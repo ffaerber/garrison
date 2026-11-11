@@ -25,29 +25,32 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 
 ## Core concepts
 
-- **Root (system):** the platform itself and its shared services. One per installation.
-- **Namespace:** a flat group of stacks with its own members, channel, Docker network and Gitea organisation. No nesting.
-- **Stack:** one app, possibly several services, described in the platform's stack format.
+- **Root (system):** the platform itself and its shared services, the namespace `system`. One per installation.
+- **Namespace:** a Gitea organisation: a flat group of stacks with its own members, channel and Docker network. No nesting.
+- **Stack:** one app, possibly several services, in one repo of its namespace. App stacks are described in the platform's stack format; system stacks are plain Compose files, because they are the platform itself.
 - **Service:** one container in a stack. Exactly one is the entry point.
 - **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-homepage.domain.com.
 - **Agents:** operator agents (system, namespace) run the cluster; coding agents build apps.
 
 ## System stack
 
-Deployed by the installer in this order, because each depends on the ones before it.
+Each component is a repo of the `system` organisation in Gitea, named after its stack. The installer deploys the first six in this order, because each depends on the ones before it; they are what it takes to build and run the controller. The controller then deploys every repo of `system`, these included.
 
-| Order | Component | Purpose |
-| --- | --- | --- |
-| 1 | Postgres | Shared database for Keycloak, Gitea, Grafana |
-| 2 | Traefik | Routing, wildcard TLS, login check for tools without their own |
-| 3 | Keycloak | Single sign-on for all people, in the realm `homecloud` |
-| 4 | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
-| 5 | Gitea + Actions runner + registry | Code, config, history, CI/CD, images |
-| 6 | Controller | Applies Git to the cluster, holds the SOPS key, writes change records |
-| 7 | Agent orchestrator | Runs operator and coding agents |
-| 8 | Platform UI | Dashboard and team chat |
-| 9 | Prometheus, Loki, Grafana, Alloy, node-exporter, cAdvisor | Metrics, logs, dashboards |
-| 10 | Alertmanager, ntfy | Alerts and phone push |
+| Order | Repo | Component | Purpose |
+| --- | --- | --- | --- |
+| 1 | `postgres` | Postgres | Shared database for Keycloak, Gitea, Grafana |
+| 2 | `traefik` | Traefik | Routing, wildcard TLS, login check for tools without their own |
+| 3 | `keycloak` | Keycloak | Single sign-on for all people, in the realm `homecloud` |
+| 4 | `sso` | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
+| 5 | `gitea` | Gitea + registry | Code, config, history, images |
+| 6 | `runner` | Gitea Actions runner | Builds the platform's own images; serves the `system` organisation only, because its jobs reach the Docker daemon |
+| 7 | `controller` | Controller | Applies Git to the cluster, holds the SOPS key, writes change records. Its repo holds its source; Gitea Actions builds its image and the controller deploys it, replacing itself |
+| — | `grafana`, `prometheus`, `loki` | Grafana; Prometheus, node-exporter, cAdvisor; Loki, Alloy | Dashboards, metrics, logs |
+| — | | Agent orchestrator | Runs operator and coding agents |
+| — | | Platform UI | Dashboard and team chat |
+| — | | Alertmanager, ntfy | Alerts and phone push |
+
+A repo of `system` without a `compose.yaml` is not deployed: `system/platform` holds the public contracts and Grafana dashboards.
 
 On the host, not in containers: ZFS, Sanoid for scheduled snapshots, restic for offsite backup.
 
@@ -57,7 +60,7 @@ On the host, not in containers: ZFS, Sanoid for scheduled snapshots, restic for 
 2. The setup wizard opens on a local port, protected by a one-time code printed in the terminal.
 3. The wizard scans hardware and drives, warns if there is no second drive for backups, and asks for: LLM API key, domain, DNS provider token, admin account.
 4. It runs swarm init, creates the ZFS pool, and deploys the system stack in order.
-5. It pushes the platform repo into Gitea, the controller takes over, and the bootstrap container removes itself.
+5. It pushes one repo per system stack into the `system` organisation. Gitea Actions builds the controller image from `system/controller`; the controller is deployed from it, takes over, and the bootstrap container removes itself.
 
 Acceptance: on a clean machine, the user reaches the dashboard at their domain with valid TLS and logs in through Keycloak, with no manual steps beyond the wizard.
 
@@ -65,12 +68,13 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 
 | Repository | Scope | Contents | Who writes |
 | --- | --- | --- | --- |
-| Platform repo | Root | System stack, Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, system agent via PR |
-| Config repo | One per namespace | Members and roles, repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins, namespace agent via PR |
-| History repo | One per namespace | Change records, one per deploy | Controller only |
-| App repos | Inside a namespace | Code, `stack.yaml`, numbered migrations | Members, coding agents |
+| System repos | The `system` organisation, one per system stack | `compose.yaml` and the files it uses; for the controller also its source and build | Root admins, system agent via PR |
+| Platform repo | `system/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, system agent via PR |
+| Config repo | One per namespace, `<namespace>/config` | Members and roles, repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins, namespace agent via PR |
+| History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Controller only |
+| App repos | Inside a namespace, one per stack | Code, `stack.yaml`, numbered migrations | Members, coding agents |
 
-Config files are JSON or YAML, validated by JSON Schema. Every repo, including the platform repo and every namespace's config and history, is readable by everyone who is signed in; nothing is readable without signing in. Secret values stay SOPS-encrypted and readable by no one.
+Config files are JSON or YAML, validated by JSON Schema. Every repo, including the system repos and every namespace's config and history, is readable by everyone who is signed in; nothing is readable without signing in. Secret values stay SOPS-encrypted and readable by no one.
 
 ## Stack format
 
@@ -114,7 +118,7 @@ environments:
 
 ## Controller and change history
 
-The controller watches Gitea and applies merged changes.
+The controller watches Gitea and applies merged changes. In the MVP it follows the `system` organisation: every repo there that holds a `compose.yaml` on its default branch is deployed as the stack named after the repo, and a stack whose repo is deleted is taken down.
 
 1. **Pre-deploy:** take ZFS snapshots of affected datasets; record running services, versions and config.
 2. **Apply:** decrypt secrets into Swarm secrets, render the stack, deploy, run migrations if present.
@@ -150,7 +154,7 @@ Restore from the History tab rolls back to a change record as a whole: the contr
 
 | Agent | Scope | Lifetime | Job |
 | --- | --- | --- | --- |
-| System agent | Root | Long-running | Platform repo, system alerts, cross-namespace upgrades via PRs into each namespace |
+| System agent | Root | Long-running | System repos, system alerts, cross-namespace upgrades via PRs into each namespace |
 | Namespace agent | One namespace | Long-running | Namespace config, members, stacks, namespace alerts |
 | Coding agent | One repo | Per task, sandboxed | Builds the app with the user, pushes to a branch, replies in thread |
 

@@ -1,0 +1,57 @@
+# Metrics. Prometheus scrapes every node (node-exporter) and every container
+# (cAdvisor). It has no login of its own, so it is not routed: Grafana reads it
+# over the system network.
+services:
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    user: root   # the dataset is owned by root
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    configs:
+      - source: prometheus
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      - type: bind
+        source: /homecloud/system/prometheus
+        target: /prometheus
+    networks: [default, system]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    command: [--path.rootfs=/host]
+    volumes:
+      - type: bind
+        source: /
+        target: /host
+        read_only: true
+        bind: { propagation: rslave }
+    deploy:
+      mode: global
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6   # v0.54+ reads containers under the containerd image store
+    command: [--docker_only=true, --housekeeping_interval=30s]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    deploy:
+      mode: global
+
+configs:
+  prometheus:
+    name: prometheus-${CONFIG_HASH}
+    file: ./prometheus.yml
+
+networks:
+  system:
+    external: true
+    name: homecloud-system

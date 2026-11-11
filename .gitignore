@@ -1,1 +1,4 @@
 bin/
+# Local secrets, e.g. the LLM API key for the agents. Never committed or copied.
+.env
+.env.*

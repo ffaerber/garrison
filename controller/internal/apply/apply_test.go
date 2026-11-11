@@ -18,7 +18,7 @@ type fake struct {
 	stdin map[string]string
 }
 
-func (f *fake) run(_ context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+func (f *fake) run(_ context.Context, _ []string, stdin []byte, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	if stdin != nil {
@@ -52,7 +52,7 @@ func TestStack(t *testing.T) {
 		"zfs create -p homecloud/ns/media/stacks/dev-jellyfin/jellyfin-config",
 		"zfs set quota=5G homecloud/ns/media/stacks/dev-jellyfin/jellyfin-config",
 		"docker secret create dev-jellyfin.jellyfin-api-key -",
-		"docker stack deploy --detach=true --compose-file - dev-jellyfin",
+		"docker stack deploy --detach=true --resolve-image never --compose-file - dev-jellyfin",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing command %q in:\n%s", want, got)

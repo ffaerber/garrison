@@ -1,0 +1,12 @@
+services:
+  db:
+    image: postgres:17-alpine
+    volumes:
+      - type: bind
+        source: /homecloud/system/db
+        target: /var/lib/postgresql/data
+      - /homecloud/system/db-backup:/backup:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - type: volume
+        source: cache
+        target: /cache

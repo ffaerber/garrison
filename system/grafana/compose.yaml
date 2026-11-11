@@ -1,0 +1,78 @@
+# Dashboards at https://grafana.<domain>. People sign in through Keycloak:
+# everyone signed in can look, root admins can change. Reads metrics from the
+# prometheus stack and logs from the loki stack over the system network.
+services:
+  grafana:
+    image: grafana/grafana:12.3.0
+    environment:
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: postgres_postgres:5432
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: grafana
+      GF_DATABASE_PASSWORD__FILE: /run/secrets/grafana-db-password
+      # Local account for the installer and tests. People never use it.
+      GF_SECURITY_ADMIN_USER: installer
+      GF_SECURITY_ADMIN_EMAIL: installer@localhost
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/admin-password
+      # Sign-in through Keycloak only.
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_OAUTH_AUTO_LOGIN: "true"
+      GF_AUTH_SIGNOUT_REDIRECT_URL: https://keycloak.${DOMAIN}/realms/homecloud/protocol/openid-connect/logout
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+      GF_AUTH_GENERIC_OAUTH_NAME: Keycloak
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET__FILE: /run/secrets/grafana-oidc-secret
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid email profile
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: https://keycloak.${DOMAIN}/realms/homecloud/protocol/openid-connect/auth
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: https://keycloak.${DOMAIN}/realms/homecloud/protocol/openid-connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: https://keycloak.${DOMAIN}/realms/homecloud/protocol/openid-connect/userinfo
+      GF_AUTH_GENERIC_OAUTH_TLS_CLIENT_CA: /run/secrets/tls.crt
+      GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: preferred_username
+      # Re-read at every login, so leaving root-admins removes the right.
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: contains(groups[*], 'root-admins') && 'GrafanaAdmin' || 'Viewer'
+      GF_AUTH_GENERIC_OAUTH_ALLOW_ASSIGN_GRAFANA_ADMIN: "true"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    configs:
+      - source: datasources
+        target: /etc/grafana/provisioning/datasources/homecloud.yaml
+    secrets:
+      - grafana-db-password
+      - grafana-oidc-secret
+      - admin-password
+      - { source: tls-cert, target: tls.crt }
+    networks: [system, traefik-public]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: traefik-public
+        traefik.http.routers.grafana.rule: Host(`grafana.${DOMAIN}`)
+        traefik.http.routers.grafana.entrypoints: websecure
+        traefik.http.routers.grafana.tls: "true"
+        traefik.http.services.grafana.loadbalancer.server.port: "3000"
+
+configs:
+  datasources:
+    name: grafana-datasources-${CONFIG_HASH}
+    file: ./datasources.yaml
+
+secrets:
+  grafana-db-password: { external: true }
+  grafana-oidc-secret: { external: true }
+  admin-password: { external: true }
+  tls-cert: { external: true }
+
+networks:
+  system:
+    external: true
+    name: homecloud-system
+  traefik-public:
+    external: true

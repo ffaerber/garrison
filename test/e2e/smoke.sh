@@ -29,7 +29,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -47,6 +47,59 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 PASSWORD=$(cat $ETC/admin-password)
 
+# After a reboot, give every service time to come back before checking.
+if [ -n "${WAIT_READY:-}" ]; then
+  deadline=$((SECONDS + WAIT_READY))
+  while :; do
+    pending=$(docker service ls --format '{{.Name}} {{.Replicas}}' | awk '{ split($2, r, "/"); if (r[1] != r[2]) print $1 }')
+    [ -z "$pending" ] && break
+    [ $SECONDS -ge $deadline ] && { echo "services not ready after reboot: $pending"; break; }
+    sleep 5
+  done
+fi
+
+
+# ---------- shared helpers ----------
+TEST_PASSWORD=${TEST_PASSWORD:-12345678}   # alice and bob, see test/e2e/add-test-users.sh
+# gitea_api USER_TO_ACT_AS ARGS...: call the Gitea API as the local admin, or,
+# with a name, with exactly that person's rights (Gitea's Sudo header).
+gitea_api() {
+  local as=$1; shift
+  web -u "$ADMIN_USER:$PASSWORD" ${as:+-H "Sudo: $as"} "$@"
+}
+api=https://git.$DOMAIN/api/v1
+# Every system stack is a repo of the system organisation; traefik stands in for them.
+repo=$api/repos/system/traefik
+# until_true SECONDS COMMAND...: retry until the command succeeds.
+until_true() {
+  local deadline=$((SECONDS + $1)); shift
+  until "$@" >/dev/null 2>&1; do [ $SECONDS -ge $deadline ] && return 1; sleep 3; done
+}
+smoke_running() { docker service ls --filter name=smoke_web --format '{{.Replicas}}' | grep -qx 1/1; }
+smoke_gone()    { ! docker stack ls --format '{{.Name}}' | grep -qx smoke; }
+controller_image() { docker service inspect controller_controller --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
+json() { curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "git.$DOMAIN:443:127.0.0.1" -u "$ADMIN_USER:$PASSWORD" "$@"; }
+# grafana_api USER ARGS...: call Grafana with a signed-in person's session, or,
+# with "", as the local installer account.
+grafana_api() {
+  local as=$1; shift
+  if [ -n "$as" ]; then web -b "$tmp/grafana-$as.jar" "$@"; else web -u "installer:$PASSWORD" "$@"; fi
+}
+# poll SECONDS PATTERN URL: until the installer's GET of URL matches PATTERN.
+poll() {
+  local deadline=$((SECONDS + $1)) out=
+  while [ $SECONDS -lt $deadline ]; do
+    out=$(grafana_api "" "$3" 2>&1)
+    grep -Eq "$2" <<<"$out" && return 0
+    sleep 5
+  done
+  echo "$out" | cut -c1-300; return 1
+}
+g=https://grafana.$DOMAIN
+
+# ---------- sections ----------
+# system: the stacks the installer deploys are up and safe.
+section_system() {
 echo "# system stack"
 check "ZFS pool is online"                 test "$(zpool list -H -o health homecloud)" = ONLINE
 check "Keycloak serves OIDC discovery over valid TLS" status_is 200 keycloak /realms/master/.well-known/openid-configuration 300
@@ -60,6 +113,107 @@ redirect=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}'
 check "HTTP redirects to HTTPS"            grep -q "^30[18] https://git.$DOMAIN/" <<<"$redirect"
 check "Postgres is not published on the host" bash -c '! (ss -ltn | grep -q ":5432 ")'
 
+}
+
+# login: people sign in through Keycloak and get exactly their rights.
+section_login() {
+echo "# signing in"
+check "the homecloud realm serves OIDC discovery" status_is 200 keycloak /realms/homecloud/.well-known/openid-configuration
+check "Gitea settings need a login"        bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/user/settings)\" != 200 ]"
+sso_login "$tmp/git.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$PASSWORD" "$tmp/git.html" >/dev/null 2>&1
+check "the admin signs in to Gitea through Keycloak" test "$(web -b "$tmp/git.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
+
+echo "# roles in Gitea"
+
+for u in alice bob; do
+  sso_login "$tmp/$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$TEST_PASSWORD" "$tmp/$u.html" $u >/dev/null 2>&1
+  check "$u signs in to Gitea through Keycloak" test "$(web -b "$tmp/$u.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
+done
+check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/alice")"
+check "bob is not a Gitea admin"           grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
+check "every system stack is a repo of the system organisation" \
+  bash -c 'for n in postgres traefik keycloak sso gitea runner controller grafana prometheus loki; do grep -q "\"full_name\":\"system/$n\"" <<<"$0" || { echo "missing system/$n"; exit 1; }; done' "$(gitea_api "" "$api/orgs/system/repos?limit=50")"
+check "the traefik repo holds its stack"   test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
+check "alice can administer the system repos"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
+check "alice can change a system repo" \
+  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"YWxpY2UK","message":"smoke test","new_branch":"smoke-'$RANDOM$RANDOM'"}' $repo/contents/smoke-test.txt)" = 201
+check "bob can see the system repos, read-only"  grep -q '"permissions":{"admin":false,"push":false,"pull":true}' <<<"$(gitea_api bob $repo)"
+check "bob can read the system stack"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
+check "bob can see it in the browser too"  test "$(web -b "$tmp/bob.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/system/traefik")" = 200
+check "bob cannot change a system repo" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test"}' $repo/contents/bob-was-here.txt)" = 403
+check "bob cannot change it on a new branch either" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test","new_branch":"bob"}' $repo/contents/bob-was-here.txt)" = 403
+check "bob's change did not land"          test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/bob-was-here.txt)" = 404
+check "bob cannot change the repo's settings" test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"description":"bob"}' $repo)" = 403
+check "someone not signed in cannot read the system repos" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 $repo)\" != 200 ]"
+check "someone not signed in cannot browse it either" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/system/traefik)\" != 200 ]"
+check "bob cannot make himself admin"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"login_name":"bob","source_id":0,"admin":true}' "https://git.$DOMAIN/api/v1/admin/users/bob")" = 403
+check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
+
+echo "# roles in Grafana"
+check "Grafana is healthy over valid TLS"  status_is 200 grafana /api/health 300
+check "Grafana sends visitors to the Keycloak login" \
+  grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$(web -o /dev/null -w '%{redirect_url}' $g/login/generic_oauth)"
+check "Grafana shows nothing without signing in" test "$(web -o /dev/null -w '%{http_code}' $g/api/search)" = 401
+for u in alice bob; do
+  sso_login "$tmp/grafana-$u.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-$u.html" $u >/dev/null 2>&1
+  check "$u signs in to Grafana through Keycloak" grep -q "\"login\":\"$u\"" <<<"$(grafana_api $u $g/api/user)"
+done
+check "alice is a Grafana admin"           grep -q '"isGrafanaAdmin":true'  <<<"$(grafana_api alice $g/api/user)"
+check "bob is not a Grafana admin"         grep -q '"isGrafanaAdmin":false' <<<"$(grafana_api bob $g/api/user)"
+check "bob is a viewer"                    grep -q '"role":"Viewer"' <<<"$(grafana_api bob $g/api/user/orgs)"
+check "bob can look at dashboards"         test "$(grafana_api bob -o /dev/null -w '%{http_code}' $g/api/search)" = 200
+check "bob can query metrics" \
+  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"queries":[{"refId":"A","datasource":{"uid":"prometheus"},"expr":"up","instant":true}],"from":"now-5m","to":"now"}' $g/api/ds/query)" = 200
+check "bob cannot create a dashboard" \
+  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"dashboard":{"title":"bob"},"overwrite":false}' $g/api/dashboards/db)" = 403
+check "bob cannot add a data source" \
+  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bob","type":"prometheus","url":"http://example.invalid","access":"proxy"}' $g/api/datasources)" = 403
+check "bob cannot make himself admin" \
+  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"role":"Admin"}' $g/api/org/users/2)" = 403
+check "alice can create a dashboard" \
+  test "$(grafana_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"dashboard":{"uid":"smoke","title":"Smoke test"},"overwrite":true}' $g/api/dashboards/db)" = 200
+
+}
+
+# platform: the controller, monitoring data, app stacks and private environments.
+section_platform() {
+echo "# controller"
+
+check "the controller runs in Swarm"       test "$(docker service ls --filter name=controller_controller --format '{{.Replicas}}')" = 1/1
+check "it runs an image built in Gitea"    bash -c "case '$(controller_image)' in git.$DOMAIN/system/controller:bootstrap) exit 1 ;; git.$DOMAIN/system/controller:*) exit 0 ;; *) exit 1 ;; esac"
+tag=$(controller_image | sed 's/.*://')
+check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/system/container/controller/$tag")" = 200
+check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/system/controller/actions/tasks?limit=1")"
+check "the runner is up"                 test "$(docker service ls --filter name=runner_runner --format '{{.Replicas}}')" = 1/1
+check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/system/actions/secrets")" = 403
+check "the controller no longer runs on the host" bash -c '! systemctl is-active --quiet homecloud-controller'
+check "the controller deployed grafana, prometheus and loki" \
+  bash -c 'a=$(homecloud-controller applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
+
+docker stack rm smoke >/dev/null 2>&1 || true
+gitea_api "" -o /dev/null -X DELETE "$api/repos/system/smoke" 2>/dev/null || true
+compose=$(printf 'services:\n  web:\n    image: traefik/whoami:v1.11\n' | base64 -w0)
+check "bob cannot add a repo to the system organisation" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-stack"}' "$api/orgs/system/repos")" = 403
+check "alice adds a repo to the system organisation" \
+  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"smoke","auto_init":true,"default_branch":"main"}' "$api/orgs/system/repos")" = 201
+check "alice gives it a compose.yaml"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"message":"smoke test","branch":"main","content":"'$compose'"}' "$api/repos/system/smoke/contents/compose.yaml")" = 201
+check "the controller deploys it as the stack smoke" until_true 120 smoke_running
+check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$api/repos/system/smoke")" = 204
+check "the controller takes the stack down" until_true 120 smoke_gone
+check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx controller <<<"$l"'
+
+echo "# monitoring data"
+check "Prometheus scrapes the node"        poll 180 '"job":"node"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
+check "Prometheus scrapes the containers"  poll 180 '"job":"cadvisor"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
+check "container metrics name their Swarm service" poll 180 'gitea_gitea' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=count%20by%20(container_label_com_docker_swarm_service_name)(container_memory_usage_bytes)"
+check "Loki has the logs of the Gitea stack" poll 180 '"values":\[\[' "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?query=%7Bstack%3D%22gitea%22%7D&limit=1"
+check "Prometheus is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://prometheus.$DOMAIN/)" = 404
+check "Loki is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://loki.$DOMAIN/)" = 404
+check "Prometheus and Loki publish no port on the host" bash -c '! (ss -ltn | grep -Eq ":(9090|3100) ")'
+
 echo "# deploying a stack"
 check "controller deploys hello (main)"    $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "hello is reachable at its hostname" status_is 200 hello /
@@ -71,8 +225,7 @@ check "controller deploys hello (dev)"     $CTL apply -domain "$DOMAIN" -env dev
 check "dev has its own dataset"            zfs list homecloud/ns/demo/stacks/dev-hello/hello-data
 check "redeploying hello is accepted"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 
-echo "# single sign-on"
-check "the homecloud realm serves OIDC discovery" status_is 200 keycloak /realms/homecloud/.well-known/openid-configuration
+echo "# private environments"
 check "a private environment answers visitors with a redirect" status_is 302 dev-hello /
 target=$(web -o /dev/null -w '%{redirect_url}' "https://dev-hello.$DOMAIN/")
 check "the redirect goes to the Keycloak login" grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$target"
@@ -85,50 +238,6 @@ check "the admin signs in and reaches the private environment" bash -c "[ '$code
 check "the app is told who signed in"      grep -qi "^X-Auth-Request-Email: $ADMIN_EMAIL" "$tmp/app.html"
 check "the session works for later requests" test "$(web -b "$tmp/sso.jar" -o /dev/null -w '%{http_code}' "https://dev-hello.$DOMAIN/again")" = 200
 check "the public environment needs no login" status_is 200 hello / 30
-check "Gitea settings need a login"        bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/user/settings)\" != 200 ]"
-sso_login "$tmp/git.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$PASSWORD" "$tmp/git.html" >/dev/null 2>&1
-check "the admin signs in to Gitea through Keycloak" test "$(web -b "$tmp/git.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
-
-echo "# roles"
-# Two test people with a fixed, well-known password, so they can also log in
-# by hand. For test installations only.
-ADD_USER=platform/system/03-keycloak/add-user.sh
-TEST_PASSWORD=${TEST_PASSWORD:-12345678}
-rm -rf $ETC/test-users
-# gitea_api USER_TO_ACT_AS ARGS...: call the Gitea API as the local admin, or,
-# with a name, with exactly that person's rights (Gitea's Sudo header).
-gitea_api() {
-  local as=$1; shift
-  web -u "$ADMIN_USER:$PASSWORD" ${as:+-H "Sudo: $as"} "$@"
-}
-repo=https://git.$DOMAIN/api/v1/repos/system/platform
-
-check "alice is added as root admin"       env USER_PASSWORD="$TEST_PASSWORD" $ADD_USER alice "alice@$DOMAIN" --admin
-check "bob is added as user"               env USER_PASSWORD="$TEST_PASSWORD" $ADD_USER bob "bob@$DOMAIN"
-for u in alice bob; do
-  sso_login "$tmp/$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$TEST_PASSWORD" "$tmp/$u.html" $u >/dev/null 2>&1
-  check "$u signs in to Gitea through Keycloak" test "$(web -b "$tmp/$u.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
-done
-check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/alice")"
-check "bob is not a Gitea admin"           grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
-check "the platform repo is in Gitea"      test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo)" = 200
-check "the platform repo holds the system stack"  test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/system/02-traefik/compose.yaml)" = 200
-check "alice can administer the platform repo"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
-check "alice can change the platform repo" \
-  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"YWxpY2UK","message":"smoke test","new_branch":"smoke-'$RANDOM$RANDOM'"}' $repo/contents/smoke-test.txt)" = 201
-check "bob can see the platform repo, read-only"  grep -q '"permissions":{"admin":false,"push":false,"pull":true}' <<<"$(gitea_api bob $repo)"
-check "bob can read the system stack"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' $repo/contents/system/02-traefik/compose.yaml)" = 200
-check "bob can see it in the browser too"  test "$(web -b "$tmp/bob.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/system/platform")" = 200
-check "bob cannot change the platform repo" \
-  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test"}' $repo/contents/bob-was-here.txt)" = 403
-check "bob cannot change it on a new branch either" \
-  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test","new_branch":"bob"}' $repo/contents/bob-was-here.txt)" = 403
-check "bob's change did not land"          test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/bob-was-here.txt)" = 404
-check "bob cannot change the repo's settings" test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"description":"bob"}' $repo)" = 403
-check "someone not signed in cannot read the platform repo" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 $repo)\" != 200 ]"
-check "someone not signed in cannot browse it either" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/system/platform)\" != 200 ]"
-check "bob cannot make himself admin"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"login_name":"bob","source_id":0,"admin":true}' "https://git.$DOMAIN/api/v1/admin/users/bob")" = 403
-check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
 
 echo "# hostname claims"
 check "a stack claiming a held hostname is rejected"     bash -c "! $CTL apply -domain $DOMAIN -reserved $ETC/reserved-hostnames.yaml $STACKS/hello-clash.yaml"
@@ -136,6 +245,13 @@ check "a stack claiming a reserved hostname is rejected" bash -c "! $CTL apply -
 check "rejected stacks were not deployed"  bash -c '! (docker stack ls --format "{{.Name}}" | grep -qx git)'
 check "hello still answers after the rejected deploys"   status_is 200 hello / 30
 
+}
+
+# Usage: smoke.sh [SECTION...]; all sections by default.
+sections=${*:-system login platform}
+for s in $sections; do
+  case $s in system|login|platform) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+done
 echo
 if [ $failed -eq 0 ]; then echo "all checks passed"; else echo "$failed check(s) failed"; fi
 exit $((failed > 0))

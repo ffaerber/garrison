@@ -1,0 +1,33 @@
+# The controller: deploys every repo of the `system` organisation that holds a
+# compose.yaml, itself included. Its image is built from this repo by Gitea
+# Actions (.gitea/workflows/build.yaml), which then sets the tag below by
+# committing here; the running controller applies that and replaces itself.
+services:
+  controller:
+    image: git.${DOMAIN}/system/controller:bootstrap
+    command:
+      - serve
+      - -gitea=http://gitea_gitea:3000
+      - -password-file=/run/secrets/admin-password
+      # ZFS runs on the host; the controller reaches it through a short-lived
+      # privileged container of its own image.
+      - -host-exec=git.${DOMAIN}/system/controller:bootstrap
+    secrets:
+      - admin-password
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
+      # Shared with the controller CLI on the host: checkouts, state and lock.
+      - /var/lib/homecloud/controller:/var/lib/homecloud/controller
+    networks: [system]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+secrets:
+  admin-password: { external: true }
+
+networks:
+  system:
+    external: true
+    name: homecloud-system

@@ -7,12 +7,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"homecloud/controller/internal/apply"
+	"homecloud/controller/internal/gitops"
 	"homecloud/controller/internal/hostnames"
 	"homecloud/controller/internal/render"
 	"homecloud/controller/internal/stack"
@@ -23,6 +29,9 @@ const usage = `usage:
   controller claims [-reserved FILE] STACK.yaml...
   controller render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
   controller apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
+  controller serve [-once] [-interval DURATION] [-config FILE] [-work DIR]
+                   [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
+  controller applied [-work DIR]
 `
 
 func main() {
@@ -40,6 +49,10 @@ func main() {
 		err = renderCmd(args)
 	case "apply":
 		err = applyCmd(args)
+	case "serve":
+		err = serveCmd(args)
+	case "applied":
+		err = appliedCmd(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -158,6 +171,100 @@ func applyCmd(args []string) error {
 		return err
 	}
 	fmt.Printf("deployed %s/%s (%s) as https://%s.%s\n", s.Namespace, s.Name, o.Environment, s.Hostname(o.Environment), o.Domain)
+	return nil
+}
+
+const (
+	etcDir  = "/etc/homecloud"
+	workDir = "/var/lib/homecloud/controller"
+)
+
+// readEnvFile reads KEY=VALUE lines, as the installer writes install.env.
+func readEnvFile(file string) ([]string, map[string]string, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, nil, err
+	}
+	var env []string
+	vars := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			return nil, nil, fmt.Errorf("%s: not KEY=VALUE: %q", file, line)
+		}
+		env = append(env, line)
+		vars[k] = v
+	}
+	return env, vars, nil
+}
+
+// serveCmd follows the `system` organisation in Gitea and deploys every repo
+// in it that holds a compose.yaml. With -once it deploys them all a single time.
+func serveCmd(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	once := fs.Bool("once", false, "deploy every stack once and exit")
+	interval := fs.Duration("interval", 15*time.Second, "how often to check the repos")
+	config := fs.String("config", etcDir+"/install.env", "installation settings")
+	work := fs.String("work", workDir, "the controller's checkout and state")
+	gitea := fs.String("gitea", "", "Gitea's URL (default https://git.<domain>, through Traefik on this machine)")
+	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
+	hostExec := fs.String("host-exec", "", "run ZFS on the host through a privileged container of this image (for a controller in a container)")
+	fs.Parse(args)
+
+	env, vars, err := readEnvFile(*config)
+	if err != nil {
+		return err
+	}
+	if vars["DOMAIN"] == "" || vars["ADMIN_USER"] == "" {
+		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
+	}
+	c := &gitops.Config{
+		Domain:       vars["DOMAIN"],
+		GiteaURL:     *gitea,
+		User:         vars["ADMIN_USER"],
+		PasswordFile: *passwordFile,
+		CAFile:       etcDir + "/tls.crt",
+		Org:          "system",
+		WorkDir:      *work,
+		Env:          env,
+		Run:          apply.Exec,
+	}
+	if *hostExec != "" {
+		c.Run = apply.HostExec(*hostExec)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *once {
+		s, err := c.Once(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("applied %d stacks\n", len(s.Stacks))
+		return nil
+	}
+	log.Printf("following the %s organisation every %s", c.Org, *interval)
+	return c.Serve(ctx, *interval)
+}
+
+// appliedCmd prints each applied stack and the commit of its repo.
+func appliedCmd(args []string) error {
+	fs := flag.NewFlagSet("applied", flag.ExitOnError)
+	work := fs.String("work", workDir, "the controller's checkouts and state")
+	fs.Parse(args)
+	s, err := gitops.ReadState(*work)
+	if err != nil {
+		return err
+	}
+	if len(s.Stacks) == 0 {
+		return fmt.Errorf("nothing applied yet")
+	}
+	for _, name := range s.Names() {
+		fmt.Println(name, s.Stacks[name])
+	}
 	return nil
 }
 

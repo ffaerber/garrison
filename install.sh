@@ -28,7 +28,7 @@ done
 [ -n "$ANSWERS" ] || fail "the setup wizard is not built yet; pass --answers FILE (see test/answers)"
 [ -r "$ANSWERS" ] || fail "cannot read answers file $ANSWERS"
 
-DOMAIN= TLS_MODE=selfsigned ADMIN_USER=admin ADMIN_EMAIL= ADMIN_PASSWORD= POOL_DEVICE= POOL_SIZE=20G
+DOMAIN= TLS_MODE=selfsigned ADMIN_USER=admin ADMIN_EMAIL= ADMIN_PASSWORD= POOL_DEVICE= POOL_SIZE=20G REGISTRY_MIRROR=
 # shellcheck disable=SC1090
 . "$ANSWERS"
 [ -n "$DOMAIN" ] || fail "answers file must set DOMAIN"
@@ -53,6 +53,25 @@ if [ ${#need[@]} -gt 0 ]; then
   apt-get install -y -qq "${need[@]}" >/dev/null
 fi
 systemctl enable --now docker >/dev/null
+
+# Optional pull-through mirror for Docker Hub images, e.g. to avoid its rate
+# limit on anonymous pulls. Docker rejects unknown keys in daemon.json, so the
+# installer marks the file it owns with a copy kept next to its own state.
+if [ -n "$REGISTRY_MIRROR" ]; then
+  want=$(printf '{\n  "registry-mirrors": ["%s"]\n}' "$REGISTRY_MIRROR")
+  owned=$ETC/daemon.json
+  mkdir -p "$ETC"
+  if [ -e /etc/docker/daemon.json ] && ! cmp -s /etc/docker/daemon.json "$owned"; then
+    fail "/etc/docker/daemon.json was not written by this installer; add the registry mirror to it by hand"
+  fi
+  if [ "$(cat /etc/docker/daemon.json 2>/dev/null)" != "$want" ]; then
+    printf '%s\n' "$want" > /etc/docker/daemon.json
+    cp /etc/docker/daemon.json "$owned"
+    systemctl restart docker
+    # Services of an existing install come back without their secrets and configs.
+    [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ] || "$ROOT/host/repair-services.sh"
+  fi
+fi
 
 # ---------- swarm ----------
 say "Setting up Docker Swarm"
@@ -80,7 +99,7 @@ if ! zpool list "$POOL" >/dev/null 2>&1; then
   fi
   zpool create -o ashift=12 -O compression=lz4 -O atime=off -m "/$POOL" "$POOL" "$vdev"
 fi
-for ds in system system/postgres system/gitea ns; do
+for ds in system system/postgres system/gitea system/gitea-runner ns; do
   zfs list "$POOL/$ds" >/dev/null 2>&1 || zfs create "$POOL/$ds"
 done
 
@@ -89,7 +108,7 @@ say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
 has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.
@@ -115,7 +134,24 @@ TLS_MODE=$TLS_MODE
 ADMIN_USER=$ADMIN_USER
 ADMIN_EMAIL=$ADMIN_EMAIL
 ENV
-install -m 644 "$ROOT/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
+install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
+
+# Gitea's registry, at git.<domain>, is used by this machine's Docker daemon:
+# builds push to it and Swarm pulls from it. The daemon reaches it through
+# Traefik here and trusts the installation's certificate.
+sed -i '/# homecloud registry$/d' /etc/hosts
+echo "127.0.0.1 git.$DOMAIN # homecloud registry" >> /etc/hosts
+install -D -m 644 "$ETC/tls.crt" "/etc/docker/certs.d/git.$DOMAIN/ca.crt"
+# With the containerd image store, Docker fetches registry tokens without
+# certs.d, so a self-signed certificate must also be in the system's trust
+# store. Docker reads that store when it starts.
+if [ "$TLS_MODE" = selfsigned ] && ! cmp -s "$ETC/tls.crt" /usr/local/share/ca-certificates/homecloud.crt; then
+  install -D -m 644 "$ETC/tls.crt" /usr/local/share/ca-certificates/homecloud.crt
+  update-ca-certificates >/dev/null 2>&1
+  systemctl restart docker
+  # Services of an existing install come back without their secrets and configs.
+  "$ROOT/host/repair-services.sh" >/dev/null
+fi
 
 # ---------- system stack ----------
 # Wait until every service of a stack has all its replicas running and healthy
@@ -140,15 +176,23 @@ wait_stack() {
   done
 }
 
+# The installer deploys only what is needed to build and run the controller:
+# the database, routing, login, Gitea and its Actions runner. Each is a repo of
+# the `system` organisation (see system/). Then the controller takes over and
+# deploys every repo of that organisation, these included.
+BOOTSTRAP="postgres traefik keycloak sso gitea runner"
+
 export DOMAIN ADMIN_USER ADMIN_EMAIL ETC
-for dir in "$ROOT"/platform/system/[0-9]*/; do
-  [ -f "$dir/compose.yaml" ] || continue
-  name=$(basename "$dir"); name=${name#*-}
+for name in $BOOTSTRAP; do
+  dir=$ROOT/system/$name
   say "Deploying $name"
-  # Swarm configs cannot change, so their names carry a hash of the stack's files.
-  CONFIG_HASH=$(cat "$dir"/* | sha256sum | cut -c1-12)
+  # Swarm configs cannot change, so their names carry a hash of the stack's
+  # files. The controller computes the same hash (controller/internal/system).
+  CONFIG_HASH=$(export LC_ALL=C; cat "$dir"/* | sha256sum | cut -c1-12)
   export CONFIG_HASH
-  docker stack deploy --detach=true --compose-file "$dir/compose.yaml" "$name" >/dev/null
+  # Images are not resolved to digests: versions are pinned by tag, and a
+  # registry that is briefly unreachable must not change the services.
+  docker stack deploy --detach=true --resolve-image never --compose-file "$dir/compose.yaml" "$name" >/dev/null
   wait_stack "$name"
   # Optional step that needs the running service, e.g. creating accounts.
   if [ -x "$dir/configure.sh" ]; then
@@ -157,16 +201,84 @@ for dir in "$ROOT"/platform/system/[0-9]*/; do
   fi
 done
 
+# ---------- boot repair ----------
+install -D -m 755 "$ROOT/host/repair-services.sh" /usr/local/lib/homecloud/repair-services.sh
+cat > /etc/systemd/system/homecloud-repair.service <<UNIT
+[Unit]
+Description=Home Cloud: give Swarm services back their secrets and configs after Docker starts
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/homecloud/repair-services.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable homecloud-repair >/dev/null 2>&1
+# Also now: a container left without its secrets by an earlier Docker restart
+# is replaced instead of being taken for healthy.
+/usr/local/lib/homecloud/repair-services.sh
+
 # ---------- controller ----------
-# Interim: the controller will ship as an image in the system stack.
+say "Building the controller in Gitea"
+# Pushing system/controller started its build in Gitea Actions. The build
+# pushes the image to Gitea's registry and sets its tag in the repo's
+# compose.yaml; until then the tag is "bootstrap".
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+. "$ROOT/installer/lib.sh"
+gitea_session "$work"
+deadline=$((SECONDS + 1800))
+until [ "$(gitea_api GET /repos/system/controller/raw/compose.yaml)" = 200 ] && ! grep -q 'system/controller:bootstrap' "$work/body"; do
+  gitea_api GET "/repos/system/controller/actions/tasks?limit=1" >/dev/null
+  if grep -q '"status":"failure"' "$work/body"; then
+    run=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
+    gitea_api GET "/repos/system/controller/actions/runs/$run/jobs" >/dev/null
+    job=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
+    gitea_api GET "/repos/system/controller/actions/jobs/$job/logs" >/dev/null
+    grep -vE 'evaluat|Writing entry|Extracting' "$work/body" | tail -n 15 >&2
+    fail "the controller build failed; see https://git.$DOMAIN/system/controller/actions"
+  fi
+  if [ $SECONDS -ge $deadline ]; then
+    gitea_api GET "/repos/system/controller/actions/tasks?limit=3" >/dev/null
+    echo "latest builds: $(cat "$work/body")" >&2
+    fail "the controller was not built within 30 minutes"
+  fi
+  sleep 10
+done
+echo "  built $(grep -oE 'system/controller:[A-Za-z0-9._-]+' "$work/body" | head -n1)"
+
+say "Handing over to the controller"
+# The host has a controller CLI too: it deploys once here, so that failures stop
+# the install, and stays for admins (homecloud-controller applied, apply, ...).
+# Interim: it is built into bin/ before installing; it will ship as a release binary.
 if [ -x "$ROOT/bin/controller" ]; then
   install -m 755 "$ROOT/bin/controller" /usr/local/bin/homecloud-controller
 fi
+command -v homecloud-controller >/dev/null || fail "controller binary missing: run 'make build' first"
+# Earlier versions ran the controller as a host service; it now runs in Swarm.
+if [ -e /etc/systemd/system/homecloud-controller.service ]; then
+  systemctl disable --now homecloud-controller >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/homecloud-controller.service
+  systemctl daemon-reload
+fi
+mkdir -p -m 700 /var/lib/homecloud/controller
+homecloud-controller serve -once
+for name in $(homecloud-controller applied | awk '{ print $1 }'); do
+  wait_stack "$name"
+done
+image=$(docker service inspect controller_controller --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+case $image in "git.$DOMAIN/system/controller:"*) ;; *) fail "the controller runs $image, not an image built in Gitea" ;; esac
+echo "  the controller runs $image"
 
 say "Done"
 cat <<MSG
   Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "homecloud")
   Gitea     https://git.$DOMAIN
+  Grafana   https://grafana.$DOMAIN
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt
 MSG
