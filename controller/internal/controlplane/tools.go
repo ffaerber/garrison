@@ -221,7 +221,7 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it at %s", c.Namespace, c.Repo, c.Number, c.URL), nil
+		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, c.URL), nil
 	}
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
 }

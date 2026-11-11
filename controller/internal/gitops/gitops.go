@@ -44,9 +44,16 @@ type Config struct {
 	Env          []string // KEY=VALUE passed to every deploy
 	Run          apply.Runner
 	HTTP         *http.Client // for the Gitea API; built from the fields above if nil
+	Dashboards   Dashboards   // optional: keeps Grafana's dashboards as they are in Git
 
 	password string
 	home     string // HOME for git, holding the .netrc
+}
+
+// Dashboards syncs the dashboards/*.json of a namespace's repos, given as
+// repo name to checkout, to Grafana.
+type Dashboards interface {
+	Sync(ctx context.Context, namespace string, repos map[string]string) error
 }
 
 // State is what the controller last applied, kept in WorkDir/applied.json:
@@ -297,8 +304,12 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	next := State{Stacks: map[string]string{}}
 	var errs []error
 	present := map[string]bool{}
+	checkouts := map[string]string{} // every fetched repo, stack or not, for dashboards
 	for _, r := range repos {
 		commit, err := c.fetch(ctx, r)
+		if err == nil {
+			checkouts[r.Name] = filepath.Join(c.WorkDir, "repos", r.Name)
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("fetch %s/%s: %w", c.Org, r.Name, err))
 			if old, ok := prev.Stacks[r.Name]; ok {
@@ -356,6 +367,13 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	next.Applied = time.Now().UTC()
 	if err := c.writeState(next); err != nil {
 		errs = append(errs, err)
+	}
+	// Dashboards follow every sync; Grafana may still be starting, so a
+	// failure is logged and retried on the next one without holding up deploys.
+	if c.Dashboards != nil {
+		if err := c.Dashboards.Sync(ctx, c.Org, checkouts); err != nil {
+			log.Printf("dashboards: %v", err)
+		}
 	}
 	return next, errors.Join(errs...)
 }

@@ -12,6 +12,8 @@ services:
       # ZFS runs on the host; the controller reaches it through a short-lived
       # privileged container of its own image.
       - -host-exec=git.${DOMAIN}/system/controller:bootstrap
+      # Keeps dashboards/*.json of the repos in Grafana.
+      - -grafana=http://grafana_grafana:3000
     secrets:
       - admin-password
     volumes:

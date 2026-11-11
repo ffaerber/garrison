@@ -24,6 +24,7 @@ import (
 
 	"homecloud/controller/internal/apply"
 	"homecloud/controller/internal/controlplane"
+	"homecloud/controller/internal/dashboards"
 	"homecloud/controller/internal/gitops"
 	"homecloud/controller/internal/hostnames"
 	"homecloud/controller/internal/render"
@@ -222,6 +223,8 @@ func serveCmd(args []string) error {
 	gitea := fs.String("gitea", "", "Gitea's URL (default https://git.<domain>, through Traefik on this machine)")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
 	hostExec := fs.String("host-exec", "", "run ZFS on the host through a privileged container of this image (for a controller in a container)")
+	grafana := fs.String("grafana", "", "Grafana's URL; when set, dashboards/*.json in the repos are kept in Grafana")
+	grafanaUser := fs.String("grafana-user", "installer", "Grafana's local admin, whose password is the admin password")
 	fs.Parse(args)
 
 	env, vars, err := readEnvFile(*config)
@@ -244,6 +247,13 @@ func serveCmd(args []string) error {
 	}
 	if *hostExec != "" {
 		c.Run = apply.HostExec(*hostExec)
+	}
+	if *grafana != "" {
+		pw, err := os.ReadFile(*passwordFile)
+		if err != nil {
+			return err
+		}
+		c.Dashboards = &dashboards.Grafana{URL: *grafana, User: *grafanaUser, Password: strings.TrimSpace(string(pw))}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

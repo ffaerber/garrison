@@ -105,9 +105,17 @@ chat_api() {
   web -b "$tmp/chat-$as.jar" -H "Authorization: Bearer $(chat_token "$as")" "$@"
 }
 chat_token() { awk '$6 == "token" { print $7 }' "$tmp/chat-$1.jar" | tail -n1; }
-# chat_login PERSON: signs in to Open WebUI through Keycloak.
+# chat_login PERSON: signs in to Open WebUI through Keycloak. Tried again for
+# up to two minutes: right after a restore, Open WebUI or Keycloak may still be starting.
 chat_login() {
-  sso_login "$tmp/chat-$1.jar" "$chat/oauth/oidc/login" "$TEST_PASSWORD" "$tmp/chat-$1.html" "$1" >/dev/null 2>&1
+  local i
+  for i in $(seq 24); do
+    rm -f "$tmp/chat-$1.jar"
+    sso_login "$tmp/chat-$1.jar" "$chat/oauth/oidc/login" "$TEST_PASSWORD" "$tmp/chat-$1.html" "$1" >/dev/null 2>&1
+    chat_api "$1" "$chat/api/v1/auths/" 2>/dev/null | grep -q "\"name\":\"$1\"" && return 0
+    sleep 5
+  done
+  return 1
 }
 # system_channel [PERSON]: the id of the channel of the namespace system.
 system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "system"))' 2>/dev/null; }
@@ -264,6 +272,64 @@ check "Prometheus is not reachable from outside" test "$(web -o /dev/null -w '%{
 check "Loki is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://loki.$DOMAIN/)" = 404
 check "Prometheus and Loki publish no port on the host" bash -c '! (ss -ltn | grep -Eq ":(9090|3100) ")'
 
+echo "# dashboards from Git"
+folder_count() { grafana_api "" "$g/api/search?type=dash-db&folderUIDs=ns-system&tag=git" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+five_dashboards() { [ "$(folder_count)" -ge 5 ]; }
+check "the system folder holds the dashboards from Git" until_true 180 five_dashboards
+sso_login "$tmp/grafana-bob.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-bob.html" bob >/dev/null 2>&1
+check "bob can open the overview"          test "$(grafana_api bob -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/homecloud-overview")" = 200
+check "bob cannot change it" \
+  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"dashboard":{"uid":"homecloud-overview","title":"bob"},"overwrite":true}' "$g/api/dashboards/db")" = 403
+# Every query of every panel must run. Variables get example values.
+queries_run() {
+  python3 - "$@" <<'PY'
+import json, glob, sys, subprocess, urllib.parse
+g, password, user = sys.argv[1], sys.argv[2], sys.argv[3]
+def get(path):
+    out = subprocess.run(["bash", "-c", 'source /dev/stdin; web -u "$0:$1" "$2"', user, password, g + path],
+                         input=sys.argv[4], capture_output=True, text=True).stdout
+    try: return json.loads(out)
+    except Exception: return {"status": "error", "error": out[:200]}
+bad = 0
+for f in sorted(glob.glob("system/grafana/dashboards/*.json")):
+    d = json.load(open(f))
+    for p in d["panels"]:
+        for t in p.get("targets", []):
+            expr = t.get("expr", "")
+            for k, v in {"$stack": "grafana", "$service": ".*", "$search": "", "$__auto": "1m", "$__interval": "1m"}.items():
+                expr = expr.replace(k, v)
+            if t["datasource"]["uid"] == "loki":
+                r = get("/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=1&" + urllib.parse.urlencode({"query": expr}))
+            else:
+                r = get("/api/datasources/proxy/uid/prometheus/api/v1/query?" + urllib.parse.urlencode({"query": expr}))
+            if r.get("status") != "success":
+                bad += 1
+                print(f"{f.split('/')[-1]}: {p['title']}: {r.get('error', r)}")
+sys.exit(bad > 0)
+PY
+}
+check "every panel's query runs"           queries_run "$g" "$PASSWORD" installer "$(declare -f web); ETC=$ETC; DOMAIN=$DOMAIN"
+prom_has() { grafana_api "" "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1")" | grep -q '"value":\['; }
+check "the overview shows the machine's CPU" until_true 120 prom_has '100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))'
+check "the stack dashboard shows grafana's services" until_true 120 prom_has 'sum by (container_label_com_docker_swarm_service_name) (rate(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace="grafana"}[5m]))'
+check "Prometheus scrapes Traefik"        until_true 180 prom_has 'up{job="traefik"} == 1'
+check "the traffic dashboard has requests" until_true 120 prom_has 'sum(rate(traefik_entrypoint_requests_total[5m])) > 0'
+check "Traefik's metrics are not reachable from outside" bash -c '! (ss -ltn | grep -q ":8082 ")'
+# A dashboard committed to a repo appears; deleting the file removes it.
+smoke_dash=$(printf '{"uid":"smoke-test","title":"Smoke test","panels":[]}' | base64 -w0)
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Add a dashboard","branch":"main","content":"'$smoke_dash'"}' "$api/repos/system/platform/contents/dashboards/smoke.json"
+dash_there() { test "$(grafana_api "" -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/smoke-test")" = 200; }
+dash_gone()  { ! dash_there; }
+check "a dashboard committed by alice appears" until_true 120 dash_there
+sha=$(gitea_api alice "$api/repos/system/platform/contents/dashboards/smoke.json" | grep -o '"sha":"[^"]*"' | head -n1 | cut -d'"' -f4)
+gitea_api alice -o /dev/null -X DELETE -H 'Content-Type: application/json' -d '{"message":"Remove a dashboard","branch":"main","sha":"'$sha'"}' "$api/repos/system/platform/contents/dashboards/smoke.json"
+check "deleting it in Git removes it"      until_true 120 dash_gone
+# An edit made in Grafana is put back.
+overview=$(grafana_api "" "$g/api/dashboards/uid/homecloud-overview" | python3 -c 'import json,sys; d=json.load(sys.stdin)["dashboard"]; d["title"]="Edited in Grafana"; print(json.dumps({"dashboard": d, "overwrite": True}))')
+grafana_api "" -o /dev/null -X POST -H 'Content-Type: application/json' -d "$overview" "$g/api/dashboards/db"
+title_back() { grafana_api "" "$g/api/dashboards/uid/homecloud-overview" | grep -q '"title":"Overview"'; }
+check "an edit made in Grafana is put back" until_true 120 title_back
+
 echo "# deploying a stack"
 check "controller deploys hello (main)"    $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "hello is reachable at its hostname" status_is 200 hello /
@@ -308,7 +374,7 @@ if [ ! -s $ETC/llm-api-key ]; then
   echo "skip  no LLM key in $ETC/llm-api-key"
   return
 fi
-for u in alice bob; do chat_login $u; done
+for u in alice bob; do check "$u signs in to Open WebUI" chat_login $u; done
 # The control plane's own Open WebUI account; it may delete any message.
 admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" \

@@ -170,6 +170,8 @@ Pages follow the levels: Home (cluster), Namespace, Stack, Service. Every page h
 
 - **Overview:** status, hostnames, warnings (e.g. missing backup drive).
 - **Logs and metrics:** one generic Grafana dashboard with template variables, embedded and filtered to the current level.
+
+Dashboards are code: any repo can hold Grafana dashboards as `dashboards/*.json`. The controller keeps them in a Grafana folder named after the namespace, as they are on `main`; edits made in Grafana are put back.
 - **Config:** a form generated from the JSON Schema, plus a Monaco code editor. Save validates and commits. Includes the write-only secrets form.
 - **History:** change records and snapshots, with restore and a warning listing what a restore will undo.
 

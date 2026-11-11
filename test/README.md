@@ -18,7 +18,7 @@ test/vm/steps.sh --clean         # delete the VM and its snapshots
 | `base` | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/homecloud` | nothing |
 | `install` | Runs the installer, adds the test people, checks the system stack (`smoke.sh system`) | `base` |
 | `login` | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do (`smoke.sh login`) | `install` |
-| `platform` | The controller deploying from Gitea, monitoring data, app stacks, private environments, hostname claims (`smoke.sh platform`) | `login` |
+| `platform` | The controller deploying from Gitea, monitoring data, dashboards from Git (every panel's query runs, a committed dashboard appears, an edit in Grafana is put back), app stacks, private environments, hostname claims (`smoke.sh platform`) | `login` |
 | `agent` | Bob and alice mention the agent of `system` in its channel in Open WebUI: it answers from the control plane's tools as them, reads logs and metrics, refuses bob's proposal and opens alice's as a pull request and deletes its messages afterwards (`smoke.sh agent`). Talks to the real LLM with `OLLAMA_API_KEY` from this checkout's `.env`; skips without it | `platform` |
 
 Every green step is saved as a VM snapshot named after it. A snapshot stays valid while the files its step depends on, and those of every earlier step, are unchanged; `--list` shows which are. Change the smoke checks and the chain resumes from `install`; change the installer and it resumes from `base`. Restoring a snapshot boots the VM, so every resumed step also tests a restart.

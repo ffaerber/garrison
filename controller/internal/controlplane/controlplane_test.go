@@ -231,7 +231,7 @@ func TestProposalsActAsThePerson(t *testing.T) {
 		t.Errorf("bob: %q, prs %d", text, fg.prs)
 	}
 	text, isErr = callText(t, m, "tok-alice", "propose_change", args)
-	if isErr || fg.prs != 1 || !strings.Contains(text, "https://git.example.com/system/grafana/pulls/7") || !strings.Contains(text, "Nothing is changed yet") {
+	if isErr || fg.prs != 1 || !strings.HasSuffix(text, "\nhttps://git.example.com/system/grafana/pulls/7") || !strings.Contains(text, "Nothing is changed yet") {
 		t.Errorf("alice: %q, prs %d", text, fg.prs)
 	}
 	for _, s := range fg.sudo {

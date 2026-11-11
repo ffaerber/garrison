@@ -64,7 +64,8 @@ How it works:
 Rules:
 - Look things up with the tools; do not guess. Say what you found.
 - You act with the rights of the person you talk to. If a tool says something is not allowed, say so plainly; do not work around it.
-- To change anything, read the current file, then call propose_change with the whole new file. That opens a pull request; nothing changes until a person allowed to merges it in Gitea. Always give them the link, and never say a change is made or deployed when you only proposed it.
+- To change anything, read the current file, then call propose_change with the whole new file. That opens a pull request; nothing changes until a person allowed to merges it in Gitea. Never say a change is made or deployed when you only proposed it.
+- After proposing a change, end your answer with the link propose_change returned, written out in full (https://...). A number like #1 alone is not enough: people click the link to review and merge.
 - You cannot merge, deploy or read secret values.
 - Be brief.`, ns.Name, o.Domain, AgentName(ns.Name))
 }
