@@ -22,7 +22,6 @@ type Gitea struct {
 	URL      string // e.g. http://gitea_gitea:3000
 	User     string // admin account
 	Password string
-	Org      string // namespace, e.g. system
 	HTTP     *http.Client
 }
 
@@ -36,6 +35,14 @@ var (
 	repoName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 	userName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 )
+
+// validOrg accepts a namespace, i.e. a Gitea organisation name.
+func validOrg(o string) error {
+	if !userName.MatchString(o) || o == "." || o == ".." {
+		return fmt.Errorf("%w: namespace %q", ErrInvalid, o)
+	}
+	return nil
+}
 
 func validRepo(r string) error {
 	if !repoName.MatchString(r) || r == "." || r == ".." {
@@ -132,6 +139,27 @@ func (g *Gitea) do(ctx context.Context, as, method, path string, body, out any) 
 	return resp.StatusCode, nil
 }
 
+type Namespace struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// Namespaces lists the organisations person can see.
+func (g *Gitea) Namespaces(ctx context.Context, as string) ([]Namespace, error) {
+	var raw []struct {
+		Name        string `json:"username"`
+		Description string `json:"description"`
+	}
+	if _, err := g.do(ctx, as, http.MethodGet, "/orgs?limit=50", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Namespace, 0, len(raw))
+	for _, o := range raw {
+		out = append(out, Namespace{Name: o.Name, Description: o.Description})
+	}
+	return out, nil
+}
+
 type Repo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -139,11 +167,14 @@ type Repo struct {
 }
 
 // Repos lists the namespace's repos as person sees them.
-func (g *Gitea) Repos(ctx context.Context, as string) ([]Repo, error) {
+func (g *Gitea) Repos(ctx context.Context, as, org string) ([]Repo, error) {
+	if err := validOrg(org); err != nil {
+		return nil, err
+	}
 	var out []Repo
 	for page := 1; page < 20; page++ {
 		var batch []Repo
-		if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/orgs/%s/repos?limit=50&page=%d", g.Org, page), nil, &batch); err != nil {
+		if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/orgs/%s/repos?limit=50&page=%d", org, page), nil, &batch); err != nil {
 			return nil, err
 		}
 		out = append(out, batch...)
@@ -162,7 +193,10 @@ type Entry struct {
 }
 
 // List lists a directory of a repo's default branch.
-func (g *Gitea) List(ctx context.Context, as, repo, path string) ([]Entry, error) {
+func (g *Gitea) List(ctx context.Context, as, org, repo, path string) ([]Entry, error) {
+	if err := validOrg(org); err != nil {
+		return nil, err
+	}
 	if err := validRepo(repo); err != nil {
 		return nil, err
 	}
@@ -170,7 +204,7 @@ func (g *Gitea) List(ctx context.Context, as, repo, path string) ([]Entry, error
 		return nil, err
 	}
 	var raw json.RawMessage
-	if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/contents/%s", g.Org, repo, escapePath(path)), nil, &raw); err != nil {
+	if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/contents/%s", org, repo, escapePath(path)), nil, &raw); err != nil {
 		return nil, err
 	}
 	var entries []Entry
@@ -185,7 +219,10 @@ func (g *Gitea) List(ctx context.Context, as, repo, path string) ([]Entry, error
 }
 
 // Read returns a file of a repo's default branch.
-func (g *Gitea) Read(ctx context.Context, as, repo, path string) (string, error) {
+func (g *Gitea) Read(ctx context.Context, as, org, repo, path string) (string, error) {
+	if err := validOrg(org); err != nil {
+		return "", err
+	}
 	if err := validRepo(repo); err != nil {
 		return "", err
 	}
@@ -193,24 +230,28 @@ func (g *Gitea) Read(ctx context.Context, as, repo, path string) (string, error)
 		return "", fmt.Errorf("%w: path %q", ErrInvalid, path)
 	}
 	var out string
-	_, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s", g.Org, repo, escapePath(path)), nil, &out)
+	_, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s", org, repo, escapePath(path)), nil, &out)
 	return out, err
 }
 
 type Change struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Author string `json:"author"`
-	URL    string `json:"url"`
-	Diff   string `json:"diff,omitempty"`
+	Namespace string `json:"namespace"`
+	Repo      string `json:"repo"`
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Author    string `json:"author"`
+	URL       string `json:"url"`
+	Diff      string `json:"diff,omitempty"`
 }
 
 // Propose writes one file on a new branch, as person, and opens a pull
-// request for it. Nothing reaches main, and so the cluster, until someone
-// allowed to merges it.
-func (g *Gitea) Propose(ctx context.Context, as, repo, path, content, title, description string) (Change, error) {
+// request for it. Nothing reaches main, and so the cluster, until a person
+// allowed to merges it in Gitea; the control plane cannot merge.
+func (g *Gitea) Propose(ctx context.Context, as, org, repo, path, content, title, description string) (Change, error) {
+	if err := validOrg(org); err != nil {
+		return Change{}, err
+	}
 	if err := validRepo(repo); err != nil {
 		return Change{}, err
 	}
@@ -221,7 +262,7 @@ func (g *Gitea) Propose(ctx context.Context, as, repo, path, content, title, des
 		return Change{}, fmt.Errorf("%w: a change needs a title", ErrInvalid)
 	}
 	branch := fmt.Sprintf("change/%s-%d", as, time.Now().UnixNano()/1e6)
-	file := fmt.Sprintf("/repos/%s/%s/contents/%s", g.Org, repo, escapePath(path))
+	file := fmt.Sprintf("/repos/%s/%s/contents/%s", org, repo, escapePath(path))
 	req := map[string]any{
 		"branch":     "main",
 		"new_branch": branch,
@@ -245,16 +286,16 @@ func (g *Gitea) Propose(ctx context.Context, as, repo, path, content, title, des
 		Number  int    `json:"number"`
 		HTMLURL string `json:"html_url"`
 	}
-	if _, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls", g.Org, repo),
+	if _, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls", org, repo),
 		map[string]any{"head": branch, "base": "main", "title": title, "body": description}, &pr); err != nil {
 		return Change{}, err
 	}
-	return Change{Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, nil
+	return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, nil
 }
 
 // Changes lists the namespace's open pull requests, with their diffs.
-func (g *Gitea) Changes(ctx context.Context, as string) ([]Change, error) {
-	repos, err := g.Repos(ctx, as)
+func (g *Gitea) Changes(ctx context.Context, as, org string) ([]Change, error) {
+	repos, err := g.Repos(ctx, as, org)
 	if err != nil {
 		return nil, err
 	}
@@ -272,34 +313,14 @@ func (g *Gitea) Changes(ctx context.Context, as string) ([]Change, error) {
 				Login string `json:"login"`
 			} `json:"user"`
 		}
-		if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls?state=open&limit=50", g.Org, r.Name), nil, &prs); err != nil {
+		if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls?state=open&limit=50", org, r.Name), nil, &prs); err != nil {
 			return nil, err
 		}
 		for _, p := range prs {
-			c := Change{Repo: r.Name, Number: p.Number, Title: p.Title, Body: p.Body, Author: p.User.Login, URL: p.HTMLURL}
-			g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d.diff", g.Org, r.Name, p.Number), nil, &c.Diff)
+			c := Change{Namespace: org, Repo: r.Name, Number: p.Number, Title: p.Title, Body: p.Body, Author: p.User.Login, URL: p.HTMLURL}
+			g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d.diff", org, r.Name, p.Number), nil, &c.Diff)
 			out = append(out, c)
 		}
 	}
 	return out, nil
-}
-
-// Approve merges a pull request as person; Gitea refuses if they may not.
-func (g *Gitea) Approve(ctx context.Context, as, repo string, number int) error {
-	if err := validRepo(repo); err != nil {
-		return err
-	}
-	_, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", g.Org, repo, number),
-		map[string]any{"Do": "merge", "delete_branch_after_merge": true}, nil)
-	return err
-}
-
-// Reject closes a pull request as person; Gitea refuses if they may not.
-func (g *Gitea) Reject(ctx context.Context, as, repo string, number int) error {
-	if err := validRepo(repo); err != nil {
-		return err
-	}
-	_, err := g.do(ctx, as, http.MethodPatch, fmt.Sprintf("/repos/%s/%s/pulls/%d", g.Org, repo, number),
-		map[string]any{"state": "closed"}, nil)
-	return err
 }

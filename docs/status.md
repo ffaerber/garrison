@@ -4,7 +4,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Works, tested end to end on a fresh Ubuntu 26.04 VM
 
-`test/vm/steps.sh` runs the end-to-end test as a chain of steps on a Multipass VM (base, install, login, platform), each saved as a VM snapshot when green; see `test/README.md`.
+`test/vm/steps.sh` runs the end-to-end test as a chain of steps on a Multipass VM (base, install, login, platform, agent), each saved as a VM snapshot when green; see `test/README.md`.
 
 - `install.sh --answers FILE`: installs Docker and ZFS, initialises Swarm, creates the ZFS pool, generates secrets, deploys the bootstrap stacks in order (Postgres, Traefik, Keycloak, login proxy, Gitea, Actions runner), waits for Gitea Actions to build the controller, and hands over to it. Safe to run again.
 - Namespaces are Gitea organisations. The system stack is the organisation `system`, one repo per stack: `postgres`, `traefik`, `keycloak`, `sso`, `gitea`, `runner`, `controller`, `grafana`, `prometheus`, `loki`, and `platform` for contracts. Everyone signed in can read them; only root admins can change them. Gitea shows nothing without signing in.
@@ -12,6 +12,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 - Single sign-on: people sign in to the Keycloak realm `homecloud`. Private environments redirect to that login and pass the signed-in person's identity to the app. Gitea and Grafana sign in through Keycloak.
 - Roles: the Keycloak group `root-admins` holds the people who may change the platform. Its members are Gitea admins and Grafana admins; everyone else views. Both re-read the groups at every login. `system/keycloak/add-user.sh` adds people.
 - Monitoring: Grafana (`grafana.<domain>`) with Prometheus (node and container metrics) and Loki (container logs), neither reachable from outside.
+- Chat: Open WebUI at `chat.<domain>`, signed in through Keycloak, with one agent per namespace kept in sync by the control plane. The agents' tools come from the control plane's MCP server, which acts with each person's own Keycloak token: they read stacks, logs, metrics and repos, and propose changes as pull requests a person merges in Gitea. The LLM is Ollama's `gpt-oss:120b` by default.
 - Reboot: `homecloud-repair.service` replaces Swarm tasks that Docker restarted without their secrets or configs.
 - Controller CLI on the host (`homecloud-controller`): validates a stack file, claims its hostnames, creates its ZFS datasets and Swarm secrets, and deploys it behind Traefik; `applied` shows what the controller deployed.
 
@@ -29,7 +30,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-Namespaces other than `system` with their members, config and history repos; snapshots, SOPS, change records, approvals and restore in the controller; agent orchestrator, platform UI and chat, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
+Deploying namespaces other than `system` (their agents exist, but have no stacks), with their members, config and history repos; snapshots, SOPS, change records, approvals and restore in the controller; coding agents, the dashboard, team channels, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
 
 ## Known limits
 

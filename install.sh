@@ -109,7 +109,7 @@ say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
 has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret controlplane-oidc-secret; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.
@@ -138,9 +138,8 @@ LLM_BASE_URL=$LLM_BASE_URL
 LLM_MODEL=$LLM_MODEL
 ENV
 
-# The agent's LLM key, root-only. It may also be put in this file by hand;
-# an empty file leaves the agent off. Written in place, so the control plane,
-# which mounts the file, sees a new key without a restart.
+# The agents' LLM key, root-only. It may also be put in this file by hand;
+# Open WebUI reads it when it starts.
 touch "$ETC/llm-api-key"
 chmod 600 "$ETC/llm-api-key"
 if [ -n "$LLM_API_KEY" ]; then
@@ -290,7 +289,7 @@ say "Done"
 cat <<MSG
   Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "homecloud")
   Gitea     https://git.$DOMAIN
-  Control   https://controlplane.$DOMAIN
+  Chat      https://chat.$DOMAIN  (one agent per namespace)
   Grafana   https://grafana.$DOMAIN
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt

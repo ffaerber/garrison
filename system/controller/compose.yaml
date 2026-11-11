@@ -24,8 +24,9 @@ services:
       placement:
         constraints: [node.role == manager]
 
-  # The web control plane at https://controlplane.<domain>: Keycloak sign-in,
-  # stacks, changes waiting for approval, and the operator agent.
+  # The control plane: the MCP server behind Open WebUI's agents, and the
+  # sync that keeps one agent per namespace there. Not routed: only Open WebUI
+  # calls it, over the system network, with each person's Keycloak token.
   controlplane:
     image: git.${DOMAIN}/system/controller:bootstrap
     command:
@@ -33,16 +34,14 @@ services:
       - -password-file=/run/secrets/admin-password
     secrets:
       - admin-password
-      - controlplane-oidc-secret
       - { source: tls-cert, target: tls.crt }
     volumes:
-      # Read-only Docker access would need a proxy; the socket gives full access.
+      # For stacks and logs. Read-only Docker access would need a proxy; the socket gives full access.
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
-      # The LLM key, root-only on the host; replaced in place, read on every call.
-      - /etc/homecloud/llm-api-key:/etc/homecloud/llm-api-key:ro
       - /var/lib/homecloud/controller:/var/lib/homecloud/controller:ro
-    # Gitea on the system network; Keycloak at its public name through Traefik.
+    # Gitea, Prometheus and Open WebUI on the system network; Keycloak's keys at
+    # its public name through Traefik.
     networks: [system, traefik-public]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8080/healthz"]
@@ -52,17 +51,9 @@ services:
     deploy:
       placement:
         constraints: [node.role == manager]
-      labels:
-        traefik.enable: "true"
-        traefik.swarm.network: traefik-public
-        traefik.http.routers.controlplane.rule: Host(`controlplane.${DOMAIN}`)
-        traefik.http.routers.controlplane.entrypoints: websecure
-        traefik.http.routers.controlplane.tls: "true"
-        traefik.http.services.controlplane.loadbalancer.server.port: "8080"
 
 secrets:
   admin-password: { external: true }
-  controlplane-oidc-secret: { external: true }
   tls-cert: { external: true }
 
 networks:

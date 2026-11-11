@@ -36,7 +36,7 @@ client() {
 client gitea gitea-oidc-secret "https://git.$DOMAIN/user/oauth2/keycloak/callback"
 client sso   sso-oidc-secret   "https://sso.$DOMAIN/oauth2/callback"
 client grafana grafana-oidc-secret "https://grafana.$DOMAIN/login/generic_oauth"
-client controlplane controlplane-oidc-secret "https://controlplane.$DOMAIN/*"
+client openwebui openwebui-oidc-secret "https://chat.$DOMAIN/oauth/oidc/callback"
 
 # The first admin. The password is set once; a later change by the person is kept.
 user=$(id_of users -q "username=$ADMIN_USER" -q exact=true)

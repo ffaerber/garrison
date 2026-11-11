@@ -44,10 +44,11 @@ Each component is a repo of the `system` organisation in Gitea, named after its 
 | 4 | `sso` | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
 | 5 | `gitea` | Gitea + registry | Code, config, history, images |
 | 6 | `runner` | Gitea Actions runner | Builds the platform's own images; serves the `system` organisation only, because its jobs reach the Docker daemon |
-| 7 | `controller` | Controller | Applies Git to the cluster, holds the SOPS key, writes change records. Its repo holds its source; Gitea Actions builds its image and the controller deploys it, replacing itself |
+| 7 | `controller` | Controller and control plane | Applies Git to the cluster, holds the SOPS key, writes change records; the control plane serves the agents' MCP tools. Its repo holds its source; Gitea Actions builds its image and the controller deploys it, replacing itself |
 | — | `grafana`, `prometheus`, `loki` | Grafana; Prometheus, node-exporter, cAdvisor; Loki, Alloy | Dashboards, metrics, logs |
 | — | | Agent orchestrator | Runs operator and coding agents |
-| — | | Platform UI | Dashboard and team chat |
+| — | `openwebui` | Open WebUI | Chat with one agent per namespace (see Chat) |
+| — | | Platform UI | Dashboard |
 | — | | Alertmanager, ntfy | Alerts and phone push |
 
 A repo of `system` without a `compose.yaml` is not deployed: `system/platform` holds the public contracts and Grafana dashboards.
@@ -158,7 +159,7 @@ Restore from the History tab rolls back to a change record as a whole: the contr
 | Namespace agent | One namespace | Long-running | Namespace config, members, stacks, namespace alerts |
 | Coding agent | One repo | Per task, sandboxed | Builds the app with the user, pushes to a branch, replies in thread |
 
-- Agents speak an OpenAI-compatible API to the orchestrator and use the LLM key from setup.
+- Agents speak an OpenAI-compatible API (Ollama by default) and use the LLM key from setup. Namespace agents run in Open WebUI with the control plane's MCP tools (see Chat).
 - Coding agents start from an @mention in a Gitea comment (commit, PR, issue) via webhook, or from the team chat. Each task gets a fresh Docker container with the repo checked out, removed when done.
 - A namespace agent that finds a cause above its scope (e.g. a full disk) escalates a request to the system agent.
 - Users can still work locally with their own coding tools and push to the same repos.
@@ -174,13 +175,14 @@ Pages follow the levels: Home (cluster), Namespace, Stack, Service. Every page h
 
 An inbox collects everything waiting for the user: PRs to approve, previews to review, failed deploys.
 
-## Team chat
+## Chat
 
-- One view per level: the team channel, with that level's agent built in. No separate private agent chat.
-- The agent only responds when @mentioned.
-- Built into the React UI with a chat library (Vercel AI SDK or assistant-ui) for streaming and history.
-- Agents propose changes through a `propose_change` tool, rendered as a change card. Opening it shows the diff in Monaco's diff view with Approve and Reject. Approve goes to the controller, never through the agent.
-- Conversational setup works on a draft branch: each confirmed card is one commit, and the final "apply" is the PR merge.
+- Open WebUI, at `chat.<domain>`, is the chat. People sign in through Keycloak; root admins are its admins.
+- Each namespace has its own agent there, named after the namespace: a model with that namespace's prompt and the control plane's tools. The control plane keeps one per Gitea organisation, adding and removing them as organisations come and go.
+- The control plane is an MCP server. Open WebUI calls it with the signed-in person's Keycloak access token, so every tool acts with that person's rights: reads and proposals go to Gitea as them. It is reachable only from Open WebUI, not from outside.
+- Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, and propose a change to a file.
+- `propose_change` opens a pull request as the person. It cannot merge or deploy: a person allowed to merges in Gitea, and the controller deploys `main`. The agent always gives the link.
+- Not yet: team channels shared by people, the agent answering only when @mentioned, conversational setup on a draft branch.
 
 ## Notifications
 

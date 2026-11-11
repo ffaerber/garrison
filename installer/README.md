@@ -18,8 +18,8 @@ Answers file keys (shell `KEY=value`):
 | `ADMIN_PASSWORD` | Admin password | generated |
 | `POOL_DEVICE` | Device for the ZFS pool | a sparse file on the root disk |
 | `POOL_SIZE` | Size of that sparse file | `20G` |
-| `LLM_BASE_URL`, `LLM_MODEL` | OpenAI-compatible API and model of the operator agent | `https://ollama.com/v1`, `gpt-oss:120b` |
-| `LLM_API_KEY` | Its key; stored root-only in `/etc/homecloud/llm-api-key`, which may also be filled by hand | none: the agent is off |
+| `LLM_BASE_URL`, `LLM_MODEL` | OpenAI-compatible API and model of the namespace agents in Open WebUI | `https://ollama.com/v1`, `gpt-oss:120b` |
+| `LLM_API_KEY` | Its key; stored root-only in `/etc/homecloud/llm-api-key`, which may also be filled by hand | none: the agents cannot answer |
 | `REGISTRY_MIRROR` | Pull-through mirror for Docker Hub images, e.g. `https://mirror.gcr.io` | none |
 
 The installer keeps its state in `/etc/homecloud` (root only): the admin password, the TLS certificate and key, the build token, and `install.env`.

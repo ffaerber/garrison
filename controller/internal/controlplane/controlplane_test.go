@@ -12,21 +12,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
-// fakeGitea answers like Gitea for alice (may write) and bob (may only read).
+// fakeGitea answers like Gitea: alice may write to system, bob may only read.
 type fakeGitea struct {
-	mu       sync.Mutex
-	files    map[string]string // repo/path -> content on main
-	branches map[string]string // branch -> repo/path written there
-	prs      []map[string]any
-	merged   []int
-	sudo     []string
-}
-
-func newFakeGitea() *fakeGitea {
-	return &fakeGitea{files: map[string]string{"grafana/compose.yaml": "services: {}\n"}, branches: map[string]string{}}
+	mu   sync.Mutex
+	prs  int
+	sudo []string
 }
 
 func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -38,246 +30,288 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	as := r.Header.Get("Sudo")
 	f.sudo = append(f.sudo, as)
-	write := r.Method != http.MethodGet
-	if write && as != "alice" {
+	if r.Method != http.MethodGet && as != "alice" {
 		http.Error(w, `{"message":"forbidden"}`, http.StatusForbidden)
 		return
 	}
 	p := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	switch {
+	case p == "/orgs":
+		io.WriteString(w, `[{"username":"system","description":"the platform"},{"username":"homepage"}]`)
 	case p == "/orgs/system/repos":
-		json.NewEncoder(w).Encode([]Repo{{Name: "grafana"}, {Name: "traefik"}})
-	case strings.HasPrefix(p, "/repos/system/grafana/raw/"):
-		c, ok := f.files["grafana/"+strings.TrimPrefix(p, "/repos/system/grafana/raw/")]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		io.WriteString(w, c)
-	case strings.HasPrefix(p, "/repos/system/grafana/contents/"):
-		path := strings.TrimPrefix(p, "/repos/system/grafana/contents/")
-		if r.Method == http.MethodGet {
-			if _, ok := f.files["grafana/"+path]; !ok {
-				http.NotFound(w, r)
-				return
-			}
-			json.NewEncoder(w).Encode(map[string]string{"sha": "abc", "name": path, "path": path, "type": "file"})
-			return
-		}
+		json.NewEncoder(w).Encode([]Repo{{Name: "grafana"}})
+	case p == "/repos/system/grafana/raw/compose.yaml":
+		io.WriteString(w, "services: {}\n")
+	case p == "/repos/system/grafana/contents/compose.yaml" && r.Method == http.MethodGet:
+		io.WriteString(w, `{"sha":"abc"}`)
+	case p == "/repos/system/grafana/contents/compose.yaml":
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		if body["branch"] != "main" || body["new_branch"] == "" {
 			http.Error(w, `{"message":"must write to a new branch"}`, http.StatusBadRequest)
 			return
 		}
-		f.branches[body["new_branch"].(string)] = "grafana/" + path
-		w.WriteHeader(http.StatusCreated)
 		io.WriteString(w, "{}")
 	case p == "/repos/system/grafana/pulls" && r.Method == http.MethodPost:
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		body["number"] = len(f.prs) + 1
-		body["html_url"] = "https://git.example.com/system/grafana/pulls/1"
-		f.prs = append(f.prs, body)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(body)
-	case strings.HasSuffix(p, "/merge"):
-		f.merged = append(f.merged, 1)
-		io.WriteString(w, "")
-	case strings.HasPrefix(p, "/repos/system/") && strings.Contains(p, "/pulls"):
+		f.prs++
+		io.WriteString(w, `{"number":7,"html_url":"https://git.example.com/system/grafana/pulls/7"}`)
+	case strings.HasSuffix(p, "/pulls"):
 		io.WriteString(w, "[]")
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-// scriptedLLM replays answers and records what it was sent.
-type scriptedLLM struct {
-	answers []Message
-	seen    [][]Message
-}
+type fakeVerifier map[string]Person
 
-func (s *scriptedLLM) Chat(_ context.Context, msgs []Message, _ []map[string]any) (Message, error) {
-	s.seen = append(s.seen, append([]Message(nil), msgs...))
-	if len(s.answers) == 0 {
-		return Message{}, errors.New("no more answers")
+func (f fakeVerifier) Verify(_ context.Context, tok string) (Person, error) {
+	if p, ok := f[tok]; ok {
+		return p, nil
 	}
-	m := s.answers[0]
-	s.answers = s.answers[1:]
-	m.Role = "assistant"
-	return m, nil
+	return Person{}, errors.New("bad token")
 }
 
-func callTool(id, name, args string) Message {
-	var c ToolCall
-	c.ID, c.Type = id, "function"
-	c.Function.Name, c.Function.Arguments = name, args
-	return Message{ToolCalls: []ToolCall{c}}
-}
-
-func setup(t *testing.T, llm Chatter) (*Agent, *fakeGitea) {
+func setup(t *testing.T) (*MCP, *fakeGitea) {
 	t.Helper()
-	fg := newFakeGitea()
-	srv := httptest.NewServer(fg)
-	t.Cleanup(srv.Close)
+	fg := &fakeGitea{}
+	gsrv := httptest.NewServer(fg)
+	t.Cleanup(gsrv.Close)
+	prom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("query") == "bad(" {
+			io.WriteString(w, `{"status":"error","error":"parse error"}`)
+			return
+		}
+		io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"container_label_com_docker_swarm_service_name":"grafana_grafana"},"value":[1,"12.5"]}]}}`)
+	}))
+	t.Cleanup(prom.Close)
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"}}`), 0o644)
 	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
 		if name == "docker" && len(args) > 1 && args[0] == "service" && args[1] == "ls" {
-			return []byte("grafana_grafana\t1/1\tgrafana/grafana:12\nhello_web\t0/1\twhoami\n"), nil
+			return []byte("grafana_grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\n"), nil
 		}
-		return []byte("ok"), nil
+		return []byte("log line\n"), nil
 	}
-	g := &Gitea{URL: srv.URL, User: "admin", Password: "pw", Org: "system"}
-	return &Agent{LLM: llm, Gitea: g, Run: run, WorkDir: dir, Domain: "example.com"}, fg
+	tools := &Tools{Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}, Run: run, WorkDir: dir, Prometheus: prom.URL}
+	return &MCP{Tools: tools, Verifier: fakeVerifier{"tok-alice": {Name: "alice", Admin: true}, "tok-bob": {Name: "bob"}}}, fg
 }
 
-func TestAgentAnswersFromTools(t *testing.T) {
-	llm := &scriptedLLM{answers: []Message{callTool("1", "list_stacks", "{}"), {Content: "grafana runs."}}}
-	a, _ := setup(t, llm)
-	reply, steps, history, err := a.Ask(context.Background(), Person{Name: "bob"}, nil, "what runs?")
-	if err != nil {
+// rpc posts one JSON-RPC request with a bearer token and returns status and decoded body.
+func rpc(t *testing.T, m *MCP, token, method string, params any) (int, map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+	r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body)))
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, r)
+	var out map[string]any
+	json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+func callText(t *testing.T, m *MCP, token, tool string, args map[string]any) (string, bool) {
+	t.Helper()
+	code, out := rpc(t, m, token, "tools/call", map[string]any{"name": tool, "arguments": args})
+	if code != http.StatusOK || out["result"] == nil {
+		t.Fatalf("%s: %d %v", tool, code, out)
+	}
+	res := out["result"].(map[string]any)
+	text := res["content"].([]any)[0].(map[string]any)["text"].(string)
+	isErr, _ := res["isError"].(bool)
+	return text, isErr
+}
+
+func TestMCPNeedsAToken(t *testing.T) {
+	m, _ := setup(t)
+	if code, _ := rpc(t, m, "", "tools/list", nil); code != http.StatusUnauthorized {
+		t.Errorf("no token: %d", code)
+	}
+	if code, _ := rpc(t, m, "forged", "tools/list", nil); code != http.StatusUnauthorized {
+		t.Errorf("forged token: %d", code)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, r)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: %d", w.Code)
+	}
+}
+
+func TestMCPHandshake(t *testing.T) {
+	m, _ := setup(t)
+	_, out := rpc(t, m, "tok-bob", "initialize", map[string]any{"protocolVersion": "2025-03-26"})
+	res := out["result"].(map[string]any)
+	if res["protocolVersion"] != "2025-03-26" || res["capabilities"].(map[string]any)["tools"] == nil {
+		t.Errorf("initialize = %v", res)
+	}
+	_, out = rpc(t, m, "tok-bob", "tools/list", nil)
+	var names []string
+	for _, tl := range out["result"].(map[string]any)["tools"].([]any) {
+		names = append(names, tl.(map[string]any)["name"].(string))
+	}
+	got := strings.Join(names, " ")
+	for _, want := range []string{"service_logs", "service_usage", "query_metrics", "propose_change", "list_namespaces"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tools/list lacks %s: %s", want, got)
+		}
+	}
+	for _, never := range []string{"merge", "approve", "deploy"} {
+		if strings.Contains(got, never) {
+			t.Errorf("tools/list offers %s: %s", never, got)
+		}
+	}
+	// A notification gets no body.
+	body := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
+	r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	r.Header.Set("Authorization", "Bearer tok-bob")
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("notification: %d", w.Code)
+	}
+	if code, out := rpc(t, m, "tok-bob", "nope", nil); code != 200 || out["error"] == nil {
+		t.Errorf("unknown method: %d %v", code, out)
+	}
+}
+
+func TestEveryoneMayLook(t *testing.T) {
+	m, _ := setup(t)
+	text, isErr := callText(t, m, "tok-bob", "list_namespaces", nil)
+	if isErr || !strings.Contains(text, "system") || !strings.Contains(text, "homepage") {
+		t.Errorf("list_namespaces = %q", text)
+	}
+	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "system"})
+	if isErr || !strings.Contains(text, "grafana (commit 0123456789ab)") || strings.Contains(text, "hello") {
+		t.Errorf("list_stacks = %q", text)
+	}
+	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "system", "service": "grafana_grafana"}); isErr || text != "log line\n" {
+		t.Errorf("service_logs = %q", text)
+	}
+	if text, isErr = callText(t, m, "tok-bob", "service_usage", map[string]any{"namespace": "system", "stack": "grafana"}); isErr || !strings.Contains(text, "12.5") {
+		t.Errorf("service_usage = %q", text)
+	}
+	if text, isErr = callText(t, m, "tok-bob", "query_metrics", map[string]any{"query": "up"}); isErr || !strings.Contains(text, "grafana_grafana") {
+		t.Errorf("query_metrics = %q", text)
+	}
+	if text, isErr = callText(t, m, "tok-bob", "read_file", map[string]any{"namespace": "system", "repo": "grafana", "path": "compose.yaml"}); isErr || text != "services: {}\n" {
+		t.Errorf("read_file = %q", text)
+	}
+}
+
+func TestToolsStayInTheirNamespace(t *testing.T) {
+	m, _ := setup(t)
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"service_logs", map[string]any{"namespace": "system", "service": "hello_web"}},            // not a system stack
+		{"service_logs", map[string]any{"namespace": "system", "service": "grafana_grafana; id"}},  // not a name
+		{"stack_status", map[string]any{"namespace": "homepage", "stack": "grafana"}},              // wrong namespace
+		{"read_file", map[string]any{"namespace": "system", "repo": "grafana", "path": "../../x"}}, // outside the repo
+		{"read_file", map[string]any{"namespace": "../admin", "repo": "grafana", "path": "a"}},     // not a namespace
+		{"query_metrics", map[string]any{"query": "bad("}},                                         // Prometheus refuses
+	} {
+		if text, isErr := callText(t, m, "tok-alice", c.tool, c.args); !isErr {
+			t.Errorf("%s %v accepted: %q", c.tool, c.args, text)
+		}
+	}
+}
+
+func TestProposalsActAsThePerson(t *testing.T) {
+	args := map[string]any{"namespace": "system", "repo": "grafana", "path": "compose.yaml", "content": "services: {x: {}}\n", "title": "Add x"}
+	m, fg := setup(t)
+	text, isErr := callText(t, m, "tok-bob", "propose_change", args)
+	if !isErr || !strings.Contains(text, "not allowed: bob") || fg.prs != 0 {
+		t.Errorf("bob: %q, prs %d", text, fg.prs)
+	}
+	text, isErr = callText(t, m, "tok-alice", "propose_change", args)
+	if isErr || fg.prs != 1 || !strings.Contains(text, "https://git.example.com/system/grafana/pulls/7") || !strings.Contains(text, "Nothing is changed yet") {
+		t.Errorf("alice: %q, prs %d", text, fg.prs)
+	}
+	for _, s := range fg.sudo {
+		if s != "alice" && s != "bob" {
+			t.Errorf("Gitea called as %q, not as the person", s)
+		}
+	}
+}
+
+func TestOpenWebUISync(t *testing.T) {
+	fg := &fakeGitea{}
+	gsrv := httptest.NewServer(fg)
+	defer gsrv.Close()
+	var mu sync.Mutex
+	models := map[string]owuiModel{"ns-gone": {ID: "ns-gone", Name: "gone"}, "other": {ID: "other"}}
+	var calls []string
+	ow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, r.URL.Path)
+		if r.URL.Path == "/api/v1/auths/signin" {
+			io.WriteString(w, `{"token":"t"}`)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer t" {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/models/all":
+			var list []owuiModel
+			for _, m := range models {
+				list = append(list, m)
+			}
+			json.NewEncoder(w).Encode(list)
+		case "/api/v1/models/create", "/api/v1/models/model/update":
+			var m owuiModel
+			json.NewDecoder(r.Body).Decode(&m)
+			models[m.ID] = m
+			io.WriteString(w, "{}")
+		case "/api/v1/models/model/delete":
+			var b map[string]string
+			json.NewDecoder(r.Body).Decode(&b)
+			delete(models, b["id"])
+			io.WriteString(w, "true")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ow.Close()
+	o := &OpenWebUI{URL: ow.URL, Email: "e", Password: "p", BaseModel: "gpt-oss:120b", ToolServerID: "homecloud", Domain: "example.com",
+		Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}}
+	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if reply != "grafana runs." || len(steps) != 1 || steps[0].Tool != "list_stacks" {
-		t.Fatalf("reply %q, steps %+v", reply, steps)
+	sys, ok := models["ns-system"]
+	if !ok || models["ns-homepage"].Name != "homepage" {
+		t.Fatalf("models = %v", models)
 	}
-	if !strings.Contains(steps[0].Result, "grafana (0123456789ab)") || !strings.Contains(steps[0].Result, "hello (not deployed by the controller)") {
-		t.Errorf("list_stacks result:\n%s", steps[0].Result)
+	if _, ok := models["ns-gone"]; ok {
+		t.Error("the model of a deleted namespace was kept")
 	}
-	// The tool result went back to the model, tied to its call.
-	last := llm.seen[1][len(llm.seen[1])-1]
-	if last.Role != "tool" || last.ToolCallID != "1" {
-		t.Errorf("tool answer = %+v", last)
+	if _, ok := models["other"]; !ok {
+		t.Error("a model the sync does not own was removed")
 	}
-	// History holds the turn without the system prompt.
-	if history[0].Role != "user" || history[len(history)-1].Content != "grafana runs." {
-		t.Errorf("history = %+v", history)
+	if b, ok := models["gpt-oss:120b"]; !ok || b.Meta["hidden"] != true || len(b.AccessGrants) != 1 {
+		t.Errorf("base model entry = %+v", b)
 	}
-	if !strings.Contains(llm.seen[0][0].Content, "bob, who is a regular user") {
-		t.Errorf("system prompt does not name the person and role:\n%s", llm.seen[0][0].Content)
+	if sys.BaseModelID != "gpt-oss:120b" || !strings.Contains(sys.Params["system"].(string), `namespace "system"`) {
+		t.Errorf("ns-system = %+v", sys)
 	}
-}
-
-func TestProposalActsAsThePerson(t *testing.T) {
-	args := `{"repo":"grafana","path":"compose.yaml","content":"services: {x: {}}\n","title":"Add x"}`
-	for _, tc := range []struct {
-		who     string
-		allowed bool
-	}{{"alice", true}, {"bob", false}} {
-		llm := &scriptedLLM{answers: []Message{callTool("1", "propose_change", args), {Content: "done"}}}
-		a, fg := setup(t, llm)
-		_, steps, _, err := a.Ask(context.Background(), Person{Name: tc.who}, nil, "add x")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if steps[0].Error == tc.allowed {
-			t.Errorf("%s: step = %+v", tc.who, steps[0])
-		}
-		if tc.allowed && len(fg.prs) != 1 {
-			t.Errorf("%s: no pull request opened", tc.who)
-		}
-		if !tc.allowed && (len(fg.prs) != 0 || !strings.Contains(steps[0].Result, "not allowed")) {
-			t.Errorf("%s: proposal not refused: %+v", tc.who, steps[0])
-		}
-		for _, s := range fg.sudo {
-			if s != tc.who {
-				t.Errorf("%s: Gitea was called as %q", tc.who, s)
-			}
-		}
+	if ids := sys.Meta["toolIds"].([]any); len(ids) != 1 || ids[0] != "server:mcp:homecloud" {
+		t.Errorf("toolIds = %v", ids)
 	}
-}
-
-func TestToolArgumentsAreChecked(t *testing.T) {
-	a, _ := setup(t, nil)
-	for _, c := range []struct{ tool, args string }{
-		{"read_file", `{"repo":"grafana","path":"../../etc/passwd"}`},
-		{"read_file", `{"repo":"../x","path":"a"}`},
-		{"service_logs", `{"service":"x; rm -rf /"}`},
-		{"stack_status", `{"stack":"-rf"}`},
-		{"nope", `{}`},
-		{"read_file", `not json`},
-	} {
-		if _, err := a.call(context.Background(), Person{Name: "alice"}, c.tool, c.args); err == nil {
-			t.Errorf("%s %s accepted", c.tool, c.args)
+	// A second sync changes nothing.
+	calls = nil
+	o.Sync(context.Background())
+	for _, c := range calls {
+		if strings.Contains(c, "create") || strings.Contains(c, "update") || strings.Contains(c, "delete") {
+			t.Errorf("second sync called %s", c)
 		}
-	}
-}
-
-func TestLLMWithoutKey(t *testing.T) {
-	l := &LLM{BaseURL: "http://127.0.0.1:1", Model: "m", KeyFile: filepath.Join(t.TempDir(), "missing")}
-	if _, err := l.Chat(context.Background(), nil, nil); !errors.Is(err, ErrNoKey) {
-		t.Errorf("err = %v, want ErrNoKey", err)
-	}
-}
-
-func TestLLMSpeaksOpenAI(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer k3y" {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "m" {
-			http.Error(w, "bad model", http.StatusBadRequest)
-			return
-		}
-		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"hi"}}]}`)
-	}))
-	defer srv.Close()
-	key := filepath.Join(t.TempDir(), "key")
-	os.WriteFile(key, []byte("k3y\n"), 0o600)
-	m, err := (&LLM{BaseURL: srv.URL + "/v1/", Model: "m", KeyFile: key}).Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
-	if err != nil || m.Content != "hi" {
-		t.Fatalf("m = %+v, err = %v", m, err)
-	}
-}
-
-func TestAPINeedsSessionAndSameOrigin(t *testing.T) {
-	a, fg := setup(t, nil)
-	s := &Server{cfg: Config{PublicURL: "https://cp.example.com", Agent: a, Gitea: a.Gitea},
-		sessions: map[string]*session{
-			"alice": {person: Person{Name: "alice", Admin: true}, expires: time.Now().Add(time.Hour)},
-			"bob":   {person: Person{Name: "bob"}, expires: time.Now().Add(time.Hour)},
-			"old":   {person: Person{Name: "alice"}, expires: time.Now().Add(-time.Minute)},
-		}, logins: map[string]pendingLogin{}}
-	h := s.Handler()
-	do := func(method, path, cookie, origin string) int {
-		r := httptest.NewRequest(method, path, strings.NewReader("{}"))
-		if cookie != "" {
-			r.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
-		}
-		if origin != "" {
-			r.Header.Set("Origin", origin)
-		}
-		r.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w.Code
-	}
-	for _, c := range []struct {
-		name, method, path, cookie, origin string
-		want                               int
-	}{
-		{"no session", "GET", "/api/stacks", "", "", 401},
-		{"expired session", "GET", "/api/me", "old", "", 401},
-		{"forged cookie", "GET", "/api/me", "alice-forged", "", 401},
-		{"page without session", "GET", "/", "", "", 302},
-		{"page with session", "GET", "/", "bob", "", 200},
-		{"stacks", "GET", "/api/stacks", "bob", "", 200},
-		{"approve from another site", "POST", "/api/changes/grafana/1/approve", "alice", "https://evil.example", 403},
-		{"approve without origin", "POST", "/api/changes/grafana/1/approve", "alice", "", 403},
-		{"bob may not approve", "POST", "/api/changes/grafana/1/approve", "bob", "https://cp.example.com", 403},
-		{"alice approves", "POST", "/api/changes/grafana/1/approve", "alice", "https://cp.example.com", 200},
-		{"bad repo name", "POST", "/api/changes/..%2Fx/1/approve", "alice", "https://cp.example.com", 400},
-		{"unknown action", "POST", "/api/changes/grafana/1/delete", "alice", "https://cp.example.com", 400},
-	} {
-		if got := do(c.method, c.path, c.cookie, c.origin); got != c.want {
-			t.Errorf("%s: %d, want %d", c.name, got, c.want)
-		}
-	}
-	if len(fg.merged) != 1 {
-		t.Errorf("merged %d times, want once (alice)", len(fg.merged))
 	}
 }

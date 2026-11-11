@@ -29,7 +29,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki controlplane hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat controlplane hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -97,12 +97,22 @@ poll() {
 }
 g=https://grafana.$DOMAIN
 
-cp=https://controlplane.$DOMAIN
-# cp_api PERSON ARGS...: the control plane's API with that person's session.
-# Changes are sent like the page sends them: JSON, from the control plane's origin.
-cp_api() {
+chat=https://chat.$DOMAIN
+# chat_api PERSON ARGS...: Open WebUI's API with that person's session, signed
+# in through Keycloak (see section login).
+chat_api() {
   local as=$1; shift
-  web -b "$tmp/cp-$as.jar" -H "Origin: $cp" -H 'Content-Type: application/json' "$@"
+  web -b "$tmp/chat-$as.jar" -H "Authorization: Bearer $(chat_token "$as")" "$@"
+}
+chat_token() { awk '$6 == "token" { print $7 }' "$tmp/chat-$1.jar" | tail -n1; }
+# chat_login PERSON: signs in to Open WebUI through Keycloak.
+chat_login() {
+  sso_login "$tmp/chat-$1.jar" "$chat/oauth/oidc/login" "$TEST_PASSWORD" "$tmp/chat-$1.html" "$1" >/dev/null 2>&1
+}
+# mcp ARGS...: the control plane's MCP endpoint, which only Open WebUI reaches.
+mcp() {
+  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
+    curl -sS --max-time 20 "$@" http://controller_controlplane:8080/mcp
 }
 
 # ---------- sections ----------
@@ -159,22 +169,24 @@ check "someone not signed in cannot browse it either" bash -c "[ \"\$(curl -s -o
 check "bob cannot make himself admin"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"login_name":"bob","source_id":0,"admin":true}' "https://git.$DOMAIN/api/v1/admin/users/bob")" = 403
 check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
 
-echo "# the control plane"
-check "the control plane sends visitors to the Keycloak login" \
-  grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$(web -L -o /dev/null -w '%{url_effective}' "$cp/")"
-check "its API needs a session"            test "$(web -o /dev/null -w '%{http_code}' "$cp/api/stacks")" = 401
-check "a forged identity header does not help" test "$(web -o /dev/null -w '%{http_code}' -H "X-Auth-Request-User: alice" -H "X-Forwarded-User: alice" "$cp/api/me")" = 401
+echo "# Open WebUI"
+check "Open WebUI is healthy over valid TLS" status_is 200 chat /health 300
+check "it sends visitors to the Keycloak login" \
+  grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$(web -o /dev/null -w '%{redirect_url}' "$chat/oauth/oidc/login")"
+check "it shows nothing without signing in" test "$(web -o /dev/null -w '%{http_code}' "$chat/api/models")" = 401
 for u in alice bob; do
-  sso_login "$tmp/cp-$u.jar" "$cp/" "$TEST_PASSWORD" "$tmp/cp-$u.html" $u >/dev/null 2>&1
-  check "$u signs in to the control plane through Keycloak" grep -q "\"name\":\"$u\"" <<<"$(cp_api $u "$cp/api/me")"
+  chat_login $u
+  check "$u signs in to Open WebUI through Keycloak" grep -q "\"name\":\"$u\"\|\"email\":\"$u@" <<<"$(chat_api $u "$chat/api/v1/auths/")"
 done
-check "alice is a root admin there"        grep -q '"admin":true'  <<<"$(cp_api alice "$cp/api/me")"
-check "bob is not"                         grep -q '"admin":false' <<<"$(cp_api bob "$cp/api/me")"
-check "bob sees the stacks"                grep -q '"name":"grafana"' <<<"$(cp_api bob "$cp/api/stacks")"
-check "a request from another site is refused" \
-  test "$(web -b "$tmp/cp-alice.jar" -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -d '{}' "$cp/api/chat/reset")" = 403
-check "signing out ends the session" \
-  bash -c "$(declare -f web); ETC=$ETC DOMAIN=$DOMAIN; cp $tmp/cp-bob.jar $tmp/cp-bob2.jar; web -b $tmp/cp-bob2.jar -c $tmp/cp-bob2.jar -o /dev/null $cp/logout; [ \"\$(web -b $tmp/cp-bob2.jar -o /dev/null -w '%{http_code}' $cp/api/me)\" = 401 ]"
+check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
+check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
+has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"ns-$1\""; }
+check "bob has the agent of the namespace system" until_true 180 has_agent system
+check "the agent has the control plane's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
+check "the control plane is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://controlplane.$DOMAIN/mcp")" = 404
+check "its MCP endpoint wants a token"     test "$(mcp -o /dev/null -w '%{http_code}' -X POST -d '{}')" = 401
+check "it refuses a made-up token"         test "$(mcp -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{}')" = 401
+check "it refuses identity headers"        test "$(mcp -o /dev/null -w '%{http_code}' -X POST -H 'X-OpenWebUI-User-Name: alice' -H 'X-Forwarded-User: alice' -d '{}')" = 401
 
 echo "# roles in Grafana"
 check "Grafana is healthy over valid TLS"  status_is 200 grafana /api/health 300
@@ -230,20 +242,6 @@ check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null 
 check "the controller takes the stack down" until_true 120 smoke_gone
 check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx controller <<<"$l"'
 
-echo "# approving changes in the control plane"
-# alice proposes a change to system/platform, which holds no stack, through Gitea.
-branch=smoke-$RANDOM$RANDOM
-title="Smoke test change $branch"
-gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"content":"'"$(printf 'smoke\n' | base64 -w0)"'","message":"'"$title"'","new_branch":"'$branch'"}' "$api/repos/system/platform/contents/smoke-$branch.txt"
-pr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'$branch'","base":"main","title":"'"$title"'"}' "$api/repos/system/platform/pulls" | grep -o '"number":[0-9]*' | head -n1 | cut -d: -f2)
-check "a proposed change waits in the control plane" grep -q "$title" <<<"$(cp_api bob "$cp/api/changes")"
-check "it comes with its diff"             grep -q "+smoke" <<<"$(cp_api bob "$cp/api/changes")"
-check "bob may not approve it"             test "$(cp_api bob -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/approve")" = 403
-check "bob may not reject it"              test "$(cp_api bob -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/reject")" = 403
-check "alice approves it"                  test "$(cp_api alice -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/approve")" = 200
-check "it is merged into main"             grep -q '"merged":true' <<<"$(gitea_api "" "$api/repos/system/platform/pulls/$pr")"
-check "it no longer waits"                 bash -c '! grep -q "$0" <<<"$1"' "$title" "$(cp_api bob "$cp/api/changes")"
-
 echo "# monitoring data"
 check "Prometheus scrapes the node"        poll 180 '"job":"node"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
 check "Prometheus scrapes the containers"  poll 180 '"job":"cadvisor"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
@@ -286,36 +284,64 @@ check "hello still answers after the rejected deploys"   status_is 200 hello / 3
 
 }
 
-# agent: the operator agent answers and proposes, with the asker's rights.
-# Talks to the real LLM, so answers vary; the checks look at what the agent
-# did (its tool calls, the changes in Gitea), not at its wording.
+# agent: the namespace agents in Open WebUI answer and propose through the
+# control plane's MCP tools, with the asker's rights. They talk to the real
+# LLM, so answers vary; the checks look at what the agents did (tools called,
+# changes in Gitea), not at their wording.
 section_agent() {
-echo "# the agent"
+echo "# the namespace agents"
 if [ ! -s $ETC/llm-api-key ]; then
   echo "skip  no LLM key in $ETC/llm-api-key"
   return
 fi
-ask() { cp_api "$1" --max-time 300 -X POST -d "$(printf '{"message":%s}' "$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" "$cp/api/chat"; }
-cp_api bob -o /dev/null -X POST -d '{}' "$cp/api/chat/reset"
-answer=$(ask bob "Which stacks does the controller deploy? Use your tools and list their names.")
-check "the agent answers bob"              grep -q '"reply":' <<<"$answer"
-check "it looked the stacks up"            grep -q '"tool":"list_stacks"' <<<"$answer"
-check "its answer names grafana"           grep -qi 'grafana' <<<"$(sed 's/"steps":.*//' <<<"$answer")"
-answer=$(ask bob "What does the repo traefik deploy? Read its compose.yaml.")
-check "it reads repos for bob"             grep -q '"tool":"read_file"' <<<"$answer"
-before=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
-answer=$(ask bob "Propose a change in the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob.")
-after=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
-check "bob's proposal is refused"          bash -c '! grep -q "Agent smoke test bob" <<<"$0"' "$after"
-check "the agent says why"                 grep -q 'not allowed' <<<"$answer"
-cp_api alice -o /dev/null -X POST -d '{}' "$cp/api/chat/reset"
-answer=$(ask alice "Propose a change in the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice.")
-check "the agent proposes alice's change"  grep -q '"tool":"propose_change"' <<<"$answer"
-changes=$(cp_api alice "$cp/api/changes")
-check "it waits for approval, by alice"    grep -q '"title":"Agent smoke test alice[^"]*","body":"[^"]*","author":"alice"' <<<"$changes"
+for u in alice bob; do chat_login $u; done
+# ask PERSON QUESTION: one chat turn with the agent of system, as the chat page
+# does it: in a saved chat, run as a background task that calls the tools and
+# stores the answer in the chat. Prints the answer.
+ask() {
+  local who=$1 question=$2 cid mid i out
+  cid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
+    -d '{"chat":{"title":"smoke test","models":["ns-system"],"messages":[],"history":{"messages":{},"currentId":null}}}' \
+    "$chat/api/v1/chats/new" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
+  mid=$(cat /proc/sys/kernel/random/uuid)
+  chat_api "$who" -o /dev/null -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": "ns-system", "chat_id": sys.argv[1], "id": sys.argv[2], "session_id": "smoke-" + sys.argv[2], "stream": True, "tool_ids": ["server:mcp:homecloud"], "messages": [{"role": "user", "content": sys.argv[3]}]}))' "$cid" "$mid" "$question")" \
+    "$chat/api/chat/completions"
+  for i in $(seq 60); do
+    out=$(chat_api "$who" "$chat/api/v1/chats/$cid")
+    python3 -c '
+import json,sys
+m = json.load(sys.stdin)["chat"]["history"]["messages"].get(sys.argv[1])
+if not m or not m.get("done"): sys.exit(1)
+print(m.get("content") or "")' "$mid" <<<"$out" && return 0
+    sleep 5
+  done
+  return 1
+}
+reply() { cat; }
+mcp_calls() { docker service logs --since "$1" controller_controlplane 2>&1 | grep -o "mcp: $2: [a-z_]*" | sort -u; }
+
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask bob "Which stacks run in the namespace system? Use your tools and list their names." | reply)
+check "the agent answers bob"              test -n "$answer"
+check "its answer names grafana"           grep -qi grafana <<<"$answer"
+check "it asked the control plane, as bob" grep -q "mcp: bob: list_stacks" <<<"$(mcp_calls "$since" bob)"
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask bob "Show me the last 20 log lines of the service grafana_grafana, and how much memory the stack grafana uses." | reply)
+check "it reads logs for bob"              grep -q "mcp: bob: service_logs" <<<"$(mcp_calls "$since" bob)"
+check "it reads metrics for bob"           grep -qE "mcp: bob: (service_usage|query_metrics)" <<<"$(mcp_calls "$since" bob)"
+answer=$(ask bob "In the namespace system, propose a change to the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob." | reply)
+check "bob's proposal is refused"          bash -c '! grep -q "Agent smoke test bob" <<<"$0"' "$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")"
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask alice "In the namespace system, propose a change to the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice." | reply)
+check "the agent proposes alice's change, as alice" grep -q "mcp: alice: propose_change" <<<"$(mcp_calls "$since" alice)"
+prs=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
+check "it waits as a pull request by alice" python3 -c 'import json,sys; sys.exit(not any(p["title"].startswith("Agent smoke test alice") and p["user"]["login"] == "alice" for p in json.load(sys.stdin)))' <<<"$prs"
 check "nothing reached main"               test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/platform/contents/agent-alice.txt")" = 404
-pr=$(grep -o '"repo":"platform","number":[0-9]*,"title":"Agent smoke test alice' <<<"$changes" | head -n1 | grep -o 'number":[0-9]*' | cut -d: -f2)
-check "alice rejects it"                   test "$(cp_api alice -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/reject")" = 200
+check "the answer links the change"        grep -q "git.$DOMAIN/system/platform/pulls/" <<<"$answer"
+# Clean up: close the proposal.
+pr=$(python3 -c 'import json,sys; print(next(p["number"] for p in json.load(sys.stdin) if p["title"].startswith("Agent smoke test alice")))' <<<"$prs" 2>/dev/null)
+[ -n "$pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/system/platform/pulls/$pr"
 }
 
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.

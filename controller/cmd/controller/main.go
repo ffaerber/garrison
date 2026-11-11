@@ -20,6 +20,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+
 	"homecloud/controller/internal/apply"
 	"homecloud/controller/internal/controlplane"
 	"homecloud/controller/internal/gitops"
@@ -36,7 +38,7 @@ const usage = `usage:
   controller serve [-once] [-interval DURATION] [-config FILE] [-work DIR]
                    [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
   controller applied [-work DIR]
-  controller controlplane [-listen ADDR] [-gitea URL] [-password-file FILE] [-work DIR] ...
+  controller controlplane [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
 `
 
 func main() {
@@ -275,18 +277,19 @@ func appliedCmd(args []string) error {
 	return nil
 }
 
-// controlplaneCmd serves the web control plane: Keycloak sign-in, stacks,
-// changes waiting for approval, and the operator agent.
+// controlplaneCmd serves the control plane: the MCP server Open WebUI's
+// agents use, and the sync that keeps one agent per namespace there.
 func controlplaneCmd(args []string) error {
 	fs := flag.NewFlagSet("controlplane", flag.ExitOnError)
-	listen := fs.String("listen", ":8080", "address to serve on")
+	listen := fs.String("listen", ":8080", "address to serve MCP on (/mcp)")
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	work := fs.String("work", workDir, "the controller's state, read-only")
 	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
-	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	clientSecretFile := fs.String("client-secret-file", "/run/secrets/controlplane-oidc-secret", "Keycloak client secret")
+	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea and Open WebUI admin accounts")
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
-	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "API key of the LLM")
+	prometheus := fs.String("prometheus", "http://prometheus_prometheus:9090", "Prometheus's URL")
+	openwebui := fs.String("openwebui", "http://openwebui_openwebui:8080", "Open WebUI's URL")
+	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	fs.Parse(args)
 
 	_, vars, err := readEnvFile(*config)
@@ -297,17 +300,11 @@ func controlplaneCmd(args []string) error {
 	if domain == "" || vars["ADMIN_USER"] == "" {
 		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
 	}
-	or := func(v, def string) string {
-		if v != "" {
-			return v
-		}
-		return def
+	model := vars["LLM_MODEL"]
+	if model == "" {
+		model = "gpt-oss:120b"
 	}
 	password, err := os.ReadFile(*passwordFile)
-	if err != nil {
-		return err
-	}
-	secret, err := os.ReadFile(*clientSecretFile)
 	if err != nil {
 		return err
 	}
@@ -321,37 +318,47 @@ func controlplaneCmd(args []string) error {
 	}
 	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 
-	g := &controlplane.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password)), Org: "system"}
-	agent := &controlplane.Agent{
-		LLM: &controlplane.LLM{
-			BaseURL: or(vars["LLM_BASE_URL"], "https://ollama.com/v1"),
-			Model:   or(vars["LLM_MODEL"], "gpt-oss:120b"),
-			KeyFile: *keyFile,
-		},
-		Gitea: g, Run: apply.Exec, WorkDir: *work, Domain: domain,
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	srv, err := controlplane.New(ctx, controlplane.Config{
-		PublicURL:    "https://controlplane." + domain,
-		Issuer:       "https://keycloak." + domain + "/realms/homecloud",
-		ClientID:     "controlplane",
-		ClientSecret: strings.TrimSpace(string(secret)),
-		HTTP:         httpClient,
-		Agent:        agent,
-		Gitea:        g,
-	})
-	if err != nil {
-		return err
+
+	// Keycloak may still be starting.
+	var verifier *controlplane.KeycloakVerifier
+	issuer := "https://keycloak." + domain + "/realms/homecloud"
+	for {
+		verifier, err = controlplane.NewKeycloakVerifier(oidc.ClientContext(ctx, httpClient), issuer, strings.Split(*clients, ","))
+		if err == nil {
+			break
+		}
+		log.Printf("waiting for Keycloak: %v", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
 	}
-	server := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+
+	g := &controlplane.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
+	mcp := &controlplane.MCP{
+		Tools:    &controlplane.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus},
+		Verifier: verifier,
+	}
+	sync := &controlplane.OpenWebUI{
+		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
+		BaseModel: model, ToolServerID: "homecloud", Domain: domain, Gitea: g,
+	}
+	go sync.Run(ctx, time.Minute)
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", mcp)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	server := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		server.Shutdown(shutdown)
 	}()
-	log.Printf("control plane on %s, model %s", *listen, agent.LLM.(*controlplane.LLM).Model)
+	log.Printf("control plane: MCP on %s/mcp, agents on %s", *listen, model)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
