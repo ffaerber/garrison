@@ -90,10 +90,11 @@ sso_login "$tmp/git.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$PASSWORD" 
 check "the admin signs in to Gitea through Keycloak" test "$(web -b "$tmp/git.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
 
 echo "# roles"
-# Two test people. Their passwords are kept so they can also log in by hand.
+# Two test people with a fixed, well-known password, so they can also log in
+# by hand. For test installations only.
 ADD_USER=platform/system/03-keycloak/add-user.sh
-mkdir -p -m 700 $ETC/test-users
-for u in alice bob; do [ -s $ETC/test-users/$u ] || openssl rand -hex 12 > $ETC/test-users/$u; done
+TEST_PASSWORD=${TEST_PASSWORD:-12345678}
+rm -rf $ETC/test-users
 # gitea_api USER_TO_ACT_AS ARGS...: call the Gitea API as the local admin, or,
 # with a name, with exactly that person's rights (Gitea's Sudo header).
 gitea_api() {
@@ -102,10 +103,10 @@ gitea_api() {
 }
 repo=https://git.$DOMAIN/api/v1/repos/system/platform
 
-check "alice is added as root admin"       env USER_PASSWORD="$(cat $ETC/test-users/alice)" $ADD_USER alice "alice@$DOMAIN" --admin
-check "bob is added as user"               env USER_PASSWORD="$(cat $ETC/test-users/bob)" $ADD_USER bob "bob@$DOMAIN"
+check "alice is added as root admin"       env USER_PASSWORD="$TEST_PASSWORD" $ADD_USER alice "alice@$DOMAIN" --admin
+check "bob is added as user"               env USER_PASSWORD="$TEST_PASSWORD" $ADD_USER bob "bob@$DOMAIN"
 for u in alice bob; do
-  sso_login "$tmp/$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$(cat $ETC/test-users/$u)" "$tmp/$u.html" $u >/dev/null 2>&1
+  sso_login "$tmp/$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$TEST_PASSWORD" "$tmp/$u.html" $u >/dev/null 2>&1
   check "$u signs in to Gitea through Keycloak" test "$(web -b "$tmp/$u.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
 done
 check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/alice")"

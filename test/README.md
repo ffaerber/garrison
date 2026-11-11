@@ -15,8 +15,9 @@ test/vm/run.sh --delete   # delete the VM
 test/vm/dns.sh          # *.homecloud.test resolves to the VM from this computer
 test/vm/dns.sh --off    # undo
 multipass exec homecloud-test -- sudo cat /etc/homecloud/admin-password
-multipass exec homecloud-test -- sudo cat /etc/homecloud/test-users/alice   # root admin; bob is a regular user
 ```
+
+The smoke test creates two people with the password `12345678`: `alice`, a root admin, and `bob`, a regular user.
 
 Then open `https://git.homecloud.test`, `https://keycloak.homecloud.test` or any deployed stack. The certificate is self-signed, so the browser asks once per hostname. The DNS setting lasts until a reboot or until the VM is recreated; run the script again then. It needs systemd-resolved on this computer.
 
