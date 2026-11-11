@@ -88,9 +88,11 @@ say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
 has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
 done
+# The login proxy needs a cookie secret of exactly 32 bytes.
+has_secret sso-cookie-secret || openssl rand -hex 16 | tr -d '\n' | docker secret create sso-cookie-secret - >/dev/null
 
 # The admin password is kept on disk, root-only, so a re-run can use it.
 if [ ! -s "$ETC/admin-password" ]; then
@@ -115,38 +117,44 @@ ENV
 install -m 644 "$ROOT/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
 
 # ---------- system stack ----------
-# Wait until every service of a stack has all its replicas running and healthy.
+# Wait until every service of a stack has all its replicas running and healthy
+# and has finished rolling out. During an update the old container still counts
+# as a running replica, so the replica count alone is not enough.
 wait_stack() {
-  local stack=$1 deadline=$((SECONDS + 600)) pending
+  local stack=$1 deadline=$((SECONDS + 600)) pending name replicas id update
   while :; do
-    pending=$(docker service ls --filter "label=com.docker.stack.namespace=$stack" --format '{{.Name}} {{.Replicas}}' \
-      | awk '{ split($2, r, "/"); if (r[1] != r[2] || r[2] == 0) print $1 }')
+    pending=
+    while read -r id name replicas; do
+      update=$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}' "$id")
+      case $update in ""|completed) ;; *) pending+=" $name"; continue ;; esac
+      [ "${replicas%/*}" = "${replicas#*/}" ] && [ "${replicas#*/}" != 0 ] || pending+=" $name"
+    done < <(docker service ls --filter "label=com.docker.stack.namespace=$stack" --format '{{.ID}} {{.Name}} {{.Replicas}}')
     [ -z "$pending" ] && return 0
     if [ $SECONDS -ge $deadline ]; then
+      # shellcheck disable=SC2086
       docker service ps --no-trunc $pending >&2 || true
-      fail "stack $stack did not become ready: $pending"
+      fail "stack $stack did not become ready:$pending"
     fi
     sleep 3
   done
 }
 
-export DOMAIN ADMIN_USER
+export DOMAIN ADMIN_USER ADMIN_EMAIL ETC
 for dir in "$ROOT"/platform/system/[0-9]*/; do
   [ -f "$dir/compose.yaml" ] || continue
   name=$(basename "$dir"); name=${name#*-}
   say "Deploying $name"
+  # Swarm configs cannot change, so their names carry a hash of the stack's files.
+  CONFIG_HASH=$(cat "$dir"/* | sha256sum | cut -c1-12)
+  export CONFIG_HASH
   docker stack deploy --detach=true --compose-file "$dir/compose.yaml" "$name" >/dev/null
   wait_stack "$name"
+  # Optional step that needs the running service, e.g. creating accounts.
+  if [ -x "$dir/configure.sh" ]; then
+    "$dir/configure.sh"
+    wait_stack "$name"
+  fi
 done
-
-# ---------- Gitea admin ----------
-say "Creating the Gitea admin account"
-gitea=$(docker ps --quiet --filter label=com.docker.swarm.service.name=gitea_gitea | head -n1)
-[ -n "$gitea" ] || fail "Gitea container not found"
-if ! docker exec -u git "$gitea" gitea admin user list --admin | awk 'NR > 1 { print $2 }' | grep -qx "$ADMIN_USER"; then
-  docker exec -u git "$gitea" gitea admin user create --admin --must-change-password=false \
-    --username "$ADMIN_USER" --email "$ADMIN_EMAIL" --password "$(cat "$ETC/admin-password")" >/dev/null
-fi
 
 # ---------- controller ----------
 # Interim: the controller will ship as an image in the system stack.
@@ -156,7 +164,7 @@ fi
 
 say "Done"
 cat <<MSG
-  Keycloak  https://auth.$DOMAIN
+  Keycloak  https://auth.$DOMAIN  (people sign in to the realm "homecloud")
   Gitea     https://git.$DOMAIN
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt

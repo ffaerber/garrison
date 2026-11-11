@@ -27,6 +27,8 @@ services:
 
 configs:
   init-databases:
+    # Swarm configs cannot change; a new name per content replaces them.
+    name: postgres-init-${CONFIG_HASH}
     file: ./init-databases.sh
 
 secrets:

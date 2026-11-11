@@ -23,7 +23,11 @@ services:
     secrets:
       - { source: tls-cert, target: tls.crt }
       - { source: tls-key, target: tls.key }
-    networks: [traefik-public]
+    networks:
+      traefik-public:
+        # Containers reach Keycloak at its public name through Traefik, so
+        # tokens and discovery use one URL inside and outside the cluster.
+        aliases: ["auth.${DOMAIN}"]
     healthcheck:
       test: [CMD, traefik, healthcheck, --ping]
       interval: 5s
@@ -35,6 +39,7 @@ services:
 
 configs:
   dynamic:
+    name: traefik-dynamic-${CONFIG_HASH}
     file: ./dynamic.yaml
 
 secrets:

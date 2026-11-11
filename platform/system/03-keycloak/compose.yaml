@@ -20,6 +20,9 @@ services:
     secrets:
       - keycloak-db-password
       - admin-password
+      # Client secrets, read by configure.sh when it creates the clients.
+      - gitea-oidc-secret
+      - sso-oidc-secret
     networks: [system, traefik-public]
     deploy:
       labels:
@@ -33,6 +36,8 @@ services:
 secrets:
   keycloak-db-password: { external: true }
   admin-password: { external: true }
+  gitea-oidc-secret: { external: true }
+  sso-oidc-secret: { external: true }
 
 networks:
   system:

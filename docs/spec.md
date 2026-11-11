@@ -40,13 +40,14 @@ Deployed by the installer in this order, because each depends on the ones before
 | --- | --- | --- |
 | 1 | Postgres | Shared database for Keycloak, Gitea, Grafana |
 | 2 | Traefik | Routing, wildcard TLS, login check for tools without their own |
-| 3 | Keycloak | Single sign-on for all people |
-| 4 | Gitea + Actions runner + registry | Code, config, history, CI/CD, images |
-| 5 | Controller | Applies Git to the cluster, holds the SOPS key, writes change records |
-| 6 | Agent orchestrator | Runs operator and coding agents |
-| 7 | Platform UI | Dashboard and team chat |
-| 8 | Prometheus, Loki, Grafana, Alloy, node-exporter, cAdvisor | Metrics, logs, dashboards |
-| 9 | Alertmanager, ntfy | Alerts and phone push |
+| 3 | Keycloak | Single sign-on for all people, in the realm `homecloud` |
+| 4 | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
+| 5 | Gitea + Actions runner + registry | Code, config, history, CI/CD, images |
+| 6 | Controller | Applies Git to the cluster, holds the SOPS key, writes change records |
+| 7 | Agent orchestrator | Runs operator and coding agents |
+| 8 | Platform UI | Dashboard and team chat |
+| 9 | Prometheus, Loki, Grafana, Alloy, node-exporter, cAdvisor | Metrics, logs, dashboards |
+| 10 | Alertmanager, ntfy | Alerts and phone push |
 
 On the host, not in containers: ZFS, Sanoid for scheduled snapshots, restic for offsite backup.
 

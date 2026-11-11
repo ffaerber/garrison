@@ -13,9 +13,17 @@ services:
       GITEA__server__ROOT_URL: https://git.${DOMAIN}/
       GITEA__server__DISABLE_SSH: "true"
       GITEA__security__INSTALL_LOCK: "true"
-      GITEA__service__DISABLE_REGISTRATION: "true"
+      # People sign in through Keycloak; an account is created on first login.
+      GITEA__service__ALLOW_ONLY_EXTERNAL_REGISTRATION: "true"
+      GITEA__oauth2_client__ENABLE_AUTO_REGISTRATION: "true"
+      GITEA__oauth2_client__USERNAME: preferred_username
+      GITEA__oauth2_client__ACCOUNT_LINKING: auto
+      # Trust the installation's certificate when calling Keycloak.
+      SSL_CERT_FILE: /run/secrets/tls.crt
     secrets:
       - gitea-db-password
+      - gitea-oidc-secret
+      - { source: tls-cert, target: tls.crt }
     volumes:
       - type: bind
         source: /homecloud/system/gitea
@@ -37,6 +45,8 @@ services:
 
 secrets:
   gitea-db-password: { external: true }
+  gitea-oidc-secret: { external: true }
+  tls-cert: { external: true }
 
 networks:
   system:
