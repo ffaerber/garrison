@@ -76,6 +76,7 @@ func (t *Tools) Specs() []Spec {
 		}, "namespace", "service"),
 		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"namespace": nsArg, "stack": str("stack name, e.g. grafana")}, "namespace", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
+		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for system, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_repos", "Lists the repos of a namespace. In system, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "namespace", "repo"),
 		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "namespace", "repo", "path"),
@@ -181,6 +182,16 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 			return "", fmt.Errorf("%w: query", ErrInvalid)
 		}
 		return t.promQuery(ctx, a.Query)
+	case "list_members":
+		if a.Namespace == SystemNamespace {
+			return "The namespace system is changed by root admins only; it has no members.yaml.", nil
+		}
+		roster, err := t.Gitea.Roster(ctx, p.Name, a.Namespace)
+		if err != nil {
+			return "", err
+		}
+		return "members.yaml of " + a.Namespace + "/config on main:\n" + roster +
+			"\nTo change it, propose a new members.yaml in the repo config. It needs the approval of an admin who did not write the change and whose role it does not change.", nil
 	case "list_repos":
 		repos, err := t.Gitea.Repos(ctx, p.Name, a.Namespace)
 		if err != nil {

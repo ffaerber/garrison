@@ -5,7 +5,9 @@
 #
 #   alice  root admin: may change the platform
 #   bob    regular user: may look at everything, change nothing
+#   carol  regular user: becomes an admin of the namespace homepage in the talk step
 set -euo pipefail
 password=${TEST_PASSWORD:-12345678}
 USER_PASSWORD=$password system/keycloak/add-user.sh alice "alice@$(. /etc/homecloud/install.env && echo "$DOMAIN")" --admin
 USER_PASSWORD=$password system/keycloak/add-user.sh bob   "bob@$(. /etc/homecloud/install.env && echo "$DOMAIN")"
+USER_PASSWORD=$password system/keycloak/add-user.sh carol "carol@$(. /etc/homecloud/install.env && echo "$DOMAIN")"

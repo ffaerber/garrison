@@ -14,6 +14,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 - Monitoring: Grafana (`grafana.<domain>`) with Prometheus (node, container and Traefik metrics) and Loki (container logs), neither reachable from outside. Dashboards are code: any repo's `dashboards/*.json` goes into a Grafana folder per namespace, kept as on `main` by the controller; `system/grafana` brings Overview, Stack, Logs, Machine and Traffic.
 - Chat: Open WebUI at `chat.<domain>`, signed in through Keycloak. Every namespace has a permanent channel, its team chat, and an agent that answers there when mentioned; the control plane keeps both in sync with the Gitea organisations. The agents' tools come from the control plane's MCP server, which acts with each person's own Keycloak token: they read stacks, logs, metrics and repos, and propose changes as pull requests a person merges in Gitea. The LLM is Ollama's `gpt-oss:120b` by default.
 - Apps: in every namespace other than `system`, each repo with a `stack.yaml` is deployed from its branches (`main` → `<stack>.<domain>`, `dev` → `dev-<stack>.<domain>`) once its pipeline has built the commit's image. `homepage/todo` (from `examples/homepage/todo`) is a Go and Postgres todo app with its tests, Dockerfile and pipeline.
+- Namespace members: `<namespace>/config/members.yaml`, applied to Gitea teams; changes only by approved pull request, and nobody approves their own role change. The agents can show members and propose changes but never approve or merge (`docs/scenarios.md`).
 - Pipelines: a system runner for `system` and a user runner for every other namespace, whose jobs reach Docker only through the controller's guard and build images with BuildKit; one build account per namespace for its registry.
 - Reboot: `homecloud-repair.service` replaces Swarm tasks that Docker restarted without their secrets or configs.
 - Controller CLI on the host (`homecloud-controller`): validates a stack file, claims its hostnames, creates its ZFS datasets and Swarm secrets, and deploys it behind Traefik; `applied` shows what the controller deployed.
@@ -31,7 +32,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-Namespace members, config and history repos; snapshots, SOPS, change records, approvals and restore in the controller; coding agents, the dashboard, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
+History repos and the rest of the config repo (autonomy levels, branch rights, secrets); snapshots, SOPS, change records, approvals and restore in the controller; coding agents, the dashboard, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
 
 ## Known limits
 

@@ -71,7 +71,7 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 | --- | --- | --- | --- |
 | System repos | The `system` organisation, one per system stack | `compose.yaml` and the files it uses; for the controller also its source and build | Root admins, system agent via PR |
 | Platform repo | `system/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, system agent via PR |
-| Config repo | One per namespace, `<namespace>/config` | Members and roles, repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins, namespace agent via PR |
+| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members); later repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins, namespace agent via PR |
 | History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Controller only |
 | App repos | Inside a namespace, one per stack | Code, `stack.yaml`, numbered migrations | Members, coding agents |
 
@@ -149,6 +149,7 @@ Restore from the History tab rolls back to a change record as a whole: the contr
 - Rights to change flow downward only: root, then namespace, then repository. No scope can change the one above it.
 - Agents propose; the controller enforces. Approvals are checked by the controller, never by the agent.
 - Nobody approves their own role change. Namespace config changes always need a human merge.
+- A namespace's `config/members.yaml` names its admins and members; the control plane keeps the Gitea teams `admins` and `members` in line with it. Its `main` branch takes changes only by pull request, approved by an admin of the namespace or a root admin who neither wrote it nor has their role changed by it; the control plane checks this and posts the required status `homecloud/approval`. The scenarios in `docs/scenarios.md` play this out through the agents.
 - Per repo and branch, an autonomy level decides how far agents go:
 
 | Level | Agent may | Human does |

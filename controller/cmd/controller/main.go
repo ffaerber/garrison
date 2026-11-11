@@ -378,6 +378,7 @@ func controlplaneCmd(args []string) error {
 		ca = string(pem)
 	}
 	go (&controlplane.Builders{Gitea: g, Domain: domain, CA: ca}).Run(ctx, time.Minute)
+	go (&controlplane.Members{Gitea: g}).Run(ctx, 20*time.Second)
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)

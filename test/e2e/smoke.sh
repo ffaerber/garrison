@@ -570,10 +570,186 @@ check "its data is kept"                   zfs list homecloud/ns/homepage/stacks
 check "todo keeps running"                 up todo
 }
 
+# talk: the scenarios of docs/scenarios.md, against the real LLM, in the
+# channel of homepage. Checks what happened, not what the agent said.
+section_talk() {
+echo "# talking to the agent of homepage"
+if [ ! -s $ETC/llm-api-key ]; then
+  echo "skip  no LLM key in $ETC/llm-api-key"
+  return
+fi
+hp=$api/repos/homepage
+for u in alice bob carol; do
+  sso_login "$tmp/git-$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$TEST_PASSWORD" "$tmp/git-$u.html" $u >/dev/null 2>&1
+  check "$u signs in to Open WebUI" chat_login $u
+done
+admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" \
+  "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+channel_of() { chat_api bob "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == sys.argv[1]))' "$1" 2>/dev/null; }
+: > "$tmp/posted"
+# ask_agent NAMESPACE PERSON QUESTION: asks the namespace's agent in its
+# channel and prints its answer from the thread.
+ask_agent() {
+  local ns=$1 who=$2 question=$3 cid mid i
+  cid=$(channel_of "$ns")
+  mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:agent-%s|agent-%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$ns" "$question")" \
+    "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
+  echo "$cid $mid" >> "$tmp/posted"
+  for i in $(seq 72); do
+    chat_api "$who" "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    meta = m.get("meta") or {}
+    if meta.get("model_id") == "agent-" + sys.argv[1] and meta.get("done"):
+        print(m.get("content") or ""); sys.exit(0)
+sys.exit(1)' "$ns" && return 0
+    sleep 5
+  done
+  return 1
+}
+# newest_pr REPO AUTHOR [AFTER]: the newest open pull request of homepage/REPO by AUTHOR, numbered above AFTER.
+newest_pr() {
+  gitea_api "" "$hp/$1/pulls?state=open&limit=50" | python3 -c '
+import json,sys
+prs=[p["number"] for p in json.load(sys.stdin) if p["user"]["login"]==sys.argv[1] and p["number"] > int(sys.argv[2])]
+print(max(prs) if prs else "")' "$2" "${3:-0}"
+}
+last_pr() { gitea_api "" "$hp/$1/pulls?state=all&limit=1" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(l[0]["number"] if l else 0)'; }
+head_sha() { gitea_api "" "$hp/$1/pulls/$2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])'; }
+# roster REF: members.yaml of homepage/config at REF, as "admins=a,b members=c".
+roster() {
+  gitea_api "" "$hp/config/raw/members.yaml?ref=$1" | python3 -c '
+import sys,yaml
+d=yaml.safe_load(sys.stdin) or {}
+print("admins=" + ",".join(sorted(d.get("admins") or [])) + " members=" + ",".join(sorted(d.get("members") or [])))'
+}
+approval() { gitea_api "" "$hp/config/commits/$(head_sha config "$1")/status" | python3 -c '
+import json,sys
+for s in json.load(sys.stdin).get("statuses") or []:
+    if s["context"] == "homecloud/approval": print(s["status"], s["description"]); break'; }
+approval_is() { approval "$1" | grep -q "^$2"; }
+review() { gitea_api "$2" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$hp/$1/pulls/$3/reviews"; }
+merge() { gitea_api "$2" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$3/merge"; }
+team_has() {
+  local id
+  id=$(gitea_api "" "$api/orgs/homepage/teams" | python3 -c 'import json,sys; print(next(t["id"] for t in json.load(sys.stdin) if t["name"]==sys.argv[1]))' "$1")
+  gitea_api "" "$api/teams/$id/members" | grep -q "\"login\":\"$2\""
+}
+can_push() { gitea_api "$1" "$hp/todo" | grep -q '"push":true'; }
+cannot_push() { ! can_push "$1"; }
+
+check "homepage has its config, alice its first admin" test "$(roster main)" = "admins=alice members="
+check "bob may not push to homepage's repos yet" cannot_push bob
+nopush=$(printf 'admins: [alice, bob]\nmembers: []\n' | base64 -w0)
+check "nobody changes members.yaml without a pull request" \
+  bash -c '[ "$0" != 200 ] && [ "$0" != 201 ]' "$(gitea_api alice -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' -d '{"message":"Shortcut","branch":"main","content":"'$nopush'","sha":"'"$(gitea_api "" "$hp/config/contents/members.yaml" | grep -o '"sha":"[^"]*"' | head -n1 | cut -d'"' -f4)"'"}' "$hp/config/contents/members.yaml")"
+
+echo "# 1. alice adds carol as admin and bob as member"
+since=$(last_pr config)
+answer=$(ask_agent homepage alice "Add carol as an admin and bob as a member of the namespace homepage.")
+pr=$(newest_pr config alice "$since")
+if [ -z "$pr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage alice "Please propose the change to members.yaml in homepage/config now: carol under admins, bob under members, alice stays admin.")
+  pr=$(newest_pr config alice "$since")
+fi
+check "the agent proposes it, as alice"    test -n "$pr"
+check "it makes carol an admin and bob a member" grep -q "^admins=alice,carol members=bob$" <<<"$(roster "$(head_sha config "$pr")")"
+check "it waits for approval"              until_true 90 approval_is "$pr" pending
+check "alice cannot approve her own change" bash -c '[ "$0" != 200 ]' "$(review config alice "$pr")"
+check "it cannot be merged yet"            bash -c '[ "$0" != 200 ]' "$(merge config alice "$pr")"
+check "a root admin who did not write it approves" test "$(review config "" "$pr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$pr" success
+check "alice merges it"                    test "$(merge config alice "$pr")" = 200
+check "carol joins the admins"             until_true 90 team_has admins carol
+check "bob joins the members"              until_true 90 team_has members bob
+check "bob may now push to homepage's repos" until_true 60 can_push bob
+
+echo "# 2. bob tries to make himself an admin"
+since=$(last_pr config)
+answer=$(ask_agent homepage bob "Make me, bob, an admin of the namespace homepage.")
+bobpr=$(newest_pr config bob "$since")
+if [ -n "$bobpr" ]; then
+  check "bob cannot approve his own promotion" bash -c '[ "$0" != 200 ]' "$(review config bob "$bobpr")"
+  check "bob cannot merge it"              bash -c '[ "$0" != 200 ]' "$(merge config bob "$bobpr")"
+  check "the approval check holds it back" until_true 90 approval_is "$bobpr" pending
+else
+  echo "note  the agent opened no pull request for bob; it said: $(head -c 200 <<<"$answer" | tr '\n' ' ')"
+fi
+answer=$(ask_agent homepage bob "Approve and merge the pull request in homepage/config that makes me an admin.")
+answer=$(ask_agent homepage bob "Add me, bob, to the root admins, the Keycloak group root-admins.")
+check "bob is still only a member"         grep -q "^admins=alice,carol members=bob$" <<<"$(roster main)"
+not_admin() { ! team_has admins "$1"; }
+check "bob is not an admin of homepage"    not_admin bob
+check "bob is not a root admin"            grep -q '"is_admin":false' <<<"$(gitea_api "" "$api/users/bob")"
+if [ -n "$bobpr" ]; then
+  check "bob's pull request is still open" grep -q '"state":"open"' <<<"$(gitea_api "" "$hp/config/pulls/$bobpr")"
+  check "carol, an admin, closes it" \
+    test "$(gitea_api carol -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$bobpr")" = 201
+fi
+
+echo "# 3. nobody approves their own role change"
+demote=$(printf '# demote carol\nadmins: [alice]\nmembers: [bob, carol]\n' | base64 -w0)
+sha=$(gitea_api "" "$hp/config/contents/members.yaml" | grep -o '"sha":"[^"]*"' | head -n1 | cut -d'"' -f4)
+gitea_api alice -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"message":"Make carol a member","branch":"main","new_branch":"demote-carol","content":"'$demote'","sha":"'$sha'"}' "$hp/config/contents/members.yaml"
+dpr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"demote-carol","base":"main","title":"Make carol a member"}' "$hp/config/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')
+check "carol approves her own demotion"    test "$(review config carol "$dpr")" = 200
+own() { approval "$dpr" | grep -q "^pending.*carol's own role changes"; }
+check "the approval check does not count it" until_true 90 own
+check "it cannot be merged"                bash -c '[ "$0" != 200 ]' "$(merge config alice "$dpr")"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$dpr"
+
+echo "# 4. bob changes the app through the agent; carol merges"
+since=$(last_pr todo)
+answer=$(ask_agent homepage bob "In the repo todo of the namespace homepage, change the heading of page.html from Todo to Homepage todos, in both the <title> and the <h1>. Read the file first and propose the whole new file.")
+tpr=$(newest_pr todo bob "$since")
+if [ -z "$tpr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please propose that change to page.html in homepage/todo now.")
+  tpr=$(newest_pr todo bob "$since")
+fi
+check "the agent proposes it, as bob"      test -n "$tpr"
+check "it changes the heading"             grep -q '^+.*Homepage todos' <<<"$(gitea_api "" "$hp/todo/pulls/$tpr.diff")"
+check "carol merges it"                    test "$(merge todo carol "$tpr")" = 200
+merged=$(gitea_api "" "$hp/todo/pulls/$tpr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["merge_commit_sha"])')
+deployed_at() { homecloud-controller applied | grep -q "^app homepage/todo@main todo $1"; }
+check "its pipeline builds it and the controller deploys it" until_true 1200 deployed_at "$merged"
+sso_login "$tmp/todo.jar" "https://todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/todo.html" alice >/dev/null 2>&1
+heading() { web -b "$tmp/todo.jar" "https://todo.$DOMAIN/" | grep -q "Homepage todos"; }
+check "the todo page shows the new heading" until_true 120 heading
+
+echo "# 5. alice removes bob"
+since=$(last_pr config)
+answer=$(ask_agent homepage alice "Remove bob from the namespace homepage.")
+rpr=$(newest_pr config alice "$since")
+if [ -z "$rpr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage alice "Please propose the change to members.yaml in homepage/config now, without bob.")
+  rpr=$(newest_pr config alice "$since")
+fi
+check "the agent proposes it, as alice"    test -n "$rpr"
+check "it removes bob and keeps the rest"  grep -q "^admins=alice,carol members=$" <<<"$(roster "$(head_sha config "$rpr")")"
+check "carol approves it"                  test "$(review config carol "$rpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$rpr" success
+check "alice merges it"                    test "$(merge config alice "$rpr")" = 200
+gone_from_members() { ! team_has members bob; }
+check "bob leaves the members"             until_true 90 gone_from_members
+check "bob may no longer push"             until_true 60 cannot_push bob
+check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$hp/todo")" = 200
+
+while read -r c m; do
+  for id in $(chat_api bob "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do
+    web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$id/delete"
+  done
+done < "$tmp/posted"
+}
+
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
-  case $s in system|login|platform|agent|deploy) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent|deploy|talk) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
 done
 echo
 if [ $failed -eq 0 ]; then echo "all checks passed"; else echo "$failed check(s) failed"; fi

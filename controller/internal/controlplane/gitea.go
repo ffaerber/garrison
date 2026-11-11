@@ -324,3 +324,5 @@ func (g *Gitea) Changes(ctx context.Context, as, org string) ([]Change, error) {
 	}
 	return out, nil
 }
+
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
