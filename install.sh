@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ETC=/etc/homecloud
 POOL=homecloud
 
-say()  { printf '\n==> %s\n' "$*"; }
+say()  { printf '\n==> [%dm%02ds] %s\n' $((SECONDS / 60)) $((SECONDS % 60)) "$*"; }
 fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
 # ---------- arguments and answers ----------

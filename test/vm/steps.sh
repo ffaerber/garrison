@@ -63,7 +63,7 @@ inputs() {
   esac
 }
 
-say()   { printf '\n==> %s\n' "$*"; }
+say()   { printf '\n==> [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 in_vm() { multipass exec "$VM" -- "$@"; }
 exists() { multipass info "$VM" >/dev/null 2>&1; }
 
@@ -232,11 +232,13 @@ valid() { local have; have=$(snapshot_of "$1"); [ -n "$have" ] && [ "$have" = "$
 save() {
   local step=$1 fp
   fp=$(fingerprint "$step")
+  local t0=$SECONDS
   say "Saving snapshot ${NUMBER[$step]} $step"
   multipass stop "$VM"
   [ -n "$(snapshot_of "$step")" ] && multipass delete --purge "$VM.$step"
   multipass snapshot "$VM" --name "$step" --comment "$fp" >/dev/null
   multipass start "$VM"
+  say "Snapshot ${NUMBER[$step]} $step took $((SECONDS - t0))s (stop, snapshot, boot)"
 }
 
 # drop STEP: deletes the snapshots of STEP and of everything that grows from it.
@@ -322,8 +324,10 @@ branch() {
       continue
     fi
     say "Step ${NUMBER[$s]} $s"
+    local t0=$SECONDS
     ( set -e; "step_$s" )
     rc=$?
+    say "Step ${NUMBER[$s]} $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
     if [ $rc != 0 ]; then
       say "Step ${NUMBER[$s]} $s failed"
       return $rc

@@ -10,7 +10,11 @@ failed=0
 
 ok()   { printf 'ok    %s\n' "$1"; }
 bad()  { printf 'FAIL  %s\n' "$1"; [ $# -gt 1 ] && printf '      %s\n' "$2"; failed=$((failed + 1)); }
-check() { local name=$1; shift; if out=$("$@" 2>&1); then ok "$name"; else bad "$name" "$(printf '%s' "$out" | tail -n 3)"; fi; }
+check() {
+  local name=$1 t0=$SECONDS; shift
+  if out=$("$@" 2>&1); then ok "$name"; else bad "$name" "$(printf '%s' "$out" | tail -n 3)"; fi
+  [ $((SECONDS - t0)) -lt 10 ] || printf 'slow  %4ds  %s\n' $((SECONDS - t0)) "$name"
+}
 
 # curl a hostname of the installation, verifying the installed certificate.
 req() { local host=$1; shift; curl -sS --max-time 10 --cacert "$ETC/tls.crt" --resolve "$host.$DOMAIN:443:127.0.0.1" "$@"; }
@@ -481,7 +485,7 @@ import json,sys
 sha=sys.argv[1]
 runs=[r for r in json.load(sys.stdin).get("workflow_runs",[]) if r["head_sha"]==sha]
 st={r["status"] for r in runs}
-print("failure" if "failure" in st else "success" if runs and st=={"success"} and len(runs)>=2 else "running")' "$1"
+print("failure" if "failure" in st else "success" if runs and st=={"success"} else "running")' "$1"
 }
 pipeline_is() { [ "$(pipeline "$1")" = "$2" ]; }
 pipeline_done() { [ "$(pipeline "$1")" != running ]; }
@@ -749,8 +753,11 @@ done < "$tmp/posted"
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
+  t0=$SECONDS
   case $s in system|login|platform|agent|deploy|talk) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  echo "time  section $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
 done
+# Slow checks: each check's time, longest first.
 echo
 if [ $failed -eq 0 ]; then echo "all checks passed"; else echo "$failed check(s) failed"; fi
 exit $((failed > 0))

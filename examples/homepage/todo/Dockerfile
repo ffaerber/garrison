@@ -1,9 +1,22 @@
-FROM golang:1.26-alpine AS build
+# Built by BuildKit for every push (.gitea/workflows/pipeline.yaml). The tests
+# run here too, in the stage test: if they fail, there is no image. Go's
+# module and build caches are cache mounts, kept by BuildKit between builds,
+# so a small change rebuilds in seconds.
+FROM golang:1.26-alpine AS source
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY *.go page.html ./
-RUN CGO_ENABLED=0 go build -trimpath -o /todo .
+
+FROM source AS test
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    go vet ./... && go test ./... && touch /tested
+
+FROM source AS build
+# Depends on the tests, so BuildKit runs them before it builds.
+COPY --from=test /tested /tmp/tested
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -o /todo .
 
 FROM alpine:3.22
 COPY --from=build /todo /usr/local/bin/todo

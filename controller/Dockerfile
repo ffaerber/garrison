@@ -3,10 +3,13 @@
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# Cache mounts: Go's module and build caches stay in the Docker daemon's
+# BuildKit between builds, so a small change compiles in seconds.
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY schemas ./schemas
 COPY controller ./controller
-RUN CGO_ENABLED=0 go build -trimpath -o /controller ./controller/cmd/controller
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -o /controller ./controller/cmd/controller
 
 # The Docker CLI deploys stacks; git follows the platform repo; nsenter runs
 # ZFS commands on the host.
