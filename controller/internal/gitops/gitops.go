@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"homecloud/controller/internal/apply"
+	"homecloud/controller/internal/hooks"
 	"homecloud/controller/internal/system"
 )
 
@@ -34,14 +35,15 @@ const LastStack = "controller"
 var stackName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type Config struct {
-	Domain       string   // installation domain; Gitea is git.<domain>
-	GiteaURL     string   // where to reach Gitea; https://git.<domain> if empty
-	User         string   // Gitea account the controller reads repos with
-	PasswordFile string   // its password
-	CAFile       string   // certificate the installation's TLS is verified with
-	Org          string   // namespace to deploy, e.g. system
-	WorkDir      string   // controller's own directory: checkouts and state
-	Env          []string // KEY=VALUE passed to every deploy
+	Domain       string          // installation domain; Gitea is git.<domain>
+	GiteaURL     string          // where to reach Gitea; https://git.<domain> if empty
+	User         string          // Gitea account the controller reads repos with
+	PasswordFile string          // its password
+	CAFile       string          // certificate the installation's TLS is verified with
+	Wake         <-chan struct{} // when set, Serve syncs before the interval is over
+	Org          string          // namespace to deploy, e.g. system
+	WorkDir      string          // controller's own directory: checkouts and state
+	Env          []string        // KEY=VALUE passed to every deploy
 	Run          apply.Runner
 	HTTP         *http.Client // for the Gitea API; built from the fields above if nil
 	Dashboards   Dashboards   // optional: keeps Grafana's dashboards as they are in Git
@@ -426,10 +428,8 @@ func (c *Config) Serve(ctx context.Context, interval time.Duration) error {
 		} else {
 			force = false
 		}
-		select {
-		case <-ctx.Done():
+		if !hooks.Sleep(ctx, interval, c.Wake) {
 			return nil
-		case <-time.After(interval):
 		}
 	}
 }

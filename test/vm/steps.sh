@@ -284,6 +284,24 @@ readdress() {
     /usr/local/lib/homecloud/repair-services.sh >/dev/null'
 }
 
+# settle: on a clone's first boot, some tasks start before the re-formed swarm
+# has their names, and stay unreachable by name on internal networks (the user
+# runner could not find the guard). Every service gets new tasks, once; then
+# this waits until all run again.
+settle() {
+  in_vm sudo bash -c '
+    for s in $(docker service ls -q); do docker service update --quiet --detach --force "$s" >/dev/null; done
+    # The old tasks still count as running for a moment.
+    sleep 15
+    for i in $(seq 1 60); do
+      docker service ls --format "{{.Replicas}}" | awk -F"[/ ]" "\$1 != \$2 { bad = 1 } END { exit bad }" && exit 0
+      sleep 5
+    done
+    echo "services still starting after 5 minutes:" >&2
+    docker service ls --format "{{.Name}} {{.Replicas}}" >&2
+    exit 1'
+}
+
 # branch TARGET [FORK]: runs the steps from the newest valid snapshot on the
 # way to TARGET up to TARGET, saving each. With FORK, only the steps after
 # FORK are considered, and with none of them valid the VM is taken to be at
@@ -316,7 +334,12 @@ branch() {
     done
     multipass start "$VM"
   fi
-  [ -z "$resume" ] && [ -n "$fork" ] && multipass start "$VM" >/dev/null 2>&1
+  if [ -z "$resume" ] && [ -n "$fork" ]; then
+    multipass start "$VM" >/dev/null 2>&1
+    local t0=$SECONDS
+    settle || return 1
+    say "Restarted the clone's services in $((SECONDS - t0))s"
+  fi
   local go=${resume:+no}
   for s in "${steps[@]}"; do
     if [ "$go" = no ]; then

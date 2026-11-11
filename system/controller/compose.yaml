@@ -14,6 +14,10 @@ services:
       - -host-exec=git.${DOMAIN}/system/controller:bootstrap
       # Keeps dashboards/*.json of the repos in Grafana.
       - -grafana=http://grafana_grafana:3000
+      # Gitea calls this on every push, pull request and finished pipeline
+      # run, so changes deploy at once; the controller still checks every 15 s.
+      - -listen=:8090
+      - -hook-url=http://controller_controller:8090/hook
     secrets:
       - admin-password
     volumes:
@@ -34,6 +38,8 @@ services:
     command:
       - controlplane
       - -password-file=/run/secrets/admin-password
+      # Wakes the build account, member and agent syncs on Gitea's events.
+      - -hook-url=http://controller_controlplane:8080/hook
     secrets:
       - admin-password
       - { source: tls-cert, target: tls.crt }

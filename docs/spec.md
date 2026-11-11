@@ -130,7 +130,7 @@ Each namespace has a build account, kept by the control plane, which may push th
 
 ## Controller and change history
 
-The controller watches Gitea and applies merged changes. In the MVP it follows the `system` organisation: every repo there that holds a `compose.yaml` on its default branch is deployed as the stack named after the repo, and a stack whose repo is deleted is taken down.
+The controller watches Gitea and applies merged changes. In the MVP it follows the `system` organisation: every repo there that holds a `compose.yaml` on its default branch is deployed as the stack named after the repo, and a stack whose repo is deleted is taken down. Gitea tells the controller and the control plane about every push, branch, repo, pull request, review, commit status and finished pipeline run through a webhook on every organisation, signed with a secret each derives from the admin password; they act on it at once, and still check on their own every few seconds in case a call is lost.
 
 1. **Pre-deploy:** take ZFS snapshots of affected datasets; record running services, versions and config.
 2. **Apply:** decrypt secrets into Swarm secrets, render the stack, deploy, run migrations if present.

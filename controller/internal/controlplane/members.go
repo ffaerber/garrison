@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"homecloud/controller/internal/hooks"
 )
 
 // Members keeps who may change each namespace other than system, as its repo
@@ -27,6 +30,8 @@ import (
 // it. Gitea cannot check the last part, so this posts a required status,
 // homecloud/approval, on every open pull request of config.
 type Members struct {
+	// Wake, when set, starts a sync before the interval is over.
+	Wake  <-chan struct{}
 	Gitea *Gitea
 
 	posted map[string]string // pull request head -> status last posted
@@ -333,15 +338,50 @@ func (m *Members) protect(ctx context.Context, ns string) error {
 		"block_admin_merge_override":   true,
 	}
 	path := "/repos/" + ns + "/" + ConfigRepo + "/branch_protections"
-	if status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/main", nil, nil); status == http.StatusNotFound {
+	var have map[string]any
+	if status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/main", nil, &have); status == http.StatusNotFound {
 		_, err := m.Gitea.do(ctx, "", http.MethodPost, path, rule, nil)
 		return err
 	} else if err != nil {
 		return err
 	}
+	// Written only when it differs: every change of a rule makes Gitea check
+	// the branch's open pull requests again, and refuse merges meanwhile.
+	if sameRule(rule, have) {
+		return nil
+	}
 	delete(rule, "rule_name")
 	_, err := m.Gitea.do(ctx, "", http.MethodPatch, path+"/main", rule, nil)
 	return err
+}
+
+// sameRule tells whether have, as Gitea returns it, already holds every
+// setting of want. Lists compare as sets.
+func sameRule(want, have map[string]any) bool {
+	for k, w := range want {
+		h, ok := have[k]
+		if !ok {
+			return false
+		}
+		if list, isList := w.([]string); isList {
+			got, _ := h.([]any)
+			if len(got) != len(list) {
+				return false
+			}
+			for _, x := range got {
+				if s, _ := x.(string); !slices.Contains(list, s) {
+					return false
+				}
+			}
+			continue
+		}
+		wj, _ := json.Marshal(w)
+		hj, _ := json.Marshal(h)
+		if string(wj) != string(hj) {
+			return false
+		}
+	}
+	return true
 }
 
 // approvals posts homecloud/approval on every open pull request of config.
@@ -420,10 +460,8 @@ func (m *Members) Run(ctx context.Context, interval time.Duration) {
 		if err := m.Sync(ctx); err != nil {
 			log.Printf("members: %v", err)
 		}
-		select {
-		case <-ctx.Done():
+		if !hooks.Sleep(ctx, interval, m.Wake) {
 			return
-		case <-time.After(interval):
 		}
 	}
 }

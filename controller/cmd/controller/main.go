@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,6 +29,7 @@ import (
 	"homecloud/controller/internal/dashboards"
 	"homecloud/controller/internal/gitops"
 	"homecloud/controller/internal/guard"
+	"homecloud/controller/internal/hooks"
 	"homecloud/controller/internal/hostnames"
 	"homecloud/controller/internal/render"
 	"homecloud/controller/internal/stack"
@@ -231,6 +233,8 @@ func serveCmd(args []string) error {
 	grafana := fs.String("grafana", "", "Grafana's URL; when set, dashboards/*.json in the repos are kept in Grafana")
 	grafanaUser := fs.String("grafana-user", "installer", "Grafana's local admin, whose password is the admin password")
 	apps := fs.Bool("apps", true, "also deploy the apps of every other namespace (repos with a stack.yaml)")
+	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
+	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
 	fs.Parse(args)
 
 	env, vars, err := readEnvFile(*config)
@@ -271,6 +275,21 @@ func serveCmd(args []string) error {
 		}
 		fmt.Printf("applied %d stacks\n", len(s.Stacks))
 		return nil
+	}
+	if *listen != "" && *hookURL != "" {
+		pw, err := os.ReadFile(*passwordFile)
+		if err != nil {
+			return err
+		}
+		giteaURL := c.GiteaURL
+		if giteaURL == "" {
+			giteaURL = "https://git." + c.Domain
+		}
+		wake := &hooks.Wake{}
+		c.Wake = wake.Subscribe()
+		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}); err != nil {
+			return err
+		}
 	}
 	log.Printf("following the %s organisation every %s", c.Org, *interval)
 	return c.Serve(ctx, *interval)
@@ -316,6 +335,7 @@ func controlplaneCmd(args []string) error {
 	prometheus := fs.String("prometheus", "http://prometheus_prometheus:9090", "Prometheus's URL")
 	openwebui := fs.String("openwebui", "http://openwebui_openwebui:8080", "Open WebUI's URL")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
+	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
 	fs.Parse(args)
 
 	_, vars, err := readEnvFile(*config)
@@ -372,16 +392,24 @@ func controlplaneCmd(args []string) error {
 		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
 		BaseModel: model, ToolServerID: "homecloud", Domain: domain, Gitea: g,
 	}
+	// Gitea's webhook wakes the syncs; the intervals stay for missed deliveries.
+	wake := &hooks.Wake{}
+	sync.Wake = wake.Subscribe()
 	go sync.Run(ctx, time.Minute)
 	ca := ""
 	if vars["TLS_MODE"] == "selfsigned" {
 		ca = string(pem)
 	}
-	go (&controlplane.Builders{Gitea: g, Domain: domain, CA: ca}).Run(ctx, time.Minute)
-	go (&controlplane.Members{Gitea: g}).Run(ctx, 20*time.Second)
+	go (&controlplane.Builders{Gitea: g, Domain: domain, CA: ca, Wake: wake.Subscribe()}).Run(ctx, time.Minute)
+	go (&controlplane.Members{Gitea: g, Wake: wake.Subscribe()}).Run(ctx, 20*time.Second)
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)
+	if *hookURL != "" {
+		secret := hooks.Secret(g.Password, *hookURL)
+		mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
+		go (&hooks.Gitea{URL: *gitea, User: g.User, Password: g.Password}).Keep(ctx, *hookURL, secret, 10*time.Second)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	server := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -394,6 +422,23 @@ func controlplaneCmd(args []string) error {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
+	return nil
+}
+
+// serveHook takes Gitea's webhook on listen and registers it with Gitea as
+// target. It returns once listening.
+func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea) error {
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		return err
+	}
+	secret := hooks.Secret(g.Password, target)
+	mux := http.NewServeMux()
+	mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go server.Serve(ln)
+	go func() { <-ctx.Done(); server.Close() }()
+	go g.Keep(ctx, target, secret, 10*time.Second)
 	return nil
 }
 

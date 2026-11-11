@@ -6,6 +6,9 @@ services:
       - --providers.swarm.endpoint=unix:///var/run/docker.sock
       - --providers.swarm.exposedByDefault=false
       - --providers.swarm.network=traefik-public
+      # Swarm has no events for Traefik; it re-reads every 5 s (default 15 s),
+      # so a redeployed service answers again sooner.
+      - --providers.swarm.refreshSeconds=5
       - --providers.file.filename=/etc/traefik/dynamic.yaml
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure

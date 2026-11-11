@@ -14,6 +14,7 @@ Runs in Swarm as the stack `controller`, from an image Gitea Actions builds from
 | `internal/apply` | Creates the ZFS datasets and Swarm secrets a stack needs, then runs `docker stack deploy` |
 | `internal/system` | Deploys a system stack: a plain Compose file, its datasets and config hash |
 | `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`; the controller itself last |
+| `internal/hooks` | Gitea's webhooks: puts one on every organisation, its secret derived from the admin password, checks the signature of each call, and wakes the sync loops |
 | `cmd/controller` | CLI over these; `serve` runs the controller |
 
 ```

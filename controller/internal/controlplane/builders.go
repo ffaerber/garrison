@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"homecloud/controller/internal/hooks"
 )
 
 // Builders gives every namespace other than system the credentials its
@@ -21,6 +23,8 @@ import (
 // and variable REGISTRY. Gitea's own job tokens cannot push to an
 // organisation's registry, and a namespace's account can push only there.
 type Builders struct {
+	// Wake, when set, starts a sync before the interval is over.
+	Wake   <-chan struct{}
 	Gitea  *Gitea
 	Domain string
 	// CA is the installation's certificate, when it is self-signed: published
@@ -180,10 +184,8 @@ func (b *Builders) Run(ctx context.Context, interval time.Duration) {
 		if err := b.Sync(ctx); err != nil {
 			log.Printf("builders: %v", err)
 		}
-		select {
-		case <-ctx.Done():
+		if !hooks.Sleep(ctx, interval, b.Wake) {
 			return
-		case <-time.After(interval):
 		}
 	}
 }

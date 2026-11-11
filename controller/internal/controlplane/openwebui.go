@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"homecloud/controller/internal/hooks"
 )
 
 // OpenWebUI keeps, for every namespace, an agent and a channel in Open WebUI.
@@ -21,6 +23,8 @@ import (
 // and the sync puts back what it owns. It signs in as the local admin Open
 // WebUI creates from its environment at first start.
 type OpenWebUI struct {
+	// Wake, when set, starts a sync before the interval is over.
+	Wake         <-chan struct{}
 	URL          string // e.g. http://openwebui_openwebui:8080
 	Email        string
 	Password     string
@@ -374,10 +378,8 @@ func (o *OpenWebUI) Run(ctx context.Context, interval time.Duration) {
 		if err := o.Sync(ctx); err != nil {
 			log.Printf("open webui sync: %v", err)
 		}
-		select {
-		case <-ctx.Done():
+		if !hooks.Sleep(ctx, interval, o.Wake) {
 			return
-		case <-time.After(interval):
 		}
 	}
 }

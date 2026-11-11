@@ -571,7 +571,8 @@ check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null 
 gone() { ! docker stack ls --format '{{.Name}}' | grep -qx dev-todo; }
 check "the controller takes dev-todo down" until_true 120 gone
 check "its data is kept"                   zfs list homecloud/ns/homepage/stacks/dev-todo/todo-db
-check "todo keeps running"                 up todo
+# main may have been redeployed just before; Traefik follows within seconds.
+check "todo keeps running"                 until_true 30 up todo
 }
 
 # talk: the scenarios of docs/scenarios.md, against the real LLM, in the

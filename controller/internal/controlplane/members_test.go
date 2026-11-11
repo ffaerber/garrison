@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,31 @@ func TestApproval(t *testing.T) {
 	_, why := Approval(base, demoteCarol, "alice", []string{"carol"}, roots)
 	if !strings.Contains(why, "carol's own role changes") || !strings.Contains(why, "changes: carol") {
 		t.Errorf("reason = %q", why)
+	}
+}
+
+func TestSameRule(t *testing.T) {
+	want := map[string]any{
+		"rule_name": "main", "enable_push": false, "required_approvals": 1,
+		"merge_whitelist_teams": []string{"admins", RootTeam}, "merge_whitelist_usernames": []string{},
+	}
+	var have map[string]any
+	json.Unmarshal([]byte(`{"rule_name":"main","enable_push":false,"required_approvals":1,
+		"merge_whitelist_teams":["root-admins","admins"],"merge_whitelist_usernames":[],"created_at":"x"}`), &have)
+	if !sameRule(want, have) {
+		t.Fatal("same rule seen as different")
+	}
+	have["required_approvals"] = float64(2)
+	if sameRule(want, have) {
+		t.Fatal("changed approvals not seen")
+	}
+	have["required_approvals"] = float64(1)
+	have["merge_whitelist_teams"] = []any{"admins"}
+	if sameRule(want, have) {
+		t.Fatal("missing team not seen")
+	}
+	delete(have, "merge_whitelist_teams")
+	if sameRule(want, have) {
+		t.Fatal("missing setting not seen")
 	}
 }
