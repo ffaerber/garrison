@@ -12,10 +12,14 @@ import (
 	"time"
 )
 
-// OpenWebUI keeps one chat agent per namespace in Open WebUI: a model preset
-// named after the namespace, on the configured LLM, with this control plane's
-// MCP tools and a prompt for that namespace. It signs in as the local admin
-// Open WebUI creates from its environment at first start.
+// OpenWebUI keeps, for every namespace, an agent and a channel in Open WebUI.
+// The agent is a model preset named after the namespace, on the configured
+// LLM, with this control plane's MCP tools and a prompt for that namespace.
+// The channel is the namespace's team chat: everyone signed in reads and
+// posts there, and mentioning the agent makes it answer, with the tools
+// acting as the person who mentioned it. Only admins may change a channel,
+// and the sync puts back what it owns. It signs in as the local admin Open
+// WebUI creates from its environment at first start.
 type OpenWebUI struct {
 	URL          string // e.g. http://openwebui_openwebui:8080
 	Email        string
@@ -184,6 +188,69 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 			return err
 		}
 		log.Printf("open webui: removed %s, whose namespace is gone", id)
+	}
+	return o.syncChannels(ctx, signin.Token, namespaces)
+}
+
+// ChannelMarker in a channel's meta names the namespace it belongs to.
+const ChannelMarker = "homecloud_namespace"
+
+type owuiChannel struct {
+	ID          string         `json:"id"`
+	Type        *string        `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Meta        map[string]any `json:"meta"`
+}
+
+func (o *OpenWebUI) channelDescription(ns Namespace) string {
+	return fmt.Sprintf("Team chat of the namespace %s. Mention @%s to ask its agent; it acts with your rights.", ns.Name, ns.Name)
+}
+
+var everyoneReadsAndWrites = []any{
+	map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"},
+	map[string]any{"principal_type": "user", "principal_id": "*", "permission": "write"},
+}
+
+// syncChannels keeps one channel per namespace, as it was made.
+func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces []Namespace) error {
+	var all []owuiChannel
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
+		return err
+	}
+	have := map[string]owuiChannel{}
+	for _, c := range all {
+		if ns, ok := c.Meta[ChannelMarker].(string); ok {
+			have[ns] = c
+		}
+	}
+	for _, ns := range namespaces {
+		meta := map[string]any{ChannelMarker: ns.Name}
+		cur, ok := have[ns.Name]
+		delete(have, ns.Name)
+		switch {
+		case !ok:
+			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta, "access_grants": everyoneReadsAndWrites}
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/create", form, nil); err != nil {
+				return err
+			}
+			log.Printf("open webui: added the channel of namespace %s", ns.Name)
+		case cur.Name != ns.Name || cur.Description != o.channelDescription(ns):
+			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta}
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/update", form, nil); err != nil {
+				return err
+			}
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/access/update", map[string]any{"access_grants": everyoneReadsAndWrites}, nil); err != nil {
+				return err
+			}
+			log.Printf("open webui: put back the channel of namespace %s", ns.Name)
+		}
+	}
+	for ns, c := range have {
+		if err := o.call(ctx, token, http.MethodDelete, "/api/v1/channels/"+c.ID+"/delete", nil, nil); err != nil {
+			return err
+		}
+		log.Printf("open webui: removed the channel of namespace %s, which is gone", ns)
 	}
 	return nil
 }

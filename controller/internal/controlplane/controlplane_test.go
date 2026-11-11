@@ -247,6 +247,11 @@ func TestOpenWebUISync(t *testing.T) {
 	defer gsrv.Close()
 	var mu sync.Mutex
 	models := map[string]owuiModel{"ns-gone": {ID: "ns-gone", Name: "gone"}, "other": {ID: "other"}}
+	channels := map[string]owuiChannel{
+		"c-gone":  {ID: "c-gone", Name: "gone", Meta: map[string]any{ChannelMarker: "gone"}},
+		"c-other": {ID: "c-other", Name: "random"},
+	}
+	nextChannel := 0
 	var calls []string
 	ow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -277,7 +282,37 @@ func TestOpenWebUISync(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&b)
 			delete(models, b["id"])
 			io.WriteString(w, "true")
+		case "/api/v1/channels/list":
+			var list []owuiChannel
+			for _, c := range channels {
+				list = append(list, c)
+			}
+			json.NewEncoder(w).Encode(list)
+		case "/api/v1/channels/create":
+			var c owuiChannel
+			json.NewDecoder(r.Body).Decode(&c)
+			nextChannel++
+			c.ID = "c" + string(rune('0'+nextChannel))
+			channels[c.ID] = c
+			io.WriteString(w, "{}")
 		default:
+			if id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/channels/"), "/delete"); ok && r.Method == http.MethodDelete {
+				delete(channels, id)
+				io.WriteString(w, "true")
+				return
+			}
+			if id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/channels/"), "/update"); ok {
+				var c owuiChannel
+				json.NewDecoder(r.Body).Decode(&c)
+				c.ID = id
+				channels[id] = c
+				io.WriteString(w, "{}")
+				return
+			}
+			if strings.HasSuffix(r.URL.Path, "/access/update") {
+				io.WriteString(w, "{}")
+				return
+			}
 			http.NotFound(w, r)
 		}
 	}))
@@ -305,6 +340,30 @@ func TestOpenWebUISync(t *testing.T) {
 	}
 	if ids := sys.Meta["toolIds"].([]any); len(ids) != 1 || ids[0] != "server:mcp:homecloud" {
 		t.Errorf("toolIds = %v", ids)
+	}
+	// One channel per namespace, everyone may post, the gone one removed, others kept.
+	byNS := map[string]owuiChannel{}
+	for _, c := range channels {
+		if ns, ok := c.Meta[ChannelMarker].(string); ok {
+			byNS[ns] = c
+		}
+	}
+	if len(byNS) != 2 || byNS["system"].Name != "system" || byNS["homepage"].Name != "homepage" {
+		t.Errorf("channels = %v", channels)
+	}
+	if _, ok := channels["c-gone"]; ok {
+		t.Error("the channel of a deleted namespace was kept")
+	}
+	if _, ok := channels["c-other"]; !ok {
+		t.Error("a channel the sync does not own was removed")
+	}
+	// A renamed channel is put back.
+	renamed := byNS["system"]
+	renamed.Name = "renamed-by-an-admin"
+	channels[renamed.ID] = renamed
+	o.Sync(context.Background())
+	if channels[renamed.ID].Name != "system" {
+		t.Errorf("renamed channel not put back: %v", channels[renamed.ID])
 	}
 	// A second sync changes nothing.
 	calls = nil

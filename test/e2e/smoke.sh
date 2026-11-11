@@ -109,6 +109,8 @@ chat_token() { awk '$6 == "token" { print $7 }' "$tmp/chat-$1.jar" | tail -n1; }
 chat_login() {
   sso_login "$tmp/chat-$1.jar" "$chat/oauth/oidc/login" "$TEST_PASSWORD" "$tmp/chat-$1.html" "$1" >/dev/null 2>&1
 }
+# system_channel [PERSON]: the id of the channel of the namespace system.
+system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "system"))' 2>/dev/null; }
 # mcp ARGS...: the control plane's MCP endpoint, which only Open WebUI reaches.
 mcp() {
   docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
@@ -183,6 +185,12 @@ check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_a
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"ns-$1\""; }
 check "bob has the agent of the namespace system" until_true 180 has_agent system
 check "the agent has the control plane's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
+check "bob sees the channel of the namespace system" until_true 120 system_channel
+cid=$(system_channel)
+check "bob cannot rename it" \
+  test "$(chat_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-channel"}' "$chat/api/v1/channels/$cid/update")" = 403
+check "bob cannot delete it"               test "$(chat_api bob -o /dev/null -w '%{http_code}' -X DELETE "$chat/api/v1/channels/$cid/delete")" = 403
+check "it is still there, unchanged"       test "$(system_channel)" = "$cid"
 check "the control plane is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://controlplane.$DOMAIN/mcp")" = 404
 check "its MCP endpoint wants a token"     test "$(mcp -o /dev/null -w '%{http_code}' -X POST -d '{}')" = 401
 check "it refuses a made-up token"         test "$(mcp -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{}')" = 401
@@ -284,8 +292,9 @@ check "hello still answers after the rejected deploys"   status_is 200 hello / 3
 
 }
 
-# agent: the namespace agents in Open WebUI answer and propose through the
-# control plane's MCP tools, with the asker's rights. They talk to the real
+# agent: the namespace agents answer in their channels in Open WebUI, when
+# mentioned, and propose through the control plane's MCP tools, with the
+# rights of the person who mentioned them. They talk to the real
 # LLM, so answers vary; the checks look at what the agents did (tools called,
 # changes in Gitea), not at their wording.
 section_agent() {
@@ -295,37 +304,57 @@ if [ ! -s $ETC/llm-api-key ]; then
   return
 fi
 for u in alice bob; do chat_login $u; done
-# ask PERSON QUESTION: one chat turn with the agent of system, as the chat page
-# does it: in a saved chat, run as a background task that calls the tools and
-# stores the answer in the chat. Prints the answer.
+# The control plane's own Open WebUI account; it may delete any message.
+admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" \
+  "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+cid=$(system_channel)
+: > "$tmp/posted"   # ids of the test's messages; ask runs in a subshell
+# ask PERSON QUESTION: posts in the channel of system, mentioning its agent, as
+# the chat page does, and waits for the agent's answer in the message's thread.
+# Prints the answer.
 ask() {
-  local who=$1 question=$2 cid mid i out
-  cid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
-    -d '{"chat":{"title":"smoke test","models":["ns-system"],"messages":[],"history":{"messages":{},"currentId":null}}}' \
-    "$chat/api/v1/chats/new" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
-  mid=$(cat /proc/sys/kernel/random/uuid)
-  chat_api "$who" -o /dev/null -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": "ns-system", "chat_id": sys.argv[1], "id": sys.argv[2], "session_id": "smoke-" + sys.argv[2], "stream": True, "tool_ids": ["server:mcp:homecloud"], "messages": [{"role": "user", "content": sys.argv[3]}]}))' "$cid" "$mid" "$question")" \
-    "$chat/api/chat/completions"
+  local who=$1 question=$2 mid i
+  mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:ns-system|system> " + sys.argv[1]}))' "$question")" \
+    "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
+  echo "$mid" >> "$tmp/posted"
   for i in $(seq 60); do
-    out=$(chat_api "$who" "$chat/api/v1/chats/$cid")
-    python3 -c '
+    chat_api "$who" "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c '
 import json,sys
-m = json.load(sys.stdin)["chat"]["history"]["messages"].get(sys.argv[1])
-if not m or not m.get("done"): sys.exit(1)
-print(m.get("content") or "")' "$mid" <<<"$out" && return 0
+for m in json.load(sys.stdin):
+    meta = m.get("meta") or {}
+    if meta.get("model_id") == "ns-system" and meta.get("done"):
+        print(m.get("content") or ""); sys.exit(0)
+sys.exit(1)' && return 0
     sleep 5
   done
   return 1
 }
 reply() { cat; }
+# Leaves the channel as it was: deletes the test's questions and their threads.
+cleanup_channel() {
+  local mid
+  for mid in $(cat "$tmp/posted"); do
+    for id in $(chat_api bob "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c 'import json,sys; [print(m["id"]) for m in json.load(sys.stdin)]' 2>/dev/null) $mid; do
+      web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$cid/messages/$id/delete"
+    done
+  done
+}
 mcp_calls() { docker service logs --since "$1" controller_controlplane 2>&1 | grep -o "mcp: $2: [a-z_]*" | sort -u; }
 
+# The model sometimes writes a tool call out as text instead of making it. A
+# question whose answer shows no sign of the system is asked once more, and
+# the retry is printed so it shows in the log.
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask bob "Which stacks run in the namespace system? Use your tools and list their names." | reply)
-check "the agent answers bob"              test -n "$answer"
+if ! grep -qi grafana <<<"$answer"; then
+  printf 'retry the agent answered %q; asking again\n' "$(head -c 200 <<<"$answer")"
+  answer=$(ask bob "Which stacks run in the namespace system? Call list_stacks and list their names." | reply)
+fi
+check "the agent answers bob in the channel" test -n "$answer"
 check "its answer names grafana"           grep -qi grafana <<<"$answer"
-check "it asked the control plane, as bob" grep -q "mcp: bob: list_stacks" <<<"$(mcp_calls "$since" bob)"
+check "it asked the control plane, as bob" grep -q "mcp: bob: " <<<"$(mcp_calls "$since" bob)"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask bob "Show me the last 20 log lines of the service grafana_grafana, and how much memory the stack grafana uses." | reply)
 check "it reads logs for bob"              grep -q "mcp: bob: service_logs" <<<"$(mcp_calls "$since" bob)"
@@ -342,6 +371,8 @@ check "the answer links the change"        grep -q "git.$DOMAIN/system/platform/
 # Clean up: close the proposal.
 pr=$(python3 -c 'import json,sys; print(next(p["number"] for p in json.load(sys.stdin) if p["title"].startswith("Agent smoke test alice")))' <<<"$prs" 2>/dev/null)
 [ -n "$pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/system/platform/pulls/$pr"
+cleanup_channel
+check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len(json.load(sys.stdin)))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
 }
 
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.

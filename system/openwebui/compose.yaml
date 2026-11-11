@@ -49,6 +49,9 @@ services:
       ENABLE_OPENAI_API: "True"
       OPENAI_API_BASE_URL: ${LLM_BASE_URL:-https://ollama.com/v1}
       DEFAULT_MODELS: ns-system
+      # One channel per namespace, kept by the control plane: the team chat
+      # where people mention the namespace's agent.
+      ENABLE_CHANNELS: "True"
       # The control plane's tools, over MCP, with each person's own Keycloak token.
       TOOL_SERVER_CONNECTIONS: >-
         [{"type": "mcp", "url": "http://controller_controlplane:8080/mcp", "auth_type": "system_oauth",
