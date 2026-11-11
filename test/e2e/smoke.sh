@@ -180,9 +180,10 @@ for u in alice bob; do
   chat_login $u
   check "$u signs in to Open WebUI through Keycloak" grep -q "\"name\":\"$u\"\|\"email\":\"$u@" <<<"$(chat_api $u "$chat/api/v1/auths/")"
 done
+check "alice is shown as alice"            grep -q '"name":"alice"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
 check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
-has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"ns-$1\""; }
+has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"agent-$1\""; }
 check "bob has the agent of the namespace system" until_true 180 has_agent system
 check "the agent has the control plane's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
 check "bob sees the channel of the namespace system" until_true 120 system_channel
@@ -191,6 +192,10 @@ check "bob cannot rename it" \
   test "$(chat_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-channel"}' "$chat/api/v1/channels/$cid/update")" = 403
 check "bob cannot delete it"               test "$(chat_api bob -o /dev/null -w '%{http_code}' -X DELETE "$chat/api/v1/channels/$cid/delete")" = 403
 check "it is still there, unchanged"       test "$(system_channel)" = "$cid"
+howto_pinned() { chat_api bob "$chat/api/v1/channels/$cid/messages/pinned" | grep -q 'How to ask the agent of this namespace'; }
+check "it has the how-to pinned"           until_true 120 howto_pinned
+check "the control plane's account says it is not the agent" \
+  grep -q '"name":"Control plane (not the agent)"' <<<"$(chat_api bob "$chat/api/v1/channels/$cid/members?page=1")"
 check "the control plane is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://controlplane.$DOMAIN/mcp")" = 404
 check "its MCP endpoint wants a token"     test "$(mcp -o /dev/null -w '%{http_code}' -X POST -d '{}')" = 401
 check "it refuses a made-up token"         test "$(mcp -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{}')" = 401
@@ -316,7 +321,7 @@ cid=$(system_channel)
 ask() {
   local who=$1 question=$2 mid i
   mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:ns-system|system> " + sys.argv[1]}))' "$question")" \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:agent-system|agent-system> " + sys.argv[1]}))' "$question")" \
     "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
   echo "$mid" >> "$tmp/posted"
   for i in $(seq 60); do
@@ -324,7 +329,7 @@ ask() {
 import json,sys
 for m in json.load(sys.stdin):
     meta = m.get("meta") or {}
-    if meta.get("model_id") == "ns-system" and meta.get("done"):
+    if meta.get("model_id") == "agent-system" and meta.get("done"):
         print(m.get("content") or ""); sys.exit(0)
 sys.exit(1)' && return 0
     sleep 5
@@ -367,12 +372,14 @@ check "the agent proposes alice's change, as alice" grep -q "mcp: alice: propose
 prs=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
 check "it waits as a pull request by alice" python3 -c 'import json,sys; sys.exit(not any(p["title"].startswith("Agent smoke test alice") and p["user"]["login"] == "alice" for p in json.load(sys.stdin)))' <<<"$prs"
 check "nothing reached main"               test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/platform/contents/agent-alice.txt")" = 404
-check "the answer links the change"        grep -q "git.$DOMAIN/system/platform/pulls/" <<<"$answer"
+# On failure the answer is printed, so a model that leaves out the link shows what it said instead.
+links() { grep -q "git.$DOMAIN/system/platform/pulls/" <<<"$1" || { echo "answer: $(tr '\n' ' ' <<<"$1" | head -c 400)"; return 1; }; }
+check "the answer links the change"        links "$answer"
 # Clean up: close the proposal.
 pr=$(python3 -c 'import json,sys; print(next(p["number"] for p in json.load(sys.stdin) if p["title"].startswith("Agent smoke test alice")))' <<<"$prs" 2>/dev/null)
 [ -n "$pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/system/platform/pulls/$pr"
 cleanup_channel
-check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len(json.load(sys.stdin)))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
+check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len([m for m in json.load(sys.stdin) if not (m.get(\"content\") or \"\").startswith(\"**How to ask the agent\")]))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
 }
 
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.

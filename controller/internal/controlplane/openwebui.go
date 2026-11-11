@@ -29,10 +29,19 @@ type OpenWebUI struct {
 	Domain       string
 	Gitea        *Gitea
 	HTTP         *http.Client
+
+	accountID string // the control plane's own Open WebUI account
 }
 
-// ModelPrefix marks the models this sync owns.
-const ModelPrefix = "ns-"
+// ModelPrefix marks the models this sync owns: agent-<namespace>, which is
+// also the name people mention, e.g. @agent-system.
+const ModelPrefix = "agent-"
+
+// legacyPrefix marks agents of earlier versions, which the sync removes.
+const legacyPrefix = "ns-"
+
+// AgentName is the id and name of a namespace's agent.
+func AgentName(namespace string) string { return ModelPrefix + namespace }
 
 type owuiModel struct {
 	ID           string         `json:"id"`
@@ -45,7 +54,7 @@ type owuiModel struct {
 }
 
 func (o *OpenWebUI) prompt(ns Namespace) string {
-	return fmt.Sprintf(`You are the operator agent of the namespace %[1]q of a home cloud at %[2]s. You answer questions about its stacks and propose changes to it, using your tools. Pass namespace %[1]q to every tool that takes one.
+	return fmt.Sprintf(`You are %[3]s, the operator agent of the namespace %[1]q of a home cloud at %[2]s. You answer questions about its stacks and propose changes to it, using your tools. Pass namespace %[1]q to every tool that takes one.
 
 How it works:
 - A namespace is a Gitea organisation. Each of its repos that holds a compose.yaml is one Docker Swarm stack, named after the repo. The controller deploys the main branch of each such repo.
@@ -57,7 +66,7 @@ Rules:
 - You act with the rights of the person you talk to. If a tool says something is not allowed, say so plainly; do not work around it.
 - To change anything, read the current file, then call propose_change with the whole new file. That opens a pull request; nothing changes until a person allowed to merges it in Gitea. Always give them the link, and never say a change is made or deployed when you only proposed it.
 - You cannot merge, deploy or read secret values.
-- Be brief.`, ns.Name, o.Domain)
+- Be brief.`, ns.Name, o.Domain, AgentName(ns.Name))
 }
 
 func (o *OpenWebUI) want(ns Namespace) owuiModel {
@@ -66,9 +75,9 @@ func (o *OpenWebUI) want(ns Namespace) owuiModel {
 		desc += ": " + ns.Description
 	}
 	return owuiModel{
-		ID:          ModelPrefix + ns.Name,
+		ID:          AgentName(ns.Name),
 		BaseModelID: o.BaseModel,
-		Name:        ns.Name,
+		Name:        AgentName(ns.Name),
 		Meta: map[string]any{
 			"description": desc,
 			"toolIds":     []string{"server:mcp:" + o.ToolServerID},
@@ -133,6 +142,9 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if err := o.call(ctx, "", http.MethodPost, "/api/v1/auths/signin", map[string]string{"email": o.Email, "password": o.Password}, &signin); err != nil {
 		return err
 	}
+	if err := o.syncProfile(ctx, signin.Token); err != nil {
+		return err
+	}
 	namespaces, err := o.Gitea.Namespaces(ctx, "")
 	if err != nil {
 		return err
@@ -144,7 +156,7 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	have := map[string]owuiModel{}
 	base := false
 	for _, m := range all {
-		if strings.HasPrefix(m.ID, ModelPrefix) {
+		if strings.HasPrefix(m.ID, ModelPrefix) || strings.HasPrefix(m.ID, legacyPrefix) {
 			have[m.ID] = m
 		}
 		base = base || m.ID == o.BaseModel
@@ -187,9 +199,93 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 		if err := o.call(ctx, signin.Token, http.MethodPost, "/api/v1/models/model/delete", map[string]string{"id": id}, nil); err != nil {
 			return err
 		}
-		log.Printf("open webui: removed %s, whose namespace is gone", id)
+		log.Printf("open webui: removed %s, whose namespace is gone or which is outdated", id)
 	}
 	return o.syncChannels(ctx, signin.Token, namespaces)
+}
+
+// AccountName is the display name of the control plane's own account. Every
+// member of a channel shows in its @ list, so the name says what it is.
+const AccountName = "Control plane (not the agent)"
+
+func (o *OpenWebUI) syncProfile(ctx context.Context, token string) error {
+	var me struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/auths/", nil, &me); err != nil {
+		return err
+	}
+	o.accountID = me.ID
+	if me.Name == AccountName {
+		return nil
+	}
+	return o.call(ctx, token, http.MethodPost, "/api/v1/auths/update/profile", map[string]string{"name": AccountName, "profile_image_url": "/user.png"}, nil)
+}
+
+// HowToMarker starts the pinned message that explains a channel.
+const HowToMarker = "**How to ask the agent of this namespace**"
+
+func (o *OpenWebUI) howTo(ns Namespace) string {
+	return fmt.Sprintf(`%[2]s
+
+Type `+"`@agent`"+` and pick **%[1]s** from the list, then your question. For example:
+
+`+"`@%[1]s which stacks are not healthy?`"+`
+`+"`@%[1]s show the last 50 log lines of grafana_grafana`"+`
+`+"`@%[1]s propose a memory limit of 1Gi for loki`"+`
+
+It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention it are for the people here. Each namespace has its own agent; in this channel, use %[1]s.
+
+It acts with your rights. Everyone may ask anything. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply.`, AgentName(ns.Name), HowToMarker)
+}
+
+type owuiMessage struct {
+	ID       string `json:"id"`
+	UserID   string `json:"user_id"`
+	Content  string `json:"content"`
+	IsPinned bool   `json:"is_pinned"`
+}
+
+// syncHowTo keeps the how-to pinned at the top of a namespace's channel. A
+// how-to someone unpinned is pinned again; a deleted one is posted again.
+func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns Namespace) error {
+	ours := func(m owuiMessage) bool { return m.UserID == o.accountID && strings.HasPrefix(m.Content, HowToMarker) }
+	var pinned []owuiMessage
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/"+channelID+"/messages/pinned", nil, &pinned); err != nil {
+		return err
+	}
+	for _, m := range pinned {
+		if ours(m) {
+			if m.Content != o.howTo(ns) {
+				return o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/"+m.ID+"/update", map[string]string{"content": o.howTo(ns)}, nil)
+			}
+			return nil
+		}
+	}
+	var recent []owuiMessage
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/"+channelID+"/messages?skip=0&limit=200", nil, &recent); err != nil {
+		return err
+	}
+	id := ""
+	for _, m := range recent {
+		if ours(m) {
+			id = m.ID
+			break
+		}
+	}
+	if id == "" {
+		var posted owuiMessage
+		if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/post", map[string]string{"content": o.howTo(ns)}, &posted); err != nil {
+			return err
+		}
+		id = posted.ID
+	}
+	if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/"+id+"/pin", map[string]bool{"is_pinned": true}, nil); err != nil {
+		return err
+	}
+	log.Printf("open webui: pinned the how-to in the channel of namespace %s", ns.Name)
+	return nil
 }
 
 // ChannelMarker in a channel's meta names the namespace it belongs to.
@@ -204,7 +300,7 @@ type owuiChannel struct {
 }
 
 func (o *OpenWebUI) channelDescription(ns Namespace) string {
-	return fmt.Sprintf("Team chat of the namespace %s. Mention @%s to ask its agent; it acts with your rights.", ns.Name, ns.Name)
+	return fmt.Sprintf("Team chat of the namespace %s. Ask its agent with @%s; see the pinned message.", ns.Name, AgentName(ns.Name))
 }
 
 var everyoneReadsAndWrites = []any{
@@ -231,7 +327,7 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 		switch {
 		case !ok:
 			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta, "access_grants": everyoneReadsAndWrites}
-			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/create", form, nil); err != nil {
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/create", form, &cur); err != nil {
 				return err
 			}
 			log.Printf("open webui: added the channel of namespace %s", ns.Name)
@@ -244,6 +340,9 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 				return err
 			}
 			log.Printf("open webui: put back the channel of namespace %s", ns.Name)
+		}
+		if err := o.syncHowTo(ctx, token, cur.ID, ns); err != nil {
+			return err
 		}
 	}
 	for ns, c := range have {

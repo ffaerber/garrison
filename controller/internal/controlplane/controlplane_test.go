@@ -246,12 +246,14 @@ func TestOpenWebUISync(t *testing.T) {
 	gsrv := httptest.NewServer(fg)
 	defer gsrv.Close()
 	var mu sync.Mutex
-	models := map[string]owuiModel{"ns-gone": {ID: "ns-gone", Name: "gone"}, "other": {ID: "other"}}
+	models := map[string]owuiModel{"agent-gone": {ID: "agent-gone", Name: "agent-gone"}, "ns-system": {ID: "ns-system", Name: "system"}, "other": {ID: "other"}}
 	channels := map[string]owuiChannel{
 		"c-gone":  {ID: "c-gone", Name: "gone", Meta: map[string]any{ChannelMarker: "gone"}},
 		"c-other": {ID: "c-other", Name: "random"},
 	}
 	nextChannel := 0
+	profileName := "Installer"
+	messages := map[string][]owuiMessage{} // channel id -> messages
 	var calls []string
 	ow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -282,6 +284,13 @@ func TestOpenWebUISync(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&b)
 			delete(models, b["id"])
 			io.WriteString(w, "true")
+		case "/api/v1/auths/":
+			json.NewEncoder(w).Encode(map[string]string{"id": "cp", "name": profileName})
+		case "/api/v1/auths/update/profile":
+			var b map[string]string
+			json.NewDecoder(r.Body).Decode(&b)
+			profileName = b["name"]
+			io.WriteString(w, "{}")
 		case "/api/v1/channels/list":
 			var list []owuiChannel
 			for _, c := range channels {
@@ -294,8 +303,41 @@ func TestOpenWebUISync(t *testing.T) {
 			nextChannel++
 			c.ID = "c" + string(rune('0'+nextChannel))
 			channels[c.ID] = c
-			io.WriteString(w, "{}")
+			json.NewEncoder(w).Encode(c)
 		default:
+			rest := strings.TrimPrefix(r.URL.Path, "/api/v1/channels/")
+			parts := strings.Split(rest, "/")
+			if len(parts) >= 2 && parts[1] == "messages" {
+				ch := parts[0]
+				switch {
+				case len(parts) == 3 && parts[2] == "pinned":
+					var out []owuiMessage
+					for _, m := range messages[ch] {
+						if m.IsPinned {
+							out = append(out, m)
+						}
+					}
+					json.NewEncoder(w).Encode(out)
+				case len(parts) == 2:
+					json.NewEncoder(w).Encode(messages[ch])
+				case len(parts) == 3 && parts[2] == "post":
+					var b map[string]string
+					json.NewDecoder(r.Body).Decode(&b)
+					m := owuiMessage{ID: "m" + string(rune('0'+len(messages[ch]))), UserID: "cp", Content: b["content"]}
+					messages[ch] = append(messages[ch], m)
+					json.NewEncoder(w).Encode(m)
+				case len(parts) == 4 && parts[3] == "pin":
+					for i := range messages[ch] {
+						if messages[ch][i].ID == parts[2] {
+							messages[ch][i].IsPinned = true
+						}
+					}
+					io.WriteString(w, "{}")
+				default:
+					http.NotFound(w, r)
+				}
+				return
+			}
 			if id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/channels/"), "/delete"); ok && r.Method == http.MethodDelete {
 				delete(channels, id)
 				io.WriteString(w, "true")
@@ -322,12 +364,15 @@ func TestOpenWebUISync(t *testing.T) {
 	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sys, ok := models["ns-system"]
-	if !ok || models["ns-homepage"].Name != "homepage" {
+	sys, ok := models["agent-system"]
+	if !ok || sys.Name != "agent-system" || models["agent-homepage"].Name != "agent-homepage" {
 		t.Fatalf("models = %v", models)
 	}
-	if _, ok := models["ns-gone"]; ok {
-		t.Error("the model of a deleted namespace was kept")
+	if _, ok := models["agent-gone"]; ok {
+		t.Error("the agent of a deleted namespace was kept")
+	}
+	if _, ok := models["ns-system"]; ok {
+		t.Error("an agent of an earlier version was kept")
 	}
 	if _, ok := models["other"]; !ok {
 		t.Error("a model the sync does not own was removed")
@@ -336,7 +381,7 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Errorf("base model entry = %+v", b)
 	}
 	if sys.BaseModelID != "gpt-oss:120b" || !strings.Contains(sys.Params["system"].(string), `namespace "system"`) {
-		t.Errorf("ns-system = %+v", sys)
+		t.Errorf("agent-system = %+v", sys)
 	}
 	if ids := sys.Meta["toolIds"].([]any); len(ids) != 1 || ids[0] != "server:mcp:homecloud" {
 		t.Errorf("toolIds = %v", ids)
@@ -365,11 +410,35 @@ func TestOpenWebUISync(t *testing.T) {
 	if channels[renamed.ID].Name != "system" {
 		t.Errorf("renamed channel not put back: %v", channels[renamed.ID])
 	}
+	// The control plane's account says it is not the agent.
+	if profileName != AccountName {
+		t.Errorf("account name = %q", profileName)
+	}
+	// Each namespace channel has the how-to pinned, once.
+	sysID := byNS["system"].ID
+	pinnedHowTos := func() int {
+		n := 0
+		for _, m := range messages[sysID] {
+			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@agent-system") {
+				n++
+			}
+		}
+		return n
+	}
+	if pinnedHowTos() != 1 {
+		t.Errorf("system channel messages = %+v", messages[sysID])
+	}
+	// Someone unpins it: it is pinned again, not posted twice.
+	messages[sysID][0].IsPinned = false
+	o.Sync(context.Background())
+	if pinnedHowTos() != 1 || len(messages[sysID]) != 1 {
+		t.Errorf("after unpinning: %+v", messages[sysID])
+	}
 	// A second sync changes nothing.
 	calls = nil
 	o.Sync(context.Background())
 	for _, c := range calls {
-		if strings.Contains(c, "create") || strings.Contains(c, "update") || strings.Contains(c, "delete") {
+		if strings.Contains(c, "create") || strings.Contains(c, "update") || strings.Contains(c, "delete") || strings.HasSuffix(c, "/post") || strings.HasSuffix(c, "/pin") {
 			t.Errorf("second sync called %s", c)
 		}
 	}

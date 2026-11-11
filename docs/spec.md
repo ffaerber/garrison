@@ -178,7 +178,7 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 ## Chat
 
 - Open WebUI, at `chat.<domain>`, is the chat. People sign in through Keycloak; root admins are its admins.
-- Each namespace has a channel there, named after it: the team chat, permanent and shared by everyone signed in. Only admins may change a channel, and the control plane puts back what it set. Mentioning the namespace's agent (`@system`) makes it answer in a thread.
+- Each namespace has a channel there, named after it: the team chat, permanent and shared by everyone signed in. Only admins may change a channel, and the control plane puts back what it set. Mentioning the namespace's agent, `@agent-<namespace>` (e.g. `@agent-system`), makes it answer in a thread; a pinned message in each channel explains how.
 - Each namespace's agent is a model with that namespace's prompt and the control plane's tools. The control plane keeps one agent and one channel per Gitea organisation, adding and removing them as organisations come and go. People can also chat with an agent privately.
 - The control plane is an MCP server. Open WebUI calls it with the signed-in person's Keycloak access token, so every tool acts with that person's rights: reads and proposals go to Gitea as them. It is reachable only from Open WebUI, not from outside.
 - Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, and propose a change to a file.
