@@ -10,7 +10,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 - System stack: Postgres, Traefik, Keycloak (`keycloak.<domain>`), login proxy (`sso.<domain>`), Gitea (`git.<domain>`).
 - Single sign-on: people sign in to the Keycloak realm `homecloud`. Private environments redirect to that login and pass the signed-in person's identity to the app. Gitea offers sign-in through Keycloak and creates the account on first login.
 - Roles: the Keycloak group `root-admins` holds the people who may change the platform. Its members are Gitea admins; Gitea re-reads the groups at every login. `platform/system/03-keycloak/add-user.sh` adds people.
-- Platform repo: the installer pushes `platform/` into the private Gitea repo `system/platform` once. Only root admins can see or change it.
+- Platform repo: the installer pushes `platform/` into the Gitea repo `system/platform` once. Everyone signed in can read it; only root admins can change it. Gitea shows nothing without signing in.
 - Upgrading an installed machine by running the installer again.
 - Controller CLI: validates a stack file, claims its hostnames, creates its ZFS datasets and Swarm secrets, and deploys it to Swarm behind Traefik.
 
@@ -28,4 +28,4 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-Namespaces and their members (everyone who can sign in can open every private environment), applying changes from the platform repo to the cluster, the controller as a service (Git watching, snapshots, SOPS, change records, approvals, restore), agent orchestrator, platform UI and chat, monitoring, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
+Namespaces and their members, applying changes from the platform repo to the cluster, the controller as a service (Git watching, snapshots, SOPS, change records, approvals, restore), agent orchestrator, platform UI and chat, monitoring, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.

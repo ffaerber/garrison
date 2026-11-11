@@ -36,9 +36,10 @@ auth=$(docker exec -u git "$(container gitea_gitea)" sh -c '
 ' "$DOMAIN")
 
 # ---------- platform repo ----------
-# The system stack lives in the private repo system/platform. Only Gitea
-# admins, i.e. root admins, can read or change it. It is pushed once; after
-# that Gitea holds the truth and the installer leaves the repo alone.
+# The system stack lives in the repo system/platform. Everyone who is signed
+# in can read it; only Gitea admins, i.e. root admins, can change it. It is
+# pushed once; after that Gitea holds the truth and the installer leaves the
+# contents alone.
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 # Credentials go in a netrc file, read by both curl and git, never on a command line.
@@ -51,10 +52,10 @@ api() { # METHOD PATH [JSON]; prints the status code
 wait_for 120 "the Gitea API" test "$(api GET /version)" = 200
 
 if [ "$(api GET /orgs/system)" != 200 ]; then
-  [ "$(api POST /orgs '{"username":"system","visibility":"private"}')" = 201 ] || { echo "could not create the system organisation" >&2; exit 1; }
+  [ "$(api POST /orgs '{"username":"system","visibility":"limited"}')" = 201 ] || { echo "could not create the system organisation" >&2; exit 1; }
 fi
 if [ "$(api GET /repos/system/platform)" != 200 ]; then
-  [ "$(api POST /orgs/system/repos '{"name":"platform","private":true,"default_branch":"main"}')" = 201 ] || { echo "could not create the platform repo" >&2; exit 1; }
+  [ "$(api POST /orgs/system/repos '{"name":"platform","private":false,"default_branch":"main"}')" = 201 ] || { echo "could not create the platform repo" >&2; exit 1; }
   cp -r "$here/../.." "$work/repo"
   (
     cd "$work/repo"
@@ -65,6 +66,11 @@ if [ "$(api GET /repos/system/platform)" != 200 ]; then
     git -c http.sslCAInfo="$ETC/tls.crt" -c http.curloptResolve="$resolve" push -q "https://git.$DOMAIN/system/platform.git" main
   )
 fi
+
+# Visibility is brought back in line on every run: the organisation is
+# "limited" (signed-in people only) and the repo is not private within it.
+[ "$(api PATCH /orgs/system '{"visibility":"limited"}')" = 200 ] || { echo "could not set the system organisation's visibility" >&2; exit 1; }
+[ "$(api PATCH /repos/system/platform '{"private":false}')" = 200 ] || { echo "could not set the platform repo's visibility" >&2; exit 1; }
 
 if [ "$auth" = updated ]; then
   docker service update --quiet --detach --force gitea_gitea >/dev/null

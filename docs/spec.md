@@ -70,7 +70,7 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 | History repo | One per namespace | Change records, one per deploy | Controller only |
 | App repos | Inside a namespace | Code, `stack.yaml`, numbered migrations | Members, coding agents |
 
-Config files are JSON or YAML, validated by JSON Schema. Config repos are readable only by members of that namespace.
+Config files are JSON or YAML, validated by JSON Schema. Every repo, including the platform repo and every namespace's config and history, is readable by everyone who is signed in; nothing is readable without signing in. Secret values stay SOPS-encrypted and readable by no one.
 
 ## Stack format
 
@@ -129,7 +129,8 @@ Restore from the History tab rolls back to a change record as a whole: the contr
 
 - An agent always acts with the rights of the person who mentioned it, never more.
 - When an agent acts without a mention, for example on an alert, it has read-only rights in its own scope (logs, metrics, state, repos) and may only propose. Its proposals always need a human to approve them, whatever the autonomy level; the approver's rights are the ones checked.
-- Rights flow downward only: root, then namespace, then repository. No scope can read or change the one above it.
+- Everyone who is signed in can see everything: every repo, stack, log and history. Seeing is not changing.
+- Rights to change flow downward only: root, then namespace, then repository. No scope can change the one above it.
 - Agents propose; the controller enforces. Approvals are checked by the controller, never by the agent.
 - Nobody approves their own role change. Namespace config changes always need a human merge.
 - Per repo and branch, an autonomy level decides how far agents go:

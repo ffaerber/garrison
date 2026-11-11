@@ -13,6 +13,8 @@ services:
       GITEA__server__ROOT_URL: https://git.${DOMAIN}/
       GITEA__server__DISABLE_SSH: "true"
       GITEA__security__INSTALL_LOCK: "true"
+      # Nothing is visible without signing in.
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
       # People sign in through Keycloak; an account is created on first login.
       GITEA__service__ALLOW_ONLY_EXTERNAL_REGISTRATION: "true"
       GITEA__oauth2_client__ENABLE_AUTO_REGISTRATION: "true"
