@@ -47,6 +47,7 @@ command -v docker  >/dev/null || need+=(docker.io)
 command -v zfs     >/dev/null || need+=(zfsutils-linux)
 command -v openssl >/dev/null || need+=(openssl)
 command -v curl    >/dev/null || need+=(curl)
+command -v git     >/dev/null || need+=(git)
 if [ ${#need[@]} -gt 0 ]; then
   apt-get update -qq
   apt-get install -y -qq "${need[@]}" >/dev/null

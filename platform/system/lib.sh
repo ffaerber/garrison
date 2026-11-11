@@ -18,3 +18,12 @@ wait_for() {
     sleep 3
   done
 }
+
+# keycloak_login: log the admin CLI inside the Keycloak container in.
+# Fails while Keycloak is still starting, so it doubles as a readiness check.
+keycloak_login() {
+  local id
+  id=$(container keycloak_keycloak) && [ -n "$id" ] && docker exec "$id" bash -c '
+    KC_CLI_PASSWORD=$(</run/secrets/admin-password) /opt/keycloak/bin/kcadm.sh config credentials \
+      --config /tmp/kcadm.config --server http://localhost:8080 --realm master --user "$0"' "$ADMIN_USER"
+}

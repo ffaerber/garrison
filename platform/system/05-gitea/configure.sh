@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Creates the local admin account and adds Keycloak as the login source.
+# Creates the local admin account, adds Keycloak as the login source and puts
+# the platform repo into Gitea.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../lib.sh"
@@ -13,9 +14,44 @@ if ! gitea admin user list --admin | awk 'NR > 1 { print $2 }' | grep -qx "$ADMI
     --username "$ADMIN_USER" --email "$ADMIN_EMAIL" --password "$(cat "$ETC/admin-password")" >/dev/null
 fi
 
-if ! gitea admin auth list | awk 'NR > 1 { print $2 }' | grep -qx keycloak; then
-  docker exec -u git "$(container gitea_gitea)" sh -c '
-    gitea admin auth add-oauth --name keycloak --provider openidConnect --key gitea \
-      --secret "$(cat /run/secrets/gitea-oidc-secret)" --scopes "openid email profile" \
-      --auto-discover-url "https://auth.$0/realms/homecloud/.well-known/openid-configuration"' "$DOMAIN" >/dev/null
+# Keycloak login. Members of the Keycloak group root-admins are Gitea admins;
+# Gitea re-reads the groups at every login, so leaving the group removes the right.
+docker exec -u git "$(container gitea_gitea)" sh -c '
+  set -- --name keycloak --provider openidConnect --key gitea \
+    --secret "$(cat /run/secrets/gitea-oidc-secret)" --scopes "openid email profile" \
+    --auto-discover-url "https://auth.$0/realms/homecloud/.well-known/openid-configuration" \
+    --group-claim-name groups --admin-group root-admins
+  id=$(gitea admin auth list | awk "NR > 1 && \$2 == \"keycloak\" { print \$1 }")
+  if [ -z "$id" ]; then gitea admin auth add-oauth "$@"; else gitea admin auth update-oauth --id "$id" "$@"; fi
+' "$DOMAIN" >/dev/null
+
+# ---------- platform repo ----------
+# The system stack lives in the private repo system/platform. Only Gitea
+# admins, i.e. root admins, can read or change it. It is pushed once; after
+# that Gitea holds the truth and the installer leaves the repo alone.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+# Credentials go in a netrc file, read by both curl and git, never on a command line.
+(umask 077; printf 'machine git.%s login %s password %s\n' "$DOMAIN" "$ADMIN_USER" "$(cat "$ETC/admin-password")" > "$work/.netrc")
+resolve="git.$DOMAIN:443:127.0.0.1"
+api() { # METHOD PATH [JSON]; prints the status code
+  curl -sS -o /dev/null -w '%{http_code}' --netrc-file "$work/.netrc" --cacert "$ETC/tls.crt" --resolve "$resolve" \
+    -X "$1" "https://git.$DOMAIN/api/v1$2" ${3:+-H 'Content-Type: application/json' -d "$3"}
+}
+wait_for 120 "the Gitea API" test "$(api GET /version)" = 200
+
+if [ "$(api GET /orgs/system)" != 200 ]; then
+  [ "$(api POST /orgs '{"username":"system","visibility":"private"}')" = 201 ] || { echo "could not create the system organisation" >&2; exit 1; }
+fi
+if [ "$(api GET /repos/system/platform)" != 200 ]; then
+  [ "$(api POST /orgs/system/repos '{"name":"platform","private":true,"default_branch":"main"}')" = 201 ] || { echo "could not create the platform repo" >&2; exit 1; }
+  cp -r "$here/../.." "$work/repo"
+  (
+    cd "$work/repo"
+    export HOME=$work GIT_CONFIG_GLOBAL=/dev/null
+    git init -q -b main
+    git add -A
+    git -c user.name="Home Cloud installer" -c user.email="$ADMIN_EMAIL" commit -q -m "Platform repo as installed"
+    git -c http.sslCAInfo="$ETC/tls.crt" -c http.curloptResolve="$resolve" push -q "https://git.$DOMAIN/system/platform.git" main
+  )
 fi

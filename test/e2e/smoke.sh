@@ -33,15 +33,15 @@ web() {
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
-# sso_login JAR URL PASSWORD OUT: open URL, fill in the Keycloak login form it
-# leads to, follow the redirects back. Prints the final status; body goes to OUT.
+# sso_login JAR URL PASSWORD OUT [USER]: open URL, fill in the Keycloak login form
+# it leads to, follow the redirects back. Prints the final status; body goes to OUT.
 sso_login() {
-  local jar=$1 url=$2 password=$3 out=$4 form action
+  local jar=$1 url=$2 password=$3 out=$4 user=${5:-$ADMIN_USER} form action
   form=$(web -L -c "$jar" -b "$jar" "$url") || return 1
   action=$(grep -o 'action="[^"]*"' <<<"$form" | head -n1 | sed 's/^action="//; s/"$//; s/&amp;/\&/g')
   [ -n "$action" ] || { echo "no login form behind $url"; return 1; }
   web -L -c "$jar" -b "$jar" -o "$out" -w '%{http_code}' \
-    --data-urlencode "username=$ADMIN_USER" --data-urlencode "password=$password" "$action"
+    --data-urlencode "username=$user" --data-urlencode "password=$password" "$action"
 }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -88,6 +88,40 @@ check "the public environment needs no login" status_is 200 hello / 30
 check "Gitea settings need a login"        bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/user/settings)\" != 200 ]"
 sso_login "$tmp/git.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$PASSWORD" "$tmp/git.html" >/dev/null 2>&1
 check "the admin signs in to Gitea through Keycloak" test "$(web -b "$tmp/git.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
+
+echo "# roles"
+# Two test people. Their passwords are kept so they can also log in by hand.
+ADD_USER=platform/system/03-keycloak/add-user.sh
+mkdir -p -m 700 $ETC/test-users
+for u in alice bob; do [ -s $ETC/test-users/$u ] || openssl rand -hex 12 > $ETC/test-users/$u; done
+# gitea_api USER_TO_ACT_AS ARGS...: call the Gitea API as the local admin, or,
+# with a name, with exactly that person's rights (Gitea's Sudo header).
+gitea_api() {
+  local as=$1; shift
+  web -u "$ADMIN_USER:$PASSWORD" ${as:+-H "Sudo: $as"} "$@"
+}
+repo=https://git.$DOMAIN/api/v1/repos/system/platform
+
+check "alice is added as root admin"       env USER_PASSWORD="$(cat $ETC/test-users/alice)" $ADD_USER alice "alice@$DOMAIN" --admin
+check "bob is added as user"               env USER_PASSWORD="$(cat $ETC/test-users/bob)" $ADD_USER bob "bob@$DOMAIN"
+for u in alice bob; do
+  sso_login "$tmp/$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$(cat $ETC/test-users/$u)" "$tmp/$u.html" $u >/dev/null 2>&1
+  check "$u signs in to Gitea through Keycloak" test "$(web -b "$tmp/$u.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
+done
+check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/alice")"
+check "bob is not a Gitea admin"           grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
+check "the platform repo is in Gitea and private" grep -q '"private":true' <<<"$(gitea_api "" $repo)"
+check "the platform repo holds the system stack"  test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/system/02-traefik/compose.yaml)" = 200
+check "alice can administer the platform repo"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
+check "alice can change the platform repo" \
+  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"YWxpY2UK","message":"smoke test","new_branch":"smoke-'$RANDOM$RANDOM'"}' $repo/contents/smoke-test.txt)" = 201
+check "bob cannot see the platform repo"   test "$(gitea_api bob -o /dev/null -w '%{http_code}' $repo)" = 404
+check "bob cannot see it in the browser either" test "$(web -b "$tmp/bob.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/system/platform")" = 404
+check "bob cannot change the platform repo" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test"}' $repo/contents/bob-was-here.txt)" = 404
+check "bob's change did not land"          test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/bob-was-here.txt)" = 404
+check "bob cannot make himself admin"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"login_name":"bob","source_id":0,"admin":true}' "https://git.$DOMAIN/api/v1/admin/users/bob")" = 403
+check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
 
 echo "# hostname claims"
 check "a stack claiming a held hostname is rejected"     bash -c "! $CTL apply -domain $DOMAIN -reserved $ETC/reserved-hostnames.yaml $STACKS/hello-clash.yaml"
