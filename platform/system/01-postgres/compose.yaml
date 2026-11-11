@@ -1,0 +1,41 @@
+# Shared database for Keycloak, Gitea and Grafana.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - postgres-password
+      - keycloak-db-password
+      - gitea-db-password
+      - grafana-db-password
+    configs:
+      - source: init-databases
+        target: /docker-entrypoint-initdb.d/10-databases.sh
+        mode: 0555
+    volumes:
+      - type: bind
+        source: /homecloud/system/postgres
+        target: /var/lib/postgresql/data
+    networks: [system]
+    healthcheck:
+      # Over TCP: during first-run initialisation Postgres listens on the socket only.
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U postgres]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+configs:
+  init-databases:
+    file: ./init-databases.sh
+
+secrets:
+  postgres-password: { external: true }
+  keycloak-db-password: { external: true }
+  gitea-db-password: { external: true }
+  grafana-db-password: { external: true }
+
+networks:
+  system:
+    external: true
+    name: homecloud-system

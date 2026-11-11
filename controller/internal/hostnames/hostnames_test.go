@@ -2,6 +2,7 @@ package hostnames
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,5 +64,26 @@ func TestClaim(t *testing.T) {
 		if len(r.held) != before {
 			t.Errorf("%s: rejected claim changed the registry", name)
 		}
+	}
+}
+
+func TestSaveLoad(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "state", "claims.json")
+	r := NewRegistry(nil)
+	if err := r.Load(file); err != nil {
+		t.Fatalf("missing file: %v", err)
+	}
+	if err := r.Claim(mk(t, "media", "jellyfin", "main")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(file); err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(nil)
+	if err := r2.Load(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := r2.Claim(mk(t, "other", "jellyfin", "main")); err == nil {
+		t.Error("clash with a loaded claim accepted")
 	}
 }

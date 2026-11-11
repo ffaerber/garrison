@@ -25,8 +25,12 @@ const (
 type Options struct {
 	Environment string // environment to render
 	Domain      string // installation domain, e.g. example.com
-	DataRoot    string // where the ZFS pool is mounted; defaults to /homecloud
+	DataRoot    string // where the ZFS pool is mounted; defaults to DefaultDataRoot
 }
+
+// DefaultDataRoot is where the installer mounts the dataset that holds all
+// namespaces. The ZFS dataset name is this path without the leading slash.
+const DefaultDataRoot = "/homecloud/ns"
 
 // StackName is the Swarm stack name of an environment. Hostnames are unique
 // across the installation, so the environment's hostname is used.
@@ -116,7 +120,7 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 		return nil, fmt.Errorf("domain is required")
 	}
 	if o.DataRoot == "" {
-		o.DataRoot = "/homecloud"
+		o.DataRoot = DefaultDataRoot
 	}
 
 	file := composeFile{Services: map[string]composeService{}}

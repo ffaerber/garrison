@@ -1,0 +1,42 @@
+# Single sign-on. Reachable at https://auth.<domain>.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    # Keycloak cannot read passwords from files, so a wrapper exports them.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        export KC_DB_PASSWORD="$$(</run/secrets/keycloak-db-password)"
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(</run/secrets/admin-password)"
+        exec /opt/keycloak/bin/kc.sh start
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_HOSTNAME: https://auth.${DOMAIN}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${ADMIN_USER}
+    secrets:
+      - keycloak-db-password
+      - admin-password
+    networks: [system, traefik-public]
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: traefik-public
+        traefik.http.routers.auth.rule: Host(`auth.${DOMAIN}`)
+        traefik.http.routers.auth.entrypoints: websecure
+        traefik.http.routers.auth.tls: "true"
+        traefik.http.services.auth.loadbalancer.server.port: "8080"
+
+secrets:
+  keycloak-db-password: { external: true }
+  admin-password: { external: true }
+
+networks:
+  system:
+    external: true
+    name: homecloud-system
+  traefik-public:
+    external: true

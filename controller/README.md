@@ -4,14 +4,15 @@ Go. Watches Gitea, renders stacks to Swarm, holds the SOPS key, takes snapshots,
 
 ## What exists
 
-The offline core, with no cluster or Gitea access yet:
+A CLI that validates, renders and deploys stack files on the machine it runs on. It does not watch Gitea yet.
 
 | Package | Does |
 | --- | --- |
 | `internal/stack` | Parses `stack.yaml`, validates it against `schemas/stack.schema.json` and the rules a schema cannot express, fills in hostnames |
 | `internal/hostnames` | Lists the hostnames a stack claims and rejects clashes and reserved names |
 | `internal/render` | Renders one environment of a stack as a Compose file for `docker stack deploy` |
-| `cmd/controller` | CLI over the three |
+| `internal/apply` | Creates the ZFS datasets and Swarm secrets a stack needs, then runs `docker stack deploy` |
+| `cmd/controller` | CLI over these |
 
 ```
 make test
@@ -19,6 +20,7 @@ make build
 bin/controller validate controller/internal/stack/testdata/jellyfin.yaml
 bin/controller claims -reserved platform/reserved-hostnames.yaml STACK.yaml...
 bin/controller render -domain example.com -env dev STACK.yaml
+bin/controller apply -domain example.com -reserved /etc/homecloud/reserved-hostnames.yaml STACK.yaml   # on an installed machine, as root
 ```
 
 Go runs in a container, so only Docker is needed. `make golden` rewrites the expected render output after an intended change.
@@ -28,7 +30,7 @@ Go runs in a container, so only Docker is needed. `make golden` rewrites the exp
 | Thing | Name |
 | --- | --- |
 | Swarm stack | the environment's hostname, e.g. `dev-jellyfin` (unique across the installation) |
-| Dataset on the host | `<data root>/<namespace>/stacks/<environment hostname>/<dataset>` |
+| Dataset on the host (data root `/homecloud/ns`) | `<data root>/<namespace>/stacks/<environment hostname>/<dataset>` |
 | Share on the host | `<data root>/<namespace>/shares/<share>` |
 | Swarm secret | `<environment hostname>.<secret>` |
 
@@ -36,7 +38,7 @@ What rendered stacks expect from the system stack is in `platform/contracts`.
 
 ## Not built yet
 
-Watching Gitea, deploying, snapshots, SOPS, migrations, change records, approvals, restore.
+Watching Gitea, snapshots, SOPS, migrations, change records, approvals, restore. See `docs/status.md`.
 
 ## Known gaps
 

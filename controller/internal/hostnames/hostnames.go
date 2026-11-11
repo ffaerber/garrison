@@ -6,8 +6,13 @@
 package hostnames
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	"homecloud/controller/internal/stack"
 )
@@ -82,3 +87,43 @@ func (r *Registry) Release(namespace, name string) {
 }
 
 func sameStack(a, b Claim) bool { return a.Namespace == b.Namespace && a.Stack == b.Stack }
+
+// Load reads the held claims saved by Save. A missing file is an empty registry.
+func (r *Registry) Load(file string) error {
+	data, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var claims []Claim
+	if err := json.Unmarshal(data, &claims); err != nil {
+		return fmt.Errorf("%s: %w", file, err)
+	}
+	for _, c := range claims {
+		r.held[c.Hostname] = c
+	}
+	return nil
+}
+
+// Save writes the held claims, sorted by hostname.
+func (r *Registry) Save(file string) error {
+	claims := make([]Claim, 0, len(r.held))
+	for _, c := range r.held {
+		claims = append(claims, c)
+	}
+	slices.SortFunc(claims, func(a, b Claim) int { return strings.Compare(a.Hostname, b.Hostname) })
+	data, err := json.MarshalIndent(claims, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, file)
+}

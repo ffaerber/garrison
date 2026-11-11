@@ -1,0 +1,46 @@
+# Code, config and history. Reachable at https://git.<domain>.
+# The Actions runner and registry settings are not configured yet.
+services:
+  gitea:
+    image: gitea/gitea:1.25
+    environment:
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: postgres:5432
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: gitea
+      GITEA__database__PASSWD__FILE: /run/secrets/gitea-db-password
+      GITEA__server__DOMAIN: git.${DOMAIN}
+      GITEA__server__ROOT_URL: https://git.${DOMAIN}/
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    secrets:
+      - gitea-db-password
+    volumes:
+      - type: bind
+        source: /homecloud/system/gitea
+        target: /data
+    networks: [system, traefik-public]
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:3000/api/healthz]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: traefik-public
+        traefik.http.routers.git.rule: Host(`git.${DOMAIN}`)
+        traefik.http.routers.git.entrypoints: websecure
+        traefik.http.routers.git.tls: "true"
+        traefik.http.services.git.loadbalancer.server.port: "3000"
+
+secrets:
+  gitea-db-password: { external: true }
+
+networks:
+  system:
+    external: true
+    name: homecloud-system
+  traefik-public:
+    external: true

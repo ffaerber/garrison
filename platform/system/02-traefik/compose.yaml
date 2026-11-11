@@ -1,0 +1,46 @@
+# Routing and TLS. Provides the names in platform/contracts.
+services:
+  traefik:
+    image: traefik:v3.6
+    command:
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedByDefault=false
+      - --providers.swarm.network=traefik-public
+      - --providers.file.filename=/etc/traefik/dynamic.yaml
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --ping=true
+    ports:
+      - { target: 80, published: 80, mode: host }
+      - { target: 443, published: 443, mode: host }
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    configs:
+      - source: dynamic
+        target: /etc/traefik/dynamic.yaml
+    secrets:
+      - { source: tls-cert, target: tls.crt }
+      - { source: tls-key, target: tls.key }
+    networks: [traefik-public]
+    healthcheck:
+      test: [CMD, traefik, healthcheck, --ping]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+configs:
+  dynamic:
+    file: ./dynamic.yaml
+
+secrets:
+  tls-cert: { external: true }
+  tls-key: { external: true }
+
+networks:
+  traefik-public:
+    external: true

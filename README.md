@@ -1,6 +1,6 @@
 # Home Cloud Platform
 
-A home cloud you run by talking to it, with Git underneath. See [docs/spec.md](docs/spec.md).
+A home cloud you run by talking to it, with Git underneath. See [docs/spec.md](docs/spec.md) for the design and [docs/status.md](docs/status.md) for what is built.
 
 | Path | Contents |
 | --- | --- |

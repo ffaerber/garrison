@@ -1,0 +1,14 @@
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /run/secrets/tls.crt
+        keyFile: /run/secrets/tls.key
+
+http:
+  middlewares:
+    # Login check for private environments. Until it is wired to Keycloak it
+    # denies every request, so nothing private is reachable by accident.
+    sso:
+      ipAllowList:
+        sourceRange: ["255.255.255.255/32"]

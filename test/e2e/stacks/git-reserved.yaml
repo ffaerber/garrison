@@ -1,0 +1,8 @@
+# Claims the hostname "git", which root reserves for Gitea.
+stack: git
+namespace: demo
+entrypoint: web
+services:
+  web: { image: traefik/whoami:v1.11, port: 80 }
+environments:
+  main: {}

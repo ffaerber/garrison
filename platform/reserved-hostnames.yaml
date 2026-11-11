@@ -1,2 +1,6 @@
 # Hostnames reserved by root. The controller rejects any stack that claims one.
-reserved: []
+reserved:
+  - auth      # Keycloak
+  - git       # Gitea
+  - grafana
+  - ntfy
