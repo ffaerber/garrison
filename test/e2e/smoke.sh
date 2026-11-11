@@ -29,7 +29,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki controlplane hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -97,6 +97,14 @@ poll() {
 }
 g=https://grafana.$DOMAIN
 
+cp=https://controlplane.$DOMAIN
+# cp_api PERSON ARGS...: the control plane's API with that person's session.
+# Changes are sent like the page sends them: JSON, from the control plane's origin.
+cp_api() {
+  local as=$1; shift
+  web -b "$tmp/cp-$as.jar" -H "Origin: $cp" -H 'Content-Type: application/json' "$@"
+}
+
 # ---------- sections ----------
 # system: the stacks the installer deploys are up and safe.
 section_system() {
@@ -150,6 +158,23 @@ check "someone not signed in cannot read the system repos" bash -c "[ \"\$(curl 
 check "someone not signed in cannot browse it either" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/system/traefik)\" != 200 ]"
 check "bob cannot make himself admin"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"login_name":"bob","source_id":0,"admin":true}' "https://git.$DOMAIN/api/v1/admin/users/bob")" = 403
 check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
+
+echo "# the control plane"
+check "the control plane sends visitors to the Keycloak login" \
+  grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$(web -L -o /dev/null -w '%{url_effective}' "$cp/")"
+check "its API needs a session"            test "$(web -o /dev/null -w '%{http_code}' "$cp/api/stacks")" = 401
+check "a forged identity header does not help" test "$(web -o /dev/null -w '%{http_code}' -H "X-Auth-Request-User: alice" -H "X-Forwarded-User: alice" "$cp/api/me")" = 401
+for u in alice bob; do
+  sso_login "$tmp/cp-$u.jar" "$cp/" "$TEST_PASSWORD" "$tmp/cp-$u.html" $u >/dev/null 2>&1
+  check "$u signs in to the control plane through Keycloak" grep -q "\"name\":\"$u\"" <<<"$(cp_api $u "$cp/api/me")"
+done
+check "alice is a root admin there"        grep -q '"admin":true'  <<<"$(cp_api alice "$cp/api/me")"
+check "bob is not"                         grep -q '"admin":false' <<<"$(cp_api bob "$cp/api/me")"
+check "bob sees the stacks"                grep -q '"name":"grafana"' <<<"$(cp_api bob "$cp/api/stacks")"
+check "a request from another site is refused" \
+  test "$(web -b "$tmp/cp-alice.jar" -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -d '{}' "$cp/api/chat/reset")" = 403
+check "signing out ends the session" \
+  bash -c "$(declare -f web); ETC=$ETC DOMAIN=$DOMAIN; cp $tmp/cp-bob.jar $tmp/cp-bob2.jar; web -b $tmp/cp-bob2.jar -c $tmp/cp-bob2.jar -o /dev/null $cp/logout; [ \"\$(web -b $tmp/cp-bob2.jar -o /dev/null -w '%{http_code}' $cp/api/me)\" = 401 ]"
 
 echo "# roles in Grafana"
 check "Grafana is healthy over valid TLS"  status_is 200 grafana /api/health 300
@@ -205,6 +230,20 @@ check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null 
 check "the controller takes the stack down" until_true 120 smoke_gone
 check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx controller <<<"$l"'
 
+echo "# approving changes in the control plane"
+# alice proposes a change to system/platform, which holds no stack, through Gitea.
+branch=smoke-$RANDOM$RANDOM
+title="Smoke test change $branch"
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"content":"'"$(printf 'smoke\n' | base64 -w0)"'","message":"'"$title"'","new_branch":"'$branch'"}' "$api/repos/system/platform/contents/smoke-$branch.txt"
+pr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'$branch'","base":"main","title":"'"$title"'"}' "$api/repos/system/platform/pulls" | grep -o '"number":[0-9]*' | head -n1 | cut -d: -f2)
+check "a proposed change waits in the control plane" grep -q "$title" <<<"$(cp_api bob "$cp/api/changes")"
+check "it comes with its diff"             grep -q "+smoke" <<<"$(cp_api bob "$cp/api/changes")"
+check "bob may not approve it"             test "$(cp_api bob -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/approve")" = 403
+check "bob may not reject it"              test "$(cp_api bob -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/reject")" = 403
+check "alice approves it"                  test "$(cp_api alice -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/approve")" = 200
+check "it is merged into main"             grep -q '"merged":true' <<<"$(gitea_api "" "$api/repos/system/platform/pulls/$pr")"
+check "it no longer waits"                 bash -c '! grep -q "$0" <<<"$1"' "$title" "$(cp_api bob "$cp/api/changes")"
+
 echo "# monitoring data"
 check "Prometheus scrapes the node"        poll 180 '"job":"node"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
 check "Prometheus scrapes the containers"  poll 180 '"job":"cadvisor"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
@@ -247,10 +286,42 @@ check "hello still answers after the rejected deploys"   status_is 200 hello / 3
 
 }
 
-# Usage: smoke.sh [SECTION...]; all sections by default.
+# agent: the operator agent answers and proposes, with the asker's rights.
+# Talks to the real LLM, so answers vary; the checks look at what the agent
+# did (its tool calls, the changes in Gitea), not at its wording.
+section_agent() {
+echo "# the agent"
+if [ ! -s $ETC/llm-api-key ]; then
+  echo "skip  no LLM key in $ETC/llm-api-key"
+  return
+fi
+ask() { cp_api "$1" --max-time 300 -X POST -d "$(printf '{"message":%s}' "$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" "$cp/api/chat"; }
+cp_api bob -o /dev/null -X POST -d '{}' "$cp/api/chat/reset"
+answer=$(ask bob "Which stacks does the controller deploy? Use your tools and list their names.")
+check "the agent answers bob"              grep -q '"reply":' <<<"$answer"
+check "it looked the stacks up"            grep -q '"tool":"list_stacks"' <<<"$answer"
+check "its answer names grafana"           grep -qi 'grafana' <<<"$(sed 's/"steps":.*//' <<<"$answer")"
+answer=$(ask bob "What does the repo traefik deploy? Read its compose.yaml.")
+check "it reads repos for bob"             grep -q '"tool":"read_file"' <<<"$answer"
+before=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
+answer=$(ask bob "Propose a change in the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob.")
+after=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
+check "bob's proposal is refused"          bash -c '! grep -q "Agent smoke test bob" <<<"$0"' "$after"
+check "the agent says why"                 grep -q 'not allowed' <<<"$answer"
+cp_api alice -o /dev/null -X POST -d '{}' "$cp/api/chat/reset"
+answer=$(ask alice "Propose a change in the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice.")
+check "the agent proposes alice's change"  grep -q '"tool":"propose_change"' <<<"$answer"
+changes=$(cp_api alice "$cp/api/changes")
+check "it waits for approval, by alice"    grep -q '"title":"Agent smoke test alice[^"]*","body":"[^"]*","author":"alice"' <<<"$changes"
+check "nothing reached main"               test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/platform/contents/agent-alice.txt")" = 404
+pr=$(grep -o '"repo":"platform","number":[0-9]*,"title":"Agent smoke test alice' <<<"$changes" | head -n1 | grep -o 'number":[0-9]*' | cut -d: -f2)
+check "alice rejects it"                   test "$(cp_api alice -o /dev/null -w '%{http_code}' -X POST -d '{}' "$cp/api/changes/platform/$pr/reject")" = 200
+}
+
+# Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
-  case $s in system|login|platform) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
 done
 echo
 if [ $failed -eq 0 ]; then echo "all checks passed"; else echo "$failed check(s) failed"; fi

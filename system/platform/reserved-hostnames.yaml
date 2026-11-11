@@ -2,6 +2,7 @@
 reserved:
   - keycloak
   - sso       # login proxy
+  - controlplane
   - git       # Gitea
   - grafana
   - ntfy

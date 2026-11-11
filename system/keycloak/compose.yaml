@@ -24,6 +24,7 @@ services:
       - gitea-oidc-secret
       - sso-oidc-secret
       - grafana-oidc-secret
+      - controlplane-oidc-secret
     networks: [system, traefik-public]
     deploy:
       labels:
@@ -40,6 +41,7 @@ secrets:
   gitea-oidc-secret: { external: true }
   sso-oidc-secret: { external: true }
   grafana-oidc-secret: { external: true }
+  controlplane-oidc-secret: { external: true }
 
 networks:
   system:

@@ -29,6 +29,7 @@ done
 [ -r "$ANSWERS" ] || fail "cannot read answers file $ANSWERS"
 
 DOMAIN= TLS_MODE=selfsigned ADMIN_USER=admin ADMIN_EMAIL= ADMIN_PASSWORD= POOL_DEVICE= POOL_SIZE=20G REGISTRY_MIRROR=
+LLM_BASE_URL=https://ollama.com/v1 LLM_MODEL=gpt-oss:120b LLM_API_KEY=
 # shellcheck disable=SC1090
 . "$ANSWERS"
 [ -n "$DOMAIN" ] || fail "answers file must set DOMAIN"
@@ -108,7 +109,7 @@ say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
 has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret controlplane-oidc-secret; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.
@@ -133,7 +134,18 @@ DOMAIN=$DOMAIN
 TLS_MODE=$TLS_MODE
 ADMIN_USER=$ADMIN_USER
 ADMIN_EMAIL=$ADMIN_EMAIL
+LLM_BASE_URL=$LLM_BASE_URL
+LLM_MODEL=$LLM_MODEL
 ENV
+
+# The agent's LLM key, root-only. It may also be put in this file by hand;
+# an empty file leaves the agent off. Written in place, so the control plane,
+# which mounts the file, sees a new key without a restart.
+touch "$ETC/llm-api-key"
+chmod 600 "$ETC/llm-api-key"
+if [ -n "$LLM_API_KEY" ]; then
+  printf '%s' "$LLM_API_KEY" > "$ETC/llm-api-key"
+fi
 install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
 
 # Gitea's registry, at git.<domain>, is used by this machine's Docker daemon:
@@ -278,6 +290,7 @@ say "Done"
 cat <<MSG
   Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "homecloud")
   Gitea     https://git.$DOMAIN
+  Control   https://controlplane.$DOMAIN
   Grafana   https://grafana.$DOMAIN
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt

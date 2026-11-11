@@ -13,11 +13,13 @@ kc get "realms/$realm" >/dev/null 2>&1 ||
 group=$(id_of groups -q search=root-admins -q exact=true)
 
 # client ID SECRET_NAME REDIRECT_URI
-# Each client's tokens carry the person's groups in a `groups` claim.
+# Each client's tokens carry the person's groups in a `groups` claim. After
+# signing out, a client may send people back to any of its redirect URIs.
 client() {
   local id args
   args=(-s "clientId=$1" -s enabled=true -s publicClient=false -s standardFlowEnabled=true
-        -s directAccessGrantsEnabled=false -s "secret=$(<"/run/secrets/$2")" -s "redirectUris=[\"$3\"]")
+        -s directAccessGrantsEnabled=false -s "secret=$(<"/run/secrets/$2")" -s "redirectUris=[\"$3\"]"
+        -s 'attributes."post.logout.redirect.uris"=+')
   id=$(id_of clients -q "clientId=$1")
   if [ -z "$id" ]; then
     kc create clients -r "$realm" "${args[@]}" >/dev/null
@@ -34,6 +36,7 @@ client() {
 client gitea gitea-oidc-secret "https://git.$DOMAIN/user/oauth2/keycloak/callback"
 client sso   sso-oidc-secret   "https://sso.$DOMAIN/oauth2/callback"
 client grafana grafana-oidc-secret "https://grafana.$DOMAIN/login/generic_oauth"
+client controlplane controlplane-oidc-secret "https://controlplane.$DOMAIN/*"
 
 # The first admin. The password is set once; a later change by the person is kept.
 user=$(id_of users -q "username=$ADMIN_USER" -q exact=true)

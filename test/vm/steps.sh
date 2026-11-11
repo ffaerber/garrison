@@ -6,6 +6,9 @@
 #
 #   test/vm/steps.sh               run the chain, resuming from the newest valid snapshot
 #   test/vm/steps.sh login         stop after the step `login`
+#
+# Steps: base, install, login, platform, agent. The agent step talks to the
+# real LLM with OLLAMA_API_KEY from this checkout's .env; without it, it skips.
 #   test/vm/steps.sh --from install    rerun from `install`, ignoring its snapshot and later ones
 #   test/vm/steps.sh --list        show the steps and their snapshots
 #   test/vm/steps.sh --clean       delete the VM and its snapshots
@@ -24,7 +27,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
 cd "$ROOT"
 
-STEPS=(base install login platform)
+STEPS=(base install login platform agent)
 
 # Files each step depends on, besides this script's own definition of the step.
 inputs() {
@@ -33,6 +36,7 @@ inputs() {
     install)  echo install.sh installer system controller schemas go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
     login)    echo test/e2e/smoke.sh ;;
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
+    agent)    echo test/e2e/smoke.sh ;;
   esac
 }
 
@@ -56,6 +60,7 @@ step_base() {
 # The installer, then the two test people.
 step_install() {
   sync_repo
+  put_llm_key
   in_vm sudo homecloud/install.sh --answers "homecloud/$ANSWERS"
   in_vm sudo bash -c 'cd homecloud && test/e2e/add-test-users.sh'
   smoke system
@@ -73,7 +78,27 @@ step_platform() {
   smoke platform
 }
 
+# The operator agent talking to the real LLM, with alice's and bob's rights.
+step_agent() {
+  sync_repo
+  put_llm_key
+  smoke agent
+}
+
 # ---------- helpers ----------
+
+# Copies OLLAMA_API_KEY from this checkout's .env to /etc/homecloud/llm-api-key
+# in the VM, as a file: never on a command line, never in Git.
+put_llm_key() {
+  local key file=$ROOT/bin/llm-api-key
+  [ -f "$ROOT/.env" ] || return 0
+  key=$(sed -n 's/^OLLAMA_API_KEY=//p' "$ROOT/.env" | tr -d '"'"'"'\r' | head -n1)
+  [ -n "$key" ] || return 0
+  (umask 077; printf '%s' "$key" > "$file")
+  multipass transfer "$file" "$VM:llm-api-key"
+  rm -f "$file"
+  in_vm sudo bash -c 'mkdir -p -m 700 /etc/homecloud && touch /etc/homecloud/llm-api-key && chmod 600 /etc/homecloud/llm-api-key && cat ~ubuntu/llm-api-key > /etc/homecloud/llm-api-key && rm ~ubuntu/llm-api-key'
+}
 
 smoke() {
   in_vm sudo bash -c "cd homecloud && WAIT_READY=600 test/e2e/smoke.sh $*"
@@ -168,9 +193,11 @@ for s in "$target" $from; do
   printf '%s\n' "${STEPS[@]}" | grep -qx "$s" || { echo "unknown step: $s (steps: ${STEPS[*]})" >&2; exit 2; }
 done
 
-# The newest valid snapshot before --from, or before the target.
+# The newest valid snapshot before --from, or before the target. Multipass
+# changes snapshots only while the VM is stopped.
 start=0 resume=
 if exists; then
+  multipass stop "$VM" 2>/dev/null || true
   [ -n "$from" ] && drop_from "$from"
   for i in "${!STEPS[@]}"; do
     s=${STEPS[$i]}
@@ -178,16 +205,13 @@ if exists; then
     resume=$s start=$((i + 1))
     [ "$s" = "$target" ] && break
   done
-fi
-
-if [ -n "$resume" ]; then
-  say "Restoring snapshot $resume"
-  multipass stop "$VM" 2>/dev/null || true
-  multipass restore --destructive "$VM.$resume" >/dev/null
+  if [ -n "$resume" ]; then
+    say "Restoring snapshot $resume"
+    multipass restore --destructive "$VM.$resume" >/dev/null
+    # Later snapshots no longer match what this run will build.
+    [ $start -lt ${#STEPS[@]} ] && drop_from "${STEPS[$start]}"
+  fi
   multipass start "$VM"
-  drop_from "${STEPS[$start]:-none}"
-else
-  start=0
 fi
 
 for ((i = start; i < ${#STEPS[@]}; i++)); do

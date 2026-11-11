@@ -1,6 +1,6 @@
 # Built by Gitea Actions from the repo system/controller (controller/ci/build.yaml).
 # Context: the repo root, which holds go.mod, schemas/ and controller/.
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

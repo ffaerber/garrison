@@ -5,9 +5,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"homecloud/controller/internal/apply"
+	"homecloud/controller/internal/controlplane"
 	"homecloud/controller/internal/gitops"
 	"homecloud/controller/internal/hostnames"
 	"homecloud/controller/internal/render"
@@ -32,6 +36,7 @@ const usage = `usage:
   controller serve [-once] [-interval DURATION] [-config FILE] [-work DIR]
                    [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
   controller applied [-work DIR]
+  controller controlplane [-listen ADDR] [-gitea URL] [-password-file FILE] [-work DIR] ...
 `
 
 func main() {
@@ -53,6 +58,8 @@ func main() {
 		err = serveCmd(args)
 	case "applied":
 		err = appliedCmd(args)
+	case "controlplane":
+		err = controlplaneCmd(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -264,6 +271,89 @@ func appliedCmd(args []string) error {
 	}
 	for _, name := range s.Names() {
 		fmt.Println(name, s.Stacks[name])
+	}
+	return nil
+}
+
+// controlplaneCmd serves the web control plane: Keycloak sign-in, stacks,
+// changes waiting for approval, and the operator agent.
+func controlplaneCmd(args []string) error {
+	fs := flag.NewFlagSet("controlplane", flag.ExitOnError)
+	listen := fs.String("listen", ":8080", "address to serve on")
+	config := fs.String("config", etcDir+"/install.env", "installation settings")
+	work := fs.String("work", workDir, "the controller's state, read-only")
+	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
+	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
+	clientSecretFile := fs.String("client-secret-file", "/run/secrets/controlplane-oidc-secret", "Keycloak client secret")
+	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
+	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "API key of the LLM")
+	fs.Parse(args)
+
+	_, vars, err := readEnvFile(*config)
+	if err != nil {
+		return err
+	}
+	domain := vars["DOMAIN"]
+	if domain == "" || vars["ADMIN_USER"] == "" {
+		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
+	}
+	or := func(v, def string) string {
+		if v != "" {
+			return v
+		}
+		return def
+	}
+	password, err := os.ReadFile(*passwordFile)
+	if err != nil {
+		return err
+	}
+	secret, err := os.ReadFile(*clientSecretFile)
+	if err != nil {
+		return err
+	}
+	pem, err := os.ReadFile(*caFile)
+	if err != nil {
+		return err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return fmt.Errorf("%s: no certificate", *caFile)
+	}
+	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+
+	g := &controlplane.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password)), Org: "system"}
+	agent := &controlplane.Agent{
+		LLM: &controlplane.LLM{
+			BaseURL: or(vars["LLM_BASE_URL"], "https://ollama.com/v1"),
+			Model:   or(vars["LLM_MODEL"], "gpt-oss:120b"),
+			KeyFile: *keyFile,
+		},
+		Gitea: g, Run: apply.Exec, WorkDir: *work, Domain: domain,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	srv, err := controlplane.New(ctx, controlplane.Config{
+		PublicURL:    "https://controlplane." + domain,
+		Issuer:       "https://keycloak." + domain + "/realms/homecloud",
+		ClientID:     "controlplane",
+		ClientSecret: strings.TrimSpace(string(secret)),
+		HTTP:         httpClient,
+		Agent:        agent,
+		Gitea:        g,
+	})
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.Shutdown(shutdown)
+	}()
+	log.Printf("control plane on %s, model %s", *listen, agent.LLM.(*controlplane.LLM).Model)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
 	}
 	return nil
 }
