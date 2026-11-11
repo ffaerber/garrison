@@ -96,18 +96,19 @@ services:
     image: redis:7
 
 environments:
-  main: { hostname: jellyfin }
-  dev:  { hostname: dev-jellyfin, private: true }
+  main: {}
+  dev:  { private: true }
 ```
 
 - The entry point gets the environment's hostname; `public: admin` gives `<hostname>-admin`, so jellyfin-admin.domain.com on main and dev-jellyfin-admin.domain.com on dev; other services stay internal.
 - Hostnames are one level deep, so one wildcard certificate covers everything.
-- A stack claims exactly the hostnames it declares: one per environment, plus `<hostname>-<public>` for each public service. The main environment's hostname is the stack name; every other environment's is `<environment>-<stack>`. Nothing is claimed by prefix.
+- A stack claims exactly the hostnames it declares: one per environment, plus `<hostname>-<public>` for each public service. The main environment's hostname is the stack name; every other environment's is `<environment>-<stack>`. The hostname follows from the rule, so `hostname` is optional and must match the rule when given. Nothing is claimed by prefix.
 - The controller rejects a deploy whose claimed hostnames are already held by another stack or reserved by root. Claims are first come, first served across all namespaces.
-- `dataset` is a ZFS dataset owned by the stack; `share` is a library other stacks can read.
+- `dataset` is a ZFS dataset owned by the stack; `share` is a library other stacks in the namespace can read.
+- A volume is mounted at `/<volume name>` in the container, so `config` appears at `/config`; `path` overrides this.
 - Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login.
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
-- The stack file carries no policy. Autonomy levels and branch rights live only in the namespace config repo, so nobody who can write an app repo can change them. The controller ignores policy keys in `stack.yaml`.
+- The stack file carries no policy. Autonomy levels and branch rights live only in the namespace config repo, so nobody who can write an app repo can change them. The controller rejects a `stack.yaml` with policy keys, or any other key the schema does not know.
 - The format names no orchestrator; the controller renders it to Swarm in the MVP.
 
 ## Controller and change history

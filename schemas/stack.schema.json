@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stack",
+  "description": "One app in a namespace. See docs/spec.md, \"Stack format\".",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stack", "namespace", "entrypoint", "services", "environments"],
+  "properties": {
+    "stack": { "$ref": "#/$defs/label", "description": "Stack name. Also the hostname of the main environment." },
+    "namespace": { "$ref": "#/$defs/label" },
+    "entrypoint": { "$ref": "#/$defs/label", "description": "The service that gets the environment's hostname." },
+    "services": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/label" },
+      "additionalProperties": { "$ref": "#/$defs/service" }
+    },
+    "environments": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Branch name to running copy of the stack.",
+      "propertyNames": { "$ref": "#/$defs/label" },
+      "additionalProperties": { "$ref": "#/$defs/environment" }
+    }
+  },
+  "$defs": {
+    "label": {
+      "type": "string",
+      "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "quantity": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(Ki|Mi|Gi|Ti)$"
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "image": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "public": { "$ref": "#/$defs/label", "description": "Expose this service at <hostname>-<public>." },
+        "devices": { "type": "array", "uniqueItems": true, "items": { "enum": ["gpu"] } },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "memory": { "$ref": "#/$defs/quantity" } }
+        },
+        "volumes": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/label" },
+          "additionalProperties": { "$ref": "#/$defs/volume" }
+        },
+        "secrets": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/label" } }
+      }
+    },
+    "volume": {
+      "description": "Mounted at /<volume name> unless path is set.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dataset", "size"],
+          "properties": {
+            "dataset": { "$ref": "#/$defs/label", "description": "ZFS dataset owned by this stack, one per environment." },
+            "size": { "$ref": "#/$defs/quantity" },
+            "path": { "$ref": "#/$defs/path" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["share"],
+          "properties": {
+            "share": { "$ref": "#/$defs/label", "description": "Library shared between stacks of the namespace." },
+            "readonly": { "type": "boolean" },
+            "path": { "$ref": "#/$defs/path" }
+          }
+        }
+      ]
+    },
+    "path": { "type": "string", "pattern": "^/[^\\s]+$" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hostname": { "$ref": "#/$defs/label", "description": "Optional. Must be the stack name on main and <environment>-<stack> elsewhere." },
+        "private": { "type": "boolean", "description": "Put the environment behind the Keycloak login." }
+      }
+    }
+  }
+}

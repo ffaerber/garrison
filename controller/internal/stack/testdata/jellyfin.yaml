@@ -1,0 +1,24 @@
+stack: jellyfin
+namespace: media
+entrypoint: app
+
+services:
+  app:
+    image: jellyfin/jellyfin:10.10
+    port: 8096
+    devices: [gpu]
+    resources: { memory: 4Gi }
+    volumes:
+      config: { dataset: jellyfin-config, size: 5Gi }
+      media:  { share: media-library, readonly: true }
+    secrets: [jellyfin-api-key]
+  admin:
+    image: example/jellyfin-admin:1.0
+    port: 8080
+    public: admin
+  redis:
+    image: redis:7
+
+environments:
+  main: {}
+  dev:  { private: true }
