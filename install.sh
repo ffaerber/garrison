@@ -83,7 +83,7 @@ if [ "$state" = inactive ]; then
 elif [ "$(docker info --format '{{.Swarm.ControlAvailable}}')" != true ]; then
   fail "this machine is already a worker in another swarm"
 fi
-for net in traefik-public homecloud-system; do
+for net in traefik-public homecloud-system homecloud-builds; do
   docker network inspect "$net" >/dev/null 2>&1 || docker network create --driver overlay --attachable "$net" >/dev/null
 done
 
@@ -152,6 +152,10 @@ install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-ho
 # Traefik here and trusts the installation's certificate.
 sed -i '/# homecloud registry$/d' /etc/hosts
 echo "127.0.0.1 git.$DOMAIN # homecloud registry" >> /etc/hosts
+# cloud-init, where present, rewrites /etc/hosts at every boot; keep the entry.
+if [ -d /etc/cloud/cloud.cfg.d ]; then
+  printf '# Written by the Home Cloud installer: keep its /etc/hosts entry.\nmanage_etc_hosts: false\n' > /etc/cloud/cloud.cfg.d/99-homecloud.cfg
+fi
 install -D -m 644 "$ETC/tls.crt" "/etc/docker/certs.d/git.$DOMAIN/ca.crt"
 # With the containerd image store, Docker fetches registry tokens without
 # certs.d, so a self-signed certificate must also be in the system's trust
@@ -232,6 +236,41 @@ systemctl enable homecloud-repair >/dev/null 2>&1
 # Also now: a container left without its secrets by an earlier Docker restart
 # is replaced instead of being taken for healthy.
 /usr/local/lib/homecloud/repair-services.sh
+
+# ---------- BuildKit, for the user namespaces' pipelines ----------
+# It pushes to Gitea's registry at its public name, which it reaches on the
+# host through Traefik and trusts with the installation's certificate.
+{
+  echo "# Written by the Home Cloud installer."
+  echo "[registry.\"git.$DOMAIN\"]"
+  echo "  ca = [\"/etc/homecloud/ca.crt\"]"
+  if [ -n "$REGISTRY_MIRROR" ]; then
+    echo "[registry.\"docker.io\"]"
+    echo "  mirrors = [\"${REGISTRY_MIRROR#https://}\"]"
+  fi
+  echo "[worker.oci]"
+  echo "  max-parallelism = 2"
+} > "$ETC/buildkitd.toml"
+install -D -m 755 "$ROOT/host/buildkit.sh" /usr/local/lib/homecloud/buildkit.sh
+cat > /etc/systemd/system/homecloud-buildkit.service <<UNIT
+[Unit]
+Description=Home Cloud: BuildKit for the user namespaces' pipelines
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm -f homecloud-buildkit
+ExecStart=/usr/local/lib/homecloud/buildkit.sh
+ExecStop=/usr/bin/docker stop homecloud-buildkit
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable homecloud-buildkit >/dev/null 2>&1
+systemctl restart homecloud-buildkit
 
 # ---------- controller ----------
 say "Building the controller in Gitea"

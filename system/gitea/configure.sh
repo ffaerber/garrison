@@ -60,6 +60,11 @@ fi
 if ! docker secret inspect gitea-runner-token >/dev/null 2>&1; then
   gitea actions generate-runner-token --scope system | tr -d '\r\n' | docker secret create gitea-runner-token - >/dev/null
 fi
+# The user runner registers for the whole instance; jobs pick it with
+# runs-on: homecloud-user. Only the system runner can reach Docker directly.
+if ! docker secret inspect gitea-user-runner-token >/dev/null 2>&1; then
+  gitea actions generate-runner-token | tr -d '\r\n' | docker secret create gitea-user-runner-token - >/dev/null
+fi
 # The controller build pushes its image and commits its tag as the admin,
 # with a token limited to repositories and packages. Kept root-only in $ETC
 # and as organisation secrets, which only root admins can read or change.

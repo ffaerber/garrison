@@ -29,7 +29,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki chat controlplane hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat controlplane hello dev-hello todo dev-todo; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -448,10 +448,132 @@ cleanup_channel
 check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len([m for m in json.load(sys.stdin) if not (m.get(\"content\") or \"\").startswith(\"**How to ask the agent\")]))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
 }
 
+# deploy: a namespace with an app of its own, built and deployed by its
+# pipeline on the user runner. Leaves homepage/todo running.
+section_deploy() {
+echo "# deploying an app through its pipeline"
+repo=$api/repos/homepage/todo
+for u in alice bob; do sso_login "$tmp/git-$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$TEST_PASSWORD" "$tmp/git-$u.html" $u >/dev/null 2>&1; done
+check "bob cannot create a namespace" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"bobs-namespace"}' "$api/orgs")" = 403
+code=$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"homepage","visibility":"limited","description":"Our homepage and its apps"}' "$api/orgs")
+check "alice creates the namespace homepage" bash -c "[ $code = 201 ] || [ $code = 422 ]"
+has_build_account() { gitea_api "" "$api/orgs/homepage/actions/secrets" | grep -q '"name":"REGISTRY_TOKEN"'; }
+check "the namespace gets its build account" until_true 150 has_build_account
+check "its build account is a member"     test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/homepage/members/homepage-builder")" = 204
+check "the todo app's source goes to homepage/todo" installer/push-repo.sh --update homepage/todo examples/homepage/todo
+# head_of BRANCH: the branch's commit, waiting for Gitea to have it.
+head_of() {
+  local i sha
+  for i in $(seq 30); do
+    sha=$(gitea_api "" "$repo/branches/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])' 2>/dev/null)
+    [ -n "$sha" ] && { echo "$sha"; return 0; }
+    sleep 2
+  done
+  return 1
+}
+good=$(head_of main)
+check "the pushed commit is known"         test -n "$good"
+# pipeline SHA: success when every job of that commit succeeded, failure when one failed.
+pipeline() {
+  gitea_api "" "$repo/actions/tasks?limit=50" | python3 -c '
+import json,sys
+sha=sys.argv[1]
+runs=[r for r in json.load(sys.stdin).get("workflow_runs",[]) if r["head_sha"]==sha]
+st={r["status"] for r in runs}
+print("failure" if "failure" in st else "success" if runs and st=={"success"} and len(runs)>=2 else "running")' "$1"
+}
+pipeline_is() { [ "$(pipeline "$1")" = "$2" ]; }
+pipeline_done() { [ "$(pipeline "$1")" != running ]; }
+pipeline_logs() {
+  local run job
+  for job in $(gitea_api "" "$repo/actions/tasks?limit=50" | python3 -c 'import json,sys; [print(r["id"]) for r in json.load(sys.stdin)["workflow_runs"] if r["head_sha"]==sys.argv[1]]' "$1"); do
+    echo "--- job $job"; gitea_api "" "$repo/actions/jobs/$job/logs" | grep -vE "evaluat|Writing entry|Extracting|expression" | tail -n 25
+  done
+}
+until_true 900 pipeline_done "$good"
+[ "$(pipeline "$good")" = success ] || pipeline_logs "$good"
+check "the pipeline tests, builds and pushes the image" pipeline_is "$good" success
+check "the image is in homepage's registry" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/homepage/container/todo/${good:0:12}")" = 200
+deployed() { homecloud-controller applied | grep -q "^app homepage/todo@$1 [a-z-]* $2"; }
+check "the controller deploys main as todo" until_true 300 deployed main "$good"
+check "todo is behind the sign-in"         status_is 302 todo / 120
+up() { [ "$(web -b "$tmp/$1.jar" -o /dev/null -w '%{http_code}' "https://$1.$DOMAIN/healthz")" = 200 ]; }
+# app_login HOST: signs alice in to an app once Traefik routes its hostname,
+# which happens a few seconds after the controller deploys it.
+app_login() {
+  status_is 302 "$1" / 120 >/dev/null || return 1
+  sso_login "$tmp/$1.jar" "https://$1.$DOMAIN/" "$TEST_PASSWORD" "$tmp/$1.html" alice >/dev/null 2>&1
+  up "$1"
+}
+check "alice opens todo"                   until_true 120 app_login todo
+todo_api() { web -b "$tmp/$1.jar" -H "Origin: https://$1.$DOMAIN" -H 'Content-Type: application/json' "${@:2}"; }
+check "alice adds a todo"                  grep -q '"created_by":"alice"' <<<"$(todo_api todo -X POST -d '{"title":"Water the plants"}' "https://todo.$DOMAIN/api/todos")"
+check "its database has its own dataset"   test "$(zfs get -H -o value quota homecloud/ns/homepage/stacks/todo/todo-db)" = 2G
+check "its password is a generated secret" docker secret inspect todo.db-password
+chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+ns_agent() { web -H "Authorization: Bearer $chat_admin" "$chat/api/models" | grep -q '"id":"agent-homepage"'; }
+check "homepage has its agent and channel in Open WebUI" until_true 120 ns_agent
+
+echo "# a dev environment"
+check "alice creates the branch dev" \
+  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$repo/branches")" = 201
+check "the controller deploys dev as dev-todo" until_true 300 deployed dev "$good"
+check "alice opens dev-todo"               until_true 120 app_login dev-todo
+dev_empty() { [ "$(todo_api dev-todo "https://dev-todo.$DOMAIN/api/todos")" = "[]" ]; }
+check "dev has its own, empty database"    until_true 60 dev_empty
+
+echo "# a failing test stops the deploy"
+fail=$(printf 'package main\n\nimport "testing"\n\nfunc TestFailsOnPurpose(t *testing.T) { t.Fatal("on purpose") }\n' | base64 -w0)
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Add a failing test","branch":"main","content":"'$fail'"}' "$repo/contents/fail_test.go"
+bad=$(head_of main)
+until_true 900 pipeline_done "$bad"
+check "the pipeline fails"                 pipeline_is "$bad" failure
+check "no image is built for it"           test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/homepage/container/todo/${bad:0:12}")" = 404
+sleep 30
+check "main keeps running the last good commit" deployed main "$good"
+check "todo still answers"                 up todo
+sha=$(gitea_api alice "$repo/contents/fail_test.go" | grep -o '"sha":"[^"]*"' | head -n1 | cut -d'"' -f4)
+gitea_api alice -o /dev/null -X DELETE -H 'Content-Type: application/json' -d '{"message":"Remove the failing test","branch":"main","sha":"'$sha'"}' "$repo/contents/fail_test.go"
+fixed=$(head_of main)
+until_true 900 pipeline_done "$fixed"
+[ "$(pipeline "$fixed")" = success ] || pipeline_logs "$fixed"
+check "the fix passes the pipeline"        pipeline_is "$fixed" success
+check "the controller deploys it"          until_true 300 deployed main "$fixed"
+check "the todo survived the redeploy"     until_true 120 bash -c "$(declare -f web todo_api); ETC=$ETC DOMAIN=$DOMAIN tmp=$tmp; todo_api todo https://todo.$DOMAIN/api/todos | grep -q 'Water the plants'"
+
+echo "# the user runner's limits"
+gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/escape"
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"name":"escape","auto_init":true,"default_branch":"main"}' "$api/orgs/homepage/repos"
+escape=$(printf 'on: push\njobs:\n  out:\n    runs-on: homecloud-user\n    container:\n      image: alpine:3.22\n      options: --pid=host --cap-add SYS_PTRACE --security-opt apparmor=unconfined\n    steps:\n      - run: cat /proc/1/cmdline\n' | base64 -w0)
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Try to get out","branch":"main","content":"'$escape'"}' "$api/repos/homepage/escape/contents/.gitea/workflows/out.yaml"
+escape_failed() { gitea_api "" "$api/repos/homepage/escape/actions/tasks?limit=5" | grep -q '"status":"failure"'; }
+check "a job asking for the host's processes fails" until_true 300 escape_failed
+check "the guard refused it"               bash -c 'docker service logs --since 10m controller_guard 2>&1 | grep -q "refused.*pid namespace host"'
+gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/escape"
+
+echo "# hostnames"
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"name":"grafana","auto_init":true,"default_branch":"main"}' "$api/orgs/homepage/repos"
+taken=$(printf 'stack: grafana\nnamespace: homepage\nentrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 80 }\nenvironments:\n  main: {}\n' | base64 -w0)
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Claim grafana","branch":"main","content":"'$taken'"}' "$api/repos/homepage/grafana/contents/stack.yaml"
+refused() { docker service logs --since 5m controller_controller 2>&1 | grep -q "homepage/grafana: not deployed: hostname \"grafana\" is reserved"; }
+check "an app cannot take a reserved hostname" until_true 120 refused
+check "it is not deployed"                 bash -c '! homecloud-controller applied | grep -q "app homepage/grafana"'
+gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/grafana"
+
+echo "# taking an environment down"
+check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$repo/branches/dev")" = 204
+gone() { ! docker stack ls --format '{{.Name}}' | grep -qx dev-todo; }
+check "the controller takes dev-todo down" until_true 120 gone
+check "its data is kept"                   zfs list homecloud/ns/homepage/stacks/dev-todo/todo-db
+check "todo keeps running"                 up todo
+}
+
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
-  case $s in system|login|platform|agent) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent|deploy) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
 done
 echo
 if [ $failed -eq 0 ]; then echo "all checks passed"; else echo "$failed check(s) failed"; fi

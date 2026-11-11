@@ -12,6 +12,9 @@ services:
       config: { dataset: jellyfin-config, size: 5Gi }
       media:  { share: media-library, readonly: true }
     secrets: [jellyfin-api-key]
+    env:
+      JELLYFIN_PublishedServerUrl: "{{url}}"
+      PRICE: "5$"
   admin:
     image: example/jellyfin-admin:1.0
     port: 8080

@@ -89,10 +89,10 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 	}))
 	t.Cleanup(prom.Close)
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"},"apps":{"homepage/todo@main":{"namespace":"homepage","repo":"todo","environment":"main","stack":"todo","commit":"fedcba9876543210"}}}`), 0o644)
 	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
 		if name == "docker" && len(args) > 1 && args[0] == "service" && args[1] == "ls" {
-			return []byte("grafana_grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\n"), nil
+			return []byte("grafana_grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\ntodo_web\t1/1\tgit.example.com/homepage/todo:fedcba987654\n"), nil
 		}
 		return []byte("log line\n"), nil
 	}
@@ -189,6 +189,13 @@ func TestEveryoneMayLook(t *testing.T) {
 	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "system"})
 	if isErr || !strings.Contains(text, "grafana (commit 0123456789ab)") || strings.Contains(text, "hello") {
 		t.Errorf("list_stacks = %q", text)
+	}
+	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "homepage"})
+	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || strings.Contains(text, "grafana") {
+		t.Errorf("list_stacks homepage = %q", text)
+	}
+	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "homepage", "service": "todo_web"}); isErr {
+		t.Errorf("service_logs of an app = %q", text)
 	}
 	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "system", "service": "grafana_grafana"}); isErr || text != "log line\n" {
 		t.Errorf("service_logs = %q", text)

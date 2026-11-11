@@ -12,8 +12,12 @@ services:
       GITEA__server__ROOT_URL: https://git.${DOMAIN}/
       GITEA__server__DISABLE_SSH: "true"
       GITEA__security__INSTALL_LOCK: "true"
-      # Builds run on the runner of the system organisation (system/runner).
+      # Builds run on the runner of the system organisation (system/runner) and
+      # on the user runner of every other namespace (system/controller).
       GITEA__actions__ENABLED: "true"
+      GITEA__repository__DEFAULT_REPO_UNITS: repo.code,repo.releases,repo.issues,repo.pulls,repo.wiki,repo.projects,repo.packages,repo.actions
+      # Namespaces are made by root admins only.
+      GITEA__admin__DISABLE_REGULAR_ORG_CREATION: "true"
       # The container registry, for images built here.
       GITEA__packages__ENABLED: "true"
       # Nothing is visible without signing in.
@@ -33,7 +37,8 @@ services:
       - type: bind
         source: /homecloud/system/gitea
         target: /data
-    networks: [system, traefik-public]
+    # The builds network: the user runner and its jobs reach Gitea there.
+    networks: [system, traefik-public, builds]
     healthcheck:
       test: [CMD, curl, -fsS, http://localhost:3000/api/healthz]
       interval: 5s
@@ -59,3 +64,6 @@ networks:
     name: homecloud-system
   traefik-public:
     external: true
+  builds:
+    external: true
+    name: homecloud-builds

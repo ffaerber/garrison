@@ -1,0 +1,70 @@
+# Test, build and push the image for every push. The controller then deploys
+# the branches named in stack.yaml (main, dev) once their image exists, so a
+# failing test means no image and no deploy.
+#
+# Runs on the user runner: jobs are containers on the builds network, where
+# they reach Gitea and BuildKit but not Docker. REGISTRY_USER and
+# REGISTRY_TOKEN are this namespace's build account, which may push this
+# namespace's images and nothing else.
+name: pipeline
+on:
+  push:
+    branches: ["**"]
+
+defaults:
+  run:
+    shell: sh
+
+env:
+  GITEA_INTERNAL: http://gitea_gitea:3000
+
+jobs:
+  test:
+    runs-on: homecloud-user
+    container:
+      image: golang:1.26-alpine
+    steps:
+      - name: Test
+        env:
+          TOKEN: ${{ gitea.token }}
+          REPO: ${{ gitea.repository }}
+          SHA: ${{ gitea.sha }}
+        run: |
+          set -eu
+          apk add --no-cache git >/dev/null
+          git -c http.extraHeader="Authorization: token $TOKEN" clone -q "$GITEA_INTERNAL/$REPO.git" src
+          cd src && git checkout -q "$SHA"
+          go vet ./...
+          go test ./...
+
+  image:
+    needs: test
+    runs-on: homecloud-user
+    container:
+      image: moby/buildkit:v0.34.1
+    steps:
+      - name: Build and push
+        env:
+          TOKEN: ${{ gitea.token }}
+          REPO: ${{ gitea.repository }}
+          SHA: ${{ gitea.sha }}
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_CA: ${{ vars.REGISTRY_CA }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          apk add --no-cache git >/dev/null
+          # The registry is on this machine: reach it through the job's gateway,
+          # and trust the installation's certificate when it is self-signed.
+          echo "$(ip route | awk '/default/ { print $3 }') $REGISTRY" >> /etc/hosts
+          [ -z "$REGISTRY_CA" ] || printf '%s\n' "$REGISTRY_CA" >> /etc/ssl/certs/ca-certificates.crt
+          git -c http.extraHeader="Authorization: token $TOKEN" clone -q "$GITEA_INTERNAL/$REPO.git" src
+          cd src && git checkout -q "$SHA" && cd ..
+          image="$REGISTRY/$REPO:$(echo "$SHA" | cut -c1-12)"
+          mkdir -p "$HOME/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}' "$REGISTRY" "$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 | tr -d '\n')" > "$HOME/.docker/config.json"
+          buildctl --addr tcp://homecloud-buildkit:1234 build \
+            --frontend dockerfile.v0 --local context=src --local dockerfile=src \
+            --output "type=image,name=$image,push=true"
+          echo "pushed $image"

@@ -8,6 +8,17 @@
 # and on every install. Healthy services are left alone.
 set -euo pipefail
 
+# The installer points the registry's name at this machine in /etc/hosts, so
+# Docker pulls app images through Traefik here. cloud-init, where present,
+# rewrites /etc/hosts at boot; put the entry back.
+if [ -s /etc/homecloud/install.env ]; then
+  domain=$(. /etc/homecloud/install.env && echo "$DOMAIN")
+  if [ -n "$domain" ] && ! grep -q "# homecloud registry$" /etc/hosts; then
+    echo "127.0.0.1 git.$domain # homecloud registry" >> /etc/hosts
+    echo "put back the hosts entry of git.$domain"
+  fi
+fi
+
 # Wait until this node manages the swarm again.
 for _ in $(seq 60); do
   [ "$(docker info --format '{{.Swarm.ControlAvailable}}' 2>/dev/null)" = true ] && break

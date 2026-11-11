@@ -26,6 +26,21 @@ type Options struct {
 	Environment string // environment to render
 	Domain      string // installation domain, e.g. example.com
 	DataRoot    string // where the ZFS pool is mounted; defaults to DefaultDataRoot
+	Commit      string // the environment's commit, for {{commit}} in images
+}
+
+// Registry is the installation's image registry: Gitea's, at git.<domain>.
+func Registry(domain string) string { return "git." + domain }
+
+// Image fills in an image's placeholders: {{registry}} is the installation's
+// registry, {{commit}} the first 12 characters of the environment's commit,
+// so a pipeline's image for each commit is deployed with that commit.
+func Image(image, domain, commit string) string {
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	image = strings.ReplaceAll(image, "{{registry}}", Registry(domain))
+	return strings.ReplaceAll(image, "{{commit}}", commit)
 }
 
 // DefaultDataRoot is where the installer mounts the dataset that holds all
@@ -63,11 +78,12 @@ type external struct {
 }
 
 type composeService struct {
-	Image    string          `yaml:"image"`
-	Networks []string        `yaml:"networks"`
-	Volumes  []composeMount  `yaml:"volumes,omitempty"`
-	Secrets  []composeSecret `yaml:"secrets,omitempty"`
-	Deploy   *composeDeploy  `yaml:"deploy,omitempty"`
+	Image       string            `yaml:"image"`
+	Environment map[string]string `yaml:"environment,omitempty"`
+	Networks    []string          `yaml:"networks"`
+	Volumes     []composeMount    `yaml:"volumes,omitempty"`
+	Secrets     []composeSecret   `yaml:"secrets,omitempty"`
+	Deploy      *composeDeploy    `yaml:"deploy,omitempty"`
 }
 
 type composeMount struct {
@@ -126,7 +142,17 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 	file := composeFile{Services: map[string]composeService{}}
 	for _, name := range s.ServiceNames() {
 		svc := s.Services[name]
-		out := composeService{Image: svc.Image, Networks: []string{"default"}}
+		out := composeService{Image: Image(svc.Image, o.Domain, o.Commit), Networks: []string{"default"}}
+		if len(svc.Env) > 0 {
+			host := s.Hostname(o.Environment) + "." + o.Domain
+			out.Environment = map[string]string{}
+			for k, v := range svc.Env {
+				v = strings.ReplaceAll(v, "{{url}}", "https://"+host+"/")
+				v = strings.ReplaceAll(v, "{{host}}", host)
+				// docker stack deploy reads $ as interpolation; values are literal.
+				out.Environment[k] = strings.ReplaceAll(v, "$", "$$")
+			}
+		}
 		deploy := composeDeploy{}
 
 		if host := s.ServiceHostname(o.Environment, name); host != "" {

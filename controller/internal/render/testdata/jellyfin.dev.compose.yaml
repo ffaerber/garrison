@@ -15,6 +15,9 @@ services:
                 traefik.swarm.network: traefik-public
     app:
         image: jellyfin/jellyfin:10.10
+        environment:
+            JELLYFIN_PublishedServerUrl: https://dev-jellyfin.example.com/
+            PRICE: 5$$
         networks:
             - default
             - traefik-public

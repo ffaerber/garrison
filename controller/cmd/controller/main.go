@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -26,6 +27,7 @@ import (
 	"homecloud/controller/internal/controlplane"
 	"homecloud/controller/internal/dashboards"
 	"homecloud/controller/internal/gitops"
+	"homecloud/controller/internal/guard"
 	"homecloud/controller/internal/hostnames"
 	"homecloud/controller/internal/render"
 	"homecloud/controller/internal/stack"
@@ -40,6 +42,7 @@ const usage = `usage:
                    [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
   controller applied [-work DIR]
   controller controlplane [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
+  controller docker-guard [-listen ADDR] [-socket PATH] [-network NAME]
 `
 
 func main() {
@@ -63,6 +66,8 @@ func main() {
 		err = appliedCmd(args)
 	case "controlplane":
 		err = controlplaneCmd(args)
+	case "docker-guard":
+		err = guardCmd(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -153,7 +158,7 @@ func applyCmd(args []string) error {
 	fs.StringVar(&o.Environment, "env", stack.MainEnvironment, "environment to deploy")
 	fs.StringVar(&o.Domain, "domain", "", "installation domain, e.g. example.com")
 	fs.StringVar(&o.DataRoot, "data-root", "", "dataset mount that holds all namespaces (default "+render.DefaultDataRoot+")")
-	state := fs.String("state", "/var/lib/homecloud/claims.json", "file that records held hostnames")
+	state := fs.String("state", "/var/lib/homecloud/controller/claims.json", "file that records held hostnames; shared with the controller")
 	reservedFile := fs.String("reserved", "", "YAML file with a `reserved` list of hostnames")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
@@ -225,6 +230,7 @@ func serveCmd(args []string) error {
 	hostExec := fs.String("host-exec", "", "run ZFS on the host through a privileged container of this image (for a controller in a container)")
 	grafana := fs.String("grafana", "", "Grafana's URL; when set, dashboards/*.json in the repos are kept in Grafana")
 	grafanaUser := fs.String("grafana-user", "installer", "Grafana's local admin, whose password is the admin password")
+	apps := fs.Bool("apps", true, "also deploy the apps of every other namespace (repos with a stack.yaml)")
 	fs.Parse(args)
 
 	env, vars, err := readEnvFile(*config)
@@ -241,6 +247,7 @@ func serveCmd(args []string) error {
 		PasswordFile: *passwordFile,
 		CAFile:       etcDir + "/tls.crt",
 		Org:          "system",
+		Apps:         *apps,
 		WorkDir:      *work,
 		Env:          env,
 		Run:          apply.Exec,
@@ -283,6 +290,15 @@ func appliedCmd(args []string) error {
 	}
 	for _, name := range s.Names() {
 		fmt.Println(name, s.Stacks[name])
+	}
+	keys := make([]string, 0, len(s.Apps))
+	for k := range s.Apps {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		a := s.Apps[k]
+		fmt.Printf("app %s %s %s\n", k, a.Stack, a.Commit)
 	}
 	return nil
 }
@@ -357,6 +373,11 @@ func controlplaneCmd(args []string) error {
 		BaseModel: model, ToolServerID: "homecloud", Domain: domain, Gitea: g,
 	}
 	go sync.Run(ctx, time.Minute)
+	ca := ""
+	if vars["TLS_MODE"] == "selfsigned" {
+		ca = string(pem)
+	}
+	go (&controlplane.Builders{Gitea: g, Domain: domain, CA: ca}).Run(ctx, time.Minute)
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)
@@ -373,6 +394,19 @@ func controlplaneCmd(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// guardCmd serves the Docker API to the user namespaces' Actions runner,
+// letting through only what running jobs needs.
+func guardCmd(args []string) error {
+	fs := flag.NewFlagSet("docker-guard", flag.ExitOnError)
+	listen := fs.String("listen", ":2375", "address to serve the guarded Docker API on")
+	socket := fs.String("socket", "/var/run/docker.sock", "the Docker daemon's socket")
+	network := fs.String("network", "homecloud-builds", "the only network job containers may join")
+	fs.Parse(args)
+	g := guard.New(*socket, guard.Policy{Network: *network, VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}})
+	log.Printf("docker guard on %s for %s, jobs on %s", *listen, *socket, *network)
+	return (&http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe()
 }
 
 func renderCmd(args []string) error {

@@ -7,7 +7,7 @@
 #   test/vm/steps.sh               run the chain, resuming from the newest valid snapshot
 #   test/vm/steps.sh login         stop after the step `login`
 #
-# Steps: base, install, login, platform, agent. The agent step talks to the
+# Steps: base, install, login, platform, agent, deploy. The agent step talks to the
 # real LLM with OLLAMA_API_KEY from this checkout's .env; without it, it skips.
 #   test/vm/steps.sh --from install    rerun from `install`, ignoring its snapshot and later ones
 #   test/vm/steps.sh --list        show the steps and their snapshots
@@ -27,7 +27,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
 cd "$ROOT"
 
-STEPS=(base install login platform agent)
+STEPS=(base install login platform agent deploy)
 
 # Files each step depends on, besides this script's own definition of the step.
 inputs() {
@@ -37,6 +37,7 @@ inputs() {
     login)    echo test/e2e/smoke.sh ;;
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
     agent)    echo test/e2e/smoke.sh ;;
+    deploy)   echo test/e2e/smoke.sh examples installer/push-repo.sh ;;
   esac
 }
 
@@ -83,6 +84,13 @@ step_agent() {
   sync_repo
   put_llm_key
   smoke agent
+}
+
+# A namespace with an app of its own, built by its pipeline on the user
+# runner and deployed by the controller: homepage/todo, left running.
+step_deploy() {
+  sync_repo
+  smoke deploy
 }
 
 # ---------- helpers ----------

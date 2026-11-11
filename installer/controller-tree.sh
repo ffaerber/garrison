@@ -7,7 +7,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 out=$1
 rm -rf "$out"
 mkdir -p "$out/.gitea/workflows"
-cp "$ROOT/system/controller/compose.yaml" "$ROOT/go.mod" "$ROOT/go.sum" "$out/"
+cp "$ROOT"/system/controller/* "$ROOT/go.mod" "$ROOT/go.sum" "$out/"
 cp -r "$ROOT/schemas" "$ROOT/controller" "$out/"
 mv "$out/controller/ci/build.yaml" "$out/.gitea/workflows/build.yaml"
 rmdir "$out/controller/ci"

@@ -68,7 +68,9 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 		}
 	}
 
-	_, err = run(ctx, nil, compose, "docker", "stack", "deploy", "--detach=true", "--resolve-image", "never", "--compose-file", "-", render.StackName(s, o.Environment))
+	// --with-registry-auth: images from the installation's registry need the
+	// credentials the controller signed in with.
+	_, err = run(ctx, nil, compose, "docker", "stack", "deploy", "--detach=true", "--resolve-image", "never", "--with-registry-auth", "--compose-file", "-", render.StackName(s, o.Environment))
 	return err
 }
 

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todo</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #5f6878; --line: #e2e5ea; --accent: #2f6fe4; --bad: #c4372f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --card: #1b1f26; --text: #e6e9ee; --muted: #9aa3b2; --line: #2c323c; --accent: #5b8ff0; --bad: #ef6b62; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  form.add { display: flex; gap: 8px; margin: 20px 0; }
+  input[type=text] { flex: 1; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  ul { list-style: none; padding: 0; margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  li:last-child { border-bottom: 0; }
+  li .title { flex: 1; overflow-wrap: anywhere; }
+  li.done .title { text-decoration: line-through; color: var(--muted); }
+  li form { margin: 0; }
+  .tick { width: 22px; height: 22px; padding: 0; border-radius: 6px; background: transparent; border: 1px solid var(--line); color: var(--accent); }
+  .del { background: transparent; border: 0; color: var(--muted); padding: 4px 8px; }
+  .del:hover { color: var(--bad); }
+  .error { color: var(--bad); }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Todo</h1><div class="muted">{{.Open}} open · signed in as {{.Who}}</div></div>
+  </header>
+  <form class="add" method="post" action="/todos">
+    <input type="text" name="title" maxlength="200" placeholder="What needs doing?" required autofocus>
+    <button type="submit">Add</button>
+  </form>
+  {{with .Error}}<p class="error">{{.}}</p>{{end}}
+  {{if .Todos}}
+  <ul>
+    {{range .Todos}}
+    <li class="{{if .Done}}done{{end}}">
+      <form method="post" action="/todos/{{.ID}}/toggle"><button class="tick" title="{{if .Done}}Not done{{else}}Done{{end}}">{{if .Done}}✓{{end}}</button></form>
+      <span class="title">{{.Title}}</span>
+      <span class="muted">{{.CreatedBy}}</span>
+      <form method="post" action="/todos/{{.ID}}/delete"><button class="del" title="Delete">✕</button></form>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <div class="empty">Nothing to do.</div>
+  {{end}}
+</main>
+</body>
+</html>

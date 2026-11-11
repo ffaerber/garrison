@@ -131,7 +131,7 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 			return "", err
 		}
 		if len(stacks) == 0 {
-			return "No stacks are deployed in this namespace. The controller deploys only the namespace system so far.", nil
+			return "No stacks are deployed in this namespace. Each repo with a stack.yaml is deployed from its branches, once its image is built.", nil
 		}
 		var b strings.Builder
 		for _, s := range stacks {
@@ -226,8 +226,24 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
 }
 
-// ownStack checks that stack is a deployed stack of namespace. Only system
-// is deployed so far; its stacks are those the controller recorded.
+// stackNames lists a namespace's deployed Swarm stacks with their commits:
+// in system the stacks the controller deployed, elsewhere one per deployed
+// environment of each app, named after its hostname (todo, dev-todo).
+func stackNames(state gitops.State, namespace string) map[string]string {
+	out := map[string]string{}
+	if namespace == SystemNamespace {
+		for name, commit := range state.Stacks {
+			out[name] = commit
+		}
+		return out
+	}
+	for _, a := range state.AppsOf(namespace) {
+		out[a.Stack] = a.Commit
+	}
+	return out
+}
+
+// ownStack checks that stack is a deployed stack of namespace.
 func (t *Tools) ownStack(namespace, stack string) error {
 	if err := validOrg(namespace); err != nil {
 		return err
@@ -235,14 +251,11 @@ func (t *Tools) ownStack(namespace, stack string) error {
 	if !swarmName.MatchString(stack) {
 		return fmt.Errorf("%w: stack %q", ErrInvalid, stack)
 	}
-	if namespace != SystemNamespace {
-		return fmt.Errorf("%w: namespace %s has no deployed stacks yet", ErrInvalid, namespace)
-	}
 	state, err := gitops.ReadState(t.WorkDir)
 	if err != nil {
 		return err
 	}
-	if _, ok := state.Stacks[stack]; !ok {
+	if _, ok := stackNames(state, namespace)[stack]; !ok {
 		return fmt.Errorf("%w: %s is not a stack of %s; list_stacks shows them", ErrInvalid, stack, namespace)
 	}
 	return nil
@@ -325,9 +338,6 @@ func (t *Tools) Stacks(ctx context.Context, namespace string) ([]Stack, error) {
 	if err := validOrg(namespace); err != nil {
 		return nil, err
 	}
-	if namespace != SystemNamespace {
-		return nil, nil
-	}
 	state, err := gitops.ReadState(t.WorkDir)
 	if err != nil {
 		return nil, err
@@ -346,9 +356,10 @@ func (t *Tools) Stacks(ctx context.Context, namespace string) ([]Stack, error) {
 		running, desired, _ := strings.Cut(strings.Fields(f[1])[0], "/")
 		byStack[stack] = append(byStack[stack], Service{Name: f[0], Replicas: f[1], Image: f[2], Healthy: running == desired && desired != "0"})
 	}
+	names := stackNames(state, namespace)
 	var stacks []Stack
-	for _, name := range state.Names() {
-		stacks = append(stacks, Stack{Name: name, Commit: state.Stacks[name], Services: byStack[name]})
+	for _, name := range sortedKeys(names) {
+		stacks = append(stacks, Stack{Name: name, Commit: names[name], Services: byStack[name]})
 	}
 	return stacks, nil
 }
@@ -359,4 +370,13 @@ func firstLines(s string, n int) string {
 		lines = append(lines[:n], "[more]")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }

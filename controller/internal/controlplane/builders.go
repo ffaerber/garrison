@@ -1,0 +1,189 @@
+package controlplane
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"time"
+)
+
+// Builders gives every namespace other than system the credentials its
+// pipelines push images with: a build account, <namespace>-builder, in the
+// organisation's team "builders", which may write packages and nothing else,
+// with a token limited to packages. The token and the registry's address
+// become the organisation's Actions secrets REGISTRY_USER and REGISTRY_TOKEN
+// and variable REGISTRY. Gitea's own job tokens cannot push to an
+// organisation's registry, and a namespace's account can push only there.
+type Builders struct {
+	Gitea  *Gitea
+	Domain string
+	// CA is the installation's certificate, when it is self-signed: published
+	// as the variable REGISTRY_CA, so pipelines can trust the registry.
+	CA string
+}
+
+// BuilderName is the build account of a namespace.
+func BuilderName(namespace string) string { return namespace + "-builder" }
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// Sync sets up every namespace that lacks its build credentials.
+func (b *Builders) Sync(ctx context.Context) error {
+	namespaces, err := b.Gitea.Namespaces(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, ns := range namespaces {
+		if ns.Name == SystemNamespace {
+			continue
+		}
+		if err := b.setup(ctx, ns.Name); err != nil {
+			return fmt.Errorf("build account of %s: %w", ns.Name, err)
+		}
+	}
+	return nil
+}
+
+func (b *Builders) setup(ctx context.Context, ns string) error {
+	g := b.Gitea
+	// The registry's address and certificate, kept current.
+	vars := map[string]string{"REGISTRY": "git." + b.Domain}
+	if b.CA != "" {
+		vars["REGISTRY_CA"] = b.CA
+	}
+	for name, value := range vars {
+		body := map[string]string{"value": value}
+		if _, err := g.do(ctx, "", http.MethodPut, "/orgs/"+ns+"/actions/variables/"+name, body, nil); err != nil {
+			if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/actions/variables/"+name, body, nil); err != nil {
+				return err
+			}
+		}
+	}
+	var secrets []struct {
+		Name string `json:"name"`
+	}
+	if _, err := g.do(ctx, "", http.MethodGet, "/orgs/"+ns+"/actions/secrets", nil, &secrets); err != nil {
+		return err
+	}
+	for _, s := range secrets {
+		if s.Name == "REGISTRY_TOKEN" {
+			return nil
+		}
+	}
+
+	// The team that may write packages, and nothing else.
+	var teams []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if _, err := g.do(ctx, "", http.MethodGet, "/orgs/"+ns+"/teams", nil, &teams); err != nil {
+		return err
+	}
+	var team int64
+	for _, t := range teams {
+		if t.Name == "builders" {
+			team = t.ID
+		}
+	}
+	if team == 0 {
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/teams", map[string]any{
+			"name": "builders", "description": "Build accounts of this namespace's pipelines: may push images.",
+			"permission": "read", "units_map": map[string]string{"repo.packages": "write"},
+			"includes_all_repositories": false, "can_create_org_repo": false,
+		}, &created); err != nil {
+			return err
+		}
+		team = created.ID
+	}
+
+	// The account, with a fresh password nobody keeps.
+	user, password := BuilderName(ns), randomHex(24)
+	account := map[string]any{"login_name": user, "source_id": 0, "password": password, "must_change_password": false}
+	if status, err := g.do(ctx, "", http.MethodGet, "/users/"+user, nil, nil); status == http.StatusNotFound {
+		account["username"] = user
+		account["email"] = user + "@noreply." + b.Domain
+		account["visibility"] = "private"
+		if _, err := g.do(ctx, "", http.MethodPost, "/admin/users", account, nil); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else if _, err := g.do(ctx, "", http.MethodPatch, "/admin/users/"+user, account, nil); err != nil {
+		return err
+	}
+	if _, err := g.do(ctx, "", http.MethodPut, fmt.Sprintf("/teams/%d/members/%s", team, user), nil, nil); err != nil {
+		return err
+	}
+	token, err := b.newToken(ctx, user, password)
+	if err != nil {
+		return err
+	}
+	for name, value := range map[string]string{"REGISTRY_USER": user, "REGISTRY_TOKEN": token} {
+		if _, err := g.do(ctx, "", http.MethodPut, "/orgs/"+ns+"/actions/secrets/"+name, map[string]string{"data": value}, nil); err != nil {
+			return err
+		}
+	}
+	log.Printf("builders: namespace %s can push images as %s", ns, user)
+	return nil
+}
+
+// newToken creates a token limited to packages, as the build account itself:
+// only an account may create its own tokens.
+func (b *Builders) newToken(ctx context.Context, user, password string) (string, error) {
+	body, _ := json.Marshal(map[string]any{"name": fmt.Sprintf("registry-%d", time.Now().Unix()), "scopes": []string{"write:package"}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.Gitea.URL+"/api/v1/users/"+user+"/tokens", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.SetBasicAuth(user, password)
+	req.Header.Set("Content-Type", "application/json")
+	client := b.Gitea.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("create token: %s: %.200s", resp.Status, data)
+	}
+	var out struct {
+		SHA1 string `json:"sha1"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.SHA1 == "" {
+		return "", fmt.Errorf("create token: no token in answer")
+	}
+	return out.SHA1, nil
+}
+
+// Run syncs now and then every interval, logging failures.
+func (b *Builders) Run(ctx context.Context, interval time.Duration) {
+	for {
+		if err := b.Sync(ctx); err != nil {
+			log.Printf("builders: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}

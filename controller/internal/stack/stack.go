@@ -40,6 +40,7 @@ type Service struct {
 	Resources Resources         `yaml:"resources"`
 	Volumes   map[string]Volume `yaml:"volumes"`
 	Secrets   []string          `yaml:"secrets"`
+	Env       map[string]string `yaml:"env"`
 }
 
 type Resources struct {

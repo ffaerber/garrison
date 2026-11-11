@@ -54,9 +54,49 @@ services:
       placement:
         constraints: [node.role == manager]
 
+  # The Docker API for the user runner: only what running jobs needs.
+  guard:
+    image: git.${DOMAIN}/system/controller:bootstrap
+    command: [docker-guard, -listen=:2375, -network=homecloud-builds]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [runner-guard]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  # Actions runner of the user namespaces (see user-runner.yaml). The system
+  # organisation has its own runner, which may use Docker directly.
+  userrunner:
+    image: gitea/act_runner:0.2.13
+    environment:
+      CONFIG_FILE: /etc/act_runner/config.yaml
+      DOCKER_HOST: tcp://guard:2375
+      GITEA_INSTANCE_URL: http://gitea_gitea:3000
+      GITEA_RUNNER_REGISTRATION_TOKEN_FILE: /run/secrets/gitea-user-runner-token
+      GITEA_RUNNER_NAME: homecloud-user
+      GITEA_RUNNER_LABELS: homecloud-user:docker://alpine:3.22
+    configs:
+      - source: user-runner
+        target: /etc/act_runner/config.yaml
+    secrets:
+      - gitea-user-runner-token
+    volumes:
+      - type: bind
+        source: /homecloud/system/user-runner
+        target: /data
+    # The guard on its own network, which jobs are not on; Gitea on the builds network.
+    networks: [runner-guard, builds]
+
+configs:
+  user-runner:
+    name: user-runner-${CONFIG_HASH}
+    file: ./user-runner.yaml
+
 secrets:
   admin-password: { external: true }
   tls-cert: { external: true }
+  gitea-user-runner-token: { external: true }
 
 networks:
   system:
@@ -64,3 +104,10 @@ networks:
     name: homecloud-system
   traefik-public:
     external: true
+  builds:
+    external: true
+    name: homecloud-builds
+  # Only the user runner and the guard.
+  runner-guard:
+    driver: overlay
+    internal: true

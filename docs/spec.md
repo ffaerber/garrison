@@ -115,7 +115,18 @@ environments:
 - Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login.
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
 - The stack file carries no policy. Autonomy levels and branch rights live only in the namespace config repo, so nobody who can write an app repo can change them. The controller rejects a `stack.yaml` with policy keys, or any other key the schema does not know.
+- `env` sets environment variables; `{{url}}` and `{{host}}` in a value become the environment's address. An image may say `{{registry}}/<namespace>/<name>:{{commit}}`: the controller then deploys a commit only once the namespace's pipeline has pushed that image, so a failing pipeline leaves the app at its last good commit.
+- In a namespace other than `system`, every repo with a `stack.yaml` is an app; its stack name must equal the repo's name and its namespace the organisation's. Each environment is deployed from the branch of the same name, and taken down when the branch or repo is deleted.
 - The format names no orchestrator; the controller renders it to Swarm in the MVP.
+
+## Pipelines
+
+Gitea Actions runs two runners:
+
+- The **system runner** serves only the `system` organisation, which only root admins can change. Its jobs can use Docker, which is root on the machine; it builds the controller.
+- The **user runner** serves every other namespace. Its jobs are containers on a builds network, where they reach Gitea and BuildKit and nothing else of the platform. It reaches Docker only through the controller's guard, which refuses anything that would let a job out of its container: privileges, capabilities, devices, security options, host namespaces, host mounts, other networks, and access to containers it did not create. Images are built by BuildKit, never by the host's Docker.
+
+Each namespace has a build account, kept by the control plane, which may push that namespace's images and nothing else; its token is the organisation's Actions secret. Namespaces are created by root admins only.
 
 ## Controller and change history
 

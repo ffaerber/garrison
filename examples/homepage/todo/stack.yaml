@@ -1,0 +1,35 @@
+# The todo app of the namespace homepage: a web app and its database.
+# main is at https://todo.<domain>, a branch dev at https://dev-todo.<domain>;
+# both behind the installation's sign-in. Each has its own database.
+stack: todo
+namespace: homepage
+entrypoint: web
+
+services:
+  web:
+    # Built by the pipeline (.gitea/workflows/pipeline.yaml) for each commit;
+    # the controller deploys a commit once its image exists.
+    image: "{{registry}}/homepage/todo:{{commit}}"
+    port: 8080
+    env:
+      DATABASE_HOST: db
+      DATABASE_NAME: todo
+      DATABASE_USER: todo
+      DATABASE_PASSWORD_FILE: /run/secrets/db-password
+    secrets: [db-password]
+    resources: { memory: 128Mi }
+
+  db:
+    image: postgres:17-alpine
+    env:
+      POSTGRES_DB: todo
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD_FILE: /run/secrets/db-password
+    volumes:
+      data: { dataset: todo-db, size: 2Gi, path: /var/lib/postgresql/data }
+    secrets: [db-password]
+    resources: { memory: 256Mi }
+
+environments:
+  main: { private: true }
+  dev: { private: true }

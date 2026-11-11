@@ -45,9 +45,13 @@ type Config struct {
 	Run          apply.Runner
 	HTTP         *http.Client // for the Gitea API; built from the fields above if nil
 	Dashboards   Dashboards   // optional: keeps Grafana's dashboards as they are in Git
+	Apps         bool         // also deploy apps: stack.yaml repos of every other namespace
+	ClaimsFile   string       // hostname claims; WorkDir/claims.json if empty
 
 	password string
-	home     string // HOME for git, holding the .netrc
+	home     string            // HOME for git, holding the .netrc
+	waiting  map[string]string // app environment -> commit whose image is awaited, to log it once
+	signedIn bool              // the Docker client is signed in to the registry
 }
 
 // Dashboards syncs the dashboards/*.json of a namespace's repos, given as
@@ -60,6 +64,7 @@ type Dashboards interface {
 // the commit of each stack's repo.
 type State struct {
 	Stacks  map[string]string `json:"stacks"`
+	Apps    map[string]App    `json:"apps,omitempty"` // namespace/repo@environment -> deployed app
 	Applied time.Time         `json:"applied"`
 }
 
@@ -74,7 +79,7 @@ func (s State) Names() []string {
 }
 
 func ReadState(workDir string) (State, error) {
-	s := State{Stacks: map[string]string{}}
+	s := State{Stacks: map[string]string{}, Apps: map[string]App{}}
 	data, err := os.ReadFile(filepath.Join(workDir, "applied.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -87,6 +92,9 @@ func ReadState(workDir string) (State, error) {
 	}
 	if s.Stacks == nil {
 		s.Stacks = map[string]string{}
+	}
+	if s.Apps == nil {
+		s.Apps = map[string]App{}
 	}
 	return s, nil
 }
@@ -153,6 +161,7 @@ func (c *Config) prepare() error {
 	if err := os.WriteFile(filepath.Join(c.home, ".netrc"), []byte(netrc), 0o600); err != nil {
 		return err
 	}
+	c.waiting = map[string]string{}
 	if c.HTTP == nil {
 		c.HTTP = &http.Client{Timeout: 30 * time.Second}
 		if c.public() {
@@ -193,11 +202,30 @@ type repo struct {
 	Archived      bool   `json:"archived"`
 }
 
-// repos lists the organisation's repos that can hold a stack.
+// repos lists the system organisation's repos that can hold a stack, with
+// the controller last.
 func (c *Config) repos(ctx context.Context) ([]repo, error) {
+	out, err := c.reposOf(ctx, c.Org)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(out, func(a, b repo) int {
+		switch {
+		case a.Name == LastStack:
+			return 1
+		case b.Name == LastStack:
+			return -1
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return out, nil
+}
+
+// reposOf lists an organisation's repos that can hold a stack, by name.
+func (c *Config) reposOf(ctx context.Context, org string) ([]repo, error) {
 	var out []repo
 	for page := 1; ; page++ {
-		u := fmt.Sprintf("%s/api/v1/orgs/%s/repos?limit=50&page=%d", c.giteaURL(), c.Org, page)
+		u := fmt.Sprintf("%s/api/v1/orgs/%s/repos?limit=50&page=%d", c.giteaURL(), url.PathEscape(org), page)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err
@@ -211,10 +239,10 @@ func (c *Config) repos(ctx context.Context) ([]repo, error) {
 		err = json.NewDecoder(resp.Body).Decode(&batch)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("list repos of %s: %s", c.Org, resp.Status)
+			return nil, fmt.Errorf("list repos of %s: %s", org, resp.Status)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("list repos of %s: %w", c.Org, err)
+			return nil, fmt.Errorf("list repos of %s: %w", org, err)
 		}
 		for _, r := range batch {
 			if !r.Empty && !r.Archived && stackName.MatchString(r.Name) {
@@ -225,18 +253,11 @@ func (c *Config) repos(ctx context.Context) ([]repo, error) {
 			break
 		}
 	}
-	// Name order, with the controller last.
-	slices.SortFunc(out, func(a, b repo) int {
-		switch {
-		case a.Name == LastStack:
-			return 1
-		case b.Name == LastStack:
-			return -1
-		}
-		return strings.Compare(a.Name, b.Name)
-	})
+	slices.SortFunc(out, func(a, b repo) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
 }
+
+func decodeJSON(resp *http.Response, out any) error { return json.NewDecoder(resp.Body).Decode(out) }
 
 func (c *Config) git(ctx context.Context, args ...string) (string, error) {
 	env := []string{
@@ -301,10 +322,11 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 		return prev, err
 	}
 
-	next := State{Stacks: map[string]string{}}
+	next := State{Stacks: map[string]string{}, Apps: prev.Apps}
 	var errs []error
 	present := map[string]bool{}
 	checkouts := map[string]string{} // every fetched repo, stack or not, for dashboards
+	appsDone := false
 	for _, r := range repos {
 		commit, err := c.fetch(ctx, r)
 		if err == nil {
@@ -327,14 +349,23 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 			next.Stacks[r.Name] = commit
 			continue
 		}
-		if r.Name == LastStack && len(errs) > 0 {
+		systemFailed := len(errs) > 0
+		if r.Name == LastStack && c.Apps {
+			// Apps first: deploying the controller may end this process. A
+			// broken app is reported but does not hold back the controller.
+			apps, appErrs := c.syncApps(ctx, force, prev.Apps)
+			next.Apps = apps
+			errs = append(errs, appErrs...)
+			appsDone = true
+		}
+		if r.Name == LastStack && systemFailed {
 			// Replacing the controller now would restart it with work undone.
 			next.Stacks[r.Name] = prev.Stacks[r.Name]
 			continue
 		}
 		// Recorded before deploying the controller, which may end this process.
 		if r.Name == LastStack {
-			pending := State{Stacks: map[string]string{}, Applied: time.Now().UTC()}
+			pending := State{Stacks: map[string]string{}, Apps: next.Apps, Applied: time.Now().UTC()}
 			for k, v := range next.Stacks {
 				pending.Stacks[k] = v
 			}
@@ -363,6 +394,11 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 			continue
 		}
 		log.Printf("removed %s: its repo is gone or holds no compose.yaml", name)
+	}
+	if c.Apps && !appsDone {
+		apps, appErrs := c.syncApps(ctx, force, prev.Apps)
+		next.Apps = apps
+		errs = append(errs, appErrs...)
 	}
 	next.Applied = time.Now().UTC()
 	if err := c.writeState(next); err != nil {

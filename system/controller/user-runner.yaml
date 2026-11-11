@@ -1,0 +1,20 @@
+# Actions runner for the user namespaces: every organisation except system.
+# It reaches Docker only through the controller's guard (docker-guard), which
+# refuses anything that would let a job out of its container. Jobs run on the
+# builds network, where they reach Gitea and BuildKit, and nothing else of the
+# platform. Images are built with BuildKit, never with the host's Docker.
+log:
+  level: info
+runner:
+  file: /data/.runner
+  capacity: 2
+  timeout: 1h
+  labels:
+    - homecloud-user:docker://alpine:3.22
+container:
+  network: homecloud-builds
+  privileged: false
+  valid_volumes: []
+  # Docker comes from DOCKER_HOST (the guard) and is never handed to jobs.
+  docker_host: "-"
+  force_pull: false

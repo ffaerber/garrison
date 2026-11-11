@@ -52,7 +52,7 @@ func TestStack(t *testing.T) {
 		"zfs create -p homecloud/ns/media/stacks/dev-jellyfin/jellyfin-config",
 		"zfs set quota=5G homecloud/ns/media/stacks/dev-jellyfin/jellyfin-config",
 		"docker secret create dev-jellyfin.jellyfin-api-key -",
-		"docker stack deploy --detach=true --resolve-image never --compose-file - dev-jellyfin",
+		"docker stack deploy --detach=true --resolve-image never --with-registry-auth --compose-file - dev-jellyfin",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing command %q in:\n%s", want, got)
