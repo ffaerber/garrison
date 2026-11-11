@@ -27,7 +27,7 @@ services:
       traefik-public:
         # Containers reach Keycloak at its public name through Traefik, so
         # tokens and discovery use one URL inside and outside the cluster.
-        aliases: ["auth.${DOMAIN}"]
+        aliases: ["keycloak.${DOMAIN}"]
     healthcheck:
       test: [CMD, traefik, healthcheck, --ping]
       interval: 5s

@@ -165,7 +165,7 @@ fi
 
 say "Done"
 cat <<MSG
-  Keycloak  https://auth.$DOMAIN  (people sign in to the realm "homecloud")
+  Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "homecloud")
   Gitea     https://git.$DOMAIN
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt

@@ -1,4 +1,4 @@
-# Single sign-on. Reachable at https://auth.<domain>.
+# Single sign-on. Reachable at https://keycloak.<domain>.
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.4
@@ -13,7 +13,7 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
-      KC_HOSTNAME: https://auth.${DOMAIN}
+      KC_HOSTNAME: https://keycloak.${DOMAIN}
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_BOOTSTRAP_ADMIN_USERNAME: ${ADMIN_USER}
@@ -28,10 +28,10 @@ services:
       labels:
         traefik.enable: "true"
         traefik.swarm.network: traefik-public
-        traefik.http.routers.auth.rule: Host(`auth.${DOMAIN}`)
-        traefik.http.routers.auth.entrypoints: websecure
-        traefik.http.routers.auth.tls: "true"
-        traefik.http.services.auth.loadbalancer.server.port: "8080"
+        traefik.http.routers.keycloak.rule: Host(`keycloak.${DOMAIN}`)
+        traefik.http.routers.keycloak.entrypoints: websecure
+        traefik.http.routers.keycloak.tls: "true"
+        traefik.http.services.keycloak.loadbalancer.server.port: "8080"
 
 secrets:
   keycloak-db-password: { external: true }

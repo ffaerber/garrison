@@ -7,7 +7,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 `test/vm/run.sh` installs on a throwaway Multipass VM and runs `test/e2e/smoke.sh`, then installs a second time and runs it again.
 
 - `install.sh --answers FILE`: installs Docker and ZFS, initialises Swarm, creates the ZFS pool, generates secrets, deploys the system stack in order and creates the Gitea admin account. Safe to run again.
-- System stack: Postgres, Traefik, Keycloak (`auth.<domain>`), login proxy (`sso.<domain>`), Gitea (`git.<domain>`).
+- System stack: Postgres, Traefik, Keycloak (`keycloak.<domain>`), login proxy (`sso.<domain>`), Gitea (`git.<domain>`).
 - Single sign-on: people sign in to the Keycloak realm `homecloud`. Private environments redirect to that login and pass the signed-in person's identity to the app. Gitea offers sign-in through Keycloak and creates the account on first login.
 - Roles: the Keycloak group `root-admins` holds the people who may change the platform. Its members are Gitea admins; Gitea re-reads the groups at every login. `platform/system/03-keycloak/add-user.sh` adds people.
 - Platform repo: the installer pushes `platform/` into the private Gitea repo `system/platform` once. Only root admins can see or change it.

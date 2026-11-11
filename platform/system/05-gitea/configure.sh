@@ -16,14 +16,24 @@ fi
 
 # Keycloak login. Members of the Keycloak group root-admins are Gitea admins;
 # Gitea re-reads the groups at every login, so leaving the group removes the right.
-docker exec -u git "$(container gitea_gitea)" sh -c '
+# A running Gitea keeps using the old settings after an update, so a changed
+# login source is followed by a restart, at the end of this script. A
+# fingerprint of the settings, kept in Gitea's data, tells whether they changed.
+auth=$(docker exec -u git "$(container gitea_gitea)" sh -c '
   set -- --name keycloak --provider openidConnect --key gitea \
     --secret "$(cat /run/secrets/gitea-oidc-secret)" --scopes "openid email profile" \
-    --auto-discover-url "https://auth.$0/realms/homecloud/.well-known/openid-configuration" \
+    --auto-discover-url "https://keycloak.$0/realms/homecloud/.well-known/openid-configuration" \
     --group-claim-name groups --admin-group root-admins
+  want=$(printf "%s\n" "$@" | sha256sum)
+  mark=/data/gitea/homecloud-login-source
   id=$(gitea admin auth list | awk "NR > 1 && \$2 == \"keycloak\" { print \$1 }")
-  if [ -z "$id" ]; then gitea admin auth add-oauth "$@"; else gitea admin auth update-oauth --id "$id" "$@"; fi
-' "$DOMAIN" >/dev/null
+  if [ -z "$id" ]; then
+    gitea admin auth add-oauth "$@" >/dev/null && echo added
+  elif [ "$(cat $mark 2>/dev/null)" != "$want" ]; then
+    gitea admin auth update-oauth --id "$id" "$@" >/dev/null && echo updated
+  fi
+  echo "$want" > $mark
+' "$DOMAIN")
 
 # ---------- platform repo ----------
 # The system stack lives in the private repo system/platform. Only Gitea
@@ -54,4 +64,8 @@ if [ "$(api GET /repos/system/platform)" != 200 ]; then
     git -c user.name="Home Cloud installer" -c user.email="$ADMIN_EMAIL" commit -q -m "Platform repo as installed"
     git -c http.sslCAInfo="$ETC/tls.crt" -c http.curloptResolve="$resolve" push -q "https://git.$DOMAIN/system/platform.git" main
   )
+fi
+
+if [ "$auth" = updated ]; then
+  docker service update --quiet --detach --force gitea_gitea >/dev/null
 fi

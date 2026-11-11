@@ -6,6 +6,9 @@
 #   test/vm/run.sh --delete   delete the VM
 #
 # The VM is kept afterwards for inspection: multipass shell homecloud-test
+#
+# After a passing run it points this computer's DNS at the VM (test/vm/dns.sh)
+# and opens Keycloak in the browser. Set OPEN=0 to skip both.
 set -euo pipefail
 
 VM=${VM:-homecloud-test}
@@ -50,3 +53,16 @@ in_vm sudo bash -c 'cd homecloud && test/e2e/smoke.sh'
 echo "==> Installing again (must change nothing and still pass)"
 in_vm sudo homecloud/install.sh --answers "homecloud/$ANSWERS"
 in_vm sudo bash -c 'cd homecloud && test/e2e/smoke.sh'
+
+if [ "${OPEN:-1}" != 0 ]; then
+  echo "==> Pointing this computer at the VM"
+  test/vm/dns.sh
+  # shellcheck disable=SC1090
+  url=https://keycloak.$(. "$ANSWERS" && echo "$DOMAIN")
+  if command -v xdg-open >/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    xdg-open "$url" >/dev/null 2>&1 &
+    echo "Opened $url"
+  else
+    echo "Open $url"
+  fi
+fi

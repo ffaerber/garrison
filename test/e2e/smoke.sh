@@ -29,7 +29,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in auth sso git hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git hello dev-hello; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -49,9 +49,9 @@ PASSWORD=$(cat $ETC/admin-password)
 
 echo "# system stack"
 check "ZFS pool is online"                 test "$(zpool list -H -o health homecloud)" = ONLINE
-check "Keycloak serves OIDC discovery over valid TLS" status_is 200 auth /realms/master/.well-known/openid-configuration 300
+check "Keycloak serves OIDC discovery over valid TLS" status_is 200 keycloak /realms/master/.well-known/openid-configuration 300
 check "Keycloak issuer uses the public hostname" \
-  bash -c "$(declare -f req); ETC=$ETC DOMAIN=$DOMAIN; req auth https://auth.$DOMAIN/realms/master/.well-known/openid-configuration | grep -q '\"issuer\":\"https://auth.$DOMAIN/realms/master\"'"
+  bash -c "$(declare -f req); ETC=$ETC DOMAIN=$DOMAIN; req keycloak https://keycloak.$DOMAIN/realms/master/.well-known/openid-configuration | grep -q '\"issuer\":\"https://keycloak.$DOMAIN/realms/master\"'"
 check "Gitea is healthy over valid TLS"    status_is 200 git /api/healthz
 login=$(req git -u "$ADMIN_USER:$(cat $ETC/admin-password)" "https://git.$DOMAIN/api/v1/user" 2>&1)
 check "Gitea admin can log in and is admin" grep -q '"is_admin":true' <<<"$login"
@@ -72,10 +72,10 @@ check "dev has its own dataset"            zfs list homecloud/ns/demo/stacks/dev
 check "redeploying hello is accepted"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 
 echo "# single sign-on"
-check "the homecloud realm serves OIDC discovery" status_is 200 auth /realms/homecloud/.well-known/openid-configuration
+check "the homecloud realm serves OIDC discovery" status_is 200 keycloak /realms/homecloud/.well-known/openid-configuration
 check "a private environment answers visitors with a redirect" status_is 302 dev-hello /
 target=$(web -o /dev/null -w '%{redirect_url}' "https://dev-hello.$DOMAIN/")
-check "the redirect goes to the Keycloak login" grep -q "^https://auth.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$target"
+check "the redirect goes to the Keycloak login" grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$target"
 check "a forged identity header does not get in" \
   test "$(web -o /dev/null -w '%{http_code}' -H "X-Auth-Request-Email: $ADMIN_EMAIL" "https://dev-hello.$DOMAIN/")" = 302
 sso_login "$tmp/bad.jar" "https://dev-hello.$DOMAIN/" "wrong-password" "$tmp/bad.html" >/dev/null 2>&1
