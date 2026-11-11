@@ -1,0 +1,2 @@
+# Hostnames reserved by root. The controller rejects any stack that claims one.
+reserved: []
