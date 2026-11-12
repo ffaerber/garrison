@@ -1,0 +1,13 @@
+# A deliberately broken app for the agent tests: QUOTES_FILE is missing.
+stack: quotes
+namespace: homepage
+entrypoint: web
+
+services:
+  web:
+    image: "{{registry}}/homepage/quotes:{{commit}}"
+    port: 8080
+    resources: { memory: 32Mi }
+
+environments:
+  main: { private: true }

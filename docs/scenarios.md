@@ -34,6 +34,26 @@ Bob: *@homepage/operator In the repo todo of homepage, change the heading of pag
 - The agent opens a pull request on `homepage/todo`, as bob.
 - Carol merges it. The pipeline tests, builds and pushes the image, and the deployer deploys it: the todo page shows *Homepage todos*.
 
+## 4b. Bob asks the media agent for a screenshot
+
+Alice adds the agent `homepage/media` (folder `agents/media` in `homepage/config`, tools `list_stacks` and `screenshot`, the shared skill `homepage-screenshots`); carol approves it. Bob: *@homepage/media Take a screenshot of https://todo.<domain>/ and put it into the repo todo as docs/screenshots/todo.png.*
+
+- The gateway's browser loads the todo app signed in as bob and the agent opens a pull request on `homepage/todo`, as bob, holding the PNG.
+- The pull request says it shows the todo app as bob, with the page title *Homepage todos*, not the sign-in page.
+
+## 4c. The media agent follows its skill
+
+Bob: *@homepage/media Make the homepage screenshots of the todo app.*
+
+- The agent loads the skill `homepage-screenshots` and follows it: two pull requests, a 1440×900 desktop screenshot and a 390×844 phone screenshot, at the paths the skill names.
+
+## 4d. What the media agent may not do
+
+Bob: *Take a screenshot of the todo app and put it into the namespace system, repo platform.* Then: *Take a screenshot of https://example.org/.*
+
+- Bob may not change `system/platform`: the gateway refuses before the browser runs, and no pull request appears.
+- The browser loads only the installation's own pages: example.org is refused, and nothing is proposed.
+
 ## 5. Alice removes bob
 
 Alice: *@homepage/operator Remove bob from the namespace homepage.*
@@ -41,3 +61,15 @@ Alice: *@homepage/operator Remove bob from the namespace homepage.*
 - The agent opens a pull request on `homepage/config`, as alice, without bob.
 - Carol approves it (she neither wrote it nor changes role); alice merges it.
 - Bob leaves the team `members` and may no longer push to `homepage`'s repos. He can still read everything, as everyone signed in can.
+
+## 6. Alice adds an agent that may only read
+
+Alice proposes `agents/reader` with a tool that does not exist: the approval check fails and names it. With `read_file` alone, carol approves it and alice merges it.
+
+- `homepage/reader` appears in the chat. Asked to propose a change, it cannot: the gateway serves it no `propose_change`.
+
+## 7. The operator finds out why an app does not run
+
+The app `homepage/quotes` builds, but exits at start: its `stack.yaml` does not set `QUOTES_FILE`. Alice: *@homepage/operator The quotes app does not work. Find out why and tell me what to change.*
+
+- The agent looks at the stack's tasks or logs, as alice, and names the missing setting.

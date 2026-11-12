@@ -663,20 +663,54 @@ team_has() {
   id=$(gitea_api "" "$api/orgs/homepage/teams" | python3 -c 'import json,sys; print(next(t["id"] for t in json.load(sys.stdin) if t["name"]==sys.argv[1]))' "$1")
   gitea_api "" "$api/teams/$id/members" | grep -q "\"login\":\"$2\""
 }
-# add_agent BRANCH NAME TOOLS DESCRIPTION PROMPT: alice proposes
-# agents/NAME in homepage/config; prints the pull request's number.
+# add_agent BRANCH NAME TOOLS DESCRIPTION PROMPT [SKILLS] [SKILL_FILE...]:
+# alice proposes agents/NAME in homepage/config, with the shared skills
+# SKILLS (comma-separated) and the files skills/... given as PATH=FILE;
+# prints the pull request's number.
 add_agent() {
   local files
   files=$(python3 -c '
 import base64,json,sys
 branch,name,tools,desc,prompt=sys.argv[1:6]
+skills=sys.argv[6] if len(sys.argv) > 6 else ""
 b=lambda s: base64.b64encode(s.encode()).decode()
-print(json.dumps({"branch":"main","new_branch":branch,"message":"Add the %s agent" % name,"files":[
-  {"operation":"create","path":"agents/%s/agent.yaml" % name,"content":b("description: %s\ntools: [%s]\n" % (desc, tools))},
-  {"operation":"create","path":"agents/%s/prompt.md" % name,"content":b(prompt + "\n")}]}))' "$@")
+cfg="description: %s\ntools: [%s]\n" % (desc, tools) + ("skills: [%s]\n" % skills if skills else "")
+ops=[{"operation":"create","path":"agents/%s/agent.yaml" % name,"content":b(cfg)},
+     {"operation":"create","path":"agents/%s/prompt.md" % name,"content":b(prompt + "\n")}]
+for spec in sys.argv[7:]:
+    path,_,file=spec.partition("=")
+    ops.append({"operation":"create","path":path,"content":b(open(file).read())})
+print(json.dumps({"branch":"main","new_branch":branch,"message":"Add the %s agent" % name,"files":ops}))' "$@")
   gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$files" "$hp/config/contents"
   gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$1"'","base":"main","title":"Add the '"$2"' agent"}' "$hp/config/pulls" |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
+}
+# png_size REPO PATH REF: WIDTHxHEIGHT of a PNG in homepage/REPO at REF, or none.
+png_size() {
+  gitea_api "" "$hp/$1/raw/$2?ref=$3" | python3 -c '
+import struct,sys
+d=sys.stdin.buffer.read()[:24]  # all of it: closing early fails the download
+print("%dx%d" % struct.unpack(">II", d[16:24]) if d[1:4] == b"PNG" else "none")'
+}
+# pr_with REPO PERSON AFTER PATH: the open pull request of homepage/REPO by
+# PERSON, numbered above AFTER, that adds PATH, and its head commit.
+pr_with() {
+  local n
+  for n in $(gitea_api "" "$hp/$1/pulls?state=open&limit=50" | python3 -c '
+import json,sys
+[print(p["number"]) for p in json.load(sys.stdin) if p["user"]["login"]==sys.argv[1] and p["number"] > int(sys.argv[2])]' "$2" "$3"); do
+    if gitea_api "" "$hp/$1/pulls/$n/files" | grep -q "\"filename\":\"$4\""; then
+      echo "$n $(head_sha "$1" "$n")"
+      return 0
+    fi
+  done
+  return 1
+}
+# refused_only SINCE PERSON TOOL WHY: every call of TOOL by PERSON since SINCE
+# was refused with WHY (also true if the agent did not try at all).
+refused_only() {
+  docker service logs --since "$1" control-plane_gateway 2>&1 | grep "mcp: $2: [^ ]*: $3" | grep -v "$4" | grep -q . && return 1
+  return 0
 }
 # has_model ID [PERSON]: Open WebUI offers the agent to PERSON (bob). Not the
 # admin: an admin sees an agent before the gateway lets everyone use it.
@@ -771,14 +805,28 @@ heading() {
 check "the todo page shows the new heading" until_true 120 heading
 
 echo "# 4b. bob asks the media agent for a screenshot"
+# The media agent comes with a shared skill for homepage screenshots.
+cat > "$tmp/skill.md" <<'SKILL'
+---
+name: homepage-screenshots
+description: Screenshots of an app for the homepage, one for desktop and one for phones. Use it whenever someone asks for homepage screenshots of an app.
+---
+For the app asked about, take two screenshots of https://<app>.<domain>/ with the screenshot tool, into the app's own repo:
+
+1. Desktop: width 1440, height 900, path docs/screenshots/<app>-desktop.png, title "Desktop screenshot of <app>".
+2. Phone: width 390, height 844, path docs/screenshots/<app>-phone.png, title "Phone screenshot of <app>".
+
+Each becomes its own pull request. Give both links.
+SKILL
 mpr=$(add_agent media media 'list_stacks, screenshot' "Makes screenshots of the namespace's apps" \
-  "You make screenshots of the namespace's apps for its homepage and docs. Each app answers at https://<stack>.<domain>/; list_stacks shows them. Put each screenshot where the person asks.")
+  "You make screenshots of the namespace's apps for its homepage and docs. Each app answers at https://<stack>.<domain>/; list_stacks shows them. Put each screenshot where the person asks." \
+  homepage-screenshots "skills/homepage-screenshots/SKILL.md=$tmp/skill.md")
 check "carol approves the media agent"     test "$(review config carol "$mpr")" = 200
 check "the approval check passes"          until_true 90 approval_is "$mpr" success
 check "alice merges it"                    test "$(merge config alice "$mpr")" = 200
 check "Open WebUI has homepage/media"      until_true 120 has_model homepage/media
 since=$(last_pr todo)
-t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent homepage bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the repo todo as docs/screenshots/todo.png. Title: Screenshot of the todo app." media)
 spr=$(newest_pr todo bob "$since")
 if [ -z "$spr" ]; then
@@ -786,15 +834,45 @@ if [ -z "$spr" ]; then
   answer=$(ask_agent homepage bob "Please take that screenshot now with the screenshot tool: url https://todo.$DOMAIN/, namespace homepage, repo todo, path docs/screenshots/todo.png." media)
   spr=$(newest_pr todo bob "$since")
 fi
-check "the media agent takes it, as bob"   grep -q "mcp: bob: screenshot" <<<"$(mcp_calls "$t0" bob)"
+check "the media agent takes it, as bob"   grep -q "mcp: bob: screenshot" <<<"$(mcp_calls "$at" bob)"
 check "it proposes the screenshot, as bob" test -n "$spr"
-is_png() { gitea_api "" "$hp/todo/raw/docs/screenshots/todo.png?ref=$(head_sha todo "$spr")" | head -c 8 | od -An -c | grep -q 'P   N   G'; }
-check "the pull request holds a PNG"       is_png
+check "the pull request holds a PNG"       test "$(png_size todo docs/screenshots/todo.png "$(head_sha todo "$spr")")" != none
 body=$(gitea_api "" "$hp/todo/pulls/$spr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
 check "it shows the todo app, signed in as bob" \
   bash -c 'grep -q "Screenshot of https://todo.$1/ as bob" <<<"$0" && grep -q "Homepage todos" <<<"$0"' "$body" "$DOMAIN"
 check "the answer links it"                grep -q "/homepage/todo/pulls/$spr" <<<"$answer"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$spr"
+
+echo "# 4c. the media agent follows its skill"
+since=$(last_pr todo)
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Make the homepage screenshots of the todo app." media)
+if ! pr_with todo bob "$since" docs/screenshots/todo-phone.png >/dev/null || ! pr_with todo bob "$since" docs/screenshots/todo-desktop.png >/dev/null; then
+  printf 'retry the agent did not make both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please load your skill homepage-screenshots and follow it for the app todo now: both screenshots." media)
+fi
+check "it loads the skill, as bob"         grep -q "mcp: bob: load_skill" <<<"$(mcp_calls "$at" bob)"
+read -r dpr dsha <<<"$(pr_with todo bob "$since" docs/screenshots/todo-desktop.png)"
+read -r ppr psha <<<"$(pr_with todo bob "$since" docs/screenshots/todo-phone.png)"
+check "the desktop screenshot is 1440x900" test "$(png_size todo docs/screenshots/todo-desktop.png "$dsha")" = 1440x900
+check "the phone screenshot is 390x844"    test "$(png_size todo docs/screenshots/todo-phone.png "$psha")" = 390x844
+for n in $dpr $ppr; do
+  gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$n"
+done
+
+echo "# 4d. what the media agent may not do"
+platform_prs() { gitea_api "" "$api/repos/system/platform/pulls?state=all&limit=1" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(l[0]["number"] if l else 0)'; }
+before=$(platform_prs)
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the namespace system, repo platform, as docs/todo.png." media)
+check "bob gets no screenshot into a repo he may not change" test "$(platform_prs)" = "$before"
+check "the gateway refused every try"      refused_only "$at" bob screenshot "not allowed"
+check "the agent says so"                  test -n "$answer"
+since=$(last_pr todo)
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Take a screenshot of https://example.org/ and put it into the repo todo as docs/screenshots/example.png." media)
+check "a page outside the home cloud is not shot" test -z "$(newest_pr todo bob "$since")"
+check "the gateway refused every try"      refused_only "$at" bob screenshot "only pages at"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)
@@ -831,6 +909,20 @@ since=$(last_pr todo)
 answer=$(ask_agent homepage alice "Propose a change to the repo todo: add a file reader.txt containing hello. Title: Reader test." reader)
 check "the reader answers"                 test -n "$answer"
 check "it cannot propose a change"         test -z "$(newest_pr todo alice "$since")"
+
+echo "# 7. the operator finds out why an app does not run"
+check "the quotes app's source goes to homepage/quotes" installer/push-repo.sh --update homepage/quotes test/e2e/apps/quotes
+quotes_deployed() { homecloud applied | grep -q "^app homepage/quotes@main quotes "; }
+check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed
+quotes_crashes() { docker service ps quotes_web --format '{{.Error}}' 2>/dev/null | grep -q 'non-zero exit'; }
+check "it does not start"                  until_true 120 quotes_crashes
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage alice "The quotes app of the namespace homepage, https://quotes.$DOMAIN/, does not work. Find out why and tell me what to change.")
+check "it looks at the stack, as alice"    grep -qE "mcp: alice: (stack_status|service_logs)" <<<"$(mcp_calls "$at" alice)"
+check "it names the missing setting"       grep -q QUOTES_FILE <<<"$answer"
+gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
+quotes_gone() { ! docker service inspect quotes_web >/dev/null 2>&1; }
+check "deleting the repo takes the app down" until_true 120 quotes_gone
 
 while read -r c m; do
   for id in $(chat_api bob "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do

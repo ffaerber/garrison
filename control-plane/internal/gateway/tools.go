@@ -310,10 +310,7 @@ func (t *Tools) screenshot(ctx context.Context, p Person, a args) (string, error
 		return "", fmt.Errorf("%w: the window must be 320 to 2560 wide and 240 to 2000 high", ErrInvalid)
 	}
 	// The repo is checked before the browser runs: a refusal costs nothing.
-	if err := validOrg(a.Namespace); err != nil {
-		return "", err
-	}
-	if err := validRepo(a.Repo); err != nil {
+	if err := t.Gitea.CanWrite(ctx, p.Name, a.Namespace, a.Repo); err != nil {
 		return "", err
 	}
 	shot, err := t.Browser.Shoot(ctx, p.Token, a.URL, w, h, a.FullPage)

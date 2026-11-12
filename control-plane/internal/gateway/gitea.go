@@ -245,6 +245,29 @@ type Change struct {
 	Diff      string `json:"diff,omitempty"`
 }
 
+// CanWrite tells whether person may push to a repo, and so propose a
+// change to it: ErrForbidden if not.
+func (g *Gitea) CanWrite(ctx context.Context, as, org, repo string) error {
+	if err := validOrg(org); err != nil {
+		return err
+	}
+	if err := validRepo(repo); err != nil {
+		return err
+	}
+	var r struct {
+		Permissions struct {
+			Push bool `json:"push"`
+		} `json:"permissions"`
+	}
+	if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s", org, repo), nil, &r); err != nil {
+		return err
+	}
+	if !r.Permissions.Push {
+		return ErrForbidden
+	}
+	return nil
+}
+
 // Propose writes one file on a new branch, as person, and opens a pull
 // request for it. Nothing reaches main, and so the cluster, until a person
 // allowed to merges it in Gitea; the gateway cannot merge.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,8 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "{}")
 	case p == "/orgs/system/repos":
 		json.NewEncoder(w).Encode([]Repo{{Name: "grafana"}})
+	case p == "/repos/system/grafana" && r.Method == http.MethodGet:
+		fmt.Fprintf(w, `{"permissions":{"push":%v}}`, as == "alice")
 	case p == "/repos/system/grafana/raw/compose.yaml":
 		io.WriteString(w, "services: {}\n")
 	case p == "/repos/system/grafana/contents/compose.yaml" && r.Method == http.MethodGet:
@@ -638,6 +641,11 @@ func TestScreenshotChecksBeforeShooting(t *testing.T) {
 		t.Errorf("without a browser: %q %v", text, isErr)
 	}
 	m.Tools.Browser = &Browser{URL: "http://127.0.0.1:1", Domain: "example.com"}
+	// bob may not write to grafana: refused before the browser runs (which
+	// here would fail differently).
+	if text, isErr := callText(t, m, "tok-bob", "screenshot", map[string]any{"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "not allowed") {
+		t.Errorf("bob: %q %v", text, isErr)
+	}
 	for name, args := range map[string]map[string]any{
 		"not a png":     {"namespace": "system", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
 		"too wide":      {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
