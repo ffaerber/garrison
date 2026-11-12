@@ -1,12 +1,13 @@
 # Control plane
 
-Go. One image, run in Swarm as the stack `control-plane` from the repo `system/control-plane` (`Dockerfile`, `ci/build.yaml`), as five services:
+Go. One image, run in Swarm as the stack `control-plane` from the repo `system/control-plane` (`Dockerfile`, `ci/build.yaml`), as six services:
 
 | Service | Does |
 | --- | --- |
 | `deployer` | Makes the machine match Git: deploys every repo of `system` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana. Later also holds the SOPS key, takes snapshots and writes change records. |
 | `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each namespace's agents (from `agents/` in its config repo; each gets only its own tools) and channel, its members and approval checks, and its build account. Changes nothing that runs. |
 | `agents` | The agent service: the OpenAI-compatible API Open WebUI talks to, whose models are the namespaces' agents. Runs each turn of an agent: the LLM, whose key only it holds, with the agent's prompt and its tools from the gateway, acting as the person chatting. |
+| `browser` | Headless Chrome for the gateway's `screenshot` tool. Its only network reaches Traefik and the gateway; it loads the installation's pages only, as the person asking. |
 | `guard` | The Docker API for the user runner, letting through only what pipeline jobs need. |
 | `user-runner` | Gitea Actions runner of every namespace other than `system`. |
 

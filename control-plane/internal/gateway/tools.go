@@ -23,6 +23,9 @@ type Person struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
 	Admin bool   `json:"admin"` // member of root-admins
+	// Token is their Keycloak access token, for tools that act as them
+	// elsewhere, e.g. the browser. Never shown or logged.
+	Token string `json:"-"`
 }
 
 // SystemNamespace is the namespace the deployer deploys.
@@ -37,6 +40,7 @@ type Tools struct {
 	Run        apply.Runner // docker CLI
 	WorkDir    string       // the deployer's state, read-only
 	Prometheus string       // e.g. http://prometheus_prometheus:9090
+	Browser    *Browser     // for screenshot; nil: none
 	HTTP       *http.Client
 }
 
@@ -114,6 +118,17 @@ func baseSpecs() []Spec {
 			"title":       str("short title of the change"),
 			"description": str("why, and what it does"),
 		}, "namespace", "repo", "path", "content", "title"),
+		spec("screenshot", "Takes a screenshot of a page of the home cloud, signed in as the person asking, and proposes it as a PNG file in a repo: a pull request, as with propose_change. Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
+			"namespace":   nsArg,
+			"repo":        str("repo the PNG goes into"),
+			"path":        str("file path of the PNG, ending in .png, e.g. docs/screenshots/todo.png"),
+			"url":         str("the page, e.g. https://todo.example.com/"),
+			"width":       map[string]any{"type": "integer", "description": "window width in pixels, 320 to 2560; default 1280"},
+			"height":      map[string]any{"type": "integer", "description": "window height in pixels, 240 to 2000; default 800"},
+			"full_page":   map[string]any{"type": "boolean", "description": "the whole page instead of the window; default false"},
+			"title":       str("short title of the change"),
+			"description": str("why, and what it shows"),
+		}, "namespace", "repo", "path", "url", "title"),
 	}
 }
 
@@ -121,7 +136,9 @@ var swarmName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,100}$`)
 
 type args struct {
 	Namespace, Stack, Service, Repo, Path, Content, Title, Description, Query, Name, Skill string
-	Lines                                                                                  int
+	Lines, Width, Height                                                                   int
+	URL                                                                                    string `json:"url"`
+	FullPage                                                                               bool   `json:"full_page"`
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp
@@ -262,6 +279,8 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 			fmt.Fprintf(&b, "%s#%d %q by %s: %s\n%s\n\n", c.Repo, c.Number, c.Title, c.Author, c.URL, firstLines(c.Diff, 60))
 		}
 		return b.String(), nil
+	case "screenshot":
+		return t.screenshot(ctx, p, a)
 	case "propose_change":
 		c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, a.Content, a.Title, a.Description)
 		if err != nil {
@@ -270,6 +289,52 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, c.URL), nil
 	}
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
+}
+
+// screenshot shoots a page as person and proposes the PNG.
+func (t *Tools) screenshot(ctx context.Context, p Person, a args) (string, error) {
+	if t.Browser == nil {
+		return "", errors.New("no browser is set up")
+	}
+	if !strings.HasSuffix(strings.ToLower(a.Path), ".png") {
+		return "", fmt.Errorf("%w: path %q must end in .png", ErrInvalid, a.Path)
+	}
+	w, h := a.Width, a.Height
+	if w == 0 {
+		w = 1280
+	}
+	if h == 0 {
+		h = 800
+	}
+	if w < 320 || w > 2560 || h < 240 || h > 2000 {
+		return "", fmt.Errorf("%w: the window must be 320 to 2560 wide and 240 to 2000 high", ErrInvalid)
+	}
+	// The repo is checked before the browser runs: a refusal costs nothing.
+	if err := validOrg(a.Namespace); err != nil {
+		return "", err
+	}
+	if err := validRepo(a.Repo); err != nil {
+		return "", err
+	}
+	shot, err := t.Browser.Shoot(ctx, p.Token, a.URL, w, h, a.FullPage)
+	if err != nil {
+		return "", err
+	}
+	desc := strings.TrimSpace(a.Description)
+	if desc != "" {
+		desc += "\n\n"
+	}
+	desc += fmt.Sprintf("Screenshot of %s as %s, %dx%d: page title %q.", shot.URL, p.Name, w, h, shot.Title)
+	c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, string(shot.PNG), a.Title, desc)
+	if err != nil {
+		return "", err
+	}
+	note := ""
+	if shot.Blocked > 0 {
+		note = fmt.Sprintf(" %d requests to other sites were refused, so parts loaded from elsewhere may be missing.", shot.Blocked)
+	}
+	return fmt.Sprintf("Took the screenshot of %s (page title %q, %d KB) and opened change %s/%s#%d with %s.%s Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s",
+		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, note, c.URL), nil
 }
 
 // skill reads one of the agent's skills from its config repo, as person.

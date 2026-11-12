@@ -31,9 +31,10 @@ services:
       placement:
         constraints: [node.role == manager]
 
-  # The gateway: the MCP server behind Open WebUI's agents, and the syncs
-  # that keep each namespace's agent, channel, members and build account. Not routed: only Open WebUI
-  # calls it, over the system network, with each person's Keycloak token.
+  # The gateway: the MCP server behind the agents, and the syncs that keep
+  # each namespace's agents, channel, members and build account. Not routed:
+  # only the agent service calls it, over the system network, with each
+  # person's Keycloak token.
   gateway:
     image: git.${DOMAIN}/system/control-plane:bootstrap
     command:
@@ -50,8 +51,8 @@ services:
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
       - /var/lib/homecloud/deployer:/var/lib/homecloud/deployer:ro
     # Gitea, Prometheus and Open WebUI on the system network; Keycloak's keys at
-    # its public name through Traefik.
-    networks: [system, traefik-public]
+    # its public name through Traefik; the browser on its own network.
+    networks: [system, traefik-public, browser]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8080/healthz"]
       interval: 5s
@@ -87,6 +88,26 @@ services:
     deploy:
       placement:
         constraints: [node.role == manager]
+
+  # Headless Chrome for the agents' screenshot tool, driven by the gateway.
+  # Its only network reaches the gateway and Traefik, and every name it looks
+  # up goes to Traefik, so it can load the installation's pages and nothing
+  # else; the gateway also refuses its requests to other names. Its DevTools
+  # port has no password: nothing but the gateway shares its network. The
+  # image's own start script splits arguments, so Chrome is started here.
+  browser:
+    image: chromedp/headless-shell:156.0.8078.48
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        socat TCP4-LISTEN:9222,fork TCP4:127.0.0.1:9223 &
+        exec /headless-shell/headless-shell --no-sandbox --use-gl=angle --use-angle=swiftshader \
+          --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 \
+          --ignore-certificate-errors '--host-resolver-rules=MAP * traefik_traefik'
+    networks: [browser]
+    deploy:
+      resources:
+        limits: { memory: 1G }
 
   # The Docker API for the user runner: only what running jobs needs.
   guard:
@@ -141,6 +162,10 @@ networks:
   builds:
     external: true
     name: homecloud-builds
+  # The browser, the gateway and Traefik; made by the Traefik stack.
+  browser:
+    external: true
+    name: homecloud-browser
   # Only the user runner and the guard.
   runner-guard:
     driver: overlay

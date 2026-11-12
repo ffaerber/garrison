@@ -11,7 +11,17 @@ http:
     # the login proxy (04-sso). Without a session the proxy redirects to
     # Keycloak. If the proxy is down, requests fail; nothing is let through.
     # The address is the full Swarm service name, which no stack can imitate.
+    # A Keycloak access token in Authorization also passes the check (an
+    # agent's browser, as the person); it is removed before the request
+    # reaches the app, so no app can reuse it elsewhere.
     sso:
+      chain:
+        middlewares: [sso-check, sso-drop-token]
+    sso-drop-token:
+      headers:
+        customRequestHeaders:
+          Authorization: ""
+    sso-check:
       forwardAuth:
         address: http://sso_oauth2-proxy:4180/
         authResponseHeaders:

@@ -608,3 +608,54 @@ func TestCatalogReadsUnknownAgentsFromGitea(t *testing.T) {
 		}
 	}
 }
+
+func TestTheBrowserStaysAtHome(t *testing.T) {
+	b := &Browser{Domain: "example.com"}
+	for u, want := range map[string]bool{
+		"https://todo.example.com/":         true,
+		"https://example.com/x":             true,
+		"https://a.b.example.com:443/p?q=1": true,
+		"http://todo.example.com/":          false, // not https
+		"https://example.com.evil.org/":     false,
+		"https://evilexample.com/":          false,
+		"https://gitea_gitea:3000/":         false,
+		"https://10.0.0.1/":                 false,
+		"https://user:pw@todo.example.com/": false,
+		"file:///etc/passwd":                false,
+		"javascript:alert(1)":               false,
+		"https://TODO.EXAMPLE.COM/":         true,
+	} {
+		if got := b.Allowed(u); got != want {
+			t.Errorf("Allowed(%q) = %v, want %v", u, got, want)
+		}
+	}
+}
+
+func TestScreenshotChecksBeforeShooting(t *testing.T) {
+	m, fg := setup(t)
+	// No browser set up: refused, nothing proposed.
+	if text, isErr := callText(t, m, "tok-alice", "screenshot", map[string]any{"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "no browser") {
+		t.Errorf("without a browser: %q %v", text, isErr)
+	}
+	m.Tools.Browser = &Browser{URL: "http://127.0.0.1:1", Domain: "example.com"}
+	for name, args := range map[string]map[string]any{
+		"not a png":     {"namespace": "system", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
+		"too wide":      {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
+		"another site":  {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://example.org/", "title": "t"},
+		"internal host": {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "http://gitea_gitea:3000/", "title": "t"},
+	} {
+		if text, isErr := callText(t, m, "tok-alice", "screenshot", args); !isErr {
+			t.Errorf("%s: accepted: %q", name, text)
+		}
+	}
+	if fg.prs != 0 {
+		t.Errorf("%d pull requests opened", fg.prs)
+	}
+}
+
+func TestTheTokenIsNeverShown(t *testing.T) {
+	b, _ := json.Marshal(Person{Name: "bob", Token: "secret-token"})
+	if strings.Contains(string(b), "secret-token") {
+		t.Errorf("person as JSON: %s", b)
+	}
+}

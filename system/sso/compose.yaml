@@ -23,6 +23,9 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      # A Keycloak access token for this client (Open WebUI's carry it as an
+      # audience) also counts as signed in: an agent's browser, as the person.
+      OAUTH2_PROXY_SKIP_JWT_BEARER_TOKENS: "true"
     secrets:
       - sso-oidc-secret
       - sso-cookie-secret

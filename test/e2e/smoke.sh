@@ -123,6 +123,8 @@ chat_login() {
 }
 # system_channel [PERSON]: the id of the channel of the namespace system.
 system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "system"))' 2>/dev/null; }
+# mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
+mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
 # mcp ARGS...: the gateway's MCP endpoint, which only Open WebUI reaches.
 mcp() {
   docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
@@ -373,6 +375,10 @@ code=$(sso_login "$tmp/sso.jar" "https://dev-hello.$DOMAIN/" "$PASSWORD" "$tmp/a
 check "the admin signs in and reaches the private environment" bash -c "[ '$code' = 200 ] && grep -q '^Hostname:' $tmp/app.html"
 check "the app is told who signed in"      grep -qi "^X-Auth-Request-Email: $ADMIN_EMAIL" "$tmp/app.html"
 check "the session works for later requests" test "$(web -b "$tmp/sso.jar" -o /dev/null -w '%{http_code}' "https://dev-hello.$DOMAIN/again")" = 200
+check "a made-up bearer token does not get in" \
+  bash -c '! grep -q "^Hostname:" <<<"$0"' "$(web -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' "https://dev-hello.$DOMAIN/")"
+check "the app never sees an Authorization header" \
+  bash -c 'grep -q "^Hostname:" <<<"$0" && ! grep -qi "^Authorization:" <<<"$0"' "$(web -b "$tmp/sso.jar" -H 'Authorization: Basic Zm9vOmJhcg==' "https://dev-hello.$DOMAIN/")"
 check "the public environment needs no login" status_is 200 hello / 30
 
 echo "# hostname claims"
@@ -432,8 +438,6 @@ cleanup_channel() {
     done
   done
 }
-# mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
-mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
 
 # The model sometimes writes a tool call out as text instead of making it. A
 # question whose answer shows no sign of the system is asked once more, and
@@ -659,6 +663,24 @@ team_has() {
   id=$(gitea_api "" "$api/orgs/homepage/teams" | python3 -c 'import json,sys; print(next(t["id"] for t in json.load(sys.stdin) if t["name"]==sys.argv[1]))' "$1")
   gitea_api "" "$api/teams/$id/members" | grep -q "\"login\":\"$2\""
 }
+# add_agent BRANCH NAME TOOLS DESCRIPTION PROMPT: alice proposes
+# agents/NAME in homepage/config; prints the pull request's number.
+add_agent() {
+  local files
+  files=$(python3 -c '
+import base64,json,sys
+branch,name,tools,desc,prompt=sys.argv[1:6]
+b=lambda s: base64.b64encode(s.encode()).decode()
+print(json.dumps({"branch":"main","new_branch":branch,"message":"Add the %s agent" % name,"files":[
+  {"operation":"create","path":"agents/%s/agent.yaml" % name,"content":b("description: %s\ntools: [%s]\n" % (desc, tools))},
+  {"operation":"create","path":"agents/%s/prompt.md" % name,"content":b(prompt + "\n")}]}))' "$@")
+  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$files" "$hp/config/contents"
+  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$1"'","base":"main","title":"Add the '"$2"' agent"}' "$hp/config/pulls" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
+}
+# has_model ID [PERSON]: Open WebUI offers the agent to PERSON (bob). Not the
+# admin: an admin sees an agent before the gateway lets everyone use it.
+has_model() { chat_api "${2:-bob}" "$chat/api/models" | grep -q "\"id\":\"$1\""; }
 can_push() { gitea_api "$1" "$hp/todo" | grep -q '"push":true'; }
 cannot_push() { ! can_push "$1"; }
 
@@ -739,8 +761,40 @@ merged=$(gitea_api "" "$hp/todo/pulls/$tpr" | python3 -c 'import json,sys; print
 deployed_at() { homecloud applied | grep -q "^app homepage/todo@main todo $1"; }
 check "its pipeline builds it and the deployer deploys it" until_true 1200 deployed_at "$merged"
 sso_login "$tmp/todo.jar" "https://todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/todo.html" alice >/dev/null 2>&1
-heading() { web -b "$tmp/todo.jar" "https://todo.$DOMAIN/" | grep -q "Homepage todos"; }
+# Signs in again if the page is not there: after a snapshot boot the login
+# proxy may still have been waiting for Keycloak at the first try.
+heading() {
+  web -b "$tmp/todo.jar" "https://todo.$DOMAIN/" | grep -q "Homepage todos" && return 0
+  sso_login "$tmp/todo.jar" "https://todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/todo.html" alice >/dev/null 2>&1
+  return 1
+}
 check "the todo page shows the new heading" until_true 120 heading
+
+echo "# 4b. bob asks the media agent for a screenshot"
+mpr=$(add_agent media media 'list_stacks, screenshot' "Makes screenshots of the namespace's apps" \
+  "You make screenshots of the namespace's apps for its homepage and docs. Each app answers at https://<stack>.<domain>/; list_stacks shows them. Put each screenshot where the person asks.")
+check "carol approves the media agent"     test "$(review config carol "$mpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$mpr" success
+check "alice merges it"                    test "$(merge config alice "$mpr")" = 200
+check "Open WebUI has homepage/media"      until_true 120 has_model homepage/media
+since=$(last_pr todo)
+t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the repo todo as docs/screenshots/todo.png. Title: Screenshot of the todo app." media)
+spr=$(newest_pr todo bob "$since")
+if [ -z "$spr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please take that screenshot now with the screenshot tool: url https://todo.$DOMAIN/, namespace homepage, repo todo, path docs/screenshots/todo.png." media)
+  spr=$(newest_pr todo bob "$since")
+fi
+check "the media agent takes it, as bob"   grep -q "mcp: bob: screenshot" <<<"$(mcp_calls "$t0" bob)"
+check "it proposes the screenshot, as bob" test -n "$spr"
+is_png() { gitea_api "" "$hp/todo/raw/docs/screenshots/todo.png?ref=$(head_sha todo "$spr")" | head -c 8 | od -An -c | grep -q 'P   N   G'; }
+check "the pull request holds a PNG"       is_png
+body=$(gitea_api "" "$hp/todo/pulls/$spr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
+check "it shows the todo app, signed in as bob" \
+  bash -c 'grep -q "Screenshot of https://todo.$1/ as bob" <<<"$0" && grep -q "Homepage todos" <<<"$0"' "$body" "$DOMAIN"
+check "the answer links it"                grep -q "/homepage/todo/pulls/$spr" <<<"$answer"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$spr"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)
@@ -763,29 +817,16 @@ check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w
 
 echo "# 6. alice adds an agent that may only read"
 check "homepage's config has its operator" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" = 200
-# add_agent BRANCH TOOLS: alice proposes agents/reader with TOOLS; prints the pull request's number.
-add_agent() {
-  local files
-  files=$(python3 -c '
-import base64,json,sys
-b=lambda s: base64.b64encode(s.encode()).decode()
-print(json.dumps({"branch":"main","new_branch":sys.argv[1],"message":"Add the reader agent","files":[
-  {"operation":"create","path":"agents/reader/agent.yaml","content":b("description: Reads the namespace'"'"'s repos\ntools: [%s]\n" % sys.argv[2])},
-  {"operation":"create","path":"agents/reader/prompt.md","content":b("You read files of the namespace'"'"'s repos and explain them.\n")}]}))' "$1" "$2")
-  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$files" "$hp/config/contents"
-  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$1"'","base":"main","title":"Add the reader agent"}' "$hp/config/pulls" |
-    python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
-}
-bad=$(add_agent reader-bad 'read_file, rm_rf')
+reader() { add_agent "$1" reader "$2" "Reads the namespace's repos" "You read files of the namespace's repos and explain them."; }
+bad=$(reader reader-bad 'read_file, rm_rf')
 check "an agent with a tool that does not exist fails the check" until_true 90 approval_is "$bad" failure
 check "the check names the tool"           grep -q 'rm_rf' <<<"$(approval "$bad")"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$bad"
-good=$(add_agent reader read_file)
+good=$(reader reader read_file)
 check "carol approves the reader"          test "$(review config carol "$good")" = 200
 check "the approval check passes"          until_true 90 approval_is "$good" success
 check "alice merges it"                    test "$(merge config alice "$good")" = 200
-reader_agent() { web -H "Authorization: Bearer $admin_token" "$chat/api/models" | grep -q '"id":"homepage/reader"'; }
-check "Open WebUI has homepage/reader"     until_true 120 reader_agent
+check "Open WebUI has homepage/reader"     until_true 120 has_model homepage/reader
 since=$(last_pr todo)
 answer=$(ask_agent homepage alice "Propose a change to the repo todo: add a file reader.txt containing hello. Title: Reader test." reader)
 check "the reader answers"                 test -n "$answer"

@@ -38,6 +38,8 @@ services:
         aliases: ["keycloak.${DOMAIN}"]
       # Prometheus scrapes the metrics entry point here.
       system: {}
+      # The agents' browser reaches the installation's names only here.
+      browser: {}
     healthcheck:
       test: [CMD, traefik, healthcheck, --ping]
       interval: 5s
@@ -62,3 +64,9 @@ networks:
   system:
     external: true
     name: homecloud-system
+  # Made here, as Traefik is deployed before the control plane, which joins it.
+  # Internal: nothing on it reaches beyond the cluster.
+  browser:
+    name: homecloud-browser
+    driver: overlay
+    internal: true

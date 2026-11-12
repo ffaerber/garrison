@@ -143,6 +143,7 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
 	}
+	person.Token = raw
 	var req rpcRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.JSONRPC != "2.0" || req.Method == "" {
 		writeRPC(w, nil, nil, &rpcError{Code: -32700, Message: "parse error"})

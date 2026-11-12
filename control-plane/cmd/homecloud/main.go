@@ -338,6 +338,7 @@ func gatewayCmd(args []string) error {
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
 	prometheus := fs.String("prometheus", "http://prometheus_prometheus:9090", "Prometheus's URL")
 	openwebui := fs.String("openwebui", "http://openwebui_openwebui:8080", "Open WebUI's URL")
+	browser := fs.String("browser", "http://control-plane_browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
 	fs.Parse(args)
@@ -368,8 +369,12 @@ func gatewayCmd(args []string) error {
 
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
 	catalog := &gateway.Catalog{Gitea: g}
+	tools := &gateway.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus}
+	if *browser != "" {
+		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain}
+	}
 	mcp := &gateway.MCP{
-		Tools:    &gateway.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus},
+		Tools:    tools,
 		Verifier: verifier,
 		Agents:   catalog,
 	}

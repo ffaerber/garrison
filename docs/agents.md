@@ -150,7 +150,7 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 3. Sandbox image with Pi; one container per chat with its dataset, idle stop and resume.
 4. LLM and tool proxies; per-agent tool lists enforced; skills.
 5. Move the operator agents over; remove the model preset sync.
-6. Marketing agent: `screenshot` tool (Chromium in the sandbox, signed in as the person), Git LFS, the media library.
+6. Marketing agent: `screenshot` tool, built: headless Chrome in the control plane, signed in as the person, the PNG proposed as a pull request; tested with a media agent that bob asks for a screenshot of the todo app. To come: Git LFS for larger media, the media library, video.
 
 ## Open questions
 
