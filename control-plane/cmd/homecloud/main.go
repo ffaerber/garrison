@@ -585,6 +585,7 @@ func agentsCmd(args []string) error {
 			}
 			srv.Sandboxes.Run(ctx)
 		}()
+		srv.Git = &agentapi.GitProxy{Gitea: g}
 		sb := &http.Server{Addr: *sandboxListen, Handler: srv.SandboxHandler(), ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			<-ctx.Done()

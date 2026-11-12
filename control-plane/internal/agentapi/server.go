@@ -44,6 +44,7 @@ type Server struct {
 	TurnTimeout  time.Duration
 	Sandboxes    *sandbox.Manager // nil: every turn runs in this process
 	MaxToolCalls int              // tool calls per turn in a sandbox; 0: 60
+	Git          *GitProxy        // Git for the sandboxes; nil: none
 }
 
 // Headers Open WebUI's connection fills in for each request.

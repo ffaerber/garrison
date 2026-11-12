@@ -890,14 +890,53 @@ check "it cannot reach the internet"       bash -c '! docker exec "$0" curl -sS 
 check "nor Gitea, nor Docker"              bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null http://gitea_gitea:3000 && ! docker exec "$0" curl -sS -m 5 -o /dev/null http://control-plane_sandbox-guard:2375/_ping' "$sb"
 check "between turns its token counts for nothing" \
   test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/tools"')" = 401
-answer=$(ask_agent homepage bob "In your workspace, use bash to write the line 'pelican 42' into notes.txt, then say done." media)
 has_notes() { docker exec "$(sandbox_of homepage/media)" grep -q "pelican 42" /data/work/notes.txt; }
+answer=$(ask_agent homepage bob "Please keep a note for our next screenshots in your workspace: use bash to write the line 'pelican 42' (the name of the next release) into notes.txt, then say done." media)
+if ! has_notes; then
+  printf 'retry the agent wrote no notes.txt; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "That note is just for you and me: please run echo 'pelican 42' > notes.txt in your workspace now." media)
+fi
 check "it writes a file in its workspace"  has_notes
 # Its container goes, as when it is idle; the workspace and the conversation stay.
 docker rm -f "$sb" >/dev/null
 answer=$(ask_agent homepage bob "Which line did you write into notes.txt just before? Check your workspace." media)
 check "a new container resumes the chat"   test -n "$(sandbox_of homepage/media)" -a "$(sandbox_of homepage/media)" != "$sb"
 check "it still has the file"              grep -q "pelican 42" <<<"$answer"
+
+echo "# 4f. bob has the developer agent change the app with Git"
+dpr=$(add_agent developer developer 'list_repos, read_file, propose_patch' "Changes the code of the namespace's apps" \
+  "You change the code of the namespace's apps. Work in a clone of the repo in your workspace, check what you changed with git diff, and propose it as one pull request.")
+check "carol approves the developer agent" test "$(review config carol "$dpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$dpr" success
+check "alice merges it"                    test "$(merge config alice "$dpr")" = 200
+check "Open WebUI has homepage/developer"  until_true 120 has_model homepage/developer
+since=$(last_pr todo)
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Clone the repo todo of the namespace homepage into your workspace. Find every place the text 'Homepage todos' appears (grep -rn) and change it to 'Team todos'. Then propose your changes, titled: Rename the heading to Team todos." developer)
+gpr=$(newest_pr todo bob "$since")
+if [ -z "$gpr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please propose the changes in your checkout of todo now with propose_workspace_changes." developer)
+  gpr=$(newest_pr todo bob "$since")
+fi
+check "it clones todo, as bob"             bash -c 'docker service logs --since "$0" control-plane_agents 2>&1 | grep -q "git: bob: homepage/developer: fetch homepage/todo"' "$at"
+check "it proposes a patch, as bob"        grep -q "mcp: bob: propose_patch" <<<"$(mcp_calls "$at" bob)"
+check "a pull request by bob holds it"     test -n "$gpr"
+diff=$(gitea_api "" "$hp/todo/pulls/$gpr.diff")
+check "it renames the heading"             bash -c 'grep -q "^+.*Team todos" <<<"$0" && grep -q "^-.*Homepage todos" <<<"$0" && ! grep -q "^+.*Homepage todos" <<<"$0"' "$diff"
+check "on a branch of its own"             grep -q '"ref":"change/bob-' <<<"$(gitea_api "" "$hp/todo/pulls/$gpr")"
+pr_files() { gitea_api "" "$hp/todo/pulls/$gpr/files" | python3 -c 'import json,sys; print(" ".join(f["filename"] for f in json.load(sys.stdin)))'; }
+answer=$(ask_agent homepage bob "Also add a file CHANGELOG.md to your checkout of todo, with the line: Renamed the heading to Team todos. Add it to the same pull request." developer)
+if ! grep -qw CHANGELOG.md <<<"$(pr_files)"; then
+  printf 'retry the pull request has no CHANGELOG.md; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please call propose_workspace_changes on your checkout of todo now, so CHANGELOG.md goes into the same pull request." developer)
+fi
+check "the follow-up goes into the same pull request" grep -qw CHANGELOG.md <<<"$(pr_files)"
+commits=$(gitea_api "" "$hp/todo/pulls/$gpr/commits" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+check "as another commit, with no new pull request" test "$commits" -ge 2 -a -z "$(newest_pr todo bob "$gpr")"
+sb=$(sandbox_of homepage/developer)
+check "the sandbox cannot push"            test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/git/homepage/todo.git/info/refs?service=git-receive-pack"')" = 403
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$gpr"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)

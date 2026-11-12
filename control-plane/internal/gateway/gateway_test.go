@@ -19,9 +19,11 @@ import (
 
 // fakeGitea answers like Gitea: alice may write to system, bob may only read.
 type fakeGitea struct {
-	mu   sync.Mutex
-	prs  int
-	sudo []string
+	mu      sync.Mutex
+	prs     int
+	sudo    []string
+	heads   []string         // branches of open pull requests
+	patches []map[string]any // diffpatch requests
 }
 
 func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,9 +61,23 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, "{}")
+	case p == "/repos/system/grafana/diffpatch":
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		f.patches = append(f.patches, body)
+		io.WriteString(w, "{}")
 	case p == "/repos/system/grafana/pulls" && r.Method == http.MethodPost:
+		var body struct{ Head string }
+		json.NewDecoder(r.Body).Decode(&body)
 		f.prs++
+		f.heads = append(f.heads, body.Head)
 		io.WriteString(w, `{"number":7,"html_url":"https://git.example.com/system/grafana/pulls/7"}`)
+	case p == "/repos/system/grafana/pulls":
+		var out []map[string]any
+		for _, h := range f.heads {
+			out = append(out, map[string]any{"number": 7, "html_url": "https://git.example.com/system/grafana/pulls/7", "head": map[string]any{"ref": h}})
+		}
+		json.NewEncoder(w).Encode(out)
 	case strings.HasSuffix(p, "/pulls"):
 		io.WriteString(w, "[]")
 	// homepage/config has two agents, one of them broken, and a skill.
@@ -274,6 +290,40 @@ func TestProposalsActAsThePerson(t *testing.T) {
 		if s != "alice" && s != "bob" {
 			t.Errorf("Gitea called as %q, not as the person", s)
 		}
+	}
+}
+
+func TestPatchesActAsThePersonAndAddUp(t *testing.T) {
+	m, fg := setup(t)
+	args := map[string]any{"namespace": "system", "repo": "grafana", "patch": "diff --git a/x b/x\n", "title": "Add x"}
+	if text, isErr := callText(t, m, "tok-bob", "propose_patch", args); !isErr || !strings.Contains(text, "not allowed") || len(fg.patches) != 0 {
+		t.Fatalf("bob: %q", text)
+	}
+	text, isErr := callText(t, m, "tok-alice", "propose_patch", args)
+	if isErr || fg.prs != 1 || !strings.HasSuffix(text, "/pulls/7") {
+		t.Fatalf("alice: %q", text)
+	}
+	first := fg.patches[0]
+	branch, _ := first["new_branch"].(string)
+	if first["branch"] != "main" || !strings.HasPrefix(branch, "change/alice-") || !strings.Contains(text, "Branch: "+branch+"\n") {
+		t.Fatalf("first patch %v; %q", first, text)
+	}
+	// More on the same branch: no new pull request.
+	args["branch"] = branch
+	if text, isErr := callText(t, m, "tok-alice", "propose_patch", args); isErr || fg.prs != 1 || fg.patches[1]["branch"] != branch || fg.patches[1]["new_branch"] != nil {
+		t.Fatalf("follow-up: %q, prs %d, %v", text, fg.prs, fg.patches[1])
+	}
+	// Never onto main or any branch that is not a change's.
+	for _, b := range []string{"main", "dev", "change/../main"} {
+		args["branch"] = b
+		if text, isErr := callText(t, m, "tok-alice", "propose_patch", args); !isErr || len(fg.patches) != 2 {
+			t.Errorf("branch %s: %q", b, text)
+		}
+	}
+	args["branch"] = ""
+	args["patch"] = " "
+	if _, isErr := callText(t, m, "tok-alice", "propose_patch", args); !isErr {
+		t.Error("an empty patch was proposed")
 	}
 }
 

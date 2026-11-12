@@ -118,6 +118,15 @@ func baseSpecs() []Spec {
 			"title":       str("short title of the change"),
 			"description": str("why, and what it does"),
 		}, "namespace", "repo", "path", "content", "title"),
+		spec("propose_patch", "Proposes changes to several files at once, as a patch (the output of git diff, with --binary for binary files), as a pull request by the person asking. Without branch, a new branch from base and a new pull request; with the branch of an earlier change, the patch goes on top of it and its pull request shows it. Nothing changes until a person allowed to merges it in Gitea; give them the link.", map[string]any{
+			"namespace":   nsArg,
+			"repo":        str("repo name"),
+			"patch":       str("the changes, as git diff prints them"),
+			"title":       str("short title of the change"),
+			"description": str("why, and what it does"),
+			"base":        str("branch the change is for; default main"),
+			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
+		}, "namespace", "repo", "patch", "title"),
 		spec("screenshot", "Takes a screenshot of a page of the home cloud, signed in as the person asking, and proposes it as a PNG file in a repo: a pull request, as with propose_change. Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
 			"namespace":   nsArg,
 			"repo":        str("repo the PNG goes into"),
@@ -136,6 +145,7 @@ var swarmName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,100}$`)
 
 type args struct {
 	Namespace, Stack, Service, Repo, Path, Content, Title, Description, Query, Name, Skill string
+	Patch, Base, Branch                                                                    string
 	Lines, Width, Height                                                                   int
 	URL                                                                                    string `json:"url"`
 	FullPage                                                                               bool   `json:"full_page"`
@@ -281,6 +291,12 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 		return b.String(), nil
 	case "screenshot":
 		return t.screenshot(ctx, p, a)
+	case "propose_patch":
+		c, branch, err := t.Gitea.ProposePatch(ctx, p.Name, a.Namespace, a.Repo, a.Base, a.Branch, a.Patch, a.Title, a.Description)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Change %s/%s#%d now holds the patch, on branch %s.\nBranch: %s\nNothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, branch, branch, c.URL), nil
 	case "propose_change":
 		c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, a.Content, a.Title, a.Description)
 		if err != nil {

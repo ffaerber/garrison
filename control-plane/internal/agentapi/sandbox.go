@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 
 	"homecloud/control-plane/internal/agents"
@@ -21,7 +22,12 @@ const Workspace = `## Your sandbox
 
 You run in a sandbox of your own for this conversation: a Linux container with bash, git, ripgrep, curl and jq. Your working directory, /data/work, is kept between messages, and only this conversation sees it. Use read, write, edit and bash there for drafts, scripts and checks.
 
-The sandbox has no internet access and cannot reach the platform's services directly: use your platform tools for repos, apps and changes; they act as the person you talk to. Files in your workspace reach a repo only through a proposed change.`
+The sandbox has no internet access and cannot reach the platform's services directly: use your platform tools for repos, apps and changes; they act as the person you talk to. Files in your workspace reach a repo only through a proposed change.
+
+Git: clone any repo the person may read with ` + "`git clone $HOMECLOUD_GIT/<namespace>/<repo>.git`" + ` (read-only; ` + "`git fetch`" + ` and ` + "`git pull`" + ` work too, pushing does not).`
+
+// WorkspaceChanges is added for agents that may propose patches.
+const WorkspaceChanges = ` To change a repo, clone it, edit the files in your checkout, check your work, then call propose_workspace_changes with the checkout's path: it opens a pull request by the person with everything you changed. For more changes to the same pull request, edit the same checkout and call it again. Do not commit or push yourself.`
 
 // definition changes whenever what the sandbox was started with does.
 func definition(model, prompt string, a agents.Agent) string {
@@ -38,6 +44,9 @@ func (s *Server) sandboxTurn(ctx context.Context, token, person, chat string, a 
 		model = s.DefaultModel
 	}
 	prompt := agents.System(a, s.Domain) + "\n\n" + Workspace
+	if slices.Contains(a.Tools, "propose_patch") {
+		prompt += WorkspaceChanges
+	}
 	want := sandbox.Want{
 		Key: chat + "\x00" + a.ID(), Chat: chat, Agent: a.ID(), Person: person,
 		Model: model, Prompt: prompt, Definition: definition(model, prompt, a),
@@ -170,21 +179,24 @@ func (s *Server) SandboxHandler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", s.sandboxLLM)
 	mux.HandleFunc("GET /tools", s.sandboxTools)
 	mux.HandleFunc("POST /tools/call", s.sandboxCall)
+	if s.Git != nil {
+		mux.Handle("/git/", s.Git.Handler(s.caller))
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	return mux
 }
 
-func (s *Server) caller(w http.ResponseWriter, r *http.Request) (agent, model, token string, ok bool) {
+func (s *Server) caller(w http.ResponseWriter, r *http.Request) (sandbox.Caller, bool) {
 	raw, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	agent, model, token, ok = s.Sandboxes.Caller(raw)
+	c, ok := s.Sandboxes.Caller(raw)
 	if !ok {
 		apiError(w, http.StatusUnauthorized, "not a sandbox in a turn")
 	}
-	return
+	return c, ok
 }
 
 func (s *Server) sandboxLLM(w http.ResponseWriter, r *http.Request) {
-	_, model, _, ok := s.caller(w, r)
+	c, ok := s.caller(w, r)
 	if !ok {
 		return
 	}
@@ -193,7 +205,7 @@ func (s *Server) sandboxLLM(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "not a chat completion request")
 		return
 	}
-	body["model"] = model
+	body["model"] = c.Model
 	if err := s.LLM.Proxy(r.Context(), w, body); err != nil {
 		apiError(w, http.StatusBadGateway, err.Error())
 	}
@@ -206,11 +218,11 @@ type toolSpec struct {
 }
 
 func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
-	agent, _, token, ok := s.caller(w, r)
+	c, ok := s.caller(w, r)
 	if !ok {
 		return
 	}
-	tools, err := s.Gateway.Tools(r.Context(), token, agent)
+	tools, err := s.Gateway.Tools(r.Context(), c.Token, c.Agent)
 	if err != nil {
 		apiError(w, http.StatusBadGateway, err.Error())
 		return
@@ -223,7 +235,7 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
-	agent, _, token, ok := s.caller(w, r)
+	c, ok := s.caller(w, r)
 	if !ok {
 		return
 	}
@@ -235,7 +247,7 @@ func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "not a tool call")
 		return
 	}
-	text, isErr, err := s.Gateway.Call(r.Context(), token, agent, req.Name, string(req.Arguments))
+	text, isErr, err := s.Gateway.Call(r.Context(), c.Token, c.Agent, req.Name, string(req.Arguments))
 	if err != nil {
 		text, isErr = "error: "+err.Error(), true
 	}

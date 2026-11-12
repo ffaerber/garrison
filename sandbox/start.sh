@@ -17,6 +17,14 @@ cat > "$HOME/.pi/agent/models.json" <<EOF
   "compat": {"supportsDeveloperRole": false},
   "models": [{"id": "$HOMECLOUD_MODEL", "reasoning": true, "contextWindow": 128000}]}}}
 EOF
+# Git: the platform's repos through the agent service, read-only, as the
+# person whose turn runs (see homecloud.ts for proposing changes).
+export GIT_CONFIG_COUNT=4
+export GIT_CONFIG_KEY_0="http.$HOMECLOUD_API/git/.extraHeader" GIT_CONFIG_VALUE_0="Authorization: Bearer $HOMECLOUD_TOKEN"
+export GIT_CONFIG_KEY_1=user.name GIT_CONFIG_VALUE_1="Agent"
+export GIT_CONFIG_KEY_2=user.email GIT_CONFIG_VALUE_2="agent@sandbox"
+export GIT_CONFIG_KEY_3=advice.detachedHead GIT_CONFIG_VALUE_3=false
+export HOMECLOUD_GIT="$HOMECLOUD_API/git"
 cd /data/work
 exec pi --mode rpc --offline --provider homecloud --model "$HOMECLOUD_MODEL" \
   --system-prompt "$HOMECLOUD_PROMPT" --session-dir /data/sessions --continue \

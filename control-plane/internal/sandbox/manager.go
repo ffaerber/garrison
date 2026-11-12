@@ -281,25 +281,32 @@ func (m *Manager) stop(ctx context.Context, s *Session) {
 	}
 }
 
-// Caller is who a sandbox acts for: its agent, its model and the Keycloak
-// token of the person whose turn runs. ok is false for an unknown token, and
-// between turns, when a sandbox may do nothing on the platform.
-func (m *Manager) Caller(token string) (agent, model, caller string, ok bool) {
+// Caller is who a sandbox acts for.
+type Caller struct {
+	Agent  string // <namespace>/<agent>
+	Model  string
+	Person string // whose turn runs
+	Token  string // their Keycloak token
+}
+
+// Caller is who the sandbox with token acts for. ok is false for an unknown
+// token, and between turns, when a sandbox may do nothing on the platform.
+func (m *Manager) Caller(token string) (Caller, bool) {
 	if token == "" {
-		return "", "", "", false
+		return Caller{}, false
 	}
 	m.mu.Lock()
 	s := m.tokens[token]
 	m.mu.Unlock()
 	if s == nil {
-		return "", "", "", false
+		return Caller{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.caller == "" {
-		return "", "", "", false
+		return Caller{}, false
 	}
-	return s.want.Agent, s.want.Model, s.caller, true
+	return Caller{Agent: s.want.Agent, Model: s.want.Model, Person: s.want.Person, Token: s.caller}, true
 }
 
 // Clean removes the sandbox containers left from before this service

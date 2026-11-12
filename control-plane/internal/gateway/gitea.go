@@ -268,6 +268,94 @@ func (g *Gitea) CanWrite(ctx context.Context, as, org, repo string) error {
 	return nil
 }
 
+// CanRead tells whether person may read a repo: ErrForbidden if not.
+func (g *Gitea) CanRead(ctx context.Context, as, org, repo string) error {
+	if err := validOrg(org); err != nil {
+		return err
+	}
+	if err := validRepo(repo); err != nil {
+		return err
+	}
+	status, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s", org, repo), nil, nil)
+	if status == http.StatusNotFound || status == http.StatusForbidden {
+		return ErrForbidden // Gitea hides what a person may not see
+	}
+	return err
+}
+
+// ChangeBranch is the prefix of the branches agents' changes go on; only
+// such branches can be added to, never main or an environment's branch.
+const ChangeBranch = "change/"
+
+var branchName = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
+
+// MaxPatch is the largest patch ProposePatch takes.
+const MaxPatch = 8 << 20
+
+// ProposePatch applies a patch (git diff, binary files too) as person: on a
+// new branch from base with a new pull request, or, given branch, on top of
+// an earlier change, whose pull request then shows it. Like Propose, it
+// never touches base itself.
+func (g *Gitea) ProposePatch(ctx context.Context, as, org, repo, base, branch, patch, title, description string) (Change, string, error) {
+	if err := g.CanWrite(ctx, as, org, repo); err != nil {
+		return Change{}, "", err
+	}
+	if base == "" {
+		base = "main"
+	}
+	if !branchName.MatchString(base) || strings.Contains(base, "..") {
+		return Change{}, "", fmt.Errorf("%w: base branch %q", ErrInvalid, base)
+	}
+	if branch != "" && (!strings.HasPrefix(branch, ChangeBranch) || !branchName.MatchString(branch) || strings.Contains(branch, "..")) {
+		return Change{}, "", fmt.Errorf("%w: branch %q: only branches of earlier changes, %s..., can be added to", ErrInvalid, branch, ChangeBranch)
+	}
+	if strings.TrimSpace(patch) == "" {
+		return Change{}, "", fmt.Errorf("%w: the patch is empty", ErrInvalid)
+	}
+	if len(patch) > MaxPatch {
+		return Change{}, "", fmt.Errorf("%w: the patch is larger than %d MB", ErrInvalid, MaxPatch>>20)
+	}
+	if strings.TrimSpace(title) == "" {
+		return Change{}, "", fmt.Errorf("%w: a change needs a title", ErrInvalid)
+	}
+	req := map[string]any{"content": patch, "message": title}
+	if branch == "" {
+		branch = fmt.Sprintf("%s%s-%d", ChangeBranch, as, time.Now().UnixNano()/1e6)
+		req["branch"], req["new_branch"] = base, branch
+	} else {
+		req["branch"] = branch
+	}
+	if _, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/diffpatch", org, repo), req, nil); err != nil {
+		return Change{}, "", fmt.Errorf("the patch does not apply: %w", err)
+	}
+	var prs []struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
+		Head    struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls?state=open&limit=50", org, repo), nil, &prs); err != nil {
+		return Change{}, "", err
+	}
+	for _, pr := range prs {
+		if pr.Head.Ref == branch {
+			return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: pr.Title, Body: pr.Body, Author: as, URL: pr.HTMLURL}, branch, nil
+		}
+	}
+	var pr struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+	}
+	if _, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls", org, repo),
+		map[string]any{"head": branch, "base": base, "title": title, "body": description}, &pr); err != nil {
+		return Change{}, "", err
+	}
+	return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, branch, nil
+}
+
 // Propose writes one file on a new branch, as person, and opens a pull
 // request for it. Nothing reaches main, and so the cluster, until a person
 // allowed to merges it in Gitea; the gateway cannot merge.

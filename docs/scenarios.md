@@ -61,6 +61,14 @@ The channel's turns with `homepage/media` ran in its sandbox: a container of the
 - The sandbox holds no LLM key and no Keycloak token; it cannot reach the internet, Gitea or Docker; between turns its own token counts for nothing at the agent service.
 - The file is in the workspace; a new container takes up the chat with the same workspace and conversation, and the agent answers *pelican 42*.
 
+## 4f. Bob has the developer agent change the app with Git
+
+Alice adds `homepage/developer` (tools `list_repos`, `read_file`, `propose_patch`); carol approves. Bob: *@homepage/developer Clone the repo todo, change every 'Homepage todos' to 'Team todos', and propose it.* Then: *Also add a CHANGELOG.md to the same pull request.*
+
+- The agent clones `homepage/todo` through the agent service, as bob, edits its checkout and proposes it: one pull request by bob, on a branch `change/bob-...`, that renames the heading.
+- The follow-up goes into the same pull request as a further commit; no second pull request appears.
+- The sandbox can fetch but not push: Git's push endpoint is refused.
+
 ## 5. Alice removes bob
 
 Alice: *@homepage/operator Remove bob from the namespace homepage.*

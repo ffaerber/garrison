@@ -24,7 +24,7 @@ The same binary is installed on the host as `homecloud`: the installer uses it t
 | `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`; the deployer itself last |
 | `internal/hooks` | Gitea's webhooks: puts one on every organisation, its secret derived from the admin password, checks the signature of each call, and wakes the sync loops |
 | `internal/dashboards` | Keeps `dashboards/*.json` of every repo in Grafana |
-| `internal/agentapi` | The agent service: models, chat completions (streamed), turns in sandboxes and the API they use (LLM and tools), the in-process loop for requests without a chat, Open WebUI's tasks |
+| `internal/agentapi` | The agent service: models, chat completions (streamed), turns in sandboxes and the API they use (LLM, tools, read-only Git), the in-process loop for requests without a chat, Open WebUI's tasks |
 | `internal/sandbox` | The sandboxes: Docker through the guard (attached to stdin and stdout), Pi's RPC protocol, one container per chat started, restarted and stopped when idle |
 | `internal/agents` | Agent folders: reads and checks `agents/` and `skills/` of a config repo; the operator; the system prompt |
 | `internal/gateway` | The gateway: MCP tools, Open WebUI agents and channels, members and approvals, build accounts |
