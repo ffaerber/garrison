@@ -175,6 +175,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 - Coding agents start from an @mention in a Gitea comment (commit, PR, issue) via webhook, or from the team chat. Each task gets a fresh Docker container with the repo checked out, removed when done.
 - A namespace agent that finds a cause above its scope (e.g. a full disk) escalates a request to the system agent.
 - Users can still work locally with their own coding tools and push to the same repos.
+- Planned: agents defined as folders in each namespace's `config` repo, each chat running in its own sandbox behind an OpenAI-compatible agent service. See [agents.md](agents.md).
 
 ## Dashboard
 
