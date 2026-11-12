@@ -1,0 +1,60 @@
+# Installed as .gitea/workflows/build.yaml in the repo system/control-plane.
+# On every push to main: build the control plane image, push it to Gitea's
+# registry, and deploy it by committing its tag to compose.yaml in this repo.
+# The running deployer then applies that commit and replaces itself.
+name: build
+on:
+  push:
+    branches: [main]
+    # The tag commit below changes only compose.yaml and must not build again.
+    paths-ignore: [compose.yaml]
+
+defaults:
+  run:
+    shell: sh
+
+jobs:
+  image:
+    runs-on: homecloud
+    steps:
+      - name: Build, push and deploy
+        env:
+          USER: ${{ secrets.PLATFORM_USER }}
+          TOKEN: ${{ secrets.PLATFORM_TOKEN }}
+          SHA: ${{ gitea.sha }}
+          # The registry's public name, set by the installer. gitea.server_url
+          # is the address the runner uses, which is internal.
+          REGISTRY: ${{ vars.REGISTRY }}
+        run: |
+          set -eu
+          apk add --no-cache git >/dev/null
+          registry=$REGISTRY
+          [ -n "$registry" ] || { echo "the organisation variable REGISTRY is not set" >&2; exit 1; }
+          tag=$(echo "$SHA" | cut -c1-12)
+          image=$registry/system/control-plane:$tag
+          auth="Authorization: token $TOKEN"
+          internal=http://gitea_gitea:3000
+
+          git -c http.extraHeader="$auth" clone -q "$internal/system/control-plane.git" src
+          git -C src checkout -q "$SHA"
+          docker build -q -f src/control-plane/Dockerfile -t "$image" src
+          echo "$TOKEN" | docker login -u "$USER" --password-stdin "$registry" >/dev/null
+          docker push -q "$image"
+          echo "built and pushed $image"
+
+          git config --global user.name "Control plane build"
+          git config --global user.email "ci@$registry"
+          for attempt in 1 2 3; do
+            rm -rf deploy
+            git -c http.extraHeader="$auth" clone -q "$internal/system/control-plane.git" deploy
+            sed -i -E "s#(/system/control-plane:)[A-Za-z0-9._-]+#\1$tag#g" deploy/compose.yaml
+            git -C deploy add compose.yaml
+            if git -C deploy diff --cached --quiet; then echo "already deploys $tag"; exit 0; fi
+            git -C deploy commit -q -m "Deploy control plane $tag [skip ci]"
+            if git -C deploy -c http.extraHeader="$auth" push -q origin main; then
+              echo "deploying $tag"; exit 0
+            fi
+            sleep 5
+          done
+          echo "could not set the tag in compose.yaml" >&2
+          exit 1

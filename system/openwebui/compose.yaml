@@ -1,6 +1,6 @@
 # Chat at https://chat.<domain>. People sign in through Keycloak; root admins
 # become Open WebUI admins, everyone else a user. Each namespace has its own
-# agent here, kept in sync by the control plane, whose MCP tools act with the
+# agent here, kept in sync by the gateway, whose MCP tools act with the
 # rights of the person chatting: Open WebUI forwards their Keycloak token.
 services:
   openwebui:
@@ -26,9 +26,9 @@ services:
       WEBUI_NAME: Home Cloud
       # Configuration comes from here, i.e. from Git, on every start.
       ENABLE_PERSISTENT_CONFIG: "False"
-      # Local admin for the control plane's sync. People never use it.
+      # Local admin for the gateway's sync. People never use it.
       WEBUI_ADMIN_EMAIL: installer@${DOMAIN}
-      WEBUI_ADMIN_NAME: Control plane (not the agent)
+      WEBUI_ADMIN_NAME: Gateway (not the agent)
       ENABLE_LOGIN_FORM: "False"
       ENABLE_SIGNUP: "False"
       # Sign-in through Keycloak.
@@ -52,12 +52,12 @@ services:
       ENABLE_OPENAI_API: "True"
       OPENAI_API_BASE_URL: ${LLM_BASE_URL:-https://ollama.com/v1}
       DEFAULT_MODELS: agent-system
-      # One channel per namespace, kept by the control plane: the team chat
+      # One channel per namespace, kept by the gateway: the team chat
       # where people mention the namespace's agent.
       ENABLE_CHANNELS: "True"
-      # The control plane's tools, over MCP, with each person's own Keycloak token.
+      # The gateway's tools, over MCP, with each person's own Keycloak token.
       TOOL_SERVER_CONNECTIONS: >-
-        [{"type": "mcp", "url": "http://controller_controlplane:8080/mcp", "auth_type": "system_oauth",
+        [{"type": "mcp", "url": "http://control-plane_gateway:8080/mcp", "auth_type": "system_oauth",
           "key": "", "path": "", "spec_type": "url", "spec": "",
           "config": {"enable": true, "access_grants": [{"principal_type": "user", "principal_id": "*", "permission": "read"}]},
           "info": {"id": "homecloud", "name": "Home Cloud", "description": "Look at the home cloud and propose changes, as you."}}]
@@ -77,7 +77,7 @@ services:
         source: /homecloud/system/openwebui
         target: /app/backend/data
       - /etc/homecloud/llm-api-key:/etc/homecloud/llm-api-key:ro
-    # The control plane on the system network; Keycloak at its public name through Traefik.
+    # The gateway on the system network; Keycloak at its public name through Traefik.
     networks: [system, traefik-public]
     healthcheck:
       test: [CMD-SHELL, "curl -fsS http://localhost:8080/health"]

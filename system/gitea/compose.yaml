@@ -13,7 +13,7 @@ services:
       GITEA__server__DISABLE_SSH: "true"
       GITEA__security__INSTALL_LOCK: "true"
       # Builds run on the runner of the system organisation (system/runner) and
-      # on the user runner of every other namespace (system/controller).
+      # on the user runner of every other namespace (system/control-plane).
       GITEA__actions__ENABLED: "true"
       GITEA__repository__DEFAULT_REPO_UNITS: repo.code,repo.releases,repo.issues,repo.pulls,repo.wiki,repo.projects,repo.packages,repo.actions
       # Namespaces are made by root admins only.
@@ -27,9 +27,9 @@ services:
       GITEA__oauth2_client__ENABLE_AUTO_REGISTRATION: "true"
       GITEA__oauth2_client__USERNAME: preferred_username
       GITEA__oauth2_client__ACCOUNT_LINKING: auto
-      # Webhooks go to outside addresses, and to the controller and control
+      # Webhooks go to outside addresses, and to the deployer and control
       # plane, which Gitea tells about pushes, pull requests and pipeline runs.
-      GITEA__webhook__ALLOWED_HOST_LIST: external,controller_controller,controller_controlplane
+      GITEA__webhook__ALLOWED_HOST_LIST: external,control-plane_deployer,control-plane_gateway
       # Trust the installation's certificate when calling Keycloak.
       SSL_CERT_FILE: /run/secrets/tls.crt
     secrets:

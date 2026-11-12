@@ -1,6 +1,6 @@
 # Test, build and push the image for every push, in one BuildKit build: the
 # Dockerfile's test stage runs the tests, so a failing test means no image,
-# and the controller keeps the last good commit running. The controller
+# and the deployer keeps the last good commit running. The deployer
 # deploys the branches named in stack.yaml (main, dev) once their image exists.
 #
 # BuildKit's layer cache is kept in Gitea's registry, as the image

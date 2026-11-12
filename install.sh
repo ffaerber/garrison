@@ -191,9 +191,9 @@ wait_stack() {
   done
 }
 
-# The installer deploys only what is needed to build and run the controller:
+# The installer deploys only what is needed to build and run the deployer:
 # the database, routing, login, Gitea and its Actions runner. Each is a repo of
-# the `system` organisation (see system/). Then the controller takes over and
+# the `system` organisation (see system/). Then the deployer takes over and
 # deploys every repo of that organisation, these included.
 BOOTSTRAP="postgres traefik keycloak sso gitea runner"
 
@@ -202,7 +202,7 @@ for name in $BOOTSTRAP; do
   dir=$ROOT/system/$name
   say "Deploying $name"
   # Swarm configs cannot change, so their names carry a hash of the stack's
-  # files. The controller computes the same hash (controller/internal/system).
+  # files. The deployer computes the same hash (control-plane/internal/system).
   CONFIG_HASH=$(export LC_ALL=C; cat "$dir"/* | sha256sum | cut -c1-12)
   export CONFIG_HASH
   # Images are not resolved to digests: versions are pinned by tag, and a
@@ -272,9 +272,9 @@ systemctl daemon-reload
 systemctl enable homecloud-buildkit >/dev/null 2>&1
 systemctl restart homecloud-buildkit
 
-# ---------- controller ----------
-say "Building the controller in Gitea"
-# Pushing system/controller started its build in Gitea Actions. The build
+# ---------- control plane ----------
+say "Building the control plane in Gitea"
+# Pushing system/control-plane started its build in Gitea Actions. The build
 # pushes the image to Gitea's registry and sets its tag in the repo's
 # compose.yaml; until then the tag is "bootstrap".
 work=$(mktemp -d)
@@ -282,47 +282,47 @@ trap 'rm -rf "$work"' EXIT
 . "$ROOT/installer/lib.sh"
 gitea_session "$work"
 deadline=$((SECONDS + 1800))
-until [ "$(gitea_api GET /repos/system/controller/raw/compose.yaml)" = 200 ] && ! grep -q 'system/controller:bootstrap' "$work/body"; do
-  gitea_api GET "/repos/system/controller/actions/tasks?limit=1" >/dev/null
+until [ "$(gitea_api GET /repos/system/control-plane/raw/compose.yaml)" = 200 ] && ! grep -q 'system/control-plane:bootstrap' "$work/body"; do
+  gitea_api GET "/repos/system/control-plane/actions/tasks?limit=1" >/dev/null
   if grep -q '"status":"failure"' "$work/body"; then
     run=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
-    gitea_api GET "/repos/system/controller/actions/runs/$run/jobs" >/dev/null
+    gitea_api GET "/repos/system/control-plane/actions/runs/$run/jobs" >/dev/null
     job=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
-    gitea_api GET "/repos/system/controller/actions/jobs/$job/logs" >/dev/null
+    gitea_api GET "/repos/system/control-plane/actions/jobs/$job/logs" >/dev/null
     grep -vE 'evaluat|Writing entry|Extracting' "$work/body" | tail -n 15 >&2
-    fail "the controller build failed; see https://git.$DOMAIN/system/controller/actions"
+    fail "the control plane build failed; see https://git.$DOMAIN/system/control-plane/actions"
   fi
   if [ $SECONDS -ge $deadline ]; then
-    gitea_api GET "/repos/system/controller/actions/tasks?limit=3" >/dev/null
+    gitea_api GET "/repos/system/control-plane/actions/tasks?limit=3" >/dev/null
     echo "latest builds: $(cat "$work/body")" >&2
-    fail "the controller was not built within 30 minutes"
+    fail "the control plane was not built within 30 minutes"
   fi
   sleep 10
 done
-echo "  built $(grep -oE 'system/controller:[A-Za-z0-9._-]+' "$work/body" | head -n1)"
+echo "  built $(grep -oE 'system/control-plane:[A-Za-z0-9._-]+' "$work/body" | head -n1)"
 
-say "Handing over to the controller"
-# The host has a controller CLI too: it deploys once here, so that failures stop
-# the install, and stays for admins (homecloud-controller applied, apply, ...).
+say "Handing over to the deployer"
+# The host has the CLI too: it deploys once here, so that failures stop
+# the install, and stays for admins (homecloud applied, apply, ...).
 # Interim: it is built into bin/ before installing; it will ship as a release binary.
-if [ -x "$ROOT/bin/controller" ]; then
-  install -m 755 "$ROOT/bin/controller" /usr/local/bin/homecloud-controller
+if [ -x "$ROOT/bin/homecloud" ]; then
+  install -m 755 "$ROOT/bin/homecloud" /usr/local/bin/homecloud
 fi
-command -v homecloud-controller >/dev/null || fail "controller binary missing: run 'make build' first"
-# Earlier versions ran the controller as a host service; it now runs in Swarm.
+command -v homecloud >/dev/null || fail "homecloud binary missing: run 'make build' first"
+# Earlier versions ran the deployer as a host service; it now runs in Swarm.
 if [ -e /etc/systemd/system/homecloud-controller.service ]; then
   systemctl disable --now homecloud-controller >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/homecloud-controller.service
   systemctl daemon-reload
 fi
-mkdir -p -m 700 /var/lib/homecloud/controller
-homecloud-controller serve -once
-for name in $(homecloud-controller applied | awk '{ print $1 }'); do
+mkdir -p -m 700 /var/lib/homecloud/deployer
+homecloud deploy -once
+for name in $(homecloud applied | awk '{ print $1 }'); do
   wait_stack "$name"
 done
-image=$(docker service inspect controller_controller --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
-case $image in "git.$DOMAIN/system/controller:"*) ;; *) fail "the controller runs $image, not an image built in Gitea" ;; esac
-echo "  the controller runs $image"
+image=$(docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+case $image in "git.$DOMAIN/system/control-plane:"*) ;; *) fail "the deployer runs $image, not an image built in Gitea" ;; esac
+echo "  the deployer runs $image"
 
 say "Done"
 cat <<MSG

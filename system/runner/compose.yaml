@@ -1,5 +1,5 @@
 # Gitea Actions runner for the `system` organisation: builds the platform's
-# own images, such as the controller. It is registered for that organisation
+# own images, such as the deployer. It is registered for that organisation
 # only, because its jobs reach the Docker daemon, which is root on this
 # machine, and only root admins can write to repos in `system`.
 services:

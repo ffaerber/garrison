@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Runs on the test machine, as root, from the repo root. Makes every repo of
 # the `system` organisation in Gitea match system/ in this checkout, as an
-# admin would by pushing, and waits until the controller has deployed it all.
+# admin would by pushing, and waits until the deployer has deployed it all.
 # Does nothing before the first install.
 #
 # This is how a test run gets changes onto an installed machine: through Git
-# and the controller, like every other change.
+# and the deployer, like every other change.
 set -euo pipefail
 
 ETC=/etc/homecloud
@@ -18,34 +18,34 @@ trap 'rm -rf "$work"' EXIT
 gitea_session "$work"
 [ "$(gitea_api GET /orgs/system)" = 200 ] || { echo "no system organisation yet; the installer creates it"; exit 0; }
 
-controller_commit=
+plane_commit=
 for dir in system/*/; do
   name=$(basename "$dir")
   src=$dir
-  if [ "$name" = controller ]; then
-    src=$work/controller-tree
-    installer/controller-tree.sh "$src"
+  if [ "$name" = control-plane ]; then
+    src=$work/control-plane-tree
+    installer/control-plane-tree.sh "$src"
   fi
   result=$(installer/push-repo.sh --update "system/$name" "$src")
   echo "  system/$name: $result"
-  [ "$name" = controller ] && [ "${result%% *}" = updated ] && controller_commit=${result#updated }
+  [ "$name" = control-plane ] && [ "${result%% *}" = updated ] && plane_commit=${result#updated }
 done
 
-# The controller only follows Gitea while it runs in Swarm.
-docker service inspect controller_controller >/dev/null 2>&1 || exit 0
+# The deployer only follows Gitea while it runs in Swarm.
+docker service inspect control-plane_deployer >/dev/null 2>&1 || exit 0
 
-# A changed controller is built first; the build sets the new tag.
-if [ -n "$controller_commit" ]; then
-  echo "  waiting for the controller build of $controller_commit"
+# A changed control plane is built first; the build sets the new tag.
+if [ -n "$plane_commit" ]; then
+  echo "  waiting for the control plane build of $plane_commit"
   deadline=$((SECONDS + 1200))
-  until [ "$(gitea_api GET /repos/system/controller/raw/compose.yaml)" = 200 ] && grep -q "system/controller:$controller_commit" "$work/body"; do
-    [ $SECONDS -ge $deadline ] && { echo "the controller was not built" >&2; exit 1; }
+  until [ "$(gitea_api GET /repos/system/control-plane/raw/compose.yaml)" = 200 ] && grep -q "system/control-plane:$plane_commit" "$work/body"; do
+    [ $SECONDS -ge $deadline ] && { echo "the control plane was not built" >&2; exit 1; }
     sleep 10
   done
 fi
 
-# Wait until the controller has deployed the tip of every stack's repo.
-echo "  waiting for the controller to deploy"
+# Wait until the deployer has deployed the tip of every stack's repo.
+echo "  waiting for the deployer to deploy"
 deadline=$((SECONDS + 600))
 while :; do
   behind=
@@ -54,12 +54,12 @@ while :; do
     [ -f "$dir/compose.yaml" ] || continue
     [ "$(gitea_api GET "/repos/system/$name/branches/main")" = 200 ] || { behind+=" $name"; continue; }
     head=$(grep -o '"id":"[0-9a-f]*"' "$work/body" | head -n1 | cut -d'"' -f4)
-    homecloud-controller applied 2>/dev/null | grep -qx "$name $head" || behind+=" $name"
+    homecloud applied 2>/dev/null | grep -qx "$name $head" || behind+=" $name"
   done
   [ -z "$behind" ] && break
   if [ $SECONDS -ge $deadline ]; then
-    echo "the controller has not deployed:$behind" >&2
-    docker service logs --tail 20 controller_controller >&2 || true
+    echo "the deployer has not deployed:$behind" >&2
+    docker service logs --tail 20 control-plane_deployer >&2 || true
     exit 1
   fi
   sleep 5

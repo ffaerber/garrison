@@ -54,7 +54,7 @@ case $LLM in local|cloud) ;; *) echo "LLM must be local or cloud" >&2; exit 2 ;;
 inputs() {
   case $1 in
     base)     ;;
-    install)  echo install.sh installer system controller schemas go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
+    install)  echo install.sh installer system control-plane schemas go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
     login)    echo test/e2e/smoke.sh ;;
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
     agent)    echo test/e2e/smoke.sh ;;
@@ -102,7 +102,7 @@ step_login() {
   smoke login
 }
 
-# The controller deploying from Gitea, monitoring data, app stacks.
+# The deployer deploying from Gitea, monitoring data, app stacks.
 step_platform() {
   sync_repo
   smoke platform
@@ -116,7 +116,7 @@ step_agent() {
 }
 
 # A namespace with an app of its own, built by its pipeline on the user
-# runner and deployed by the controller: homepage/todo, left running.
+# runner and deployed by the deployer: homepage/todo, left running.
 step_deploy() {
   sync_repo
   smoke deploy
@@ -156,12 +156,12 @@ smoke() {
 }
 
 # Puts this checkout into the VM at ~/homecloud: tracked and new files, never
-# ignored ones such as .env, plus the controller binary for the host.
+# ignored ones such as .env, plus the homecloud binary for the host.
 sync_repo() {
   # Built once before parallel branches start (BUILT=1), never by two at once.
   [ -n "${BUILT:-}" ] || make --no-print-directory build >/dev/null
   local archive=$ROOT/bin/homecloud-$VM.tar   # the Multipass snap cannot read /tmp; one per VM
-  { git ls-files -co --exclude-standard | while read -r f; do [ -e "$f" ] && echo "$f"; done; echo bin/controller; } \
+  { git ls-files -co --exclude-standard | while read -r f; do [ -e "$f" ] && echo "$f"; done; echo bin/homecloud; } \
     | tar -c -f "$archive" -T -
   in_vm rm -rf homecloud homecloud.tar
   multipass transfer "$archive" "$VM:homecloud.tar"
@@ -293,8 +293,24 @@ settle() {
     for s in $(docker service ls -q); do docker service update --quiet --detach --force "$s" >/dev/null; done
     # The old tasks still count as running for a moment.
     sleep 15
+    # A task can count as running while its container lost its network
+    # endpoint (the old task'"'"'s cleanup raced the new one), so its name does
+    # not resolve; those services are restarted again.
+    detached() {
+      for c in $(docker ps -q -f label=com.docker.swarm.service.name); do
+        n=$(docker inspect "$c" --format "{{.Name}} {{range .NetworkSettings.Networks}}{{if not .EndpointID}}lost{{end}}{{end}}")
+        # Named /SERVICE.SLOT.TASK
+        case $n in *lost) n=${n#/}; echo "${n%%.*}" ;; esac
+      done | sort -u
+    }
     for i in $(seq 1 60); do
-      docker service ls --format "{{.Replicas}}" | awk -F"[/ ]" "\$1 != \$2 { bad = 1 } END { exit bad }" && exit 0
+      if docker service ls --format "{{.Replicas}}" | awk -F"[/ ]" "\$1 != \$2 { bad = 1 } END { exit bad }"; then
+        lost=$(detached)
+        [ -z "$lost" ] && exit 0
+        echo "restarting services without a network endpoint: $lost" >&2
+        for s in $lost; do docker service update --quiet --detach --force "$s" >/dev/null; done
+        sleep 15
+      fi
       sleep 5
     done
     echo "services still starting after 5 minutes:" >&2

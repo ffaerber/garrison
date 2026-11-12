@@ -1,4 +1,4 @@
-# Hostnames reserved by root. The controller rejects any stack that claims one.
+# Hostnames reserved by root. The deployer rejects any stack that claims one.
 reserved:
   - keycloak
   - sso       # login proxy

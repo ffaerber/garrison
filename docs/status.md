@@ -6,18 +6,18 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 `test/vm/steps.sh` runs the end-to-end test as a chain of steps on a Multipass VM (base, install, login, platform, agent), each saved as a VM snapshot when green; see `test/README.md`.
 
-- `install.sh --answers FILE`: installs Docker and ZFS, initialises Swarm, creates the ZFS pool, generates secrets, deploys the bootstrap stacks in order (Postgres, Traefik, Keycloak, login proxy, Gitea, Actions runner), waits for Gitea Actions to build the controller, and hands over to it. Safe to run again.
-- Namespaces are Gitea organisations. The system stack is the organisation `system`, one repo per stack: `postgres`, `traefik`, `keycloak`, `sso`, `gitea`, `runner`, `controller`, `grafana`, `prometheus`, `loki`, and `platform` for contracts. Everyone signed in can read them; only root admins can change them. Gitea shows nothing without signing in.
-- Controller: runs in Swarm and deploys every repo of `system` that holds a `compose.yaml`, itself last, as soon as Gitea's webhook reports a change (and every 15 s otherwise); a deleted repo's stack is taken down. Its image is built from `system/controller` by Gitea Actions on the `system` organisation's runner, pushed to Gitea's registry, and deployed by a commit that sets the tag in that repo's `compose.yaml`.
+- `install.sh --answers FILE`: installs Docker and ZFS, initialises Swarm, creates the ZFS pool, generates secrets, deploys the bootstrap stacks in order (Postgres, Traefik, Keycloak, login proxy, Gitea, Actions runner), waits for Gitea Actions to build the control plane, and hands over to its deployer. Safe to run again.
+- Namespaces are Gitea organisations. The system stack is the organisation `system`, one repo per stack: `postgres`, `traefik`, `keycloak`, `sso`, `gitea`, `runner`, `control-plane`, `grafana`, `prometheus`, `loki`, and `platform` for contracts. Everyone signed in can read them; only root admins can change them. Gitea shows nothing without signing in.
+- Deployer: runs in Swarm and deploys every repo of `system` that holds a `compose.yaml`, itself last, as soon as Gitea's webhook reports a change (and every 15 s otherwise); a deleted repo's stack is taken down. Its image is built from `system/control-plane` by Gitea Actions on the `system` organisation's runner, pushed to Gitea's registry, and deployed by a commit that sets the tag in that repo's `compose.yaml`.
 - Single sign-on: people sign in to the Keycloak realm `homecloud`. Private environments redirect to that login and pass the signed-in person's identity to the app. Gitea and Grafana sign in through Keycloak.
 - Roles: the Keycloak group `root-admins` holds the people who may change the platform. Its members are Gitea admins and Grafana admins; everyone else views. Both re-read the groups at every login. `system/keycloak/add-user.sh` adds people.
-- Monitoring: Grafana (`grafana.<domain>`) with Prometheus (node, container and Traefik metrics) and Loki (container logs), neither reachable from outside. Dashboards are code: any repo's `dashboards/*.json` goes into a Grafana folder per namespace, kept as on `main` by the controller; `system/grafana` brings Overview, Stack, Logs, Machine and Traffic.
-- Chat: Open WebUI at `chat.<domain>`, signed in through Keycloak. Every namespace has a permanent channel, its team chat, and an agent that answers there when mentioned; the control plane keeps both in sync with the Gitea organisations. The agents' tools come from the control plane's MCP server, which acts with each person's own Keycloak token: they read stacks, logs, metrics and repos, and propose changes as pull requests a person merges in Gitea. The LLM is Ollama's `gpt-oss:120b` by default.
+- Monitoring: Grafana (`grafana.<domain>`) with Prometheus (node, container and Traefik metrics) and Loki (container logs), neither reachable from outside. Dashboards are code: any repo's `dashboards/*.json` goes into a Grafana folder per namespace, kept as on `main` by the deployer; `system/grafana` brings Overview, Stack, Logs, Machine and Traffic.
+- Chat: Open WebUI at `chat.<domain>`, signed in through Keycloak. Every namespace has a permanent channel, its team chat, and an agent that answers there when mentioned; the gateway keeps both in sync with the Gitea organisations. The agents' tools come from the gateway's MCP server, which acts with each person's own Keycloak token: they read stacks, logs, metrics and repos, and propose changes as pull requests a person merges in Gitea. The LLM is Ollama's `gpt-oss:120b` by default.
 - Apps: in every namespace other than `system`, each repo with a `stack.yaml` is deployed from its branches (`main` → `<stack>.<domain>`, `dev` → `dev-<stack>.<domain>`) once its pipeline has built the commit's image. `homepage/todo` (from `examples/homepage/todo`) is a Go and Postgres todo app with its tests, Dockerfile and pipeline.
 - Namespace members: `<namespace>/config/members.yaml`, applied to Gitea teams; changes only by approved pull request, and nobody approves their own role change. The agents can show members and propose changes but never approve or merge (`docs/scenarios.md`).
-- Pipelines: a system runner for `system` and a user runner for every other namespace, whose jobs reach Docker only through the controller's guard and build images with BuildKit; one build account per namespace for its registry.
+- Pipelines: a system runner for `system` and a user runner for every other namespace, whose jobs reach Docker only through the control plane's guard and build images with BuildKit; one build account per namespace for its registry.
 - Reboot: `homecloud-repair.service` replaces Swarm tasks that Docker restarted without their secrets or configs.
-- Controller CLI on the host (`homecloud-controller`): validates a stack file, claims its hostnames, creates its ZFS datasets and Swarm secrets, and deploys it behind Traefik; `applied` shows what the controller deployed.
+- CLI on the host (`homecloud`): validates a stack file, claims its hostnames, creates its ZFS datasets and Swarm secrets, and deploys it behind Traefik; `applied` shows what the deployer deployed.
 
 ## Differs from the spec for now
 
@@ -32,10 +32,10 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-History repos and the rest of the config repo (autonomy levels, branch rights, secrets); snapshots, SOPS, change records, approvals and restore in the controller; coding agents, the dashboard, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
+History repos and the rest of the config repo (autonomy levels, branch rights, secrets); snapshots, SOPS, change records, approvals and restore in the deployer; coding agents, the dashboard, alerts and ntfy, Sanoid and restic, coding-agent sandbox, Playwright tests.
 
 ## Known limits
 
-- The controller pulls its image from the local Docker daemon, which built it. A second node would need registry credentials.
+- The deployer pulls its image from the local Docker daemon, which built it. A second node would need registry credentials.
 - The system runner's jobs can use the Docker daemon, which is root on the machine. It serves only the `system` organisation, which only root admins can write to.
 - BuildKit runs privileged, outside Swarm. Build steps run in its own sandboxes without privileges; a flaw in BuildKit itself would reach the host. Its build cache is shared between namespaces.

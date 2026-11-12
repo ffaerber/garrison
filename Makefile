@@ -9,10 +9,10 @@ test:
 	$(GO) test ./...
 
 build:
-	$(GO) build -o bin/controller ./controller/cmd/controller
+	$(GO) build -o bin/homecloud ./control-plane/cmd/homecloud
 
 tidy:
 	$(GO) mod tidy
 
 golden:
-	$(GO) test ./controller/internal/render -update
+	$(GO) test ./control-plane/internal/render -update

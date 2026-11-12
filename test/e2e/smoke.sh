@@ -5,7 +5,7 @@ set -uo pipefail
 . /etc/homecloud/install.env
 ETC=/etc/homecloud
 STACKS=test/e2e/stacks
-CTL="homecloud-controller"
+CTL="homecloud"
 failed=0
 
 ok()   { printf 'ok    %s\n' "$1"; }
@@ -33,7 +33,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki chat controlplane hello dev-hello todo dev-todo; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat gateway hello dev-hello todo dev-todo; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -81,7 +81,7 @@ until_true() {
 }
 smoke_running() { docker service ls --filter name=smoke_web --format '{{.Replicas}}' | grep -qx 1/1; }
 smoke_gone()    { ! docker stack ls --format '{{.Name}}' | grep -qx smoke; }
-controller_image() { docker service inspect controller_controller --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
+deployer_image() { docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
 json() { curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "git.$DOMAIN:443:127.0.0.1" -u "$ADMIN_USER:$PASSWORD" "$@"; }
 # grafana_api USER ARGS...: call Grafana with a signed-in person's session, or,
 # with "", as the local installer account.
@@ -123,10 +123,10 @@ chat_login() {
 }
 # system_channel [PERSON]: the id of the channel of the namespace system.
 system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "system"))' 2>/dev/null; }
-# mcp ARGS...: the control plane's MCP endpoint, which only Open WebUI reaches.
+# mcp ARGS...: the gateway's MCP endpoint, which only Open WebUI reaches.
 mcp() {
   docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
-    curl -sS --max-time 20 "$@" http://controller_controlplane:8080/mcp
+    curl -sS --max-time 20 "$@" http://control-plane_gateway:8080/mcp
 }
 
 # ---------- sections ----------
@@ -164,7 +164,7 @@ done
 check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/alice")"
 check "bob is not a Gitea admin"           grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
 check "every system stack is a repo of the system organisation" \
-  bash -c 'for n in postgres traefik keycloak sso gitea runner controller grafana prometheus loki; do grep -q "\"full_name\":\"system/$n\"" <<<"$0" || { echo "missing system/$n"; exit 1; }; done' "$(gitea_api "" "$api/orgs/system/repos?limit=50")"
+  bash -c 'for n in postgres traefik keycloak sso gitea runner control-plane grafana prometheus loki; do grep -q "\"full_name\":\"system/$n\"" <<<"$0" || { echo "missing system/$n"; exit 1; }; done' "$(gitea_api "" "$api/orgs/system/repos?limit=50")"
 check "the traefik repo holds its stack"   test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
 check "alice can administer the system repos"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
 check "alice can change a system repo" \
@@ -197,7 +197,7 @@ check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_a
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"agent-$1\""; }
 check "bob has the agent of the namespace system" until_true 180 has_agent system
-check "the agent has the control plane's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
+check "the agent has the gateway's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
 check "bob sees the channel of the namespace system" until_true 120 system_channel
 cid=$(system_channel)
 check "bob cannot rename it" \
@@ -206,9 +206,9 @@ check "bob cannot delete it"               test "$(chat_api bob -o /dev/null -w 
 check "it is still there, unchanged"       test "$(system_channel)" = "$cid"
 howto_pinned() { chat_api bob "$chat/api/v1/channels/$cid/messages/pinned" | grep -q 'How to ask the agent of this namespace'; }
 check "it has the how-to pinned"           until_true 120 howto_pinned
-check "the control plane's account says it is not the agent" \
-  grep -q '"name":"Control plane (not the agent)"' <<<"$(chat_api bob "$chat/api/v1/channels/$cid/members?page=1")"
-check "the control plane is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://controlplane.$DOMAIN/mcp")" = 404
+check "the gateway's account says it is not the agent" \
+  grep -q '"name":"Gateway (not the agent)"' <<<"$(chat_api bob "$chat/api/v1/channels/$cid/members?page=1")"
+check "the gateway is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://gateway.$DOMAIN/mcp")" = 404
 check "its MCP endpoint wants a token"     test "$(mcp -o /dev/null -w '%{http_code}' -X POST -d '{}')" = 401
 check "it refuses a made-up token"         test "$(mcp -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{}')" = 401
 check "it refuses identity headers"        test "$(mcp -o /dev/null -w '%{http_code}' -X POST -H 'X-OpenWebUI-User-Name: alice' -H 'X-Forwarded-User: alice' -d '{}')" = 401
@@ -239,20 +239,20 @@ check "alice can create a dashboard" \
 
 }
 
-# platform: the controller, monitoring data, app stacks and private environments.
+# platform: the deployer, monitoring data, app stacks and private environments.
 section_platform() {
-echo "# controller"
+echo "# deployer"
 
-check "the controller runs in Swarm"       test "$(docker service ls --filter name=controller_controller --format '{{.Replicas}}')" = 1/1
-check "it runs an image built in Gitea"    bash -c "case '$(controller_image)' in git.$DOMAIN/system/controller:bootstrap) exit 1 ;; git.$DOMAIN/system/controller:*) exit 0 ;; *) exit 1 ;; esac"
-tag=$(controller_image | sed 's/.*://')
-check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/system/container/controller/$tag")" = 200
-check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/system/controller/actions/tasks?limit=1")"
+check "the deployer runs in Swarm"       test "$(docker service ls --filter name=control-plane_deployer --format '{{.Replicas}}')" = 1/1
+check "it runs an image built in Gitea"    bash -c "case '$(deployer_image)' in git.$DOMAIN/system/control-plane:bootstrap) exit 1 ;; git.$DOMAIN/system/control-plane:*) exit 0 ;; *) exit 1 ;; esac"
+tag=$(deployer_image | sed 's/.*://')
+check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/system/container/control-plane/$tag")" = 200
+check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/system/control-plane/actions/tasks?limit=1")"
 check "the runner is up"                 test "$(docker service ls --filter name=runner_runner --format '{{.Replicas}}')" = 1/1
 check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/system/actions/secrets")" = 403
-check "the controller no longer runs on the host" bash -c '! systemctl is-active --quiet homecloud-controller'
-check "the controller deployed grafana, prometheus and loki" \
-  bash -c 'a=$(homecloud-controller applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
+check "the deployer no longer runs on the host" bash -c '! systemctl is-active --quiet homecloud-controller'
+check "the deployer deployed grafana, prometheus and loki" \
+  bash -c 'a=$(homecloud applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
 
 docker stack rm smoke >/dev/null 2>&1 || true
 gitea_api "" -o /dev/null -X DELETE "$api/repos/system/smoke" 2>/dev/null || true
@@ -262,10 +262,10 @@ check "bob cannot add a repo to the system organisation" \
 check "alice adds a repo to the system organisation" \
   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"smoke","auto_init":true,"default_branch":"main"}' "$api/orgs/system/repos")" = 201
 check "alice gives it a compose.yaml"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"message":"smoke test","branch":"main","content":"'$compose'"}' "$api/repos/system/smoke/contents/compose.yaml")" = 201
-check "the controller deploys it as the stack smoke" until_true 120 smoke_running
+check "the deployer deploys it as the stack smoke" until_true 120 smoke_running
 check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$api/repos/system/smoke")" = 204
-check "the controller takes the stack down" until_true 120 smoke_gone
-check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx controller <<<"$l"'
+check "the deployer takes the stack down" until_true 120 smoke_gone
+check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx control-plane <<<"$l"'
 
 echo "# monitoring data"
 check "Prometheus scrapes the node"        poll 180 '"job":"node"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
@@ -335,13 +335,13 @@ title_back() { grafana_api "" "$g/api/dashboards/uid/homecloud-overview" | grep 
 check "an edit made in Grafana is put back" until_true 120 title_back
 
 echo "# deploying a stack"
-check "controller deploys hello (main)"    $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
+check "the CLI deploys hello (main)"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "hello is reachable at its hostname" status_is 200 hello /
 check "hello got its dataset with a quota" test "$(zfs get -H -o value quota homecloud/ns/demo/stacks/hello/hello-data)" = 1G
 check "hello's dataset is mounted in the container" \
   bash -c 'c=$(docker ps -q --filter label=com.docker.swarm.service.name=hello_web | head -n1); docker inspect "$c" --format "{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}" | grep -q "/homecloud/ns/demo/stacks/hello/hello-data:/data"'
 check "hello got a generated secret"       docker secret inspect hello.hello-token
-check "controller deploys hello (dev)"     $CTL apply -domain "$DOMAIN" -env dev -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
+check "the CLI deploys hello (dev)"       $CTL apply -domain "$DOMAIN" -env dev -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "dev has its own dataset"            zfs list homecloud/ns/demo/stacks/dev-hello/hello-data
 check "redeploying hello is accepted"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 
@@ -368,7 +368,7 @@ check "hello still answers after the rejected deploys"   status_is 200 hello / 3
 }
 
 # agent: the namespace agents answer in their channels in Open WebUI, when
-# mentioned, and propose through the control plane's MCP tools, with the
+# mentioned, and propose through the gateway's MCP tools, with the
 # rights of the person who mentioned them. They talk to the real
 # LLM, so answers vary; the checks look at what the agents did (tools called,
 # changes in Gitea), not at their wording.
@@ -379,7 +379,7 @@ if [ ! -s $ETC/llm-api-key ]; then
   return
 fi
 for u in alice bob; do check "$u signs in to Open WebUI" chat_login $u; done
-# The control plane's own Open WebUI account; it may delete any message.
+# The gateway's own Open WebUI account; it may delete any message.
 admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" \
   "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
@@ -416,7 +416,7 @@ cleanup_channel() {
     done
   done
 }
-mcp_calls() { docker service logs --since "$1" controller_controlplane 2>&1 | grep -o "mcp: $2: [a-z_]*" | sort -u; }
+mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -o "mcp: $2: [a-z_]*" | sort -u; }
 
 # The model sometimes writes a tool call out as text instead of making it. A
 # question whose answer shows no sign of the system is asked once more, and
@@ -429,7 +429,7 @@ if ! grep -qi grafana <<<"$answer"; then
 fi
 check "the agent answers bob in the channel" test -n "$answer"
 check "its answer names grafana"           grep -qi grafana <<<"$answer"
-check "it asked the control plane, as bob" grep -q "mcp: bob: " <<<"$(mcp_calls "$since" bob)"
+check "it asked the gateway, as bob" grep -q "mcp: bob: " <<<"$(mcp_calls "$since" bob)"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask bob "Show me the last 20 log lines of the service grafana_grafana, and how much memory the stack grafana uses." | reply)
 check "it reads logs for bob"              grep -q "mcp: bob: service_logs" <<<"$(mcp_calls "$since" bob)"
@@ -499,12 +499,12 @@ until_true 900 pipeline_done "$good"
 [ "$(pipeline "$good")" = success ] || pipeline_logs "$good"
 check "the pipeline tests, builds and pushes the image" pipeline_is "$good" success
 check "the image is in homepage's registry" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/homepage/container/todo/${good:0:12}")" = 200
-deployed() { homecloud-controller applied | grep -q "^app homepage/todo@$1 [a-z-]* $2"; }
-check "the controller deploys main as todo" until_true 300 deployed main "$good"
+deployed() { homecloud applied | grep -q "^app homepage/todo@$1 [a-z-]* $2"; }
+check "the deployer deploys main as todo" until_true 300 deployed main "$good"
 check "todo is behind the sign-in"         status_is 302 todo / 120
 up() { [ "$(web -b "$tmp/$1.jar" -o /dev/null -w '%{http_code}' "https://$1.$DOMAIN/healthz")" = 200 ]; }
 # app_login HOST: signs alice in to an app once Traefik routes its hostname,
-# which happens a few seconds after the controller deploys it.
+# which happens a few seconds after the deployer deploys it.
 app_login() {
   status_is 302 "$1" / 120 >/dev/null || return 1
   sso_login "$tmp/$1.jar" "https://$1.$DOMAIN/" "$TEST_PASSWORD" "$tmp/$1.html" alice >/dev/null 2>&1
@@ -523,7 +523,7 @@ check "homepage has its agent and channel in Open WebUI" until_true 120 ns_agent
 echo "# a dev environment"
 check "alice creates the branch dev" \
   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$repo/branches")" = 201
-check "the controller deploys dev as dev-todo" until_true 300 deployed dev "$good"
+check "the deployer deploys dev as dev-todo" until_true 300 deployed dev "$good"
 check "alice opens dev-todo"               until_true 120 app_login dev-todo
 dev_empty() { [ "$(todo_api dev-todo "https://dev-todo.$DOMAIN/api/todos")" = "[]" ]; }
 check "dev has its own, empty database"    until_true 60 dev_empty
@@ -544,7 +544,7 @@ fixed=$(head_of main)
 until_true 900 pipeline_done "$fixed"
 [ "$(pipeline "$fixed")" = success ] || pipeline_logs "$fixed"
 check "the fix passes the pipeline"        pipeline_is "$fixed" success
-check "the controller deploys it"          until_true 300 deployed main "$fixed"
+check "the deployer deploys it"          until_true 300 deployed main "$fixed"
 check "the todo survived the redeploy"     until_true 120 bash -c "$(declare -f web todo_api); ETC=$ETC DOMAIN=$DOMAIN tmp=$tmp; todo_api todo https://todo.$DOMAIN/api/todos | grep -q 'Water the plants'"
 
 echo "# the user runner's limits"
@@ -554,22 +554,22 @@ escape=$(printf 'on: push\njobs:\n  out:\n    runs-on: homecloud-user\n    conta
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Try to get out","branch":"main","content":"'$escape'"}' "$api/repos/homepage/escape/contents/.gitea/workflows/out.yaml"
 escape_failed() { gitea_api "" "$api/repos/homepage/escape/actions/tasks?limit=5" | grep -q '"status":"failure"'; }
 check "a job asking for the host's processes fails" until_true 300 escape_failed
-check "the guard refused it"               bash -c 'docker service logs --since 10m controller_guard 2>&1 | grep -q "refused.*pid namespace host"'
+check "the guard refused it"               bash -c 'docker service logs --since 10m control-plane_guard 2>&1 | grep -q "refused.*pid namespace host"'
 gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/escape"
 
 echo "# hostnames"
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"name":"grafana","auto_init":true,"default_branch":"main"}' "$api/orgs/homepage/repos"
 taken=$(printf 'stack: grafana\nnamespace: homepage\nentrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 80 }\nenvironments:\n  main: {}\n' | base64 -w0)
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Claim grafana","branch":"main","content":"'$taken'"}' "$api/repos/homepage/grafana/contents/stack.yaml"
-refused() { docker service logs --since 5m controller_controller 2>&1 | grep -q "homepage/grafana: not deployed: hostname \"grafana\" is reserved"; }
+refused() { docker service logs --since 5m control-plane_deployer 2>&1 | grep -q "homepage/grafana: not deployed: hostname \"grafana\" is reserved"; }
 check "an app cannot take a reserved hostname" until_true 120 refused
-check "it is not deployed"                 bash -c '! homecloud-controller applied | grep -q "app homepage/grafana"'
+check "it is not deployed"                 bash -c '! homecloud applied | grep -q "app homepage/grafana"'
 gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/grafana"
 
 echo "# taking an environment down"
 check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$repo/branches/dev")" = 204
 gone() { ! docker stack ls --format '{{.Name}}' | grep -qx dev-todo; }
-check "the controller takes dev-todo down" until_true 120 gone
+check "the deployer takes dev-todo down" until_true 120 gone
 check "its data is kept"                   zfs list homecloud/ns/homepage/stacks/dev-todo/todo-db
 # main may have been redeployed just before; Traefik follows within seconds.
 check "todo keeps running"                 until_true 30 up todo
@@ -719,8 +719,8 @@ check "the agent proposes it, as bob"      test -n "$tpr"
 check "it changes the heading"             grep -q '^+.*Homepage todos' <<<"$(gitea_api "" "$hp/todo/pulls/$tpr.diff")"
 check "carol merges it"                    test "$(merge todo carol "$tpr")" = 200
 merged=$(gitea_api "" "$hp/todo/pulls/$tpr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["merge_commit_sha"])')
-deployed_at() { homecloud-controller applied | grep -q "^app homepage/todo@main todo $1"; }
-check "its pipeline builds it and the controller deploys it" until_true 1200 deployed_at "$merged"
+deployed_at() { homecloud applied | grep -q "^app homepage/todo@main todo $1"; }
+check "its pipeline builds it and the deployer deploys it" until_true 1200 deployed_at "$merged"
 sso_login "$tmp/todo.jar" "https://todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/todo.html" alice >/dev/null 2>&1
 heading() { web -b "$tmp/todo.jar" "https://todo.$DOMAIN/" | grep -q "Homepage todos"; }
 check "the todo page shows the new heading" until_true 120 heading

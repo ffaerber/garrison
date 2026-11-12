@@ -1,6 +1,6 @@
 # Contracts
 
-Public contracts other repos may rely on. The controller renders stacks against these names (`controller/internal/render`); the system stack must provide them.
+Public contracts other repos may rely on. The deployer renders stacks against these names (`control-plane/internal/render`); the system stack must provide them.
 
 | Name | Provided by | Meaning |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ Public contracts other repos may rely on. The controller renders stacks against 
 | `keycloak.<domain>` | Traefik stack | Resolves to Traefik on `traefik-public`, so containers reach Keycloak at its public URL. |
 | `GPU` | Installer | Swarm generic resource advertised once per GPU on the node. |
 
-Labels the controller sets on a routed service, with `<host>` the service's hostname:
+Labels the deployer sets on a routed service, with `<host>` the service's hostname:
 
 ```
 traefik.enable=true

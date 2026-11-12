@@ -9,10 +9,10 @@ A home cloud you run by talking to it, with Git underneath. See [docs/spec.md](d
 | `schemas/` | JSON Schema for stack files, namespace config, change records |
 | `system/` | One directory per repo of the `system` organisation in Gitea, i.e. per system stack; pushed at install |
 | `templates/` | Starting contents for namespace config repos and app repos |
-| `controller/` | Go: applies Git to the cluster, and the control plane (MCP server for the chat agents). Built into an image by Gitea Actions from `system/controller` |
+| `control-plane/` | Go: the deployer (applies Git to the cluster), the gateway (MCP server for the chat agents, namespace members) and the guard. Built into one image by Gitea Actions from `system/control-plane` |
 | `orchestrator/` | TypeScript: runs the agents |
 | `ui/` | React: dashboard and team chat |
-| `installer/` | Bootstrap helpers: pushing repos, assembling the controller repo |
+| `installer/` | Bootstrap helpers: pushing repos, assembling the control plane repo |
 | `sandbox/` | Coding-agent container image |
 | `host/` | Sanoid, restic, systemd units |
 | `test/` | End-to-end tests on throwaway VMs |

@@ -1,4 +1,4 @@
-// Package schemas embeds the JSON Schemas shared by the controller, UI and agents.
+// Package schemas embeds the JSON Schemas shared by the deployer, UI and agents.
 package schemas
 
 import _ "embed"

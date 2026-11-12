@@ -8,7 +8,7 @@ entrypoint: web
 services:
   web:
     # Built by the pipeline (.gitea/workflows/pipeline.yaml) for each commit;
-    # the controller deploys a commit once its image exists.
+    # the deployer deploys a commit once its image exists.
     image: "{{registry}}/homepage/todo:{{commit}}"
     port: 8080
     env:

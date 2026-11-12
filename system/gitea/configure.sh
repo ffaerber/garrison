@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates the local admin account, adds Keycloak as the login source, creates
 # the `system` organisation with one repo per system stack, and prepares Gitea
-# Actions: the runner's registration and the credentials the controller build
+# Actions: the runner's registration and the credentials the control plane build
 # deploys with.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -10,7 +10,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 gitea() { docker exec -u git "$(container gitea_gitea)" gitea "$@"; }
 wait_for 300 "Gitea to start" gitea admin user list
 
-# Local admin: used by the installer and, later, the controller. People sign in through Keycloak.
+# Local admin: used by the installer and, later, the deployer. People sign in through Keycloak.
 if ! gitea admin user list --admin | awk 'NR > 1 { print $2 }' | grep -qx "$ADMIN_USER"; then
   gitea admin user create --admin --must-change-password=false \
     --username "$ADMIN_USER" --email "$ADMIN_EMAIL" --password "$(cat "$ETC/admin-password")" >/dev/null
@@ -65,12 +65,12 @@ fi
 if ! docker secret inspect gitea-user-runner-token >/dev/null 2>&1; then
   gitea actions generate-runner-token | tr -d '\r\n' | docker secret create gitea-user-runner-token - >/dev/null
 fi
-# The controller build pushes its image and commits its tag as the admin,
+# The control plane build pushes its image and commits its tag as the admin,
 # with a token limited to repositories and packages. Kept root-only in $ETC
 # and as organisation secrets, which only root admins can read or change.
 if [ ! -s "$ETC/ci-token" ]; then
-  gitea_api DELETE "/users/$ADMIN_USER/tokens/controller-ci" >/dev/null
-  token=$(gitea admin user generate-access-token --username "$ADMIN_USER" --token-name controller-ci \
+  gitea_api DELETE "/users/$ADMIN_USER/tokens/control-plane-ci" >/dev/null
+  token=$(gitea admin user generate-access-token --username "$ADMIN_USER" --token-name control-plane-ci \
     --scopes write:repository,write:package --raw | tr -d '\r\n')
   [ -n "$token" ] || { echo "could not create the build token" >&2; exit 1; }
   (umask 077; printf '%s' "$token" > "$ETC/ci-token")
@@ -97,13 +97,13 @@ esac
 for dir in "$ROOT"/system/*/; do
   name=$(basename "$dir")
   src=$dir
-  if [ "$name" = controller ]; then
-    src=$work/controller-tree
-    "$ROOT/installer/controller-tree.sh" "$src"
+  if [ "$name" = control-plane ]; then
+    src=$work/control-plane-tree
+    "$ROOT/installer/control-plane-tree.sh" "$src"
   fi
   printf '  system/%s: %s\n' "$name" "$("$ROOT/installer/push-repo.sh" "system/$name" "$src")"
 done
-[ "$(gitea_api PATCH /repos/system/controller '{"has_actions":true}')" = 200 ] || { echo "could not enable Actions on system/controller" >&2; exit 1; }
+[ "$(gitea_api PATCH /repos/system/control-plane '{"has_actions":true}')" = 200 ] || { echo "could not enable Actions on system/control-plane" >&2; exit 1; }
 
 if [ "$auth" = updated ]; then
   docker service update --quiet --detach --force gitea_gitea >/dev/null
