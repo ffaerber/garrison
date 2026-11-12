@@ -33,7 +33,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki chat gateway hello dev-hello todo dev-todo; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -129,6 +129,13 @@ mcp() {
     curl -sS --max-time 20 "$@" http://control-plane_gateway:8080/mcp
 }
 
+# agents_api ARGS... PATH: the agent service, which only the system network reaches.
+agents_api() {
+  local path=${!#}
+  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
+    curl -sS --max-time 20 "${@:1:$#-1}" "http://control-plane_agents:8070$path"
+}
+
 # ---------- sections ----------
 # system: the stacks the installer deploys are up and safe.
 section_system() {
@@ -197,7 +204,14 @@ check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_a
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"$1\""; }
 check "bob has the operator agent of the namespace system" until_true 180 has_agent system/operator
-check "the agent has the gateway's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
+check "the agents come from the agent service" grep -q '"owned_by":"homecloud"' <<<"$(chat_api bob "$chat/api/models")"
+check "Open WebUI has no LLM key" \
+  test -z "$(docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" printenv OPENAI_API_KEY)"
+check "the agent service wants a token" \
+  test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"model":"system/operator","messages":[]}' /v1/chat/completions)" = 401
+check "it refuses a made-up token" \
+  test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{"model":"system/operator","messages":[]}' /v1/chat/completions)" = 401
+check "the agent service is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://agents.$DOMAIN/v1/models")" = 404
 check "system has its config repo with the operator" \
   test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/config/raw/agents/operator/agent.yaml")" = 200
 check "bob sees the channel of the namespace system" until_true 120 system_channel

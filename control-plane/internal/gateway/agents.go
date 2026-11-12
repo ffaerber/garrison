@@ -118,7 +118,16 @@ func (f configFiles) Read(ctx context.Context, path string) (string, error) {
 	return out, err
 }
 
-// Agents reads a namespace's agents from its config repo at ref.
+// Agents reads a namespace's agents from its config repo at ref. A
+// namespace that does not exist has none.
 func (g *Gitea) Agents(ctx context.Context, ns, ref string) ([]agents.Agent, []string, error) {
+	if err := validOrg(ns); err != nil {
+		return nil, nil, err
+	}
+	if status, err := g.do(ctx, "", http.MethodGet, "/orgs/"+ns, nil, nil); status == http.StatusNotFound {
+		return nil, nil, nil
+	} else if err != nil {
+		return nil, nil, err
+	}
 	return agents.Load(ctx, configFiles{g: g, ns: ns, ref: ref}, ns, ToolNames())
 }

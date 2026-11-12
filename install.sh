@@ -138,8 +138,8 @@ LLM_BASE_URL=$LLM_BASE_URL
 LLM_MODEL=$LLM_MODEL
 ENV
 
-# The agents' LLM key, root-only. It may also be put in this file by hand;
-# Open WebUI reads it when it starts.
+# The agents' LLM key, root-only. It may also be put in this file by hand:
+# only the agent service reads it, on each request.
 touch "$ETC/llm-api-key"
 chmod 600 "$ETC/llm-api-key"
 if [ -n "$LLM_API_KEY" ]; then

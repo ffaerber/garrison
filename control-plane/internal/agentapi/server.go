@@ -1,0 +1,290 @@
+// Package agentapi is the agent service: an OpenAI-compatible API that
+// Open WebUI talks to as if it were an LLM. Each model is an agent of a
+// namespace, <namespace>/<agent>, read from its config repo; a chat with it
+// runs the agent's loop here: the LLM with the agent's prompt and its tools
+// from the gateway, which act as the person chatting. Open WebUI sends that
+// person's Keycloak token, and holds no LLM key.
+//
+// The loop runs in this process for now; each chat is to get its own
+// sandbox (docs/agents.md).
+package agentapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/gateway"
+)
+
+// Agents finds the agents defined in the namespaces' config repos.
+type Agents interface {
+	All(ctx context.Context) ([]agents.Agent, error)
+	Get(ctx context.Context, id string) (agents.Agent, bool, error)
+}
+
+// Server serves /v1/models and /v1/chat/completions.
+type Server struct {
+	Agents       Agents
+	Verifier     gateway.Verifier
+	LLM          *LLM
+	Gateway      *Gateway
+	Domain       string
+	DefaultModel string // the LLM model of agents that name none, and of Open WebUI's own tasks
+	MaxRounds    int    // tool rounds per turn; 0: 25
+	TurnTimeout  time.Duration
+}
+
+// Headers Open WebUI's connection fills in for each request.
+const (
+	ChatHeader = "X-Homecloud-Chat" // {{CHAT_ID}}
+	TaskHeader = "X-Homecloud-Task" // {{TASK}}: title, tags, follow-ups...
+)
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("POST /v1/chat/completions", s.chat)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	return mux
+}
+
+// models lists every agent. Everyone signed in may see every agent, and
+// Open WebUI may ask without a person, so this needs no token.
+func (s *Server) models(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Agents.All(r.Context())
+	if err != nil {
+		log.Printf("agents: models: %v", err)
+		http.Error(w, "cannot list the agents", http.StatusBadGateway)
+		return
+	}
+	data := make([]map[string]any, 0, len(list))
+	for _, a := range list {
+		data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "homecloud", "name": a.ID()})
+	}
+	writeJSON(w, map[string]any{"object": "list", "data": data})
+}
+
+type chatRequest struct {
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+	Stream   bool      `json:"stream"`
+}
+
+func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || raw == "" {
+		apiError(w, http.StatusUnauthorized, "a Keycloak access token is required")
+		return
+	}
+	person, err := s.Verifier.Verify(r.Context(), raw)
+	if err != nil {
+		log.Printf("agents: refused token: %v", err)
+		apiError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "cannot read the request")
+		return
+	}
+	var req chatRequest
+	if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
+		apiError(w, http.StatusBadRequest, "not a chat completion request")
+		return
+	}
+	// Open WebUI's own tasks (a chat's title, tags, follow-up suggestions)
+	// need no agent: they go straight to the LLM.
+	if task := r.Header.Get(TaskHeader); task != "" {
+		var generic map[string]any
+		json.Unmarshal(body, &generic)
+		if err := s.LLM.Forward(r.Context(), w, generic, s.DefaultModel); err != nil {
+			log.Printf("agents: %s: task %s: %v", person.Name, task, err)
+			apiError(w, http.StatusBadGateway, err.Error())
+		}
+		return
+	}
+	agent, found, err := s.Agents.Get(r.Context(), req.Model)
+	if err != nil {
+		log.Printf("agents: %s: %s: %v", person.Name, req.Model, err)
+		apiError(w, http.StatusBadGateway, "cannot read the agent")
+		return
+	}
+	if !found {
+		apiError(w, http.StatusNotFound, "no agent "+req.Model)
+		return
+	}
+	chat := r.Header.Get(ChatHeader)
+	ctx, cancel := context.WithTimeout(r.Context(), s.turnTimeout())
+	defer cancel()
+
+	out := newWriter(w, req.Model, req.Stream)
+	rounds, err := s.turn(ctx, raw, agent, req.Messages, out)
+	if err != nil {
+		log.Printf("agents: %s: %s: chat %s: %v", person.Name, agent.ID(), chat, err)
+		out.content("\n\nThe agent stopped: " + err.Error())
+	}
+	log.Printf("agents: %s: %s: chat %s: %d tool calls", person.Name, agent.ID(), chat, rounds)
+	out.finish()
+}
+
+func (s *Server) turnTimeout() time.Duration {
+	if s.TurnTimeout > 0 {
+		return s.TurnTimeout
+	}
+	return 10 * time.Minute
+}
+
+// turn runs one turn of the agent: the LLM answers, calling the agent's
+// tools as the person, until it answers without a tool call. It returns
+// the number of tool calls.
+func (s *Server) turn(ctx context.Context, token string, a agents.Agent, incoming []Message, out *writer) (int, error) {
+	messages := []Message{{Role: "system", Content: agents.System(a, s.Domain)}}
+	for _, m := range incoming {
+		switch m.Role {
+		case "system", "user", "assistant":
+			// Open WebUI's own system messages, e.g. a channel thread's history,
+			// come after the agent's prompt and the platform's rules.
+			messages = append(messages, Message{Role: m.Role, Content: m.Content})
+		}
+	}
+	tools, err := s.Gateway.Tools(ctx, token, a.ID())
+	if err != nil {
+		return 0, err
+	}
+	model := a.Model
+	if model == "" {
+		model = s.DefaultModel
+	}
+	max := s.MaxRounds
+	if max <= 0 {
+		max = 25
+	}
+	calls := 0
+	for round := 0; ; round++ {
+		offer := tools
+		if round == max {
+			offer = nil // the last round must answer
+			messages = append(messages, Message{Role: "system", Content: "You have used all your tool calls for this turn. Answer now with what you found."})
+		}
+		msg, err := s.LLM.Chat(ctx, model, messages, offer)
+		if err != nil {
+			return calls, err
+		}
+		if len(msg.ToolCalls) == 0 || offer == nil {
+			out.content(msg.Text())
+			return calls, nil
+		}
+		messages = append(messages, Message{Role: "assistant", Content: msg.Text(), ToolCalls: msg.ToolCalls})
+		for _, c := range msg.ToolCalls {
+			calls++
+			out.reasoning(fmt.Sprintf("%s(%s)\n", c.Function.Name, shorten(c.Function.Arguments, 200)))
+			text, isErr, err := s.Gateway.Call(ctx, token, a.ID(), c.Function.Name, c.Function.Arguments)
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+					return calls, err
+				}
+				text, isErr = "error: "+err.Error(), true
+			}
+			if isErr {
+				out.reasoning("  → " + shorten(text, 300) + "\n")
+			}
+			messages = append(messages, Message{Role: "tool", ToolCallID: c.ID, Content: text})
+		}
+	}
+}
+
+func shorten(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > n {
+		return s[:n] + "…"
+	}
+	return s
+}
+
+// writer answers Open WebUI: streamed as chunks, or as one completion.
+// Tool calls show as reasoning, the answer as content.
+type writer struct {
+	w       http.ResponseWriter
+	model   string
+	stream  bool
+	id      string
+	created int64
+	text    strings.Builder
+	thought strings.Builder
+}
+
+func newWriter(w http.ResponseWriter, model string, stream bool) *writer {
+	out := &writer{w: w, model: model, stream: stream, id: fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()), created: time.Now().Unix()}
+	if stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		out.chunk(map[string]any{"role": "assistant", "content": ""}, nil)
+	}
+	return out
+}
+
+func (o *writer) chunk(delta map[string]any, finish any) {
+	b, _ := json.Marshal(map[string]any{
+		"id": o.id, "object": "chat.completion.chunk", "created": o.created, "model": o.model,
+		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}},
+	})
+	fmt.Fprintf(o.w, "data: %s\n\n", b)
+	if f, ok := o.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (o *writer) reasoning(s string) {
+	if o.stream {
+		o.chunk(map[string]any{"reasoning_content": s}, nil)
+	} else {
+		o.thought.WriteString(s)
+	}
+}
+
+func (o *writer) content(s string) {
+	if o.stream {
+		o.chunk(map[string]any{"content": s}, nil)
+	} else {
+		o.text.WriteString(s)
+	}
+}
+
+func (o *writer) finish() {
+	if o.stream {
+		o.chunk(map[string]any{}, "stop")
+		fmt.Fprint(o.w, "data: [DONE]\n\n")
+		if f, ok := o.w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
+	msg := map[string]any{"role": "assistant", "content": o.text.String()}
+	if o.thought.Len() > 0 {
+		msg["reasoning_content"] = o.thought.String()
+	}
+	writeJSON(o.w, map[string]any{
+		"id": o.id, "object": "chat.completion", "created": o.created, "model": o.model,
+		"choices": []any{map[string]any{"index": 0, "message": msg, "finish_reason": "stop"}},
+	})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func apiError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg, "type": "homecloud"}})
+}

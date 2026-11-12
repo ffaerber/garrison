@@ -1,6 +1,6 @@
 # Agents — Design
 
-How agents are defined, run and updated. Status: step 1 of the plan is built: agent folders, their checks, and one Open WebUI model per agent; the gateway serves each agent only its own tools and skills. The rest is design. Until the agent service exists, Open WebUI runs each agent's loop itself (see Chat in [spec.md](spec.md)).
+How agents are defined, run and updated. Status: steps 1 and 2 of the plan are built: agent folders and their checks, and the agent service, which Open WebUI talks to and which runs each turn of an agent in its own process for now; the gateway serves each agent only its own tools and skills. Sandboxes per chat (step 3 on) are design. See Chat in [spec.md](spec.md).
 
 ## Goals
 
@@ -145,8 +145,8 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 
 ## Plan
 
-1. Agent folders: parsing, checks on `config` pull requests, `system/config`, the operator written into new namespaces. Built; meanwhile each agent is an Open WebUI model on the one MCP connection, which names the agent in `X-Homecloud-Agent` (`{{MODEL_ID}}`), and the gateway serves it its tools and skills (`load_skill`, `read_skill_file`).
-2. Agent service with a stub harness: models list, streaming, chat id and signed user, task requests to the LLM.
+1. Agent folders: parsing, checks on `config` pull requests, `system/config`, the operator written into new namespaces. Built. The gateway serves an agent its tools and skills (`load_skill`, `read_skill_file`) when a call names it in `X-Homecloud-Agent`.
+2. Agent service: models list, streaming, chat id, the person's Keycloak token (Open WebUI's `system_oauth`, so no forwarded-user JWT is needed), task requests to the LLM. Built with the loop in its own process: the LLM with the agent's prompt, and its tools from the gateway as the person; tool calls show as reasoning. Open WebUI has no LLM key and no tools any more.
 3. Sandbox image with Pi; one container per chat with its dataset, idle stop and resume.
 4. LLM and tool proxies; per-agent tool lists enforced; skills.
 5. Move the operator agents over; remove the model preset sync.
@@ -155,7 +155,6 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 ## Open questions
 
 - Which chat id Open WebUI sends for a mention in a channel thread.
-- Whether the forwarded-user JWT carries what the gateway needs (username, root-admin group), or the agent service looks the person up in Keycloak.
 - Pi's RPC protocol in detail: session files, branching, cancelling a turn.
 - Whether the agent service is Go in the control plane, as assumed here, or the TypeScript orchestrator in `orchestrator/`.
 - GPU or a local LLM for agents that run many turns.

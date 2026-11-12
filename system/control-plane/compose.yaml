@@ -61,6 +61,33 @@ services:
       placement:
         constraints: [node.role == manager]
 
+  # The agent service: the OpenAI-compatible API Open WebUI talks to. Its
+  # models are the namespaces' agents; it runs each turn of an agent with the
+  # LLM, whose key only it has, and the agent's tools from the gateway, acting
+  # as the person chatting (Open WebUI sends their Keycloak token).
+  agents:
+    image: git.${DOMAIN}/system/control-plane:bootstrap
+    command:
+      - agents
+      - -password-file=/run/secrets/admin-password
+    secrets:
+      - admin-password
+      - { source: tls-cert, target: tls.crt }
+    volumes:
+      - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
+      - /etc/homecloud/llm-api-key:/etc/homecloud/llm-api-key:ro
+    # Gitea, the gateway and Open WebUI on the system network; Keycloak's keys
+    # at its public name through Traefik; the LLM outside.
+    networks: [system, traefik-public]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8070/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
   # The Docker API for the user runner: only what running jobs needs.
   guard:
     image: git.${DOMAIN}/system/control-plane:bootstrap

@@ -16,11 +16,11 @@ import (
 	"homecloud/control-plane/internal/hooks"
 )
 
-// OpenWebUI keeps, for every agent of every namespace, a model in Open
-// WebUI, and for every namespace a channel. An agent is a model preset named
-// <namespace>/<agent> on its LLM, with its prompt and the gateway's MCP
-// connection, which names the agent in X-Homecloud-Agent ({{MODEL_ID}}), so
-// the gateway serves only its tools.
+// OpenWebUI keeps, for every agent of every namespace, a model entry in
+// Open WebUI, and for every namespace a channel. The agents are the models of
+// Open WebUI's one connection, the agent service, which runs them; the entry,
+// named <namespace>/<agent>, lets everyone signed in use the agent and says
+// what it does.
 // The channel is the namespace's team chat: everyone signed in reads and
 // posts there, and mentioning an agent makes it answer, with the tools
 // acting as the person who mentioned it. Only admins may change a channel,
@@ -28,16 +28,14 @@ import (
 // WebUI creates from its environment at first start.
 type OpenWebUI struct {
 	// Wake, when set, starts a sync before the interval is over.
-	Wake         <-chan struct{}
-	URL          string // e.g. http://openwebui_openwebui:8080
-	Email        string
-	Password     string
-	BaseModel    string // the default LLM, e.g. gpt-oss:120b
-	ToolServerID string // the MCP connection's id in Open WebUI
-	Domain       string
-	Gitea        *Gitea
-	Agents       *Catalog // filled with the agents read, for the MCP endpoints
-	HTTP         *http.Client
+	Wake     <-chan struct{}
+	URL      string // e.g. http://openwebui_openwebui:8080
+	Email    string
+	Password string
+	Domain   string
+	Gitea    *Gitea
+	Agents   *Catalog // filled with the agents read, for the MCP endpoints
+	HTTP     *http.Client
 
 	token     string          // kept between syncs: Open WebUI limits sign-ins
 	accountID string          // the gateway's own Open WebUI account
@@ -53,19 +51,12 @@ var legacyPrefixes = []string{"agent-", "ns-"}
 
 type owuiModel struct {
 	ID           string         `json:"id"`
-	BaseModelID  string         `json:"base_model_id"`
+	BaseModelID  *string        `json:"base_model_id"` // nil: a model of a connection, not a preset
 	Name         string         `json:"name"`
 	Meta         map[string]any `json:"meta"`
 	Params       map[string]any `json:"params"`
 	AccessGrants []any          `json:"access_grants"`
 	IsActive     bool           `json:"is_active"`
-}
-
-func (o *OpenWebUI) model(a agents.Agent) string {
-	if a.Model != "" {
-		return a.Model
-	}
-	return o.BaseModel
 }
 
 func (o *OpenWebUI) want(a agents.Agent) owuiModel {
@@ -74,18 +65,13 @@ func (o *OpenWebUI) want(a agents.Agent) owuiModel {
 		desc = "Agent of the namespace " + a.Namespace
 	}
 	return owuiModel{
-		ID:          a.ID(),
-		BaseModelID: o.model(a),
-		Name:        a.ID(),
+		ID:   a.ID(),
+		Name: a.ID(),
 		Meta: map[string]any{
 			"description": desc,
-			"toolIds":     []string{"server:mcp:" + o.ToolServerID},
 			AgentMarker:   a.ID(),
 		},
-		Params: map[string]any{
-			"system":           agents.System(a, o.Domain),
-			"function_calling": "native",
-		},
+		Params: map[string]any{},
 		// Everyone signed in may chat with every agent; the tools still act
 		// with each person's own rights.
 		AccessGrants: []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}},
@@ -202,35 +188,11 @@ func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.
 		return err
 	}
 	have := map[string]owuiModel{}
-	exists := map[string]bool{}
 	for _, m := range all {
-		exists[m.ID] = true
 		_, ours := m.Meta[AgentMarker]
 		if ours || slices.ContainsFunc(legacyPrefixes, func(p string) bool { return strings.HasPrefix(m.ID, p) }) {
 			have[m.ID] = m
 		}
-	}
-	// Open WebUI lets only admins use a base model that has no entry of its
-	// own, also through a preset. The entry makes it readable to everyone
-	// signed in, and hides it from the model list: people chat with the
-	// agents. An entry an admin made is left as it is.
-	for _, a := range list {
-		base := o.model(a)
-		if exists[base] {
-			continue
-		}
-		entry := owuiModel{
-			ID: base, Name: base,
-			Meta:         map[string]any{"description": "An LLM behind the agents.", "hidden": true},
-			Params:       map[string]any{},
-			AccessGrants: []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}},
-			IsActive:     true,
-		}
-		if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/create", entry, nil); err != nil {
-			return err
-		}
-		exists[base] = true
-		log.Printf("open webui: made the base model %s usable for everyone signed in", base)
 	}
 	for _, a := range list {
 		want := o.want(a)
@@ -242,6 +204,15 @@ func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.
 				return err
 			}
 			log.Printf("open webui: added the agent %s", want.ID)
+		case cur.BaseModelID != nil:
+			// A preset of an earlier version: made again as the connection's model.
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/model/delete", map[string]string{"id": cur.ID}, nil); err != nil {
+				return err
+			}
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/create", want, nil); err != nil {
+				return err
+			}
+			log.Printf("open webui: made the agent %s a model of the agent service", want.ID)
 		case !same(cur, want):
 			if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/model/update", want, nil); err != nil {
 				return err
@@ -426,11 +397,11 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 // same compares the fields the sync owns. Access grants are set on every
 // create and update but not compared: Open WebUI returns them in its own shape.
 func same(a, b owuiModel) bool {
-	if a.Name != b.Name || a.BaseModelID != b.BaseModelID || !a.IsActive {
+	if a.Name != b.Name || (a.BaseModelID == nil) != (b.BaseModelID == nil) || !a.IsActive {
 		return false
 	}
-	ja, _ := json.Marshal([]any{a.Params["system"], a.Params["function_calling"], a.Meta["toolIds"], a.Meta["description"], a.Meta[AgentMarker]})
-	jb, _ := json.Marshal([]any{b.Params["system"], b.Params["function_calling"], b.Meta["toolIds"], b.Meta["description"], b.Meta[AgentMarker]})
+	ja, _ := json.Marshal([]any{a.Meta["description"], a.Meta[AgentMarker]})
+	jb, _ := json.Marshal([]any{b.Meta["description"], b.Meta[AgentMarker]})
 	return bytes.Equal(ja, jb)
 }
 

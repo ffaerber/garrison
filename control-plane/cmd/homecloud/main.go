@@ -24,6 +24,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
+	"homecloud/control-plane/internal/agentapi"
 	"homecloud/control-plane/internal/apply"
 	"homecloud/control-plane/internal/dashboards"
 	"homecloud/control-plane/internal/gateway"
@@ -44,6 +45,7 @@ const usage = `usage:
                    [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
   homecloud applied [-work DIR]
   homecloud gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
+  homecloud agents [-listen ADDR] [-gitea URL] [-gateway URL] ...
   homecloud guard [-listen ADDR] [-socket PATH] [-network NAME]
 `
 
@@ -68,6 +70,8 @@ func main() {
 		err = appliedCmd(args)
 	case "gateway":
 		err = gatewayCmd(args)
+	case "agents":
+		err = agentsCmd(args)
 	case "guard":
 		err = guardCmd(args)
 	default:
@@ -346,10 +350,6 @@ func gatewayCmd(args []string) error {
 	if domain == "" || vars["ADMIN_USER"] == "" {
 		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
 	}
-	model := vars["LLM_MODEL"]
-	if model == "" {
-		model = "gpt-oss:120b"
-	}
 	password, err := os.ReadFile(*passwordFile)
 	if err != nil {
 		return err
@@ -358,29 +358,12 @@ func gatewayCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		return fmt.Errorf("%s: no certificate", *caFile)
-	}
-	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	// Keycloak may still be starting.
-	var verifier *gateway.KeycloakVerifier
-	issuer := "https://keycloak." + domain + "/realms/homecloud"
-	for {
-		verifier, err = gateway.NewKeycloakVerifier(oidc.ClientContext(ctx, httpClient), issuer, strings.Split(*clients, ","))
-		if err == nil {
-			break
-		}
-		log.Printf("waiting for Keycloak: %v", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
+	verifier, err := keycloakVerifier(ctx, domain, pem, *caFile, strings.Split(*clients, ","))
+	if err != nil {
+		return err
 	}
 
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
@@ -392,7 +375,7 @@ func gatewayCmd(args []string) error {
 	}
 	sync := &gateway.OpenWebUI{
 		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
-		BaseModel: model, ToolServerID: "homecloud", Domain: domain, Gitea: g, Agents: catalog,
+		Domain: domain, Gitea: g, Agents: catalog,
 	}
 	// Gitea's webhook wakes the syncs; the intervals stay for missed deliveries.
 	wake := &hooks.Wake{}
@@ -421,7 +404,7 @@ func gatewayCmd(args []string) error {
 		defer cancel()
 		server.Shutdown(shutdown)
 	}()
-	log.Printf("gateway: MCP on %s/mcp, agents on %s", *listen, model)
+	log.Printf("gateway: MCP on %s/mcp", *listen)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
@@ -478,4 +461,97 @@ func renderCmd(args []string) error {
 	}
 	_, err = os.Stdout.Write(out)
 	return err
+}
+
+// keycloakVerifier accepts access tokens of the installation's Keycloak
+// realm issued to clients. Keycloak may still be starting.
+func keycloakVerifier(ctx context.Context, domain string, pem []byte, caFile string, clients []string) (*gateway.KeycloakVerifier, error) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s: no certificate", caFile)
+	}
+	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	issuer := "https://keycloak." + domain + "/realms/homecloud"
+	for {
+		verifier, err := gateway.NewKeycloakVerifier(oidc.ClientContext(ctx, httpClient), issuer, clients)
+		if err == nil {
+			return verifier, nil
+		}
+		log.Printf("waiting for Keycloak: %v", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+// agentsCmd serves the agent service: the OpenAI-compatible API Open WebUI
+// talks to, whose models are the namespaces' agents. It runs each turn of an
+// agent: the LLM, which only it has the key of, with the agent's tools from
+// the gateway, acting as the person chatting.
+func agentsCmd(args []string) error {
+	fs := flag.NewFlagSet("agents", flag.ExitOnError)
+	listen := fs.String("listen", ":8070", "address to serve the API on (/v1)")
+	config := fs.String("config", etcDir+"/install.env", "installation settings")
+	giteaURL := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
+	gatewayURL := fs.String("gateway", "http://control-plane_gateway:8080/mcp", "the gateway's MCP endpoint")
+	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
+	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the LLM's API key")
+	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
+	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
+	fs.Parse(args)
+
+	_, vars, err := readEnvFile(*config)
+	if err != nil {
+		return err
+	}
+	domain := vars["DOMAIN"]
+	if domain == "" || vars["ADMIN_USER"] == "" {
+		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
+	}
+	model := vars["LLM_MODEL"]
+	if model == "" {
+		model = "gpt-oss:120b"
+	}
+	base := vars["LLM_BASE_URL"]
+	if base == "" {
+		base = "https://ollama.com/v1"
+	}
+	password, err := os.ReadFile(*passwordFile)
+	if err != nil {
+		return err
+	}
+	pem, err := os.ReadFile(*caFile)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	verifier, err := keycloakVerifier(ctx, domain, pem, *caFile, strings.Split(*clients, ","))
+	if err != nil {
+		return err
+	}
+	g := &gateway.Gitea{URL: *giteaURL, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
+	srv := &agentapi.Server{
+		Agents:       &agentapi.GiteaAgents{Gitea: g},
+		Verifier:     verifier,
+		LLM:          &agentapi.LLM{URL: base, KeyFile: *keyFile},
+		Gateway:      &agentapi.Gateway{URL: *gatewayURL},
+		Domain:       domain,
+		DefaultModel: model,
+	}
+	// Turns stream for minutes: no write timeout.
+	server := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		server.Shutdown(shutdown)
+	}()
+	log.Printf("agents: API on %s/v1, LLM %s at %s", *listen, model, base)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }

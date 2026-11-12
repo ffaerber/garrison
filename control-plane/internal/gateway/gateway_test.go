@@ -40,6 +40,8 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/orgs":
 		io.WriteString(w, `[{"username":"system","description":"the platform"},{"username":"homepage"}]`)
+	case p == "/orgs/system" || p == "/orgs/homepage":
+		io.WriteString(w, "{}")
 	case p == "/orgs/system/repos":
 		json.NewEncoder(w).Encode([]Repo{{Name: "grafana"}})
 	case p == "/repos/system/grafana/raw/compose.yaml":
@@ -277,9 +279,12 @@ func TestOpenWebUISync(t *testing.T) {
 	gsrv := httptest.NewServer(fg)
 	defer gsrv.Close()
 	var mu sync.Mutex
+	preset := "gpt-oss:120b"
 	models := map[string]owuiModel{
 		"agent-gone": {ID: "agent-gone", Name: "agent-gone"}, "ns-system": {ID: "ns-system", Name: "system"}, "other": {ID: "other"},
 		"homepage/old": {ID: "homepage/old", Name: "homepage/old", Meta: map[string]any{AgentMarker: "homepage/old"}},
+		"homepage/marketing": {ID: "homepage/marketing", Name: "homepage/marketing", BaseModelID: &preset, IsActive: true,
+			Meta: map[string]any{AgentMarker: "homepage/marketing", "description": "Media"}},
 	}
 	channels := map[string]owuiChannel{
 		"c-gone":  {ID: "c-gone", Name: "gone", Meta: map[string]any{ChannelMarker: "gone"}},
@@ -394,7 +399,7 @@ func TestOpenWebUISync(t *testing.T) {
 	}))
 	defer ow.Close()
 	catalog := &Catalog{}
-	o := &OpenWebUI{URL: ow.URL, Email: "e", Password: "p", BaseModel: "gpt-oss:120b", ToolServerID: "homecloud", Domain: "example.com",
+	o := &OpenWebUI{URL: ow.URL, Email: "e", Password: "p", Domain: "example.com",
 		Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}, Agents: catalog}
 	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
@@ -425,14 +430,16 @@ func TestOpenWebUISync(t *testing.T) {
 	if _, ok := models["other"]; !ok {
 		t.Error("a model the sync does not own was removed")
 	}
-	if b, ok := models["gpt-oss:120b"]; !ok || b.Meta["hidden"] != true || len(b.AccessGrants) != 1 {
-		t.Errorf("base model entry = %+v", b)
-	}
-	if sys.BaseModelID != "gpt-oss:120b" || !strings.Contains(sys.Params["system"].(string), `namespace "system"`) {
+	// An agent is the agent service's model: an entry without a base model,
+	// which everyone may use. The preset of an earlier version is made again.
+	if sys.BaseModelID != nil || len(sys.AccessGrants) != 1 || sys.Meta[AgentMarker] != "system/operator" {
 		t.Errorf("system/operator = %+v", sys)
 	}
-	if ids := sys.Meta["toolIds"].([]any); len(ids) != 1 || ids[0] != "server:mcp:homecloud" {
-		t.Errorf("toolIds = %v", ids)
+	if m := models["homepage/marketing"]; m.BaseModelID != nil || m.Meta["description"] != "Media" {
+		t.Errorf("homepage/marketing = %+v", m)
+	}
+	if _, ok := models["gpt-oss:120b"]; ok {
+		t.Error("an entry for the LLM was made")
 	}
 	// One channel per namespace, everyone may post, the gone one removed, others kept.
 	byNS := map[string]owuiChannel{}
