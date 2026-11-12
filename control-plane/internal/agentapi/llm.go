@@ -136,6 +136,12 @@ func (l *LLM) Chat(ctx context.Context, model string, messages []Message, tools 
 func (l *LLM) Forward(ctx context.Context, w http.ResponseWriter, body map[string]any, model string) error {
 	body["model"] = model
 	delete(body, "tools")
+	return l.Proxy(ctx, w, body)
+}
+
+// Proxy sends a request as it is, with the key, and copies the answer back
+// as it comes.
+func (l *LLM) Proxy(ctx context.Context, w http.ResponseWriter, body map[string]any) error {
 	resp, err := l.post(ctx, body)
 	if err != nil {
 		return err

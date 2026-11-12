@@ -1,6 +1,7 @@
 # Installed as .gitea/workflows/build.yaml in the repo system/control-plane.
-# On every push to main: build the control plane image, push it to Gitea's
-# registry, and deploy it by committing its tag to compose.yaml in this repo.
+# On every push to main: build the control plane image and the agents'
+# sandbox image, push them to Gitea's registry, and deploy them by committing
+# their tag to compose.yaml in this repo.
 # The running deployer then applies that commit and replaces itself.
 name: build
 on:
@@ -32,22 +33,25 @@ jobs:
           [ -n "$registry" ] || { echo "the organisation variable REGISTRY is not set" >&2; exit 1; }
           tag=$(echo "$SHA" | cut -c1-12)
           image=$registry/system/control-plane:$tag
+          sandbox=$registry/system/sandbox:$tag
           auth="Authorization: token $TOKEN"
           internal=http://gitea_gitea:3000
 
           git -c http.extraHeader="$auth" clone -q "$internal/system/control-plane.git" src
           git -C src checkout -q "$SHA"
           docker build -q -f src/control-plane/Dockerfile -t "$image" src
+          docker build -q -t "$sandbox" src/sandbox
           echo "$TOKEN" | docker login -u "$USER" --password-stdin "$registry" >/dev/null
           docker push -q "$image"
-          echo "built and pushed $image"
+          docker push -q "$sandbox"
+          echo "built and pushed $image and $sandbox"
 
           git config --global user.name "Control plane build"
           git config --global user.email "ci@$registry"
           for attempt in 1 2 3; do
             rm -rf deploy
             git -c http.extraHeader="$auth" clone -q "$internal/system/control-plane.git" deploy
-            sed -i -E "s#(/system/control-plane:)[A-Za-z0-9._-]+#\1$tag#g" deploy/compose.yaml
+            sed -i -E "s#(/system/(control-plane|sandbox):)[A-Za-z0-9._-]+#\1$tag#g" deploy/compose.yaml
             git -C deploy add compose.yaml
             if git -C deploy diff --cached --quiet; then echo "already deploys $tag"; exit 0; fi
             git -C deploy commit -q -m "Deploy control plane $tag [skip ci]"

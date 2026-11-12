@@ -1,5 +1,5 @@
 // Package guard is a Docker API proxy for the Actions runner of user
-// namespaces. The runner needs Docker to run jobs in containers, but Docker's
+// namespaces, and for the agent service, which starts the agents' sandboxes. The runner needs Docker to run jobs in containers, but Docker's
 // API is root on the machine, and a workflow can ask for container options
 // (devices, capabilities, host namespaces) that escape any container. The
 // guard lets through only what running a job needs, and refuses everything
@@ -13,6 +13,10 @@
 //   - volumes only of the runner's own (by name prefix), without driver options;
 //   - image pulls, but no builds, pushes, tags, commits or imports, and
 //     nothing of Swarm, secrets, plugins or the system.
+//
+// For sandboxes the policy is narrower still: only one image, every
+// container labelled and with memory and process limits. Containers are
+// known by that label, so they stay manageable after the guard restarts.
 package guard
 
 import (
@@ -29,18 +33,23 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Policy is what the guard allows.
 type Policy struct {
 	Network        string   // the only network job containers may join
 	VolumePrefixes []string // names of volumes jobs may create and mount
+	Image          string   // if set, the only image (repository, any tag) containers may run and be pulled
+	Label          string   // if set, containers must carry this label as "true", and are owned by it
+	MaxMemory      int64    // if set, containers must set a memory limit up to this and a process limit
 }
 
 // Guard proxies the Docker API on a Unix socket under a Policy.
 type Guard struct {
 	Policy Policy
 	proxy  *httputil.ReverseProxy
+	docker *http.Client
 
 	mu         sync.Mutex
 	containers map[string]bool // ids and names of containers created through the guard
@@ -52,12 +61,14 @@ func New(socket string, p Policy) *Guard {
 	g := &Guard{Policy: p, containers: map[string]bool{}, execs: map[string]bool{}}
 	target, _ := url.Parse("http://docker")
 	g.proxy = httputil.NewSingleHostReverseProxy(target)
-	g.proxy.Transport = &http.Transport{
+	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", socket)
 		},
 	}
+	g.proxy.Transport = transport
+	g.docker = &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	g.proxy.ModifyResponse = g.record
 	return g
 }
@@ -85,8 +96,39 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Guard) owned(id string) bool {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.containers[id] || g.containers[strings.TrimPrefix(id, "/")]
+	known := g.containers[id] || g.containers[strings.TrimPrefix(id, "/")]
+	g.mu.Unlock()
+	if known || g.Policy.Label == "" {
+		return known
+	}
+	// Created before the guard last started: known by the label.
+	resp, err := g.docker.Get("http://docker/containers/" + url.PathEscape(id) + "/json")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return true // no such container: Docker answers that itself
+	}
+	var c struct {
+		Config struct{ Labels map[string]string }
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&c) != nil {
+		return false
+	}
+	if c.Config.Labels[g.Policy.Label] != "true" {
+		return false
+	}
+	g.mu.Lock()
+	g.containers[id] = true
+	g.mu.Unlock()
+	return true
+}
+
+// imageAllowed: any image without an image policy, else only its repository.
+func (g *Guard) imageAllowed(image string) bool {
+	p := g.Policy.Image
+	return p == "" || image == p || strings.HasPrefix(image, p+":") || strings.HasPrefix(image, p+"@")
 }
 
 func (g *Guard) allow(r *http.Request, path string) error {
@@ -99,6 +141,9 @@ func (g *Guard) allow(r *http.Request, path string) error {
 	case m == http.MethodPost && path == "/images/create":
 		if r.URL.Query().Get("fromImage") == "" || r.URL.Query().Get("fromSrc") != "" {
 			return fmt.Errorf("only image pulls are allowed")
+		}
+		if !g.imageAllowed(r.URL.Query().Get("fromImage")) {
+			return fmt.Errorf("image %s is not allowed", r.URL.Query().Get("fromImage"))
 		}
 		return nil
 	case m == http.MethodGet && (path == "/networks" || networkPath.MatchString(path)):
@@ -162,7 +207,11 @@ func (g *Guard) volumeAllowed(name string) bool {
 }
 
 type createBody struct {
+	Image      string
+	Labels     map[string]string
 	HostConfig struct {
+		Memory            int64
+		PidsLimit         *int64
 		Privileged        bool
 		CapAdd            []string
 		Devices           []any
@@ -234,6 +283,12 @@ func (g *Guard) checkCreate(r *http.Request) error {
 	add(len(h.PortBindings) > 0 || h.PublishAllPorts, "published ports")
 	add(h.OomKillDisable != nil && *h.OomKillDisable, "disabled OOM killer")
 	add(h.Isolation != "" && h.Isolation != "default", "isolation "+h.Isolation)
+	add(!g.imageAllowed(b.Image), "image "+b.Image)
+	add(g.Policy.Label != "" && b.Labels[g.Policy.Label] != "true", "no label "+g.Policy.Label)
+	if g.Policy.MaxMemory > 0 {
+		add(h.Memory <= 0 || h.Memory > g.Policy.MaxMemory, fmt.Sprintf("memory %d", h.Memory))
+		add(h.PidsLimit == nil || *h.PidsLimit <= 0, "no process limit")
+	}
 	if len(bad) > 0 {
 		return fmt.Errorf("container asks for %s", strings.Join(bad, ", "))
 	}
@@ -325,6 +380,13 @@ func (g *Guard) filterList(resp *http.Response) error {
 	}
 	mine := []map[string]any{}
 	for _, c := range all {
+		labels, _ := c["Labels"].(map[string]any)
+		if g.Policy.Label != "" {
+			if labels[g.Policy.Label] == "true" {
+				mine = append(mine, c)
+			}
+			continue
+		}
 		if id, _ := c["Id"].(string); g.owned(id) {
 			mine = append(mine, c)
 		}

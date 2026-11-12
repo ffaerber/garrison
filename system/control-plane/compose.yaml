@@ -63,14 +63,18 @@ services:
         constraints: [node.role == manager]
 
   # The agent service: the OpenAI-compatible API Open WebUI talks to. Its
-  # models are the namespaces' agents; it runs each turn of an agent with the
-  # LLM, whose key only it has, and the agent's tools from the gateway, acting
-  # as the person chatting (Open WebUI sends their Keycloak token).
+  # models are the namespaces' agents. Each chat with an agent runs in a
+  # sandbox of its own (the image below, built with this one): Pi, the agent
+  # harness, with a workspace kept in a volume per chat. The agent service
+  # passes on the LLM, whose key only it has, and the agent's tools from the
+  # gateway, acting as the person chatting (Open WebUI sends their Keycloak
+  # token).
   agents:
     image: git.${DOMAIN}/system/control-plane:bootstrap
     command:
       - agents
       - -password-file=/run/secrets/admin-password
+      - -sandbox-image=git.${DOMAIN}/system/sandbox:bootstrap
     secrets:
       - admin-password
       - { source: tls-cert, target: tls.crt }
@@ -78,13 +82,34 @@ services:
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
       - /etc/homecloud/llm-api-key:/etc/homecloud/llm-api-key:ro
     # Gitea, the gateway and Open WebUI on the system network; Keycloak's keys
-    # at its public name through Traefik; the LLM outside.
-    networks: [system, traefik-public]
+    # at its public name through Traefik; the LLM outside; the sandboxes, and
+    # Docker for them through their guard.
+    networks: [system, traefik-public, sandboxes, sandbox-guard]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8070/healthz"]
       interval: 5s
       timeout: 3s
       retries: 60
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  # The Docker API for the agent service: only sandboxes, i.e. containers of
+  # the sandbox image, labelled, with memory and process limits, on the
+  # sandboxes network, with a volume of their own.
+  sandbox-guard:
+    image: git.${DOMAIN}/system/control-plane:bootstrap
+    command:
+      - guard
+      - -listen=:2375
+      - -network=homecloud-sandboxes
+      - -volumes=homecloud-agent-
+      - -image=git.${DOMAIN}/system/sandbox
+      - -label=homecloud.sandbox
+      - -max-memory=2147483648
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [sandbox-guard]
     deploy:
       placement:
         constraints: [node.role == manager]
@@ -168,5 +193,16 @@ networks:
     name: homecloud-browser
   # Only the user runner and the guard.
   runner-guard:
+    driver: overlay
+    internal: true
+  # The agents' sandboxes, plain containers, and the agent service: nothing
+  # on it reaches beyond the cluster.
+  sandboxes:
+    name: homecloud-sandboxes
+    driver: overlay
+    internal: true
+    attachable: true
+  # Only the agent service and its guard.
+  sandbox-guard:
     driver: overlay
     internal: true

@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -33,6 +35,7 @@ import (
 	"homecloud/control-plane/internal/hooks"
 	"homecloud/control-plane/internal/hostnames"
 	"homecloud/control-plane/internal/render"
+	"homecloud/control-plane/internal/sandbox"
 	"homecloud/control-plane/internal/stack"
 )
 
@@ -46,7 +49,8 @@ const usage = `usage:
   homecloud applied [-work DIR]
   homecloud gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
   homecloud agents [-listen ADDR] [-gitea URL] [-gateway URL] ...
-  homecloud guard [-listen ADDR] [-socket PATH] [-network NAME]
+  homecloud guard [-listen ADDR] [-socket PATH] [-network NAME] [-volumes PREFIXES]
+                  [-image REPOSITORY -label LABEL -max-memory BYTES]
 `
 
 func main() {
@@ -434,15 +438,21 @@ func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *
 }
 
 // guardCmd serves the Docker API to the user namespaces' Actions runner,
-// letting through only what running jobs needs.
+// letting through only what running jobs needs; with -image and -label, to
+// the agent service, letting through only sandboxes.
 func guardCmd(args []string) error {
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	listen := fs.String("listen", ":2375", "address to serve the guarded Docker API on")
 	socket := fs.String("socket", "/var/run/docker.sock", "the Docker daemon's socket")
-	network := fs.String("network", "homecloud-builds", "the only network job containers may join")
+	network := fs.String("network", "homecloud-builds", "the only network containers may join")
+	volumes := fs.String("volumes", "GITEA-ACTIONS-,act-toolcache", "prefixes of the volumes containers may use, comma-separated")
+	image := fs.String("image", "", "the only image repository containers may run, if set")
+	label := fs.String("label", "", "the label containers must carry, and are known by, if set")
+	maxMemory := fs.Int64("max-memory", 0, "the largest memory limit a container may ask for; if set, it must ask for one")
 	fs.Parse(args)
-	g := guard.New(*socket, guard.Policy{Network: *network, VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}})
-	log.Printf("docker guard on %s for %s, jobs on %s", *listen, *socket, *network)
+	g := guard.New(*socket, guard.Policy{Network: *network, VolumePrefixes: strings.Split(*volumes, ","),
+		Image: *image, Label: *label, MaxMemory: *maxMemory})
+	log.Printf("docker guard on %s for %s, containers on %s", *listen, *socket, *network)
 	return (&http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe()
 }
 
@@ -505,6 +515,15 @@ func agentsCmd(args []string) error {
 	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the LLM's API key")
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
+	image := fs.String("sandbox-image", "", "the sandbox image; if empty, turns run in this process")
+	dockerAddr := fs.String("sandbox-docker", "control-plane_sandbox-guard:2375", "the Docker API sandboxes are started through")
+	network := fs.String("sandbox-network", "homecloud-sandboxes", "the network of the sandboxes")
+	sandboxListen := fs.String("sandbox-listen", ":8071", "address to serve the sandboxes on: the LLM and the tools")
+	sandboxAPI := fs.String("sandbox-api", "http://control-plane_agents:8071", "that address, as sandboxes reach it")
+	memory := fs.Int64("sandbox-memory", 1<<30, "memory limit of a sandbox, in bytes")
+	cpus := fs.Float64("sandbox-cpus", 1, "CPU limit of a sandbox")
+	idle := fs.Duration("sandbox-idle", 15*time.Minute, "a sandbox without a message this long is stopped")
+	perPerson := fs.Int("sandbox-per-person", 3, "running sandboxes per person")
 	fs.Parse(args)
 
 	_, vars, err := readEnvFile(*config)
@@ -545,6 +564,38 @@ func agentsCmd(args []string) error {
 		Gateway:      &agentapi.Gateway{URL: *gatewayURL},
 		Domain:       domain,
 		DefaultModel: model,
+	}
+	if *image != "" {
+		// The sandbox image is pulled from Gitea's registry as the admin, if
+		// the build did not leave it on this machine.
+		auth, _ := json.Marshal(map[string]string{"username": vars["ADMIN_USER"], "password": strings.TrimSpace(string(password)), "serveraddress": "git." + domain})
+		srv.Sandboxes = &sandbox.Manager{
+			Docker: &sandbox.Docker{Addr: *dockerAddr}, Image: *image, Network: *network, API: *sandboxAPI,
+			Memory: *memory, CPUs: *cpus, Pids: 512, Idle: *idle, PerPerson: *perPerson,
+			RegistryAuth: base64.URLEncoding.EncodeToString(auth),
+		}
+		go func() {
+			for ctx.Err() == nil {
+				err := srv.Sandboxes.Clean(ctx)
+				if err == nil {
+					break
+				}
+				log.Printf("agents: sandboxes: %v", err)
+				time.Sleep(5 * time.Second)
+			}
+			srv.Sandboxes.Run(ctx)
+		}()
+		sb := &http.Server{Addr: *sandboxListen, Handler: srv.SandboxHandler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			<-ctx.Done()
+			sb.Close()
+		}()
+		go func() {
+			if err := sb.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("agents: sandboxes: %v", err)
+			}
+		}()
+		log.Printf("agents: sandboxes from %s on %s, served on %s", *image, *network, *sandboxListen)
 	}
 	// Turns stream for minutes: no write timeout.
 	server := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}

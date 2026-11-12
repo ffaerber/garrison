@@ -54,6 +54,13 @@ Bob: *Take a screenshot of the todo app and put it into the namespace system, re
 - Bob may not change `system/platform`: the gateway refuses before the browser runs, and no pull request appears.
 - The browser loads only the installation's own pages: example.org is refused, and nothing is proposed.
 
+## 4e. The media agent works in a sandbox of its own
+
+The channel's turns with `homepage/media` ran in its sandbox: a container of the sandbox image for that channel and agent. Bob: *In your workspace, use bash to write the line 'pelican 42' into notes.txt.* Then its container is removed, as after 15 idle minutes, and bob asks: *Which line did you write into notes.txt just before?*
+
+- The sandbox holds no LLM key and no Keycloak token; it cannot reach the internet, Gitea or Docker; between turns its own token counts for nothing at the agent service.
+- The file is in the workspace; a new container takes up the chat with the same workspace and conversation, and the agent answers *pelican 42*.
+
 ## 5. Alice removes bob
 
 Alice: *@homepage/operator Remove bob from the namespace homepage.*

@@ -5,8 +5,9 @@
 // from the gateway, which act as the person chatting. Open WebUI sends that
 // person's Keycloak token, and holds no LLM key.
 //
-// The loop runs in this process for now; each chat is to get its own
-// sandbox (docs/agents.md).
+// With sandboxes, each chat with an agent runs in a container of its own:
+// Pi, the agent harness, with a workspace kept between turns (sandbox.go).
+// Without, or for a request without a chat, the loop runs in this process.
 package agentapi
 
 import (
@@ -22,6 +23,7 @@ import (
 
 	"homecloud/control-plane/internal/agents"
 	"homecloud/control-plane/internal/gateway"
+	"homecloud/control-plane/internal/sandbox"
 )
 
 // Agents finds the agents defined in the namespaces' config repos.
@@ -40,6 +42,8 @@ type Server struct {
 	DefaultModel string // the LLM model of agents that name none, and of Open WebUI's own tasks
 	MaxRounds    int    // tool rounds per turn; 0: 25
 	TurnTimeout  time.Duration
+	Sandboxes    *sandbox.Manager // nil: every turn runs in this process
+	MaxToolCalls int              // tool calls per turn in a sandbox; 0: 60
 }
 
 // Headers Open WebUI's connection fills in for each request.
@@ -126,7 +130,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	out := newWriter(w, req.Model, req.Stream)
-	rounds, err := s.turn(ctx, raw, agent, req.Messages, out)
+	var rounds int
+	if s.Sandboxes != nil && chat != "" {
+		rounds, err = s.sandboxTurn(ctx, raw, person.Name, chat, agent, req.Messages, out)
+	} else {
+		rounds, err = s.turn(ctx, raw, agent, req.Messages, out)
+	}
 	if err != nil {
 		log.Printf("agents: %s: %s: chat %s: %v", person.Name, agent.ID(), chat, err)
 		out.content("\n\nThe agent stopped: " + err.Error())

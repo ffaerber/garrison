@@ -193,3 +193,99 @@ func TestVolumeListShowsOnlyJobVolumes(t *testing.T) {
 		t.Errorf("volumes = %v", out.Volumes)
 	}
 }
+
+func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
+	sock, seen := fakeDocker(t)
+	g := New(sock, Policy{Network: "homecloud-sandboxes", VolumePrefixes: []string{"homecloud-agent-"},
+		Image: "git.example.com/system/sandbox", Label: "homecloud.sandbox", MaxMemory: 2 << 30})
+	srv := httptest.NewServer(g)
+	t.Cleanup(srv.Close)
+	return srv, seen
+}
+
+func sandboxSpec(change func(c, h map[string]any)) map[string]any {
+	h := map[string]any{"NetworkMode": "homecloud-sandboxes", "Memory": 1 << 30, "PidsLimit": 512,
+		"Mounts": []map[string]any{{"Type": "volume", "Source": "homecloud-agent-1", "Target": "/data"}}}
+	c := map[string]any{"Image": "git.example.com/system/sandbox:abc", "Labels": map[string]string{"homecloud.sandbox": "true"}, "HostConfig": h}
+	if change != nil {
+		change(c, h)
+	}
+	return c
+}
+
+func TestOnlySandboxesAreCreated(t *testing.T) {
+	srv, _ := sandboxGuard(t)
+	if code := do(t, srv, "POST", "/v1.47/containers/create?name=homecloud-agent-1", sandboxSpec(nil)); code != http.StatusCreated {
+		t.Fatalf("a sandbox: %d", code)
+	}
+	for name, change := range map[string]func(c, h map[string]any){
+		"other image":     func(c, h map[string]any) { c["Image"] = "alpine:3.22" },
+		"lookalike image": func(c, h map[string]any) { c["Image"] = "git.example.com/system/sandbox-evil:1" },
+		"no label":        func(c, h map[string]any) { delete(c, "Labels") },
+		"no memory limit": func(c, h map[string]any) { delete(h, "Memory") },
+		"too much memory": func(c, h map[string]any) { h["Memory"] = 8 << 30 },
+		"no pids limit":   func(c, h map[string]any) { delete(h, "PidsLimit") },
+		"other network":   func(c, h map[string]any) { h["NetworkMode"] = "homecloud-system" },
+		"other volume": func(c, h map[string]any) {
+			h["Mounts"] = []map[string]any{{"Type": "volume", "Source": "gitea-data", "Target": "/data"}}
+		},
+		"docker socket": func(c, h map[string]any) { h["Binds"] = []string{"/var/run/docker.sock:/var/run/docker.sock"} },
+		"privileged":    func(c, h map[string]any) { h["Privileged"] = true },
+	} {
+		if code := do(t, srv, "POST", "/v1.47/containers/create", sandboxSpec(change)); code != http.StatusForbidden {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	if code := do(t, srv, "POST", "/v1.47/images/create?fromImage=git.example.com/system/sandbox&tag=abc", nil); code != http.StatusOK {
+		t.Errorf("pulling the sandbox image: %d", code)
+	}
+	if code := do(t, srv, "POST", "/v1.47/images/create?fromImage=alpine&tag=3.22", nil); code != http.StatusForbidden {
+		t.Errorf("pulling another image: %d", code)
+	}
+}
+
+func TestSandboxesAreKnownByTheirLabel(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "docker.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv0 := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			io.WriteString(w, `[{"Id":"sb1","Labels":{"homecloud.sandbox":"true"}},{"Id":"gitea1","Labels":{}}]`)
+		case strings.HasSuffix(r.URL.Path, "/containers/sb1/json"):
+			io.WriteString(w, `{"Config":{"Labels":{"homecloud.sandbox":"true"}}}`)
+		case strings.HasSuffix(r.URL.Path, "/containers/gitea1/json"):
+			io.WriteString(w, `{"Config":{"Labels":{}}}`)
+		case strings.HasSuffix(r.URL.Path, "/containers/gone/json"), strings.HasSuffix(r.URL.Path, "/containers/gone"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})}
+	go srv0.Serve(l)
+	t.Cleanup(func() { srv0.Close() })
+	// A guard that has just started, and created nothing yet.
+	srv := httptest.NewServer(New(sock, Policy{Network: "n", Image: "img", Label: "homecloud.sandbox", MaxMemory: 1}))
+	t.Cleanup(srv.Close)
+	if code := do(t, srv, "DELETE", "/v1.47/containers/sb1?force=1", nil); code != http.StatusNoContent {
+		t.Errorf("removing a sandbox: %d", code)
+	}
+	if code := do(t, srv, "DELETE", "/v1.47/containers/gone?force=1", nil); code != http.StatusNotFound {
+		t.Errorf("removing a container that is not there: %d", code)
+	}
+	if code := do(t, srv, "DELETE", "/v1.47/containers/gitea1?force=1", nil); code != http.StatusForbidden {
+		t.Errorf("removing gitea: %d", code)
+	}
+	resp, err := http.Get(srv.URL + "/v1.47/containers/json?all=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var list []map[string]any
+	json.NewDecoder(resp.Body).Decode(&list)
+	if len(list) != 1 || list[0]["Id"] != "sb1" {
+		t.Errorf("list %v", list)
+	}
+}

@@ -1,0 +1,8 @@
+{
+  "name": "homecloud-sandbox",
+  "private": true,
+  "description": "The agents' harness, installed into the sandbox image",
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1"
+  }
+}

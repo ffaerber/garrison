@@ -1,6 +1,6 @@
 # Agents — Design
 
-How agents are defined, run and updated. Status: steps 1 and 2 of the plan are built: agent folders and their checks, and the agent service, which Open WebUI talks to and which runs each turn of an agent in its own process for now; the gateway serves each agent only its own tools and skills. Sandboxes per chat (step 3 on) are design. See Chat in [spec.md](spec.md).
+How agents are defined, run and updated. Status: steps 1 to 3 of the plan are built, and the proxies of step 4: agent folders and their checks; the agent service, which Open WebUI talks to; and a sandbox per chat, Pi in a container with its workspace in a volume, which gets the LLM and the agent's platform tools through the agent service. The gateway serves each agent only its own tools and skills. Still design: datasets instead of volumes, clean-up of old chats, Pi's native skills, Git in the workspace. See Chat in [spec.md](spec.md).
 
 ## Goals
 
@@ -29,7 +29,7 @@ Open WebUI ──/v1/chat/completions──▶ agent service (control plane)
 | --- | --- | --- |
 | Agent folders | `<namespace>/config/agents/<name>/` | What an agent is: prompt, model, tools, skills |
 | Agent service | Control plane, service `agents` | OpenAI-compatible endpoint for Open WebUI; starts, routes to and stops sandboxes; proxies the LLM and the tools |
-| Sandbox image | System repo `system/sandbox`, built by Gitea Actions | The harness (Pi) and what agents work with: git, Chromium, ffmpeg |
+| Sandbox image | `sandbox/` in the control plane's repo, built with it by Gitea Actions and pushed as `system/sandbox` | The harness (Pi) and what agents work with: bash, git, ripgrep, curl, jq; later Chromium, ffmpeg |
 | Gateway | Control plane, service `gateway` | The tools, as today, acting as the person |
 
 ## Agent folders
@@ -88,9 +88,10 @@ An OpenAI-compatible API, reachable only from Open WebUI on the system network.
 
 - `GET /v1/models` lists every agent folder as a model. Open WebUI shows them in its model picker; the gateway no longer syncs model presets.
 - `POST /v1/chat/completions` streams the agent's answer. Tool calls and progress show as reasoning, so people see what the agent does.
-- Open WebUI's connection sends, as custom headers, `X-OpenWebUI-Chat-Id: {{CHAT_ID}}`, the message id, the user message's id and its parent's id, and `X-OpenWebUI-Task: {{TASK}}`. The user comes as a signed JWT (`ENABLE_FORWARD_USER_INFO_HEADERS` with `FORWARD_USER_INFO_HEADER_JWT_SECRET`); the agent service checks the signature.
+- Open WebUI's connection sends, as custom headers, `X-Homecloud-Chat: {{CHAT_ID}}` and `X-Homecloud-Task: {{TASK}}`, and the person's Keycloak token (`system_oauth`), which the agent service verifies.
 - Requests with a task header (titles, tags, follow-up suggestions) go straight to the LLM without a sandbox.
-- Open WebUI sends the whole conversation each time. The agent service passes on only the new message: the harness keeps its own session, including tool calls and results. When the parent id shows a message was edited or regenerated, the session is branched from that point.
+- Open WebUI sends the whole conversation each time. The agent service passes on only the new message, and Open WebUI's own system messages (a channel thread's history): the harness keeps its own session, including tool calls and results. A fresh session, e.g. of a chat begun before sandboxes, gets the earlier messages as context. Branching the session when a message is edited or regenerated is to come.
+- In the answer, Pi's thinking, its tool calls, failed tool results and what it says between tool calls show as reasoning; its last message is the content.
 
 ## Sessions
 
@@ -102,22 +103,23 @@ A container belongs to a chat, not to an agent or a person.
 | Alice opens a second chat with it | 3 |
 | Alice returns to her first chat the next day | Hers starts again where it left off |
 
-- **Workspaces are separate.** Each chat has its own ZFS dataset holding the workspace and the session, so drafts of one chat never show in another. Agents share work through Git (branches and pull requests) and the namespace's media library, like people do.
+- **Workspaces are separate.** Each chat has its own volume (built: a Docker volume `homecloud-agent-<hash>`; planned: a ZFS dataset, for snapshots and quotas) holding the workspace and the session, so drafts of one chat never show in another. Agents share work through Git (branches and pull requests) and the namespace's media library, like people do.
 - **Rights are separate.** Every tool call acts as the person whose message started the turn.
-- **Team channels:** a namespace channel is one conversation shared by its members, so it gets one container per thread. Each turn acts as the person who mentioned the agent in that message. The workspace is visible to everyone in the thread; private work belongs in a private chat.
+- **Team channels:** a namespace channel is one conversation shared by its members. Open WebUI names the channel (`channel:<id>`), not the thread, in its requests, so a channel gets one container per agent for all its threads; each thread's history still comes along with each message. Each turn acts as the person who mentioned the agent in that message. The workspace is visible to everyone in the thread; private work belongs in a private chat.
 - **One turn at a time per chat;** a message sent while the agent works waits for the turn to end.
 
 ## Sandbox
 
-- One container per chat from the sandbox image, its main process `pi --mode rpc`: the agent service sends commands on stdin and reads events from stdout, so the sandbox opens no port.
-- Mounted: the chat's dataset as the workspace, and the agent's folder and skills read-only, at the commit the turn started with.
-- Network: only the agent service. The agent service proxies the LLM, adding the API key, and the gateway's tools, adding the person of the current turn. The sandbox holds no key, no token and no Docker access.
-- CPU and memory limits per container. Containers are started through a guard like the user runner's, which allows only sandbox containers with these settings.
+- One container per chat and agent from the sandbox image, its main process `pi --mode rpc`: the agent service attaches to its stdin and stdout, sends commands and reads events, so the sandbox opens no port. Built.
+- Pi gets the agent's prompt with the platform's rules and a note on its sandbox; its own tools (read, write, edit, bash) work in `/data/work`; a Pi extension (`sandbox/homecloud.ts`) adds the agent's platform tools.
+- Mounted: the chat's volume at `/data` (workspace and Pi's session). Skills are still read through the gateway's `load_skill`; mounting the agent's folder and skills for Pi to load natively is to come.
+- Network: `homecloud-sandboxes`, internal, shared only with the agent service. On a second port (8071) the agent service passes on the LLM, adding the API key and enforcing the agent's model, and the gateway's tools, adding the Keycloak token of the person whose turn runs. A sandbox names itself with a random token given at its start, which counts only during a turn. The sandbox holds no key, no person's token and no Docker access.
+- Limits per container: 1 GB of memory, one CPU, 512 processes, no capabilities. Containers are started through the sandbox guard, like the user runner's, which allows only the sandbox image, with the label `homecloud.sandbox`, these limits, that network and volumes named `homecloud-agent-*`. It knows its containers by the label, so it still does after a restart.
 
 ## Lifecycle and updates
 
 - **Start:** on the first message of a chat, or the next message after a stop. A new chat's first answer takes a few seconds more.
-- **Stop:** after 15 minutes without a message. The dataset stays.
+- **Stop:** after 15 minutes without a message. The volume stays. When the agent service restarts, it removes all sandbox containers; their next message starts them again.
 - **Clean-up:** Open WebUI does not report deleted chats; datasets of chats unused for 30 days are removed, after a snapshot.
 - **Updates:** an agent is built from three layers, each changed in its own place.
 
@@ -133,9 +135,9 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 
 ## Limits
 
-- Per person: at most 3 running sandboxes; a new chat stops that person's oldest idle one, or waits.
+- Per person: at most 3 running sandboxes; a new chat stops that person's oldest idle one, or is refused while all three work.
 - Machine: a cap from free memory; idle sandboxes are stopped first.
-- Per turn: a time limit and a cap on tool calls.
+- Per turn: a time limit (10 minutes) and a cap on tool calls (60 in a sandbox), after which the turn is aborted.
 
 ## Observability
 
@@ -147,14 +149,13 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 
 1. Agent folders: parsing, checks on `config` pull requests, `system/config`, the operator written into new namespaces. Built. The gateway serves an agent its tools and skills (`load_skill`, `read_skill_file`) when a call names it in `X-Homecloud-Agent`.
 2. Agent service: models list, streaming, chat id, the person's Keycloak token (Open WebUI's `system_oauth`, so no forwarded-user JWT is needed), task requests to the LLM. Built with the loop in its own process: the LLM with the agent's prompt, and its tools from the gateway as the person; tool calls show as reasoning. Open WebUI has no LLM key and no tools any more.
-3. Sandbox image with Pi; one container per chat with its dataset, idle stop and resume.
-4. LLM and tool proxies; per-agent tool lists enforced; skills.
+3. Sandbox image with Pi; one container per chat with its volume, idle stop and resume. Built; requests without a chat id still run in the agent service's process. To come: a dataset per chat, removing unused ones.
+4. LLM and tool proxies; per-agent tool lists enforced; skills. Proxies built, with the per-agent tool lists of step 1. To come: Pi's native skills, Git in the workspace (clone through the agent service as the person, push a branch as a pull request), so agents can work on code together.
 5. Move the operator agents over; remove the model preset sync.
 6. Marketing agent: `screenshot` tool, built: headless Chrome in the control plane, signed in as the person, the PNG proposed as a pull request; tested with a media agent that bob asks for a screenshot of the todo app. To come: Git LFS for larger media, the media library, video.
 
 ## Open questions
 
-- Which chat id Open WebUI sends for a mention in a channel thread.
-- Pi's RPC protocol in detail: session files, branching, cancelling a turn.
-- Whether the agent service is Go in the control plane, as assumed here, or the TypeScript orchestrator in `orchestrator/`.
+- Branching Pi's session when a message is edited or regenerated in Open WebUI: today the newest message is simply sent on.
+- Thread ids for channels, so each thread gets its own sandbox.
 - GPU or a local LLM for agents that run many turns.

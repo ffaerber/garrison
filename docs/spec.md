@@ -44,9 +44,8 @@ Each component is a repo of the `system` organisation in Gitea, named after its 
 | 4 | `sso` | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
 | 5 | `gitea` | Gitea + registry | Code, config, history, images |
 | 6 | `runner` | Gitea Actions runner | Builds the platform's own images; serves the `system` organisation only, because its jobs reach the Docker daemon |
-| 7 | `control-plane` | Deployer, gateway, agent service, guard and user runner | The deployer applies Git to the cluster, holds the SOPS key and writes change records; the gateway serves the agents' MCP tools and keeps namespaces' members, channels and build accounts; the agent service runs the agents. Its repo holds its source; Gitea Actions builds its image and the deployer deploys it, replacing itself |
+| 7 | `control-plane` | Deployer, gateway, agent service, guards and user runner | The deployer applies Git to the cluster, holds the SOPS key and writes change records; the gateway serves the agents' MCP tools and keeps namespaces' members, channels and build accounts; the agent service runs each chat with an agent in a sandbox of its own (Pi, image `system/sandbox`). Its repo holds its source; Gitea Actions builds its image and the deployer deploys it, replacing itself |
 | — | `grafana`, `prometheus`, `loki` | Grafana; Prometheus, node-exporter, cAdvisor; Loki, Alloy | Dashboards, metrics, logs |
-| — | | Agent orchestrator | Runs operator and coding agents |
 | — | `openwebui` | Open WebUI | Chat with one agent per namespace (see Chat) |
 | — | | Platform UI | Dashboard |
 | — | | Alertmanager, ntfy | Alerts and phone push |

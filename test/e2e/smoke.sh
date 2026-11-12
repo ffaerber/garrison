@@ -752,7 +752,10 @@ bobpr=$(newest_pr config bob "$since")
 if [ -n "$bobpr" ]; then
   check "bob cannot approve his own promotion" bash -c '[ "$0" != 200 ]' "$(review config bob "$bobpr")"
   check "bob cannot merge it"              bash -c '[ "$0" != 200 ]' "$(merge config bob "$bobpr")"
-  check "the approval check holds it back" until_true 90 approval_is "$bobpr" pending
+  # Pending for want of an approval, or failed if the agent wrote an invalid
+  # members.yaml (bob under both roles): either way it cannot be merged.
+  held_back() { approval "$bobpr" | grep -qE '^(pending|failure)'; }
+  check "the approval check holds it back" until_true 90 held_back
 else
   echo "note  the agent opened no pull request for bob; it said: $(head -c 200 <<<"$answer" | tr '\n' ' ')"
 fi
@@ -827,6 +830,7 @@ check "alice merges it"                    test "$(merge config alice "$mpr")" =
 check "Open WebUI has homepage/media"      until_true 120 has_model homepage/media
 since=$(last_pr todo)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+media_from=$at  # the channel's conversation with the media agent begins
 answer=$(ask_agent homepage bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the repo todo as docs/screenshots/todo.png. Title: Screenshot of the todo app." media)
 spr=$(newest_pr todo bob "$since")
 if [ -z "$spr" ]; then
@@ -851,7 +855,8 @@ if ! pr_with todo bob "$since" docs/screenshots/todo-phone.png >/dev/null || ! p
   printf 'retry the agent did not make both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent homepage bob "Please load your skill homepage-screenshots and follow it for the app todo now: both screenshots." media)
 fi
-check "it loads the skill, as bob"         grep -q "mcp: bob: load_skill" <<<"$(mcp_calls "$at" bob)"
+# Its sandbox keeps the conversation: a skill loaded for 4b is still known.
+check "it has loaded the skill, as bob"    grep -q "mcp: bob: load_skill" <<<"$(mcp_calls "$media_from" bob)"
 read -r dpr dsha <<<"$(pr_with todo bob "$since" docs/screenshots/todo-desktop.png)"
 read -r ppr psha <<<"$(pr_with todo bob "$since" docs/screenshots/todo-phone.png)"
 check "the desktop screenshot is 1440x900" test "$(png_size todo docs/screenshots/todo-desktop.png "$dsha")" = 1440x900
@@ -873,6 +878,26 @@ at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent homepage bob "Take a screenshot of https://example.org/ and put it into the repo todo as docs/screenshots/example.png." media)
 check "a page outside the home cloud is not shot" test -z "$(newest_pr todo bob "$since")"
 check "the gateway refused every try"      refused_only "$at" bob screenshot "only pages at"
+
+echo "# 4e. the media agent works in a sandbox of its own"
+# sandbox AGENT: the running sandbox of AGENT in homepage's channel.
+sandbox_of() { docker ps -q --filter label=homecloud.sandbox=true --filter "label=homecloud.agent=$1" --filter "label=homecloud.chat=channel:$(channel_of homepage)" | head -n1; }
+sb=$(sandbox_of homepage/media)
+check "the channel's turns with it ran in its sandbox" test -n "$sb"
+check "the sandbox holds no LLM key and no token" \
+  bash -c 'k=$(cat "$1"); { [ ${#k} -lt 16 ] || ! docker inspect "$0" | grep -qF -- "$k"; } && [ "$(docker exec "$0" env | grep -c "^HOMECLOUD_")" = 4 ] && ! docker exec "$0" ls /etc/homecloud 2>/dev/null' "$sb" "$ETC/llm-api-key"
+check "it cannot reach the internet"       bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null https://example.org' "$sb"
+check "nor Gitea, nor Docker"              bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null http://gitea_gitea:3000 && ! docker exec "$0" curl -sS -m 5 -o /dev/null http://control-plane_sandbox-guard:2375/_ping' "$sb"
+check "between turns its token counts for nothing" \
+  test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/tools"')" = 401
+answer=$(ask_agent homepage bob "In your workspace, use bash to write the line 'pelican 42' into notes.txt, then say done." media)
+has_notes() { docker exec "$(sandbox_of homepage/media)" grep -q "pelican 42" /data/work/notes.txt; }
+check "it writes a file in its workspace"  has_notes
+# Its container goes, as when it is idle; the workspace and the conversation stay.
+docker rm -f "$sb" >/dev/null
+answer=$(ask_agent homepage bob "Which line did you write into notes.txt just before? Check your workspace." media)
+check "a new container resumes the chat"   test -n "$(sandbox_of homepage/media)" -a "$(sandbox_of homepage/media)" != "$sb"
+check "it still has the file"              grep -q "pelican 42" <<<"$answer"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)
