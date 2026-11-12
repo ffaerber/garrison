@@ -71,7 +71,7 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 | --- | --- | --- | --- |
 | System repos | The `system` organisation, one per system stack | `compose.yaml` and the files it uses; for the deployer also its source and build | Root admins, system agent via PR |
 | Platform repo | `system/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, system agent via PR |
-| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members); later repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins, namespace agent via PR |
+| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `system`), `agents/` and `skills/`; later repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins (root admins in `system`), agents via PR |
 | History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Deployer only |
 | App repos | Inside a namespace, one per stack | Code, `stack.yaml`, numbered migrations | Members, coding agents |
 
@@ -175,7 +175,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 - Coding agents start from an @mention in a Gitea comment (commit, PR, issue) via webhook, or from the team chat. Each task gets a fresh Docker container with the repo checked out, removed when done.
 - A namespace agent that finds a cause above its scope (e.g. a full disk) escalates a request to the system agent.
 - Users can still work locally with their own coding tools and push to the same repos.
-- Planned: agents defined as folders in each namespace's `config` repo, each chat running in its own sandbox behind an OpenAI-compatible agent service. See [agents.md](agents.md).
+- Agents are folders in each namespace's `config` repo (see Chat). Planned: each chat running in its own sandbox behind an OpenAI-compatible agent service. See [agents.md](agents.md).
 
 ## Dashboard
 
@@ -193,8 +193,10 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 ## Chat
 
 - Open WebUI, at `chat.<domain>`, is the chat. People sign in through Keycloak; root admins are its admins.
-- Each namespace has a channel there, named after it: the team chat, permanent and shared by everyone signed in. Only admins may change a channel, and the gateway puts back what it set. Mentioning the namespace's agent, `@agent-<namespace>` (e.g. `@agent-system`), makes it answer in a thread; a pinned message in each channel explains how.
-- Each namespace's agent is a model with that namespace's prompt and the gateway's tools. The gateway keeps one agent and one channel per Gitea organisation, adding and removing them as organisations come and go. People can also chat with an agent privately.
+- Each namespace has a channel there, named after it: the team chat, permanent and shared by everyone signed in. Only admins may change a channel, and the gateway puts back what it set. Mentioning one of the namespace's agents, `@<namespace>/<agent>` (e.g. `@system/operator`), makes it answer in a thread; a pinned message in each channel lists them.
+- A namespace's agents are folders under `agents/` in its repo config: `agent.yaml` (description, model, tools, skills) and `prompt.md`, with skills in the Agent Skills format (`SKILL.md`) under `skills/`. A new config repo gets the operator; a namespace without an `agents/` folder has it too. `system/config` holds the system namespace's agents, and only root admins approve changes to it. See [agents.md](agents.md).
+- Each agent is a model, `<namespace>/<agent>`, with its prompt, the platform's rules after it, and the gateway's MCP connection. Open WebUI names the agent in each call (`X-Homecloud-Agent`, its model id), and the gateway serves it only the tools its `agent.yaml` lists (plus `load_skill` and `read_skill_file` if it has skills); a model that is no agent gets none. The gateway keeps the models and one channel per namespace, adding and removing them as folders and organisations come and go. People can also chat with an agent privately.
+- The `homecloud/approval` check on config pull requests also checks the agent files: an agent with an unknown tool or skill, or without a prompt, fails it.
 - The gateway is an MCP server. Open WebUI calls it with the signed-in person's Keycloak access token, so every tool acts with that person's rights: reads and proposals go to Gitea as them. It is reachable only from Open WebUI, not from outside.
 - Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, and propose a change to a file.
 - `propose_change` opens a pull request as the person. It cannot merge or deploy: a person allowed to merges in Gitea, and the deployer deploys `main`. The agent always gives the link.

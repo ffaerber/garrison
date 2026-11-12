@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"homecloud/control-plane/internal/agents"
 )
 
 // fakeGitea answers like Gitea: alice may write to system, bob may only read.
@@ -57,6 +59,23 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"number":7,"html_url":"https://git.example.com/system/grafana/pulls/7"}`)
 	case strings.HasSuffix(p, "/pulls"):
 		io.WriteString(w, "[]")
+	// homepage/config has two agents, one of them broken, and a skill.
+	case p == "/repos/homepage/config/contents/agents":
+		io.WriteString(w, `[{"name":"marketing","type":"dir"},{"name":"broken","type":"dir"},{"name":"README.md","type":"file"}]`)
+	case p == "/repos/homepage/config/raw/agents/marketing/agent.yaml":
+		io.WriteString(w, "description: Media\ntools: [read_file]\n")
+	case p == "/repos/homepage/config/raw/agents/marketing/prompt.md":
+		io.WriteString(w, "You make media.\n")
+	case p == "/repos/homepage/config/raw/agents/broken/agent.yaml":
+		io.WriteString(w, "tools: [rm_rf]\n")
+	case p == "/repos/homepage/config/raw/agents/broken/prompt.md":
+		io.WriteString(w, "x\n")
+	case p == "/repos/homepage/config/contents/agents/marketing/skills/thumbnail":
+		io.WriteString(w, `[{"name":"SKILL.md","type":"file"},{"name":"frame.svg","type":"file"}]`)
+	case p == "/repos/homepage/config/raw/agents/marketing/skills/thumbnail/SKILL.md":
+		io.WriteString(w, "---\nname: thumbnail\ndescription: Make a thumbnail.\n---\nUse frame.svg.\n")
+	case p == "/repos/homepage/config/raw/agents/marketing/skills/thumbnail/frame.svg":
+		io.WriteString(w, "<svg/>")
 	default:
 		http.NotFound(w, r)
 	}
@@ -103,8 +122,13 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 // rpc posts one JSON-RPC request with a bearer token and returns status and decoded body.
 func rpc(t *testing.T, m *MCP, token, method string, params any) (int, map[string]any) {
 	t.Helper()
+	return rpcAt(t, m, "/mcp", token, method, params)
+}
+
+func rpcAt(t *testing.T, m *MCP, path, token, method string, params any) (int, map[string]any) {
+	t.Helper()
 	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body)))
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -253,7 +277,10 @@ func TestOpenWebUISync(t *testing.T) {
 	gsrv := httptest.NewServer(fg)
 	defer gsrv.Close()
 	var mu sync.Mutex
-	models := map[string]owuiModel{"agent-gone": {ID: "agent-gone", Name: "agent-gone"}, "ns-system": {ID: "ns-system", Name: "system"}, "other": {ID: "other"}}
+	models := map[string]owuiModel{
+		"agent-gone": {ID: "agent-gone", Name: "agent-gone"}, "ns-system": {ID: "ns-system", Name: "system"}, "other": {ID: "other"},
+		"homepage/old": {ID: "homepage/old", Name: "homepage/old", Meta: map[string]any{AgentMarker: "homepage/old"}},
+	}
 	channels := map[string]owuiChannel{
 		"c-gone":  {ID: "c-gone", Name: "gone", Meta: map[string]any{ChannelMarker: "gone"}},
 		"c-other": {ID: "c-other", Name: "random"},
@@ -265,7 +292,7 @@ func TestOpenWebUISync(t *testing.T) {
 	ow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
-		calls = append(calls, r.URL.Path)
+		calls = append(calls, r.Method+" "+r.URL.Path)
 		if r.URL.Path == "/api/v1/auths/signin" {
 			io.WriteString(w, `{"token":"t"}`)
 			return
@@ -366,14 +393,28 @@ func TestOpenWebUISync(t *testing.T) {
 		}
 	}))
 	defer ow.Close()
+	catalog := &Catalog{}
 	o := &OpenWebUI{URL: ow.URL, Email: "e", Password: "p", BaseModel: "gpt-oss:120b", ToolServerID: "homecloud", Domain: "example.com",
-		Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}}
+		Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}, Agents: catalog}
 	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sys, ok := models["agent-system"]
-	if !ok || sys.Name != "agent-system" || models["agent-homepage"].Name != "agent-homepage" {
+	// system has no agents folder: its operator. homepage has its own agents,
+	// of which the broken one is left out.
+	sys, ok := models["system/operator"]
+	if !ok || sys.Name != "system/operator" || models["homepage/marketing"].Name != "homepage/marketing" {
 		t.Fatalf("models = %v", models)
+	}
+	for _, id := range []string{"homepage/operator", "homepage/broken"} {
+		if _, ok := models[id]; ok {
+			t.Errorf("%s was added", id)
+		}
+	}
+	if _, ok := catalog.Get("homepage/marketing"); !ok {
+		t.Error("the catalog lacks homepage/marketing")
+	}
+	if _, ok := models["homepage/old"]; ok {
+		t.Error("the model of a removed agent folder was kept")
 	}
 	if _, ok := models["agent-gone"]; ok {
 		t.Error("the agent of a deleted namespace was kept")
@@ -388,7 +429,7 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Errorf("base model entry = %+v", b)
 	}
 	if sys.BaseModelID != "gpt-oss:120b" || !strings.Contains(sys.Params["system"].(string), `namespace "system"`) {
-		t.Errorf("agent-system = %+v", sys)
+		t.Errorf("system/operator = %+v", sys)
 	}
 	if ids := sys.Meta["toolIds"].([]any); len(ids) != 1 || ids[0] != "server:mcp:homecloud" {
 		t.Errorf("toolIds = %v", ids)
@@ -426,7 +467,7 @@ func TestOpenWebUISync(t *testing.T) {
 	pinnedHowTos := func() int {
 		n := 0
 		for _, m := range messages[sysID] {
-			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@agent-system") {
+			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@system/operator") {
 				n++
 			}
 		}
@@ -445,8 +486,118 @@ func TestOpenWebUISync(t *testing.T) {
 	calls = nil
 	o.Sync(context.Background())
 	for _, c := range calls {
+		if strings.HasSuffix(c, "/signin") {
+			t.Error("second sync signed in again")
+		}
 		if strings.Contains(c, "create") || strings.Contains(c, "update") || strings.Contains(c, "delete") || strings.HasSuffix(c, "/post") || strings.HasSuffix(c, "/pin") {
 			t.Errorf("second sync called %s", c)
+		}
+	}
+}
+
+func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
+	m, fg := setup(t)
+	m.Agents = &Catalog{}
+	m.Agents.Set([]agents.Agent{
+		{Namespace: "homepage", Name: "reader", Tools: []string{"read_file"}},
+		{Namespace: "homepage", Name: "marketing", Tools: []string{"list_repos"},
+			Skills: []agents.Skill{{Name: "thumbnail", Description: "Make a thumbnail.", Dir: "agents/marketing/skills/thumbnail"}}},
+	})
+	names := func(path string) []string {
+		code, out := rpcAt(t, m, path, "tok-alice", "tools/list", nil)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", path, code)
+		}
+		var n []string
+		for _, x := range out["result"].(map[string]any)["tools"].([]any) {
+			n = append(n, x.(map[string]any)["name"].(string))
+		}
+		return n
+	}
+	if got := names("/mcp/homepage/reader"); len(got) != 1 || got[0] != "read_file" {
+		t.Errorf("reader's tools = %v", got)
+	}
+	if got := names("/mcp/homepage/marketing"); strings.Join(got, ",") != "list_repos,load_skill,read_skill_file" {
+		t.Errorf("marketing's tools = %v", got)
+	}
+	if got := names("/mcp"); len(got) != len(ToolNames()) {
+		t.Errorf("/mcp tools = %v", got)
+	}
+	// A tool the agent lacks is refused before anything happens.
+	_, out := rpcAt(t, m, "/mcp/homepage/reader", "tok-alice", "tools/call", map[string]any{"name": "propose_change", "arguments": map[string]any{
+		"namespace": "system", "repo": "grafana", "path": "compose.yaml", "content": "x", "title": "t"}})
+	if out["error"] == nil || fg.prs != 0 {
+		t.Errorf("reader proposed a change: %v, %d pull requests", out, fg.prs)
+	}
+	// Open WebUI names the agent in a header, on the one /mcp connection.
+	viaHeader := func(agent string) (int, []string) {
+		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+		r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body)))
+		r.Header.Set("Authorization", "Bearer tok-alice")
+		r.Header.Set(AgentHeader, agent)
+		w := httptest.NewRecorder()
+		m.ServeHTTP(w, r)
+		var out map[string]any
+		json.Unmarshal(w.Body.Bytes(), &out)
+		var n []string
+		if res, ok := out["result"].(map[string]any); ok {
+			for _, x := range res["tools"].([]any) {
+				n = append(n, x.(map[string]any)["name"].(string))
+			}
+		}
+		return w.Code, n
+	}
+	if code, got := viaHeader("homepage/reader"); code != http.StatusOK || len(got) != 1 || got[0] != "read_file" {
+		t.Errorf("reader via header: %d %v", code, got)
+	}
+	// An agent nobody defined, or a model without an agent, gets nothing.
+	for _, id := range []string{"homepage/nobody", ""} {
+		if code, _ := viaHeader(id); code != http.StatusNotFound {
+			t.Errorf("agent %q: %d", id, code)
+		}
+	}
+	r := httptest.NewRequest(http.MethodPost, "/mcp/homepage/nobody", strings.NewReader("{}"))
+	r.Header.Set("Authorization", "Bearer tok-alice")
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown agent in the path: %d", w.Code)
+	}
+	// Skills: load one, read its file, nothing outside it.
+	call := func(tool string, args map[string]any) (string, bool) {
+		_, out := rpcAt(t, m, "/mcp/homepage/marketing", "tok-bob", "tools/call", map[string]any{"name": tool, "arguments": args})
+		res := out["result"].(map[string]any)
+		isErr, _ := res["isError"].(bool)
+		return res["content"].([]any)[0].(map[string]any)["text"].(string), isErr
+	}
+	if text, isErr := call("load_skill", map[string]any{"name": "thumbnail"}); isErr || !strings.Contains(text, "Use frame.svg.") || !strings.Contains(text, "- frame.svg") || strings.Contains(text, "- SKILL.md") {
+		t.Errorf("load_skill = %q %v", text, isErr)
+	}
+	if text, isErr := call("read_skill_file", map[string]any{"skill": "thumbnail", "path": "frame.svg"}); isErr || text != "<svg/>" {
+		t.Errorf("read_skill_file = %q %v", text, isErr)
+	}
+	if _, isErr := call("read_skill_file", map[string]any{"skill": "thumbnail", "path": "../../reader/prompt.md"}); !isErr {
+		t.Error("read_skill_file left its skill")
+	}
+	if _, isErr := call("load_skill", map[string]any{"name": "nope"}); !isErr {
+		t.Error("load_skill loaded a skill the agent does not have")
+	}
+}
+
+func TestCatalogReadsUnknownAgentsFromGitea(t *testing.T) {
+	fg := &fakeGitea{}
+	gsrv := httptest.NewServer(fg)
+	defer gsrv.Close()
+	c := &Catalog{Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}}
+	if a, ok := c.Lookup(context.Background(), "homepage/marketing"); !ok || a.Description != "Media" {
+		t.Errorf("homepage/marketing before any sync: %+v %v", a, ok)
+	}
+	if _, ok := c.Lookup(context.Background(), "system/operator"); !ok {
+		t.Error("system/operator before any sync")
+	}
+	for _, id := range []string{"homepage/broken", "homepage/nobody", "../x", "nobody"} {
+		if _, ok := c.Lookup(context.Background(), id); ok {
+			t.Errorf("%s found", id)
 		}
 	}
 }

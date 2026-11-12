@@ -14,11 +14,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"homecloud/control-plane/internal/agents"
 	"homecloud/control-plane/internal/hooks"
 )
 
-// Members keeps who may change each namespace other than system, as its repo
-// config says in members.yaml:
+// Members keeps each namespace's config repo: who may change the namespace,
+// as members.yaml there says, and the checks on its agents. For system,
+// which has no members.yaml, only root admins approve changes to config.
+// Who may change a namespace, as members.yaml says:
 //
 //	admins: [alice]   # approve and merge changes, including to members.yaml
 //	members: [bob]    # push to the namespace's repos
@@ -156,6 +159,9 @@ func (m *Members) Sync(ctx context.Context) error {
 	var errs []error
 	for _, ns := range namespaces {
 		if ns.Name == SystemNamespace {
+			if err := m.system(ctx, roots); err != nil {
+				errs = append(errs, fmt.Errorf("config of system: %w", err))
+			}
 			continue
 		}
 		if err := m.namespace(ctx, ns.Name, roots); err != nil {
@@ -192,7 +198,9 @@ type team struct {
 	Name string `json:"name"`
 }
 
-func (m *Members) teams(ctx context.Context, ns string) (map[string]int64, error) {
+// teams lists a namespace's teams, making the ones in want (name: access)
+// that are missing.
+func (m *Members) teams(ctx context.Context, ns string, want map[string]string) (map[string]int64, error) {
 	var list []team
 	if _, err := m.Gitea.do(ctx, "", http.MethodGet, "/orgs/"+ns+"/teams", nil, &list); err != nil {
 		return nil, err
@@ -201,7 +209,7 @@ func (m *Members) teams(ctx context.Context, ns string) (map[string]int64, error
 	for _, t := range list {
 		out[t.Name] = t.ID
 	}
-	for name, access := range map[string]string{"admins": "admin", "members": "write", RootTeam: "admin"} {
+	for name, access := range want {
 		if _, ok := out[name]; ok {
 			continue
 		}
@@ -241,12 +249,13 @@ func (m *Members) teamMembers(ctx context.Context, id int64) ([]string, error) {
 
 func (m *Members) namespace(ctx context.Context, ns string, roots []string) error {
 	g := m.Gitea
-	teams, err := m.teams(ctx, ns)
+	teams, err := m.teams(ctx, ns, map[string]string{"admins": "admin", "members": "write", RootTeam: "admin"})
 	if err != nil {
 		return err
 	}
 
-	// config: created with the organisation's owners as its first admins.
+	// config: created with the organisation's owners as its first admins,
+	// and the operator agent.
 	if status, err := g.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
 		owners, err := m.teamMembers(ctx, teams["Owners"])
 		if err != nil {
@@ -256,27 +265,20 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 		if len(owners) == 0 {
 			return errors.New("no owner to make the first admin")
 		}
-		if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/repos", map[string]any{
-			"name": ConfigRepo, "description": "Who may change this namespace: members.yaml",
-			"auto_init": true, "default_branch": "main", "private": false,
-		}, nil); err != nil {
-			return err
-		}
 		data, _ := yaml.Marshal(Roster{Admins: owners, Members: []string{}})
-		content := "# Who may change the namespace " + ns + ". Everyone signed in may read everything.\n" +
+		files := agents.OperatorFiles(ToolNames())
+		files[MembersFile] = "# Who may change the namespace " + ns + ". Everyone signed in may read everything.\n" +
 			"# admins approve and merge changes, including to this file; members push to its repos.\n" +
 			"# Change it by pull request: it needs the approval of an admin who did not write it\n" +
 			"# and whose role it does not change.\n" + string(data)
-		if _, err := g.do(ctx, "", http.MethodPost, "/repos/"+ns+"/"+ConfigRepo+"/contents/"+MembersFile, map[string]any{
-			"branch": "main", "message": "First admins: the namespace's creators", "content": b64(content),
-		}, nil); err != nil {
+		if err := m.createConfig(ctx, ns, "Who may change this namespace, and its agents", "First admins: the namespace's creators; the operator agent", files); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made, admins %v", ns, owners)
 	} else if err != nil {
 		return err
 	}
-	if err := m.protect(ctx, ns); err != nil {
+	if err := m.protect(ctx, ns, []string{"admins", RootTeam}); err != nil {
 		return err
 	}
 
@@ -290,45 +292,100 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 		return err // keep the teams as they are
 	}
 	for name, want := range map[string][]string{"admins": roster.Admins, "members": roster.Members, RootTeam: roots} {
-		have, err := m.teamMembers(ctx, teams[name])
-		if err != nil {
+		if err := m.syncTeam(ctx, ns, name, teams[name], want); err != nil {
 			return err
 		}
-		for _, u := range want {
-			if slices.Contains(have, u) {
-				continue
-			}
-			if status, err := g.do(ctx, "", http.MethodPut, fmt.Sprintf("/teams/%d/members/%s", teams[name], url.PathEscape(u)), nil, nil); err != nil {
-				if status == http.StatusNotFound {
-					continue // no Gitea account yet: added after their first sign-in
-				}
-				return err
-			}
-			log.Printf("members: %s is now in %s/%s", u, ns, name)
-		}
-		for _, u := range have {
-			if slices.Contains(want, u) {
-				continue
-			}
-			if _, err := g.do(ctx, "", http.MethodDelete, fmt.Sprintf("/teams/%d/members/%s", teams[name], url.PathEscape(u)), nil, nil); err != nil {
-				return err
-			}
-			log.Printf("members: %s is no longer in %s/%s", u, ns, name)
-		}
 	}
-	return m.approvals(ctx, ns, roster, roots)
+	return m.approvals(ctx, ns, &roster, roots)
+}
+
+// system keeps system/config, which holds the system namespace's agents.
+// It has no members.yaml: root admins approve and merge its changes.
+func (m *Members) system(ctx context.Context, roots []string) error {
+	ns := SystemNamespace
+	teams, err := m.teams(ctx, ns, map[string]string{RootTeam: "admin"})
+	if err != nil {
+		return err
+	}
+	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
+		if err := m.createConfig(ctx, ns, "The agents of the system namespace; root admins approve changes", "The operator agent", agents.OperatorFiles(ToolNames())); err != nil {
+			return err
+		}
+		log.Printf("members: %s/config made", ns)
+	} else if err != nil {
+		return err
+	}
+	if err := m.protect(ctx, ns, []string{RootTeam}); err != nil {
+		return err
+	}
+	if err := m.syncTeam(ctx, ns, RootTeam, teams[RootTeam], roots); err != nil {
+		return err
+	}
+	return m.approvals(ctx, ns, nil, roots)
+}
+
+// createConfig makes a namespace's config repo with files, in one commit.
+func (m *Members) createConfig(ctx context.Context, ns, description, message string, files map[string]string) error {
+	g := m.Gitea
+	if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/repos", map[string]any{
+		"name": ConfigRepo, "description": description,
+		"auto_init": true, "default_branch": "main", "private": false,
+	}, nil); err != nil {
+		return err
+	}
+	var ops []map[string]string
+	for _, path := range sortedKeys(files) {
+		ops = append(ops, map[string]string{"operation": "create", "path": path, "content": b64(files[path])})
+	}
+	_, err := g.do(ctx, "", http.MethodPost, "/repos/"+ns+"/"+ConfigRepo+"/contents", map[string]any{
+		"branch": "main", "message": message, "files": ops,
+	}, nil)
+	return err
+}
+
+// syncTeam makes a team's members want. People without a Gitea account yet
+// are added after their first sign-in.
+func (m *Members) syncTeam(ctx context.Context, ns, name string, id int64, want []string) error {
+	g := m.Gitea
+	have, err := m.teamMembers(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, u := range want {
+		if slices.Contains(have, u) {
+			continue
+		}
+		if status, err := g.do(ctx, "", http.MethodPut, fmt.Sprintf("/teams/%d/members/%s", id, url.PathEscape(u)), nil, nil); err != nil {
+			if status == http.StatusNotFound {
+				continue
+			}
+			return err
+		}
+		log.Printf("members: %s is now in %s/%s", u, ns, name)
+	}
+	for _, u := range have {
+		if slices.Contains(want, u) {
+			continue
+		}
+		if _, err := g.do(ctx, "", http.MethodDelete, fmt.Sprintf("/teams/%d/members/%s", id, url.PathEscape(u)), nil, nil); err != nil {
+			return err
+		}
+		log.Printf("members: %s is no longer in %s/%s", u, ns, name)
+	}
+	return nil
 }
 
 // protect keeps config's main branch changing only by approved pull requests.
-func (m *Members) protect(ctx context.Context, ns string) error {
+// mergers are the teams that approve and merge.
+func (m *Members) protect(ctx context.Context, ns string, mergers []string) error {
 	rule := map[string]any{
 		"rule_name":                    "main",
 		"enable_push":                  false,
 		"enable_merge_whitelist":       true,
-		"merge_whitelist_teams":        []string{"admins", RootTeam},
+		"merge_whitelist_teams":        mergers,
 		"merge_whitelist_usernames":    []string{},
 		"enable_approvals_whitelist":   true,
-		"approvals_whitelist_teams":    []string{"admins", RootTeam},
+		"approvals_whitelist_teams":    mergers,
 		"approvals_whitelist_username": []string{},
 		"required_approvals":           1,
 		"enable_status_check":          true,
@@ -384,8 +441,11 @@ func sameRule(want, have map[string]any) bool {
 	return true
 }
 
-// approvals posts homecloud/approval on every open pull request of config.
-func (m *Members) approvals(ctx context.Context, ns string, base Roster, roots []string) error {
+// approvals posts homecloud/approval on every open pull request of config:
+// its agents must be valid, and it needs an approval by Approval. base is
+// members.yaml on main; nil for system, which has none and whose changes
+// root admins approve.
+func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots []string) error {
 	g := m.Gitea
 	repo := "/repos/" + ns + "/" + ConfigRepo
 	var prs []struct {
@@ -403,10 +463,24 @@ func (m *Members) approvals(ctx context.Context, ns string, base Roster, roots [
 	for _, pr := range prs {
 		state, desc := "pending", ""
 		var raw string
-		if _, err := g.do(ctx, "", http.MethodGet, repo+"/raw/"+MembersFile+"?ref="+pr.Head.SHA, nil, &raw); err != nil {
-			state, desc = "failure", "members.yaml is missing"
-		} else if head, err := ParseRoster([]byte(raw)); err != nil {
-			state, desc = "failure", err.Error()
+		head, before := Roster{}, Roster{}
+		var rosterErr error
+		if base != nil {
+			before = *base
+			if _, err := g.do(ctx, "", http.MethodGet, repo+"/raw/"+MembersFile+"?ref="+pr.Head.SHA, nil, &raw); err != nil {
+				rosterErr = errors.New("members.yaml is missing")
+			} else {
+				head, rosterErr = ParseRoster([]byte(raw))
+			}
+		}
+		_, problems, err := g.Agents(ctx, ns, pr.Head.SHA)
+		if err != nil {
+			return err
+		}
+		if rosterErr != nil {
+			state, desc = "failure", rosterErr.Error()
+		} else if len(problems) > 0 {
+			state, desc = "failure", "agents: "+strings.Join(problems, "; ")
 		} else {
 			var reviews []struct {
 				User struct {
@@ -425,7 +499,7 @@ func (m *Members) approvals(ctx context.Context, ns string, base Roster, roots [
 					approvers = append(approvers, r.User.Login)
 				}
 			}
-			ok, why := Approval(base, head, pr.User.Login, approvers, roots)
+			ok, why := Approval(before, head, pr.User.Login, approvers, roots)
 			desc = why
 			if ok {
 				state = "success"

@@ -195,9 +195,11 @@ done
 check "alice is shown as alice"            grep -q '"name":"alice"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
 check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
-has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"agent-$1\""; }
-check "bob has the agent of the namespace system" until_true 180 has_agent system
+has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"$1\""; }
+check "bob has the operator agent of the namespace system" until_true 180 has_agent system/operator
 check "the agent has the gateway's tools" grep -q 'server:mcp:homecloud' <<<"$(chat_api bob "$chat/api/models")"
+check "system has its config repo with the operator" \
+  test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/config/raw/agents/operator/agent.yaml")" = 200
 check "bob sees the channel of the namespace system" until_true 120 system_channel
 cid=$(system_channel)
 check "bob cannot rename it" \
@@ -391,7 +393,7 @@ cid=$(system_channel)
 ask() {
   local who=$1 question=$2 mid i
   mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:agent-system|agent-system> " + sys.argv[1]}))' "$question")" \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:system/operator|system/operator> " + sys.argv[1]}))' "$question")" \
     "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
   echo "$mid" >> "$tmp/posted"
   for i in $(seq 60); do
@@ -399,7 +401,7 @@ ask() {
 import json,sys
 for m in json.load(sys.stdin):
     meta = m.get("meta") or {}
-    if meta.get("model_id") == "agent-system" and meta.get("done"):
+    if meta.get("model_id") == "system/operator" and meta.get("done"):
         print(m.get("content") or ""); sys.exit(0)
 sys.exit(1)' && return 0
     sleep 5
@@ -416,7 +418,8 @@ cleanup_channel() {
     done
   done
 }
-mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -o "mcp: $2: [a-z_]*" | sort -u; }
+# mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
+mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
 
 # The model sometimes writes a tool call out as text instead of making it. A
 # question whose answer shows no sign of the system is asked once more, and
@@ -517,7 +520,7 @@ check "its database has its own dataset"   test "$(zfs get -H -o value quota hom
 check "its password is a generated secret" docker secret inspect todo.db-password
 chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-ns_agent() { web -H "Authorization: Bearer $chat_admin" "$chat/api/models" | grep -q '"id":"agent-homepage"'; }
+ns_agent() { web -H "Authorization: Bearer $chat_admin" "$chat/api/models" | grep -q '"id":"homepage/operator"'; }
 check "homepage has its agent and channel in Open WebUI" until_true 120 ns_agent
 
 echo "# a dev environment"
@@ -593,13 +596,13 @@ admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DO
   "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 channel_of() { chat_api bob "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == sys.argv[1]))' "$1" 2>/dev/null; }
 : > "$tmp/posted"
-# ask_agent NAMESPACE PERSON QUESTION: asks the namespace's agent in its
-# channel and prints its answer from the thread.
+# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent of the namespace,
+# its operator by default, in its channel and prints its answer from the thread.
 ask_agent() {
-  local ns=$1 who=$2 question=$3 cid mid i
+  local ns=$1 who=$2 question=$3 id=$1/${4:-operator} cid mid i
   cid=$(channel_of "$ns")
   mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:agent-%s|agent-%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$ns" "$question")" \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:%s|%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$id" "$question")" \
     "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
   echo "$cid $mid" >> "$tmp/posted"
   for i in $(seq 72); do
@@ -607,9 +610,9 @@ ask_agent() {
 import json,sys
 for m in json.load(sys.stdin):
     meta = m.get("meta") or {}
-    if meta.get("model_id") == "agent-" + sys.argv[1] and meta.get("done"):
+    if meta.get("model_id") == sys.argv[1] and meta.get("done"):
         print(m.get("content") or ""); sys.exit(0)
-sys.exit(1)' "$ns" && return 0
+sys.exit(1)' "$id" && return 0
     sleep 5
   done
   return 1
@@ -743,6 +746,36 @@ gone_from_members() { ! team_has members bob; }
 check "bob leaves the members"             until_true 90 gone_from_members
 check "bob may no longer push"             until_true 60 cannot_push bob
 check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$hp/todo")" = 200
+
+echo "# 6. alice adds an agent that may only read"
+check "homepage's config has its operator" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" = 200
+# add_agent BRANCH TOOLS: alice proposes agents/reader with TOOLS; prints the pull request's number.
+add_agent() {
+  local files
+  files=$(python3 -c '
+import base64,json,sys
+b=lambda s: base64.b64encode(s.encode()).decode()
+print(json.dumps({"branch":"main","new_branch":sys.argv[1],"message":"Add the reader agent","files":[
+  {"operation":"create","path":"agents/reader/agent.yaml","content":b("description: Reads the namespace'"'"'s repos\ntools: [%s]\n" % sys.argv[2])},
+  {"operation":"create","path":"agents/reader/prompt.md","content":b("You read files of the namespace'"'"'s repos and explain them.\n")}]}))' "$1" "$2")
+  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$files" "$hp/config/contents"
+  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$1"'","base":"main","title":"Add the reader agent"}' "$hp/config/pulls" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
+}
+bad=$(add_agent reader-bad 'read_file, rm_rf')
+check "an agent with a tool that does not exist fails the check" until_true 90 approval_is "$bad" failure
+check "the check names the tool"           grep -q 'rm_rf' <<<"$(approval "$bad")"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$bad"
+good=$(add_agent reader read_file)
+check "carol approves the reader"          test "$(review config carol "$good")" = 200
+check "the approval check passes"          until_true 90 approval_is "$good" success
+check "alice merges it"                    test "$(merge config alice "$good")" = 200
+reader_agent() { web -H "Authorization: Bearer $admin_token" "$chat/api/models" | grep -q '"id":"homepage/reader"'; }
+check "Open WebUI has homepage/reader"     until_true 120 reader_agent
+since=$(last_pr todo)
+answer=$(ask_agent homepage alice "Propose a change to the repo todo: add a file reader.txt containing hello. Title: Reader test." reader)
+check "the reader answers"                 test -n "$answer"
+check "it cannot propose a change"         test -z "$(newest_pr todo alice "$since")"
 
 while read -r c m; do
   for id in $(chat_api bob "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do

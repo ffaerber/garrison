@@ -5,7 +5,7 @@ Go. One image, run in Swarm as the stack `control-plane` from the repo `system/c
 | Service | Does |
 | --- | --- |
 | `deployer` | Makes the machine match Git: deploys every repo of `system` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana. Later also holds the SOPS key, takes snapshots and writes change records. |
-| `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each namespace's agent and channel, its members and approval checks, and its build account. Changes nothing that runs. |
+| `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each namespace's agents (from `agents/` in its config repo; each gets only its own tools) and channel, its members and approval checks, and its build account. Changes nothing that runs. |
 | `guard` | The Docker API for the user runner, letting through only what pipeline jobs need. |
 | `user-runner` | Gitea Actions runner of every namespace other than `system`. |
 
@@ -21,6 +21,7 @@ The same binary is installed on the host as `homecloud`: the installer uses it t
 | `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`; the deployer itself last |
 | `internal/hooks` | Gitea's webhooks: puts one on every organisation, its secret derived from the admin password, checks the signature of each call, and wakes the sync loops |
 | `internal/dashboards` | Keeps `dashboards/*.json` of every repo in Grafana |
+| `internal/agents` | Agent folders: reads and checks `agents/` and `skills/` of a config repo; the operator; the system prompt |
 | `internal/gateway` | The gateway: MCP tools, Open WebUI agents and channels, members and approvals, build accounts |
 | `internal/guard` | The guarded Docker API |
 | `cmd/homecloud` | CLI over these: `deploy` runs the deployer, `gateway` the gateway, `guard` the guard |

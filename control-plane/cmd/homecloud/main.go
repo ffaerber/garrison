@@ -323,10 +323,10 @@ func appliedCmd(args []string) error {
 }
 
 // gatewayCmd serves the gateway: the MCP server Open WebUI's
-// agents use, and the sync that keeps one agent per namespace there.
+// agents use, and the sync that keeps every namespace's agents there.
 func gatewayCmd(args []string) error {
 	fs := flag.NewFlagSet("gateway", flag.ExitOnError)
-	listen := fs.String("listen", ":8080", "address to serve MCP on (/mcp)")
+	listen := fs.String("listen", ":8080", "address to serve MCP on (/mcp, /mcp/<namespace>/<agent>)")
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	work := fs.String("work", workDir, "the deployer's state, read-only")
 	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
@@ -384,13 +384,15 @@ func gatewayCmd(args []string) error {
 	}
 
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
+	catalog := &gateway.Catalog{Gitea: g}
 	mcp := &gateway.MCP{
 		Tools:    &gateway.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus},
 		Verifier: verifier,
+		Agents:   catalog,
 	}
 	sync := &gateway.OpenWebUI{
 		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
-		BaseModel: model, ToolServerID: "homecloud", Domain: domain, Gitea: g,
+		BaseModel: model, ToolServerID: "homecloud", Domain: domain, Gitea: g, Agents: catalog,
 	}
 	// Gitea's webhook wakes the syncs; the intervals stay for missed deliveries.
 	wake := &hooks.Wake{}
@@ -405,6 +407,7 @@ func gatewayCmd(args []string) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)
+	mux.Handle("/mcp/", mcp)
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)
 		mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})

@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+
+	"homecloud/control-plane/internal/agents"
 )
 
 // Verifier turns a bearer token into the person it was issued to.
@@ -72,9 +74,34 @@ func (k *KeycloakVerifier) Verify(ctx context.Context, raw string) (Person, erro
 
 // MCP serves the tools over MCP's Streamable HTTP transport, answering each
 // JSON-RPC request with a JSON response. It keeps no sessions.
+//
+// Each agent gets only the tools its agent.yaml lists. Open WebUI names the
+// agent in the header X-Homecloud-Agent (its model id); /mcp/<namespace>/<agent>
+// names it in the path. /mcp without the header serves every base tool.
 type MCP struct {
 	Tools    *Tools
 	Verifier Verifier
+	Agents   *Catalog
+}
+
+// AgentHeader names the agent a request is for.
+const AgentHeader = "X-Homecloud-Agent"
+
+// agentFor finds the agent a request names; nil for every base tool. An
+// agent nobody defined, e.g. a model an admin made by hand, gets nothing.
+func (m *MCP) agentFor(r *http.Request) (*agents.Agent, bool) {
+	id, inPath := strings.CutPrefix(r.URL.Path, "/mcp/")
+	if !inPath {
+		if _, named := r.Header[http.CanonicalHeaderKey(AgentHeader)]; !named {
+			return nil, true
+		}
+		id = r.Header.Get(AgentHeader)
+	}
+	if m.Agents == nil {
+		return nil, false
+	}
+	a, ok := m.Agents.Lookup(r.Context(), id)
+	return &a, ok
 }
 
 var supportedVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
@@ -92,6 +119,11 @@ type rpcError struct {
 }
 
 func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	agent, ok := m.agentFor(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		// No server-initiated stream and no sessions to end.
 		w.Header().Set("Allow", "POST")
@@ -120,11 +152,11 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	result, rerr := m.handle(r.Context(), person, req)
+	result, rerr := m.handle(r.Context(), person, agent, req)
 	writeRPC(w, req.ID, result, rerr)
 }
 
-func (m *MCP) handle(ctx context.Context, p Person, req rpcRequest) (any, *rpcError) {
+func (m *MCP) handle(ctx context.Context, p Person, agent *agents.Agent, req rpcRequest) (any, *rpcError) {
 	switch req.Method {
 	case "initialize":
 		var params struct {
@@ -144,7 +176,7 @@ func (m *MCP) handle(ctx context.Context, p Person, req rpcRequest) (any, *rpcEr
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return map[string]any{"tools": m.Tools.Specs()}, nil
+		return map[string]any{"tools": SpecsFor(agent)}, nil
 	case "tools/call":
 		var params struct {
 			Name      string          `json:"name"`
@@ -153,22 +185,29 @@ func (m *MCP) handle(ctx context.Context, p Person, req rpcRequest) (any, *rpcEr
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, &rpcError{Code: -32602, Message: "invalid params"}
 		}
-		if !slices.ContainsFunc(m.Tools.Specs(), func(s Spec) bool { return s.Name == params.Name }) {
+		if !slices.ContainsFunc(SpecsFor(agent), func(s Spec) bool { return s.Name == params.Name }) {
 			return nil, &rpcError{Code: -32602, Message: "unknown tool " + params.Name}
 		}
-		out, err := m.Tools.Call(ctx, p, params.Name, params.Arguments)
+		out, err := m.Tools.Call(ctx, p, agent, params.Name, params.Arguments)
 		if err != nil {
 			msg := err.Error()
 			if errors.Is(err, ErrForbidden) {
 				msg = fmt.Sprintf("not allowed: %s may not do this", p.Name)
 			}
-			log.Printf("mcp: %s: %s: %s", p.Name, params.Name, msg)
+			log.Printf("mcp: %s: %s: %s: %s", p.Name, agentID(agent), params.Name, msg)
 			return map[string]any{"content": []map[string]any{{"type": "text", "text": "error: " + msg}}, "isError": true}, nil
 		}
-		log.Printf("mcp: %s: %s", p.Name, params.Name)
+		log.Printf("mcp: %s: %s: %s", p.Name, agentID(agent), params.Name)
 		return map[string]any{"content": []map[string]any{{"type": "text", "text": out}}}, nil
 	}
 	return nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method}
+}
+
+func agentID(a *agents.Agent) string {
+	if a == nil {
+		return "-"
+	}
+	return a.ID()
 }
 
 func writeRPC(w http.ResponseWriter, id json.RawMessage, result any, rerr *rpcError) {

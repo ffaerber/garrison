@@ -1,6 +1,6 @@
 # Agents — Design
 
-How agents are defined, run and updated. Status: design, not built. Today each namespace's agent is a model preset in Open WebUI with a generated prompt and the gateway's MCP tools (see Chat in [spec.md](spec.md)); this replaces that.
+How agents are defined, run and updated. Status: step 1 of the plan is built: agent folders, their checks, and one Open WebUI model per agent; the gateway serves each agent only its own tools and skills. The rest is design. Until the agent service exists, Open WebUI runs each agent's loop itself (see Chat in [spec.md](spec.md)).
 
 ## Goals
 
@@ -145,7 +145,7 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 
 ## Plan
 
-1. Agent folders: parsing, checks on `config` pull requests, `system/config`, the operator written into new namespaces.
+1. Agent folders: parsing, checks on `config` pull requests, `system/config`, the operator written into new namespaces. Built; meanwhile each agent is an Open WebUI model on the one MCP connection, which names the agent in `X-Homecloud-Agent` (`{{MODEL_ID}}`), and the gateway serves it its tools and skills (`load_skill`, `read_skill_file`).
 2. Agent service with a stub harness: models list, streaming, chat id and signed user, task requests to the LLM.
 3. Sandbox image with Pi; one container per chat with its dataset, idle stop and resume.
 4. LLM and tool proxies; per-agent tool lists enforced; skills.

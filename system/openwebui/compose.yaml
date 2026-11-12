@@ -1,7 +1,8 @@
 # Chat at https://chat.<domain>. People sign in through Keycloak; root admins
-# become Open WebUI admins, everyone else a user. Each namespace has its own
-# agent here, kept in sync by the gateway, whose MCP tools act with the
-# rights of the person chatting: Open WebUI forwards their Keycloak token.
+# become Open WebUI admins, everyone else a user. Each namespace's agents
+# (folders under agents/ in its repo config) are models here, kept in sync by
+# the gateway, whose MCP tools act with the rights of the person chatting:
+# Open WebUI forwards their Keycloak token.
 services:
   openwebui:
     image: ghcr.io/open-webui/open-webui:v0.12.4
@@ -51,16 +52,22 @@ services:
       ENABLE_OLLAMA_API: "False"
       ENABLE_OPENAI_API: "True"
       OPENAI_API_BASE_URL: ${LLM_BASE_URL:-https://ollama.com/v1}
-      DEFAULT_MODELS: agent-system
+      DEFAULT_MODELS: system/operator
       # One channel per namespace, kept by the gateway: the team chat
       # where people mention the namespace's agent.
       ENABLE_CHANNELS: "True"
       # The gateway's tools, over MCP, with each person's own Keycloak token.
+      # X-Homecloud-Agent names the agent being chatted with, so the gateway
+      # serves only that agent's tools. Set here, not through the API: with
+      # persistent config off, settings made through the API are lost on
+      # restart. Swarm expands Go templates in the environment, so the
+      # placeholder is written as a template string that yields {{MODEL_ID}}.
       TOOL_SERVER_CONNECTIONS: >-
         [{"type": "mcp", "url": "http://control-plane_gateway:8080/mcp", "auth_type": "system_oauth",
           "key": "", "path": "", "spec_type": "url", "spec": "",
+          "headers": {"X-Homecloud-Agent": "{{`{{MODEL_ID}}`}}"},
           "config": {"enable": true, "access_grants": [{"principal_type": "user", "principal_id": "*", "permission": "read"}]},
-          "info": {"id": "homecloud", "name": "Home Cloud", "description": "Look at the home cloud and propose changes, as you."}}]
+          "info": {"id": "homecloud", "name": "Home Cloud", "description": "The tools of the agent you talk to, acting as you."}}]
       ENABLE_DIRECT_CONNECTIONS: "False"
       ENABLE_COMMUNITY_SHARING: "False"
       ENABLE_VERSION_UPDATE_CHECK: "False"

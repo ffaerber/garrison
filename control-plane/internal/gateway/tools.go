@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"homecloud/control-plane/internal/agents"
 	"homecloud/control-plane/internal/apply"
 	"homecloud/control-plane/internal/gitops"
 )
@@ -64,7 +65,31 @@ func str(desc string) map[string]any { return map[string]any{"type": "string", "
 
 var nsArg = str("the namespace, i.e. the Gitea organisation, e.g. system")
 
-func (t *Tools) Specs() []Spec {
+// Specs are the tools of the plain /mcp endpoint: every base tool.
+func (t *Tools) Specs() []Spec { return baseSpecs() }
+
+// SpecsFor are an agent's tools: the base tools its agent.yaml lists, and
+// the skill tools if it has skills. A nil agent has every base tool.
+func SpecsFor(a *agents.Agent) []Spec {
+	if a == nil {
+		return baseSpecs()
+	}
+	var out []Spec
+	for _, s := range baseSpecs() {
+		if slices.Contains(a.Tools, s.Name) {
+			out = append(out, s)
+		}
+	}
+	if len(a.Skills) > 0 {
+		out = append(out,
+			spec("load_skill", "Loads one of your skills: its instructions and the list of its files. Call it before a task the skill is for.", map[string]any{"name": str("the skill's name")}, "name"),
+			spec("read_skill_file", "Reads a file of one of your skills, as listed by load_skill.", map[string]any{"skill": str("the skill's name"), "path": str("the file's path inside the skill, e.g. template.svg")}, "skill", "path"),
+		)
+	}
+	return out
+}
+
+func baseSpecs() []Spec {
 	return []Spec{
 		spec("list_namespaces", "Lists the namespaces (Gitea organisations).", nil),
 		spec("list_stacks", "Lists a namespace's stacks with the commit the deployer deployed, and each of their Swarm services with running/desired replicas and image.", map[string]any{"namespace": nsArg}, "namespace"),
@@ -95,19 +120,29 @@ func (t *Tools) Specs() []Spec {
 var swarmName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,100}$`)
 
 type args struct {
-	Namespace, Stack, Service, Repo, Path, Content, Title, Description, Query string
-	Lines                                                                     int
+	Namespace, Stack, Service, Repo, Path, Content, Title, Description, Query, Name, Skill string
+	Lines                                                                                  int
 }
 
-// Call runs one tool for person.
-func (t *Tools) Call(ctx context.Context, p Person, name string, raw json.RawMessage) (string, error) {
+// Call runs one tool for person, talking to agent (nil: the plain /mcp
+// endpoint, with every base tool). A tool the agent lacks is refused.
+func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name string, raw json.RawMessage) (string, error) {
+	if !slices.ContainsFunc(SpecsFor(agent), func(s Spec) bool { return s.Name == name }) {
+		return "", fmt.Errorf("%w: this agent has no tool %q", ErrInvalid, name)
+	}
 	var a args
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return "", fmt.Errorf("%w: arguments: %v", ErrInvalid, err)
 		}
 	}
-	out, err := t.call(ctx, p, name, a)
+	var out string
+	var err error
+	if name == "load_skill" || name == "read_skill_file" {
+		out, err = t.skill(ctx, p, agent, name, a)
+	} else {
+		out, err = t.call(ctx, p, name, a)
+	}
 	if len(out) > maxToolOutput {
 		out = out[:maxToolOutput] + "\n[truncated]"
 	}
@@ -235,6 +270,60 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, c.URL), nil
 	}
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
+}
+
+// skill reads one of the agent's skills from its config repo, as person.
+func (t *Tools) skill(ctx context.Context, p Person, agent *agents.Agent, name string, a args) (string, error) {
+	want := a.Name
+	if name == "read_skill_file" {
+		want = a.Skill
+	}
+	i := slices.IndexFunc(agent.Skills, func(s agents.Skill) bool { return s.Name == want })
+	if i < 0 {
+		var names []string
+		for _, s := range agent.Skills {
+			names = append(names, s.Name)
+		}
+		return "", fmt.Errorf("%w: no skill %q; yours are: %s", ErrInvalid, want, strings.Join(names, ", "))
+	}
+	sk := agent.Skills[i]
+	if name == "read_skill_file" {
+		if err := validPath(a.Path); err != nil || a.Path == "" {
+			return "", fmt.Errorf("%w: path %q", ErrInvalid, a.Path)
+		}
+		return t.Gitea.Read(ctx, p.Name, agent.Namespace, ConfigRepo, sk.Dir+"/"+a.Path)
+	}
+	body, err := t.Gitea.Read(ctx, p.Name, agent.Namespace, ConfigRepo, sk.Dir+"/"+agents.SkillFile)
+	if err != nil {
+		return "", err
+	}
+	var files []string
+	var walk func(dir, prefix string) error
+	walk = func(dir, prefix string) error {
+		entries, err := t.Gitea.List(ctx, p.Name, agent.Namespace, ConfigRepo, dir)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			switch {
+			case e.Type == "dir" && len(files) < 200:
+				if err := walk(dir+"/"+e.Name, prefix+e.Name+"/"); err != nil {
+					return err
+				}
+			case e.Type == "file" && e.Name != agents.SkillFile:
+				files = append(files, prefix+e.Name)
+			}
+		}
+		return nil
+	}
+	if err := walk(sk.Dir, ""); err != nil {
+		return "", err
+	}
+	out := body
+	if len(files) > 0 {
+		out += "\n\nFiles of this skill (read them with read_skill_file):\n- " + strings.Join(files, "\n- ")
+	}
+	return out, nil
 }
 
 // stackNames lists a namespace's deployed Swarm stacks with their commits:
