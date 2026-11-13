@@ -29,40 +29,62 @@ Git: clone any repo the person may read with ` + "`git clone $HOMECLOUD_GIT/<nam
 // WorkspaceChanges is added for agents that may propose patches.
 const WorkspaceChanges = ` To change a repo, clone it, edit the files in your checkout, check your work, then call propose_workspace_changes with the checkout's path: it opens a pull request by the person with everything you changed. For more changes to the same pull request, edit the same checkout and call it again. Do not commit or push yourself.`
 
+// AskOthers is added for agents that may ask others.
+const AskOthers = `## Other agents
+
+You may hand work to these agents with ask_agent: say what to do (task), what bounds it (limits) and what a good answer looks like (done_when). They work for the same person, in workspaces of their own; share work through Git, e.g. a branch you proposed. Their answer comes back to you word for word; pass on what matters.`
+
 // definition changes whenever what the sandbox was started with does.
 func definition(model, prompt string, a agents.Agent) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s", model, prompt, strings.Join(a.Tools, ","))
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s", model, prompt, strings.Join(a.Tools, ","), strings.Join(a.Asks, ","))
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// sandboxTurn runs the turn in the chat's sandbox: Pi with the agent's
-// prompt, its own tools in its workspace and the agent's platform tools.
-func (s *Server) sandboxTurn(ctx context.Context, token, person, chat string, a agents.Agent, incoming []Message, out *writer) (int, error) {
+// output receives a turn's progress and its answer.
+type output interface {
+	reasoning(string)
+	content(string)
+}
+
+// prompt is the message a turn sends Pi; fresh is true for a session that
+// has no messages yet.
+type prompt func(fresh bool) (string, []sandbox.Image)
+
+// sandboxTurn runs the turn in a sandbox: Pi with the agent's prompt, its
+// own tools in its workspace and the agent's platform tools. key names the
+// sandbox, with chat; person is whom it counts against.
+func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat, key string, a agents.Agent, msg prompt, out output) (int, error) {
 	model := a.Model
 	if model == "" {
 		model = s.DefaultModel
 	}
-	prompt := agents.System(a, s.Domain) + "\n\n" + Workspace
+	system := agents.System(a, s.Domain) + "\n\n" + Workspace
 	if slices.Contains(a.Tools, "propose_patch") {
-		prompt += WorkspaceChanges
+		system += WorkspaceChanges
+	}
+	if len(a.Asks) > 0 {
+		system += "\n\n" + AskOthers
+	}
+	if len(run.Chain) == 0 {
+		run.Chain = []string{a.ID()}
 	}
 	want := sandbox.Want{
-		Key: chat + "\x00" + a.ID(), Chat: chat, Agent: a.ID(), Person: person,
-		Model: model, Prompt: prompt, Definition: definition(model, prompt, a),
+		Key: key, Chat: chat, Agent: a.ID(), Person: person,
+		Model: model, Prompt: system, Definition: definition(model, system, a),
 	}
 	max := s.MaxToolCalls
 	if max <= 0 {
 		max = 60
 	}
 	calls := 0
-	err := s.Sandboxes.Turn(ctx, want, token, func(sb *sandbox.Session) error {
+	err := s.Sandboxes.Turn(ctx, want, run, func(sb *sandbox.Session) error {
 		pi := sb.Pi()
 		st, err := pi.State(ctx)
 		if err != nil {
 			return err
 		}
-		text, images := promptFrom(incoming, st.MessageCount == 0)
+		text, images := msg(st.MessageCount == 0)
 		turn, cancel := context.WithCancel(ctx)
 		defer cancel()
 		capped := false
@@ -222,14 +244,17 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tools, err := s.Gateway.Tools(r.Context(), c.Token, c.Agent)
+	tools, err := s.Gateway.Tools(r.Context(), AsOf(c), c.Agent)
 	if err != nil {
 		apiError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	specs := make([]toolSpec, 0, len(tools))
+	specs := make([]toolSpec, 0, len(tools)+1)
 	for _, t := range tools {
 		specs = append(specs, toolSpec{t.Function.Name, t.Function.Description, t.Function.Parameters})
+	}
+	if a, ok, err := s.Agents.Get(r.Context(), c.Agent); err == nil && ok && len(a.Asks) > 0 {
+		specs = append(specs, askSpec(a))
 	}
 	writeJSON(w, specs)
 }
@@ -247,7 +272,12 @@ func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "not a tool call")
 		return
 	}
-	text, isErr, err := s.Gateway.Call(r.Context(), c.Token, c.Agent, req.Name, string(req.Arguments))
+	if req.Name == "ask_agent" {
+		text, isErr := s.askAgent(r.Context(), c, req.Arguments)
+		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
+		return
+	}
+	text, isErr, err := s.Gateway.Call(r.Context(), AsOf(c), c.Agent, req.Name, string(req.Arguments))
 	if err != nil {
 		text, isErr = "error: "+err.Error(), true
 	}

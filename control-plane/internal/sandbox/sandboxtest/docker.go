@@ -212,7 +212,15 @@ func (d *Docker) attach(w http.ResponseWriter, c *Container) {
 			emit(map[string]any{"type": "response", "id": cmd.ID, "command": "prompt", "success": true})
 			emit(map[string]any{"type": "agent_start"})
 			answer := "echo: " + cmd.Message
-			if strings.Contains(cmd.Message, "tools") {
+			if i := strings.LastIndex(cmd.Message, "call "); i >= 0 {
+				// "call <tool> <json>", to the end of its line: calls a tool,
+				// answering with its result.
+				rest, _, _ := strings.Cut(cmd.Message[i+len("call "):], "\n")
+				name, args, _ := strings.Cut(rest, " ")
+				emit(map[string]any{"type": "tool_execution_start", "toolName": name, "args": json.RawMessage(args)})
+				answer = "called: " + d.callTool(c, name, args)
+				emit(map[string]any{"type": "tool_execution_end", "toolName": name, "isError": false})
+			} else if strings.Contains(cmd.Message, "tools") {
 				emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{map[string]any{"type": "text", "text": "Let me look."}}}})
 				emit(map[string]any{"type": "tool_execution_start", "toolName": "list_repos", "args": map[string]any{"namespace": "homepage"}})
 				answer = d.listTools(c)
@@ -241,4 +249,24 @@ func (d *Docker) listTools(c *Container) string {
 		return fmt.Sprintf("tools: %s", resp.Status)
 	}
 	return fmt.Sprintf("tools: %d", len(specs))
+}
+
+func (d *Docker) callTool(c *Container, name, args string) string {
+	body, _ := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(args)})
+	req, _ := http.NewRequest("POST", c.env("HOMECLOUD_API")+"/tools/call", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+c.env("HOMECLOUD_TOKEN"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err.Error()
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Text    string `json:"text"`
+		IsError bool   `json:"is_error"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	if out.IsError {
+		return "error: " + out.Text
+	}
+	return out.Text
 }

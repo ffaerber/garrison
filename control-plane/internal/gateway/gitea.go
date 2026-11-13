@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -292,11 +293,25 @@ var branchName = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
 // MaxPatch is the largest patch ProposePatch takes.
 const MaxPatch = 8 << 20
 
-// ProposePatch applies a patch (git diff, binary files too) as person: on a
-// new branch from base with a new pull request, or, given branch, on top of
-// an earlier change, whose pull request then shows it. Like Propose, it
-// never touches base itself.
-func (g *Gitea) ProposePatch(ctx context.Context, as, org, repo, base, branch, patch, title, description string) (Change, string, error) {
+// Proposal is a patch to propose.
+type Proposal struct {
+	Org, Repo   string
+	Base        string   // the branch it is for; default main
+	Branch      string   // an earlier change's branch to add to; empty for a new one
+	Fresh       string   // the new branch's name, for a new change
+	Prefixes    []string // the branches that may be added to
+	Patch       string   // as git diff --binary prints it
+	Title       string
+	Description string
+	Note        string // the gateway's line on whom it is for: in a new pull request, and a comment for each addition
+}
+
+// ProposePatch applies a patch (git diff, binary files too) as the account
+// as: on a new branch from base with a new pull request, or, given branch,
+// on top of an earlier change, whose pull request then shows it. Like
+// Propose, it never touches base itself.
+func (g *Gitea) ProposePatch(ctx context.Context, as string, pp Proposal) (Change, string, error) {
+	org, repo, base, branch, patch, title, description := pp.Org, pp.Repo, pp.Base, pp.Branch, pp.Patch, pp.Title, pp.Description
 	if err := g.CanWrite(ctx, as, org, repo); err != nil {
 		return Change{}, "", err
 	}
@@ -306,8 +321,11 @@ func (g *Gitea) ProposePatch(ctx context.Context, as, org, repo, base, branch, p
 	if !branchName.MatchString(base) || strings.Contains(base, "..") {
 		return Change{}, "", fmt.Errorf("%w: base branch %q", ErrInvalid, base)
 	}
-	if branch != "" && (!strings.HasPrefix(branch, ChangeBranch) || !branchName.MatchString(branch) || strings.Contains(branch, "..")) {
-		return Change{}, "", fmt.Errorf("%w: branch %q: only branches of earlier changes, %s..., can be added to", ErrInvalid, branch, ChangeBranch)
+	if len(pp.Prefixes) == 0 {
+		pp.Prefixes = []string{ChangeBranch}
+	}
+	if branch != "" && (!slices.ContainsFunc(pp.Prefixes, func(p string) bool { return strings.HasPrefix(branch, p) }) || !branchName.MatchString(branch) || strings.Contains(branch, "..")) {
+		return Change{}, "", fmt.Errorf("%w: branch %q: only branches of earlier changes, %s..., can be added to", ErrInvalid, branch, strings.Join(pp.Prefixes, "... or "))
 	}
 	if strings.TrimSpace(patch) == "" {
 		return Change{}, "", fmt.Errorf("%w: the patch is empty", ErrInvalid)
@@ -319,8 +337,12 @@ func (g *Gitea) ProposePatch(ctx context.Context, as, org, repo, base, branch, p
 		return Change{}, "", fmt.Errorf("%w: a change needs a title", ErrInvalid)
 	}
 	req := map[string]any{"content": patch, "message": title}
-	if branch == "" {
-		branch = fmt.Sprintf("%s%s-%d", ChangeBranch, as, time.Now().UnixNano()/1e6)
+	added := branch != ""
+	if !added {
+		branch = pp.Fresh
+		if branch == "" {
+			branch = fmt.Sprintf("%s%s-%d", ChangeBranch, as, time.Now().UnixNano()/1e6)
+		}
 		req["branch"], req["new_branch"] = base, branch
 	} else {
 		req["branch"] = branch
@@ -342,6 +364,10 @@ func (g *Gitea) ProposePatch(ctx context.Context, as, org, repo, base, branch, p
 	}
 	for _, pr := range prs {
 		if pr.Head.Ref == branch {
+			if added && pp.Note != "" {
+				g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/comments", org, repo, pr.Number),
+					map[string]string{"body": "Changes added, " + strings.ToLower(pp.Note[:1]) + pp.Note[1:]}, nil)
+			}
 			return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: pr.Title, Body: pr.Body, Author: as, URL: pr.HTMLURL}, branch, nil
 		}
 	}
@@ -349,8 +375,12 @@ func (g *Gitea) ProposePatch(ctx context.Context, as, org, repo, base, branch, p
 		Number  int    `json:"number"`
 		HTMLURL string `json:"html_url"`
 	}
+	body := description
+	if pp.Note != "" {
+		body = strings.TrimSpace(description + "\n\n" + pp.Note)
+	}
 	if _, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls", org, repo),
-		map[string]any{"head": branch, "base": base, "title": title, "body": description}, &pr); err != nil {
+		map[string]any{"head": branch, "base": base, "title": title, "body": body}, &pr); err != nil {
 		return Change{}, "", err
 	}
 	return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, branch, nil

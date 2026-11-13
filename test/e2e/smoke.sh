@@ -719,6 +719,8 @@ can_push() { gitea_api "$1" "$hp/todo" | grep -q '"push":true'; }
 cannot_push() { ! can_push "$1"; }
 
 check "homepage has its config, alice its first admin" test "$(roster main)" = "admins=alice members="
+not_seen() { ! has_model "$1" "$2"; }
+check "bob, not in homepage, does not see its agents" not_seen homepage/operator bob
 check "bob may not push to homepage's repos yet" cannot_push bob
 nopush=$(printf 'admins: [alice, bob]\nmembers: []\n' | base64 -w0)
 check "nobody changes members.yaml without a pull request" \
@@ -744,6 +746,7 @@ check "alice merges it"                    test "$(merge config alice "$pr")" = 
 check "carol joins the admins"             until_true 90 team_has admins carol
 check "bob joins the members"              until_true 90 team_has members bob
 check "bob may now push to homepage's repos" until_true 60 can_push bob
+check "bob now sees homepage's agents"     until_true 120 has_model homepage/operator bob
 
 echo "# 2. bob tries to make himself an admin"
 since=$(last_pr config)
@@ -938,6 +941,148 @@ sb=$(sandbox_of homepage/developer)
 check "the sandbox cannot push"            test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/git/homepage/todo.git/info/refs?service=git-receive-pack"')" = 403
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$gpr"
 
+echo "# 4g. agents get rights of their own"
+# set_file REPO BRANCH PATH FILE MESSAGE: alice writes FILE to PATH on BRANCH
+# of homepage/REPO, directly (she may: the app repos take pushes).
+set_file() {
+  local sha body
+  sha=$(gitea_api "" "$hp/$1/contents/$3?ref=$2" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)
+  body=$(python3 -c 'import base64,json,sys; d={"branch":sys.argv[1],"message":sys.argv[3],"content":base64.b64encode(open(sys.argv[2],"rb").read()).decode()}; d.update({"sha":sys.argv[4]} if sys.argv[4] else {}); print(json.dumps(d))' "$2" "$4" "$5" "$sha")
+  gitea_api alice -o /dev/null -w '%{http_code}' -X "$([ -n "$sha" ] && echo PUT || echo POST)" -H 'Content-Type: application/json' -d "$body" "$hp/$1/contents/$3"
+}
+# propose_config BRANCH TITLE PATH=FILE...: alice proposes files in homepage/config; prints the pull request's number.
+propose_config() {
+  local branch=$1 title=$2 spec specs=() ops; shift 2
+  for spec in "$@"; do
+    # Each with the blob it replaces, if any.
+    specs+=("$spec=$(gitea_api "" "$hp/config/contents/${spec%%=*}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)")
+  done
+  ops=$(python3 -c '
+import base64,json,sys
+branch,title=sys.argv[1:3]
+ops=[]
+for spec in sys.argv[3:]:
+    path,file,sha=spec.split("=")
+    op={"operation":"update" if sha else "create","path":path,"content":base64.b64encode(open(file,"rb").read()).decode()}
+    if sha: op["sha"]=sha
+    ops.append(op)
+print(json.dumps({"branch":"main","new_branch":branch,"message":title,"files":ops}))' "$branch" "$title" "${specs[@]}")
+  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$ops" "$hp/config/contents"
+  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"'"$title"'"}' "$hp/config/pulls" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
+}
+cat > "$tmp/bad.yaml" <<'YAML'
+description: Changes the code of the namespace's apps
+tools: [list_repos, read_file, propose_patch]
+grants:
+  - {repo: config, level: propose}
+YAML
+bad=$(propose_config grant-config "Let the developer change config" "agents/developer/agent.yaml=$tmp/bad.yaml")
+check "a grant on config fails the check"  until_true 90 approval_is "$bad" failure
+check "the check says why"                 grep -q 'no agent may have a grant on config' <<<"$(approval "$bad")"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$bad"
+cat > "$tmp/developer.yaml" <<'YAML'
+description: Changes the code of the namespace's apps
+tools: [list_repos, read_file, propose_patch, merge_change]
+agents: [homepage/tester]
+grants:
+  - {repo: todo, branch: dev, level: autonomous}
+routines:
+  - name: main-moved
+    on_push: {repo: todo, branch: main}
+    owner: bob
+    task: Call read_file on stack.yaml of the repo todo of the namespace homepage, then say in one sentence which environments it has. Change nothing.
+YAML
+cat > "$tmp/tester.yaml" <<'YAML'
+description: Tries the namespace's apps in the browser
+tools: [browse]
+YAML
+printf 'You try the namespace'"'"'s apps in the browser, as the person you work for, and report exactly what you see. Change nothing.
+' > "$tmp/tester.md"
+cat > "$tmp/desk.yaml" <<'YAML'
+description: Takes requests for changes to the namespace's apps from anyone
+visible: everyone
+tools: [read_file, propose_patch]
+grants:
+  - {repo: todo, level: propose, for: everyone}
+YAML
+printf 'You take requests for small changes to the namespace'"'"'s apps from anyone, and propose them as pull requests for the namespace'"'"'s people to review.
+' > "$tmp/desk.md"
+gpr=$(propose_config grants "Give the developer grants; add the tester and the desk"   "agents/developer/agent.yaml=$tmp/developer.yaml" "agents/tester/agent.yaml=$tmp/tester.yaml" "agents/tester/prompt.md=$tmp/tester.md"   "agents/desk/agent.yaml=$tmp/desk.yaml" "agents/desk/prompt.md=$tmp/desk.md")
+check "carol approves the grants"          test "$(review config carol "$gpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$gpr" success
+check "alice merges them"                  test "$(merge config alice "$gpr")" = 200
+has_account() { gitea_api "" "$api/users/$1" | grep -q '"full_name":"Agent homepage/'; }
+check "the developer gets an account"      until_true 120 has_account agent-homepage-developer
+collaborates() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/$2/collaborators/$1")" = 204 ]; }
+check "it may write to todo"               until_true 60 collaborates agent-homepage-developer todo
+check "and to nothing else"                test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/collaborators/agent-homepage-developer")" = 404
+check "the tester, without grants, gets none" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/users/agent-homepage-tester")" = 404
+check "Open WebUI has homepage/tester"     until_true 120 has_model homepage/tester
+routines_seen=$SECONDS
+
+echo "# 4h. bob has the developer change dev and merge it there"
+check "alice makes the branch dev"         test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$hp/todo/branches")" = 201
+since=$(last_pr todo)
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Clone the repo todo of the namespace homepage, check out its branch dev, change the text 'Homepage todos' to 'Dev todos' everywhere (grep -rn), and propose it with propose_workspace_changes with base dev, titled: Dev heading. Then merge that pull request into dev with merge_change, and give me the link." developer)
+dvpr=$(newest_pr todo bob "$since")
+if [ -z "$dvpr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s
+' "$(head -c 300 <<<"$answer" | tr '
+' ' ')"
+  answer=$(ask_agent homepage bob "Please propose your checkout of todo now with propose_workspace_changes, base dev, then merge it into dev with merge_change." developer)
+  dvpr=$(newest_pr todo bob "$since")
+fi
+merged_by() { gitea_api "" "$hp/todo/pulls/$1" | python3 -c 'import json,sys; p=json.load(sys.stdin); print((p.get("merged_by") or {}).get("login","") if p.get("merged") else "")'; }
+if [ -n "$dvpr" ] && [ -z "$(merged_by "$dvpr")" ]; then
+  printf 'retry the agent did not merge; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please merge pull request $dvpr of homepage/todo into dev now, with merge_change." developer)
+fi
+check "it proposes it for dev, as bob"     grep -q '"ref":"dev"' <<<"$(gitea_api "" "$hp/todo/pulls/${dvpr:-0}")"
+check "it merges it with its own account"  test "$(merged_by "${dvpr:-0}")" = agent-homepage-developer
+check "the gateway says it merged for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob: homepage/developer: merge_change \[person\]$"' "$at"
+dev_heading() { web -b "$tmp/dev.jar" "https://dev-todo.$DOMAIN/" | grep -q "Dev todos" && return 0; sso_login "$tmp/dev.jar" "https://dev-todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/dev.html" bob >/dev/null 2>&1; return 1; }
+check "dev-todo deploys it"                until_true 1200 dev_heading
+main_untouched() { ! gitea_api "" "$hp/todo/raw/page.html?ref=main" | grep -q "Dev todos"; }
+check "main is untouched"                  main_untouched
+
+echo "# 4i. previews, and the tester tries one for the developer"
+printf '%s\n  preview: { private: true }\n' "$(gitea_api "" "$hp/todo/raw/stack.yaml?ref=main")" > "$tmp/stack.yaml"
+# Waits until the routine has seen main, so this push is news to it.
+while [ $((SECONDS - routines_seen)) -lt 90 ]; do sleep 10; done
+mainmoved=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+check "alice gives todo previews"          bash -c '[ "$0" = 201 ] || [ "$0" = 200 ]' "$(set_file todo main stack.yaml "$tmp/stack.yaml" "Previews of pull requests")"
+since=$(last_pr todo)
+answer=$(ask_agent homepage bob "Clone the repo todo of the namespace homepage, add a file PREVIEW.md with the line: Preview test. Propose it with propose_workspace_changes, titled: Preview test. Do not merge it." developer)
+ppr=$(newest_pr todo bob "$since")
+check "it proposes it"                     test -n "$ppr"
+previewed() { homecloud applied | grep -q "^app homepage/todo@pr-$ppr pr-$ppr-todo "; }
+check "the pull request gets a preview"    until_true 1200 previewed
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage bob "Ask homepage/tester to open https://pr-$ppr-todo.$DOMAIN/ in the browser and tell you the page's main heading. Tell me what it says." developer)
+check "the tester browses it, for bob, asked by the developer" \
+  bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob: homepage/tester: browse \[agent homepage/developer\]$"' "$at"
+check "the answer names the heading"       grep -q "Homepage todos" <<<"$answer"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$ppr"
+unpreviewed() { ! homecloud applied | grep -q "^app homepage/todo@pr-$ppr "; }
+check "closing it takes the preview down"  until_true 300 unpreviewed
+
+echo "# 4j. a routine runs when main moves, with nobody watching"
+hcid=$(channel_of homepage)
+routine_post() {
+  chat_api bob "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    c = m.get("content") or ""
+    if c.startswith("**homepage/developer**") and "Routine main-moved, for bob" in c:
+        print(m["id"]); sys.exit(0)
+sys.exit(1)'
+}
+check "its answer is posted in the channel" until_true 600 routine_post
+check "it read as its own account, for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-homepage-developer): homepage/developer: [a-z_]* \[routine homepage/developer/main-moved\]"' "$mainmoved"
+if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
+
 echo "# 5. alice removes bob"
 since=$(last_pr config)
 answer=$(ask_agent homepage alice "Remove bob from the namespace homepage.")
@@ -956,6 +1101,22 @@ gone_from_members() { ! team_has members bob; }
 check "bob leaves the members"             until_true 90 gone_from_members
 check "bob may no longer push"             until_true 60 cannot_push bob
 check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$hp/todo")" = 200
+check "bob no longer sees homepage's agents" until_true 120 not_seen homepage/developer bob
+check "but the desk, for everyone"         has_model homepage/desk bob
+
+echo "# 5b. bob, no longer in homepage, asks the desk for a change"
+since=$(last_pr todo)
+answer=$(ask_agent homepage bob "In the repo todo of the namespace homepage, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else." desk)
+opr=$(newest_pr todo agent-homepage-desk "$since")
+if [ -z "$opr" ]; then
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please propose that IDEAS.md for homepage/todo now: clone it, add the file, and call propose_workspace_changes." desk)
+  opr=$(newest_pr todo agent-homepage-desk "$since")
+fi
+check "the desk proposes it with its own account" test -n "$opr"
+check "it says for whom"                   grep -q 'Asked by bob (not in homepage) through homepage/desk' <<<"$(gitea_api "" "$hp/todo/pulls/${opr:-0}")"
+check "on a branch of the desk's"          grep -q '"ref":"agent/desk/bob-' <<<"$(gitea_api "" "$hp/todo/pulls/${opr:-0}")"
+[ -n "$opr" ] && gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$opr"
 
 echo "# 6. alice adds an agent that may only read"
 check "homepage's config has its operator" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" = 200

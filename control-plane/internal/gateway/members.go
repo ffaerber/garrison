@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,7 +39,9 @@ type Members struct {
 	Wake  <-chan struct{}
 	Gitea *Gitea
 
-	posted map[string]string // pull request head -> status last posted
+	posted  map[string]string // pull request head -> status last posted
+	applied map[string]string // agent account -> the repos it was last given
+	current map[string]string // pull request -> its head and base when last brought up to date
 }
 
 const (
@@ -152,9 +156,15 @@ func (m *Members) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	roots, err := m.rootAdmins(ctx)
+	users, err := m.users(ctx)
 	if err != nil {
 		return err
+	}
+	var roots []string
+	for _, u := range users {
+		if u.IsAdmin {
+			roots = append(roots, u.Login)
+		}
 	}
 	var errs []error
 	for _, ns := range namespaces {
@@ -162,35 +172,166 @@ func (m *Members) Sync(ctx context.Context) error {
 			if err := m.system(ctx, roots); err != nil {
 				errs = append(errs, fmt.Errorf("config of system: %w", err))
 			}
-			continue
-		}
-		if err := m.namespace(ctx, ns.Name, roots); err != nil {
+		} else if err := m.namespace(ctx, ns.Name, roots); err != nil {
 			errs = append(errs, fmt.Errorf("members of %s: %w", ns.Name, err))
+		}
+		if err := m.accounts(ctx, ns.Name, users); err != nil {
+			errs = append(errs, fmt.Errorf("agent accounts of %s: %w", ns.Name, err))
+		}
+		if err := m.keepCurrent(ctx, ns.Name); err != nil {
+			errs = append(errs, fmt.Errorf("changes of %s: %w", ns.Name, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (m *Members) rootAdmins(ctx context.Context) ([]string, error) {
-	var out []string
-	for page := 1; page < 20; page++ {
-		var users []struct {
-			Login   string `json:"login"`
-			IsAdmin bool   `json:"is_admin"`
-		}
+type giteaUser struct {
+	Login         string `json:"login"`
+	FullName      string `json:"full_name"`
+	IsAdmin       bool   `json:"is_admin"`
+	ProhibitLogin bool   `json:"prohibit_login"`
+}
+
+func (m *Members) users(ctx context.Context) ([]giteaUser, error) {
+	var out []giteaUser
+	for page := 1; page < 40; page++ {
+		var users []giteaUser
 		if _, err := m.Gitea.do(ctx, "", http.MethodGet, fmt.Sprintf("/admin/users?limit=50&page=%d", page), nil, &users); err != nil {
 			return nil, err
 		}
-		for _, u := range users {
-			if u.IsAdmin {
-				out = append(out, u.Login)
-			}
-		}
+		out = append(out, users...)
 		if len(users) < 50 {
 			break
 		}
 	}
 	return out, nil
+}
+
+// accounts keeps the Gitea accounts of a namespace's agents that have
+// grants or routines: made when missing, writing to the repos their grants
+// name and no others, and locked, with their access taken away, when their
+// agent is gone or switched off. Nobody signs in with them: the gateway
+// acts as them through Sudo.
+func (m *Members) accounts(ctx context.Context, ns string, users []giteaUser) error {
+	g := m.Gitea
+	if m.applied == nil {
+		m.applied = map[string]string{}
+	}
+	list, _, err := g.Agents(ctx, ns, "main")
+	if err != nil {
+		return err
+	}
+	want := map[string]agents.Agent{}
+	for _, a := range list {
+		if a.NeedsAccount() {
+			want[AgentAccount(&a)] = a
+		}
+	}
+	var mine []giteaUser
+	for _, u := range users {
+		if strings.HasPrefix(u.FullName, AccountPrefix+ns+"/") {
+			mine = append(mine, u)
+		}
+	}
+	if len(want) == 0 && len(mine) == 0 {
+		return nil
+	}
+	repos, err := g.Repos(ctx, "", ns)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, r := range repos {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	accounts := make([]string, 0, len(want))
+	for name := range want {
+		accounts = append(accounts, name)
+	}
+	slices.Sort(accounts)
+	for _, name := range accounts {
+		a := want[name]
+		i := slices.IndexFunc(users, func(u giteaUser) bool { return u.Login == name })
+		switch {
+		case i < 0:
+			if _, err := g.do(ctx, "", http.MethodPost, "/admin/users", map[string]any{
+				"username": name, "email": name + "@agents.invalid", "full_name": AccountPrefix + a.ID(),
+				"password": randomPassword(), "must_change_password": false, "send_notify": false,
+			}, nil); err != nil {
+				return fmt.Errorf("make %s: %w", name, err)
+			}
+			log.Printf("members: made the account %s of the agent %s", name, a.ID())
+			delete(m.applied, name)
+		case users[i].ProhibitLogin:
+			if _, err := g.do(ctx, "", http.MethodPatch, "/admin/users/"+name, map[string]any{
+				"login_name": name, "source_id": 0, "prohibit_login": false,
+			}, nil); err != nil {
+				return err
+			}
+			log.Printf("members: unlocked the account %s of the agent %s", name, a.ID())
+			delete(m.applied, name)
+		}
+		if err := m.collaborations(ctx, ns, name, a.GrantedRepos(), names); err != nil {
+			return err
+		}
+	}
+	for _, u := range mine {
+		if _, ok := want[u.Login]; ok {
+			continue
+		}
+		if err := m.collaborations(ctx, ns, u.Login, nil, names); err != nil {
+			return err
+		}
+		if !u.ProhibitLogin {
+			if _, err := g.do(ctx, "", http.MethodPatch, "/admin/users/"+u.Login, map[string]any{
+				"login_name": u.Login, "source_id": 0, "prohibit_login": true,
+			}, nil); err != nil {
+				return err
+			}
+			log.Printf("members: locked the account %s: its agent is gone, switched off or has no grants", u.Login)
+		}
+	}
+	return nil
+}
+
+// collaborations gives account write access to the repos in granted and
+// takes it away from every other repo of the namespace. It is applied again
+// only when either list changes.
+func (m *Members) collaborations(ctx context.Context, ns, account string, granted, repos []string) error {
+	key := ns + ":" + strings.Join(granted, ",") + "|" + strings.Join(repos, ",")
+	if m.applied[account] == key {
+		return nil
+	}
+	g := m.Gitea
+	for _, r := range repos {
+		path := fmt.Sprintf("/repos/%s/%s/collaborators/%s", ns, r, account)
+		status, err := g.do(ctx, "", http.MethodGet, path, nil, nil)
+		if err != nil && status != http.StatusNotFound {
+			return err
+		}
+		has, wants := status == http.StatusNoContent, slices.Contains(granted, r)
+		switch {
+		case wants && !has:
+			if _, err := g.do(ctx, "", http.MethodPut, path, map[string]string{"permission": "write"}, nil); err != nil {
+				return err
+			}
+			log.Printf("members: %s may now write to %s/%s", account, ns, r)
+		case !wants && has:
+			if _, err := g.do(ctx, "", http.MethodDelete, path, nil, nil); err != nil {
+				return err
+			}
+			log.Printf("members: %s may no longer write to %s/%s", account, ns, r)
+		}
+	}
+	m.applied[account] = key
+	return nil
+}
+
+func randomPassword() string {
+	b := make([]byte, 24)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 type team struct {

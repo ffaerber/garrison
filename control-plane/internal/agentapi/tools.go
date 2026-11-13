@@ -9,20 +9,37 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"homecloud/control-plane/internal/gateway"
+	"homecloud/control-plane/internal/sandbox"
 )
 
 // Gateway calls the gateway's MCP tools as a person, for one agent: the
 // person's Keycloak token goes along, and the gateway serves the agent only
 // its own tools and acts with the person's rights.
 type Gateway struct {
-	URL  string // e.g. http://control-plane_gateway:8080/mcp
-	HTTP *http.Client
+	URL        string // e.g. http://control-plane_gateway:8080/mcp
+	ServiceKey string // gateway.ServiceKey: says what started a run, and runs without a person
+	HTTP       *http.Client
 }
 
 // AgentHeader names the agent to the gateway.
 const AgentHeader = "X-Homecloud-Agent"
 
-func (g *Gateway) rpc(ctx context.Context, token, agent, method string, params, out any) error {
+// As is whom a call to the gateway acts for: the person whose token it is,
+// or, without one, a routine's owner, with the agent's own account.
+type As struct {
+	Token     string
+	StartedBy string // person, agent <id>, routine <id>/<name>
+	Owner     string // a run without a person: the routine's owner
+}
+
+// AsOf is whom a sandbox's calls act for.
+func AsOf(c sandbox.Caller) As {
+	return As{Token: c.Token, StartedBy: c.Run.StartedBy, Owner: c.Run.Owner}
+}
+
+func (g *Gateway) rpc(ctx context.Context, as As, agent, method string, params, out any) error {
 	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.URL, bytes.NewReader(body))
 	if err != nil {
@@ -30,7 +47,17 @@ func (g *Gateway) rpc(ctx context.Context, token, agent, method string, params, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("Authorization", "Bearer "+token)
+	if as.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+as.Token)
+	} else if as.Owner != "" {
+		req.Header.Set(gateway.OwnerHeader, as.Owner)
+	}
+	if g.ServiceKey != "" {
+		req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
+		if as.StartedBy != "" {
+			req.Header.Set(gateway.StartedByHeader, as.StartedBy)
+		}
+	}
 	req.Header.Set(AgentHeader, agent)
 	client := g.HTTP
 	if client == nil {
@@ -61,7 +88,7 @@ func (g *Gateway) rpc(ctx context.Context, token, agent, method string, params, 
 }
 
 // Tools lists the agent's tools, as functions for the LLM.
-func (g *Gateway) Tools(ctx context.Context, token, agent string) ([]Tool, error) {
+func (g *Gateway) Tools(ctx context.Context, as As, agent string) ([]Tool, error) {
 	var out struct {
 		Tools []struct {
 			Name        string         `json:"name"`
@@ -69,7 +96,7 @@ func (g *Gateway) Tools(ctx context.Context, token, agent string) ([]Tool, error
 			InputSchema map[string]any `json:"inputSchema"`
 		} `json:"tools"`
 	}
-	if err := g.rpc(ctx, token, agent, "tools/list", map[string]any{}, &out); err != nil {
+	if err := g.rpc(ctx, as, agent, "tools/list", map[string]any{}, &out); err != nil {
 		return nil, err
 	}
 	tools := make([]Tool, 0, len(out.Tools))
@@ -86,7 +113,7 @@ func (g *Gateway) Tools(ctx context.Context, token, agent string) ([]Tool, error
 
 // Call runs one tool; a refusal or failure comes back as text for the
 // model to read, with isError set.
-func (g *Gateway) Call(ctx context.Context, token, agent, name, arguments string) (text string, isError bool, err error) {
+func (g *Gateway) Call(ctx context.Context, as As, agent, name, arguments string) (text string, isError bool, err error) {
 	args := map[string]any{}
 	if strings.TrimSpace(arguments) != "" {
 		if err := json.Unmarshal([]byte(arguments), &args); err != nil {
@@ -99,7 +126,7 @@ func (g *Gateway) Call(ctx context.Context, token, agent, name, arguments string
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	}
-	if err := g.rpc(ctx, token, agent, "tools/call", map[string]any{"name": name, "arguments": args}, &out); err != nil {
+	if err := g.rpc(ctx, as, agent, "tools/call", map[string]any{"name": name, "arguments": args}, &out); err != nil {
 		return "", false, err
 	}
 	var b strings.Builder

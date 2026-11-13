@@ -80,6 +80,48 @@ func (c *Config) namespaces(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+// MaxPreviews is how many pull requests of a repo get a preview at once:
+// the newest.
+const MaxPreviews = 3
+
+// previews are the open pull requests of a repo that get a preview, by
+// number, with their branch: the newest, from branches of the repo itself.
+func (c *Config) previews(ctx context.Context, org, repo string) (map[int]string, error) {
+	var prs []struct {
+		Number int `json:"number"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/pulls?state=open&sort=newest&limit=50", url.PathEscape(org), url.PathEscape(repo)), &prs); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(prs, func(a, b struct {
+		Number int `json:"number"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+	}) int {
+		return b.Number - a.Number
+	})
+	out := map[int]string{}
+	for _, p := range prs {
+		if len(out) == MaxPreviews {
+			break
+		}
+		if p.Head.Repo.FullName == org+"/"+repo && p.Head.Ref != "" {
+			out[p.Number] = p.Head.Ref
+		}
+	}
+	return out, nil
+}
+
 func (c *Config) branches(ctx context.Context, org, repo string) ([]string, error) {
 	var batch []struct {
 		Name string `json:"name"`
@@ -222,29 +264,52 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				keepApp(ns, r.Name)
 				continue
 			}
-			if err := reg.Claim(s); err != nil {
-				fail("%s/%s: not deployed: %v", ns, r.Name, err)
-				keepApp(ns, r.Name)
-				continue
-			}
 			branches, err := c.branches(ctx, ns, r.Name)
 			if err != nil {
 				fail("branches of %s/%s: %v", ns, r.Name, err)
 				keepApp(ns, r.Name)
 				continue
 			}
+			// Environments and the branch each is deployed from: those named
+			// in stack.yaml, and a preview of each open pull request.
+			from := map[string]string{}
+			for _, env := range s.Branches() {
+				if slices.Contains(branches, env) {
+					from[env] = env
+				}
+			}
+			var previews []string
+			if _, ok := s.Environments[stack.PreviewEnvironment]; ok {
+				prs, err := c.previews(ctx, ns, r.Name)
+				if err != nil {
+					fail("pull requests of %s/%s: %v", ns, r.Name, err)
+					keepApp(ns, r.Name)
+					continue
+				}
+				for n, head := range prs {
+					from[stack.PreviewName(n)] = head
+					previews = append(previews, stack.PreviewName(n))
+				}
+			}
+			s.WithPreviews(previews)
+			if err := reg.Claim(s); err != nil {
+				fail("%s/%s: not deployed: %v", ns, r.Name, err)
+				keepApp(ns, r.Name)
+				continue
+			}
 			for _, env := range s.EnvironmentNames() {
 				key := appKey(ns, r.Name, env)
-				if !slices.Contains(branches, env) {
+				branch, ok := from[env]
+				if !ok {
 					continue // no branch, no environment
 				}
 				dir := mainDir
-				if env != r.DefaultBranch {
+				if branch != r.DefaultBranch {
 					dir = filepath.Join(base, "@"+env)
 				}
-				commit, err := c.checkout(ctx, ns, r.Name, env, dir)
+				commit, err := c.checkout(ctx, ns, r.Name, branch, dir)
 				if err != nil {
-					fail("fetch %s branch %s: %v", key, env, err)
+					fail("fetch %s branch %s: %v", key, branch, err)
 					keep(key)
 					continue
 				}
@@ -253,8 +318,13 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					err = errors.New("stack.yaml names another stack or namespace than on " + r.DefaultBranch)
 				}
 				if err == nil {
+					want := env
+					if slices.Contains(previews, env) {
+						want = stack.PreviewEnvironment
+						es.WithPreviews([]string{env})
+					}
 					if _, ok := es.Environments[env]; !ok {
-						err = fmt.Errorf("stack.yaml on %s has no environment %s", env, env)
+						err = fmt.Errorf("stack.yaml on %s has no environment %s", branch, want)
 					}
 				}
 				if err != nil {

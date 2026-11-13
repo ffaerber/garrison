@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"homecloud/control-plane/internal/agents"
@@ -37,6 +38,7 @@ type OpenWebUI struct {
 	Agents   *Catalog // filled with the agents read, for the MCP endpoints
 	HTTP     *http.Client
 
+	mu        sync.Mutex      // guards token: posts come from other goroutines
 	token     string          // kept between syncs: Open WebUI limits sign-ins
 	accountID string          // the gateway's own Open WebUI account
 	problems  map[string]bool // agent problems already logged
@@ -59,10 +61,24 @@ type owuiModel struct {
 	IsActive     bool           `json:"is_active"`
 }
 
-func (o *OpenWebUI) want(a agents.Agent) owuiModel {
+// AccessMarker in a model's meta records whom the sync let use it, as Open
+// WebUI returns access grants in its own shape.
+const AccessMarker = "homecloud_access"
+
+// want is the model entry of an agent. groups maps a namespace to its Open
+// WebUI group, for agents visible to its members only. Root admins are
+// Open WebUI's admins and see every agent.
+func (o *OpenWebUI) want(a agents.Agent, groups map[string]string) owuiModel {
 	desc := a.Description
 	if desc == "" {
 		desc = "Agent of the namespace " + a.Namespace
+	}
+	access, grants := "everyone", []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}}
+	if a.Visible != agents.VisibleEveryone {
+		access, grants = "admins", []any{}
+		if id := groups[a.Namespace]; id != "" {
+			access, grants = "group:"+id, []any{map[string]any{"principal_type": "group", "principal_id": id, "permission": "read"}}
+		}
 	}
 	return owuiModel{
 		ID:   a.ID(),
@@ -70,11 +86,10 @@ func (o *OpenWebUI) want(a agents.Agent) owuiModel {
 		Meta: map[string]any{
 			"description": desc,
 			AgentMarker:   a.ID(),
+			AccessMarker:  access,
 		},
-		Params: map[string]any{},
-		// Everyone signed in may chat with every agent; the tools still act
-		// with each person's own rights.
-		AccessGrants: []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}},
+		Params:       map[string]any{},
+		AccessGrants: grants,
 		IsActive:     true,
 	}
 }
@@ -159,7 +174,11 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if o.Agents != nil {
 		o.Agents.Set(list)
 	}
-	if err := o.syncModels(ctx, signin.Token, list); err != nil {
+	groups, err := o.syncGroups(ctx, signin.Token, namespaces)
+	if err != nil {
+		return err
+	}
+	if err := o.syncModels(ctx, signin.Token, list, groups); err != nil {
 		return err
 	}
 	return o.syncChannels(ctx, signin.Token, namespaces, byNS)
@@ -168,6 +187,8 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 // session returns a token, signing in only when the kept one no longer
 // works: Open WebUI limits sign-ins, and webhooks start many syncs.
 func (o *OpenWebUI) session(ctx context.Context) (string, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.token != "" && o.call(ctx, o.token, http.MethodGet, "/api/v1/auths/", nil, nil) == nil {
 		return o.token, nil
 	}
@@ -182,7 +203,7 @@ func (o *OpenWebUI) session(ctx context.Context) (string, error) {
 	return o.token, nil
 }
 
-func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.Agent) error {
+func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.Agent, groups map[string]string) error {
 	var all []owuiModel
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/models/all", nil, &all); err != nil {
 		return err
@@ -195,7 +216,7 @@ func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.
 		}
 	}
 	for _, a := range list {
-		want := o.want(a)
+		want := o.want(a, groups)
 		cur, ok := have[want.ID]
 		delete(have, want.ID)
 		switch {
@@ -394,14 +415,15 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 	return nil
 }
 
-// same compares the fields the sync owns. Access grants are set on every
-// create and update but not compared: Open WebUI returns them in its own shape.
+// same compares the fields the sync owns. Access grants are compared by
+// the marker the sync writes with them: Open WebUI returns them in its own
+// shape.
 func same(a, b owuiModel) bool {
 	if a.Name != b.Name || (a.BaseModelID == nil) != (b.BaseModelID == nil) || !a.IsActive {
 		return false
 	}
-	ja, _ := json.Marshal([]any{a.Meta["description"], a.Meta[AgentMarker]})
-	jb, _ := json.Marshal([]any{b.Meta["description"], b.Meta[AgentMarker]})
+	ja, _ := json.Marshal([]any{a.Meta["description"], a.Meta[AgentMarker], a.Meta[AccessMarker]})
+	jb, _ := json.Marshal([]any{b.Meta["description"], b.Meta[AgentMarker], b.Meta[AccessMarker]})
 	return bytes.Equal(ja, jb)
 }
 
@@ -416,4 +438,121 @@ func (o *OpenWebUI) Run(ctx context.Context, interval time.Duration) {
 			return
 		}
 	}
+}
+
+// GroupPrefix names the Open WebUI group of a namespace's people:
+// "homecloud <namespace>".
+const GroupPrefix = "homecloud "
+
+type owuiGroup struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// syncGroups keeps one Open WebUI group per namespace with the people of its
+// members.yaml who have signed in to Open WebUI, matched by email, so that
+// agents visible to members show only to them. It returns the group ids by
+// namespace. system has none: its people are root admins, whom Open WebUI
+// shows everything.
+func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []Namespace) (map[string]string, error) {
+	var groups []owuiGroup
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/groups/", nil, &groups); err != nil {
+		return nil, err
+	}
+	have := map[string]string{}
+	for _, g := range groups {
+		if ns, ok := strings.CutPrefix(g.Name, GroupPrefix); ok {
+			have[ns] = g.ID
+		}
+	}
+	var users struct {
+		Users []struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		} `json:"users"`
+	}
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/users/all", nil, &users); err != nil {
+		return nil, err
+	}
+	byEmail := map[string]string{}
+	for _, u := range users.Users {
+		byEmail[strings.ToLower(u.Email)] = u.ID
+	}
+	out := map[string]string{}
+	for _, ns := range namespaces {
+		if ns.Name == SystemNamespace {
+			continue
+		}
+		id, ok := have[ns.Name]
+		delete(have, ns.Name)
+		if !ok {
+			var g owuiGroup
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/groups/create", map[string]any{
+				"name": GroupPrefix + ns.Name, "description": "The people of the namespace " + ns.Name + ", from members.yaml in its repo config; kept by the gateway.",
+			}, &g); err != nil {
+				return nil, err
+			}
+			id = g.ID
+			log.Printf("open webui: added the group of namespace %s", ns.Name)
+		}
+		out[ns.Name] = id
+		var raw string
+		if _, err := o.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns.Name+"/"+ConfigRepo+"/raw/"+MembersFile+"?ref=main", nil, &raw); err != nil {
+			continue // no roster yet: keep the group as it is
+		}
+		roster, err := ParseRoster([]byte(raw))
+		if err != nil {
+			continue
+		}
+		var want []string
+		for _, name := range slices.Concat(roster.Admins, roster.Members) {
+			var u struct {
+				Email string `json:"email"`
+			}
+			if _, err := o.Gitea.do(ctx, "", http.MethodGet, "/users/"+name, nil, &u); err != nil {
+				continue // not signed in yet
+			}
+			if uid := byEmail[strings.ToLower(u.Email)]; uid != "" {
+				want = append(want, uid)
+			}
+		}
+		var members []struct {
+			ID string `json:"id"`
+		}
+		if err := o.call(ctx, token, http.MethodPost, "/api/v1/groups/id/"+id+"/users", nil, &members); err != nil {
+			return nil, err
+		}
+		var cur, add, remove []string
+		for _, m := range members {
+			cur = append(cur, m.ID)
+			if !slices.Contains(want, m.ID) {
+				remove = append(remove, m.ID)
+			}
+		}
+		for _, uid := range want {
+			if !slices.Contains(cur, uid) {
+				add = append(add, uid)
+			}
+		}
+		if len(add) > 0 {
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/groups/id/"+id+"/users/add", map[string]any{"user_ids": add}, nil); err != nil {
+				return nil, err
+			}
+		}
+		if len(remove) > 0 {
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/groups/id/"+id+"/users/remove", map[string]any{"user_ids": remove}, nil); err != nil {
+				return nil, err
+			}
+		}
+		if len(add)+len(remove) > 0 {
+			log.Printf("open webui: the group of namespace %s: %d added, %d removed", ns.Name, len(add), len(remove))
+		}
+	}
+	for ns, id := range have {
+		if err := o.call(ctx, token, http.MethodDelete, "/api/v1/groups/id/"+id+"/delete", nil, nil); err != nil {
+			return nil, err
+		}
+		log.Printf("open webui: removed the group of namespace %s, which is gone", ns)
+	}
+	return out, nil
 }

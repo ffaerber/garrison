@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -80,6 +81,10 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(out)
 	case strings.HasSuffix(p, "/pulls"):
 		io.WriteString(w, "[]")
+	case p == "/users/alice":
+		io.WriteString(w, `{"email":"alice@example.com"}`)
+	case p == "/repos/homepage/config/raw/members.yaml":
+		io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
 	// homepage/config has two agents, one of them broken, and a skill.
 	case p == "/repos/homepage/config/contents/agents":
 		io.WriteString(w, `[{"name":"marketing","type":"dir"},{"name":"broken","type":"dir"},{"name":"README.md","type":"file"}]`)
@@ -137,7 +142,7 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 		return []byte("log line\n"), nil
 	}
 	tools := &Tools{Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}, Run: run, WorkDir: dir, Prometheus: prom.URL}
-	return &MCP{Tools: tools, Verifier: fakeVerifier{"tok-alice": {Name: "alice", Admin: true}, "tok-bob": {Name: "bob"}}}, fg
+	return &MCP{Tools: tools, Verifier: fakeVerifier{"tok-alice": {Name: "alice", Admin: true}, "tok-bob": {Name: "bob"}, "tok-carol": {Name: "carol"}}}, fg
 }
 
 // rpc posts one JSON-RPC request with a bearer token and returns status and decoded body.
@@ -347,6 +352,8 @@ func TestOpenWebUISync(t *testing.T) {
 	profileName := "Installer"
 	messages := map[string][]owuiMessage{} // channel id -> messages
 	var calls []string
+	var groups []owuiGroup
+	groupUsers := map[string][]string{}
 	ow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -376,6 +383,16 @@ func TestOpenWebUISync(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&b)
 			delete(models, b["id"])
 			io.WriteString(w, "true")
+		case "/api/v1/groups/":
+			json.NewEncoder(w).Encode(groups)
+		case "/api/v1/groups/create":
+			var g owuiGroup
+			json.NewDecoder(r.Body).Decode(&g)
+			g.ID = "g" + g.Name
+			groups = append(groups, g)
+			json.NewEncoder(w).Encode(g)
+		case "/api/v1/users/all":
+			io.WriteString(w, `{"users":[{"id":"u-alice","email":"Alice@example.com"},{"id":"u-carol","email":"carol@example.com"}]}`)
 		case "/api/v1/auths/":
 			json.NewEncoder(w).Encode(map[string]string{"id": "cp", "name": profileName})
 		case "/api/v1/auths/update/profile":
@@ -397,6 +414,30 @@ func TestOpenWebUISync(t *testing.T) {
 			channels[c.ID] = c
 			json.NewEncoder(w).Encode(c)
 		default:
+			if id, ok := strings.CutPrefix(r.URL.Path, "/api/v1/groups/id/"); ok {
+				id, op, _ := strings.Cut(id, "/")
+				var b struct {
+					UserIDs []string `json:"user_ids"`
+				}
+				json.NewDecoder(r.Body).Decode(&b)
+				switch op {
+				case "users":
+					out := []map[string]string{}
+					for _, u := range groupUsers[id] {
+						out = append(out, map[string]string{"id": u})
+					}
+					json.NewEncoder(w).Encode(out)
+				case "users/add":
+					groupUsers[id] = append(groupUsers[id], b.UserIDs...)
+					io.WriteString(w, "{}")
+				case "users/remove":
+					groupUsers[id] = slices.DeleteFunc(groupUsers[id], func(u string) bool { return slices.Contains(b.UserIDs, u) })
+					io.WriteString(w, "{}")
+				default:
+					http.NotFound(w, r)
+				}
+				return
+			}
 			rest := strings.TrimPrefix(r.URL.Path, "/api/v1/channels/")
 			parts := strings.Split(rest, "/")
 			if len(parts) >= 2 && parts[1] == "messages" {
@@ -456,6 +497,14 @@ func TestOpenWebUISync(t *testing.T) {
 		Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}, Agents: catalog}
 	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	// Only homepage's people see its agents; system's are for everyone.
+	gid := "g" + GroupPrefix + "homepage"
+	if models["homepage/marketing"].Meta[AccessMarker] != "group:"+gid || models["system/operator"].Meta[AccessMarker] != "everyone" {
+		t.Errorf("access: %v %v", models["homepage/marketing"].Meta, models["system/operator"].Meta)
+	}
+	if strings.Join(groupUsers[gid], ",") != "u-alice" {
+		t.Errorf("homepage's group: %v (alice is in it; bob has not signed in to Open WebUI; carol is not in homepage)", groupUsers[gid])
 	}
 	// system has no agents folder: its operator. homepage has its own agents,
 	// of which the broken one is left out.
@@ -580,7 +629,7 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	if got := names("/mcp/homepage/marketing"); strings.Join(got, ",") != "list_repos,load_skill,read_skill_file" {
 		t.Errorf("marketing's tools = %v", got)
 	}
-	if got := names("/mcp"); len(got) != len(ToolNames()) {
+	if got := names("/mcp"); len(got) != len(ToolNames())-1 {
 		t.Errorf("/mcp tools = %v", got)
 	}
 	// A tool the agent lacks is refused before anything happens.
@@ -623,6 +672,18 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Errorf("unknown agent in the path: %d", w.Code)
 	}
+	// carol is not in homepage: its agents, visible to its members, are not hers.
+	if code, _ := rpcAt(t, m, "/mcp/homepage/reader", "tok-carol", "tools/list", nil); code != http.StatusForbidden {
+		t.Errorf("carol used homepage/reader: %d", code)
+	}
+	m.Agents.Set([]agents.Agent{{Namespace: "homepage", Name: "desk", Visible: agents.VisibleEveryone, Tools: []string{"read_file"}}})
+	if code, _ := rpcAt(t, m, "/mcp/homepage/desk", "tok-carol", "tools/list", nil); code != http.StatusOK {
+		t.Errorf("carol could not use an agent for everyone: %d", code)
+	}
+	m.Agents.Set([]agents.Agent{
+		{Namespace: "homepage", Name: "marketing", Tools: []string{"list_repos"},
+			Skills: []agents.Skill{{Name: "thumbnail", Description: "Make a thumbnail.", Dir: "agents/marketing/skills/thumbnail"}}},
+	})
 	// Skills: load one, read its file, nothing outside it.
 	call := func(tool string, args map[string]any) (string, bool) {
 		_, out := rpcAt(t, m, "/mcp/homepage/marketing", "tok-bob", "tools/call", map[string]any{"name": tool, "arguments": args})

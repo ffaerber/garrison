@@ -19,6 +19,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"homecloud/control-plane/internal/agents"
@@ -45,6 +46,8 @@ type Server struct {
 	Sandboxes    *sandbox.Manager // nil: every turn runs in this process
 	MaxToolCalls int              // tool calls per turn in a sandbox; 0: 60
 	Git          *GitProxy        // Git for the sandboxes; nil: none
+	Gitea        *gateway.Gitea   // who may use an agent (visible); nil: everyone
+	Poster       Poster           // posts answers no message waits for; nil: none
 }
 
 // Headers Open WebUI's connection fills in for each request.
@@ -126,6 +129,18 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "no agent "+req.Model)
 		return
 	}
+	if s.Gitea != nil {
+		ok, err := s.Gitea.CanUse(r.Context(), &agent, person)
+		if err != nil {
+			apiError(w, http.StatusBadGateway, "cannot read the namespace's members")
+			return
+		}
+		if !ok {
+			log.Printf("agents: %s: %s: refused: not in %s", person.Name, agent.ID(), agent.Namespace)
+			apiError(w, http.StatusForbidden, fmt.Sprintf("%s is for the people of %s; ask one of its admins to add you to members.yaml, or ask an agent that serves everyone", agent.ID(), agent.Namespace))
+			return
+		}
+	}
 	chat := r.Header.Get(ChatHeader)
 	ctx, cancel := context.WithTimeout(r.Context(), s.turnTimeout())
 	defer cancel()
@@ -133,7 +148,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	out := newWriter(w, req.Model, req.Stream)
 	var rounds int
 	if s.Sandboxes != nil && chat != "" {
-		rounds, err = s.sandboxTurn(ctx, raw, person.Name, chat, agent, req.Messages, out)
+		run := sandbox.Run{Token: raw, StartedBy: "person", Chain: []string{agent.ID()}, Admin: person.Admin, Show: out.reasoning}
+		msg := func(fresh bool) (string, []sandbox.Image) { return promptFrom(req.Messages, fresh) }
+		rounds, err = s.sandboxTurn(ctx, run, person.Name, chat, chat+"\x00"+agent.ID(), agent, msg, out)
 	} else {
 		rounds, err = s.turn(ctx, raw, agent, req.Messages, out)
 	}
@@ -165,7 +182,8 @@ func (s *Server) turn(ctx context.Context, token string, a agents.Agent, incomin
 			messages = append(messages, Message{Role: m.Role, Content: m.Content})
 		}
 	}
-	tools, err := s.Gateway.Tools(ctx, token, a.ID())
+	as := As{Token: token, StartedBy: "person"}
+	tools, err := s.Gateway.Tools(ctx, as, a.ID())
 	if err != nil {
 		return 0, err
 	}
@@ -196,7 +214,7 @@ func (s *Server) turn(ctx context.Context, token string, a agents.Agent, incomin
 		for _, c := range msg.ToolCalls {
 			calls++
 			out.reasoning(fmt.Sprintf("%s(%s)\n", c.Function.Name, shorten(c.Function.Arguments, 200)))
-			text, isErr, err := s.Gateway.Call(ctx, token, a.ID(), c.Function.Name, c.Function.Arguments)
+			text, isErr, err := s.Gateway.Call(ctx, as, a.ID(), c.Function.Name, c.Function.Arguments)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 					return calls, err
@@ -222,6 +240,7 @@ func shorten(s string, n int) string {
 // writer answers Open WebUI: streamed as chunks, or as one completion.
 // Tool calls show as reasoning, the answer as content.
 type writer struct {
+	mu      sync.Mutex // agents asked in the run write from other goroutines
 	w       http.ResponseWriter
 	model   string
 	stream  bool
@@ -254,6 +273,8 @@ func (o *writer) chunk(delta map[string]any, finish any) {
 }
 
 func (o *writer) reasoning(s string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.stream {
 		o.chunk(map[string]any{"reasoning_content": s}, nil)
 	} else {
@@ -262,6 +283,8 @@ func (o *writer) reasoning(s string) {
 }
 
 func (o *writer) content(s string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.stream {
 		o.chunk(map[string]any{"content": s}, nil)
 	} else {
@@ -270,6 +293,8 @@ func (o *writer) content(s string) {
 }
 
 func (o *writer) finish() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.stream {
 		o.chunk(map[string]any{}, "stop")
 		fmt.Fprint(o.w, "data: [DONE]\n\n")

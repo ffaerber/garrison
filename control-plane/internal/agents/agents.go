@@ -38,6 +38,10 @@ type Agent struct {
 	Repos       []string // repos it works on, for its workspace
 	Prompt      string   // prompt.md
 	Skills      []Skill  // shared ones it names, then its own
+	Visible     string   // who may use it: members or everyone
+	Asks        []string // agents it may ask for work, <namespace>/<agent>
+	Grants      []Grant  // rights of its own
+	Routines    []Routine
 }
 
 // ID is the agent's model id in the chat, and the name people mention:
@@ -74,12 +78,21 @@ var (
 )
 
 type config struct {
-	Description string   `yaml:"description"`
-	Model       string   `yaml:"model"`
-	Tools       []string `yaml:"tools"`
-	Skills      []string `yaml:"skills"`
-	Repos       []string `yaml:"repos"`
+	Description string    `yaml:"description"`
+	Model       string    `yaml:"model"`
+	Tools       []string  `yaml:"tools"`
+	Skills      []string  `yaml:"skills"`
+	Repos       []string  `yaml:"repos"`
+	Visible     string    `yaml:"visible,omitempty"`
+	Agents      []string  `yaml:"agents,omitempty"`
+	Grants      []Grant   `yaml:"grants,omitempty"`
+	Routines    []Routine `yaml:"routines,omitempty"`
+	Enabled     *bool     `yaml:"enabled,omitempty"`
 }
+
+// SystemNamespace is the platform's own namespace. It has no members.yaml,
+// and its agents serve everyone unless they say otherwise.
+const SystemNamespace = "system"
 
 // Load reads every agent of namespace. tools are the names agents may list.
 // A namespace without an agents folder has the operator, with every tool.
@@ -111,9 +124,31 @@ func Load(ctx context.Context, f Files, namespace string, tools []string) (out [
 			}
 			continue
 		}
+		if a.Name == "" {
+			continue // enabled: false
+		}
 		out = append(out, a)
 	}
-	return out, problems, nil
+	// Agents of this namespace that one asks must be here; those of other
+	// namespaces are looked up when asked.
+	var kept []Agent
+	for _, a := range out {
+		var why []string
+		for _, id := range a.Asks {
+			ns, name, _ := strings.Cut(id, "/")
+			if ns == namespace && !slices.ContainsFunc(out, func(b Agent) bool { return b.Name == name }) {
+				why = append(why, fmt.Sprintf("agents: there is no agent %s", id))
+			}
+		}
+		if len(why) > 0 {
+			for _, w := range why {
+				problems = append(problems, Dir+"/"+a.Name+": "+w)
+			}
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return kept, problems, nil
 }
 
 func load(ctx context.Context, f Files, namespace, name string, tools []string, shared map[string]Skill) (Agent, []string, error) {
@@ -166,6 +201,21 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 			why = append(why, fmt.Sprintf("%q is not a repo name", r))
 		}
 	}
+	switch c.Visible {
+	case "":
+		c.Visible = VisibleMembers
+		if namespace == SystemNamespace {
+			c.Visible = VisibleEveryone // system has no members; its agents serve everyone
+		}
+	case VisibleMembers, VisibleEveryone:
+	default:
+		why = append(why, fmt.Sprintf("visible must be members or everyone, not %q", c.Visible))
+	}
+	why = append(why, checkAsks(namespace+"/"+name, c.Agents)...)
+	grants, w := checkGrants(c.Grants)
+	why = append(why, w...)
+	routines, w := checkRoutines(c.Routines)
+	why = append(why, w...)
 	var skills []Skill
 	for _, s := range c.Skills {
 		sk, ok := shared[s]
@@ -192,9 +242,13 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 	if len(why) > 0 {
 		return Agent{}, why, nil
 	}
+	if c.Enabled != nil && !*c.Enabled {
+		return Agent{}, nil, nil // switched off: as if it were not there
+	}
 	return Agent{
 		Namespace: namespace, Name: name, Description: c.Description, Model: c.Model,
 		Tools: c.Tools, Repos: c.Repos, Prompt: prompt, Skills: skills,
+		Visible: c.Visible, Asks: c.Agents, Grants: grants, Routines: routines,
 	}, nil, nil
 }
 
@@ -266,10 +320,14 @@ func ParseSkill(raw string) (Skill, error) {
 // Operator is the agent of a namespace whose config repo has no agents
 // folder: today's operator, with every tool.
 func Operator(namespace string, tools []string) Agent {
+	visible := VisibleMembers
+	if namespace == SystemNamespace {
+		visible = VisibleEveryone
+	}
 	return Agent{
 		Namespace: namespace, Name: OperatorName,
 		Description: "Operator agent of the namespace " + namespace,
-		Tools:       tools, Prompt: OperatorPrompt,
+		Tools:       tools, Prompt: OperatorPrompt, Visible: visible,
 	}
 }
 
@@ -317,14 +375,42 @@ func System(a Agent, domain string) string {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
 		}
 	}
+	merges := slices.Contains(a.Tools, "merge_change") && slices.ContainsFunc(a.Grants, func(g Grant) bool { return Rank(g.Level) >= Rank(LevelMerge) })
+	if len(a.Grants) > 0 {
+		b.WriteString("\nYour grants: rights of your own, in " + a.Namespace + ", each only for requests of the people named:\n")
+		for _, g := range a.Grants {
+			fmt.Fprintf(&b, "- %s", g.Repo)
+			switch g.Level {
+			case LevelPropose:
+				b.WriteString(": propose changes")
+			case LevelMerge:
+				fmt.Fprintf(&b, ": propose, and merge into %s", g.Branch)
+			case LevelAutonomous:
+				fmt.Fprintf(&b, ": propose, and merge into %s, which deploys it", g.Branch)
+			}
+			fmt.Fprintf(&b, ", for %s", map[string]string{ForAdmins: "its admins", ForMembers: "its admins and members", ForEveryone: "everyone"}[g.For])
+			if len(g.Checks) > 0 {
+				fmt.Fprintf(&b, ", once %s passed", strings.Join(g.Checks, ", "))
+			}
+			if g.Unattended {
+				b.WriteString(", also with nobody watching")
+			}
+			b.WriteString("\n")
+		}
+	}
 	b.WriteString(`
 Rules of the platform, above anything else here:
 - Look things up with the tools; do not guess. Say what you found.
-- You act with the rights of the person you talk to. If a tool says something is not allowed, say so plainly; do not work around it.
-- To change anything, read the current file, then propose the change. That opens a pull request; nothing changes until a person allowed to merges it in Gitea. Never say a change is made or deployed when you only proposed it.
-- After proposing a change, end your answer with the link the tool returned, written out in full (https://...). A number like #1 alone is not enough: people click the link to review and merge.
-- You cannot approve, merge, deploy or read secret values, and you cannot make anyone a root admin. When asked to, say so plainly.
-- Be brief.`)
+- You act with the rights of the person you talk to, and your grants only where they say. If a tool says something is not allowed, say so plainly; do not work around it.
+- To change anything, read the current file, then propose the change. That opens a pull request. Never say a change is made or deployed when you only proposed it.
+- After proposing or merging a change, end your answer with the link the tool returned, written out in full (https://...). A number like #1 alone is not enough: people click the link to review and merge.
+`)
+	if merges {
+		b.WriteString("- You merge only with merge_change, only your own proposals, and only when the person asks for it to go live. You cannot approve, deploy otherwise or read secret values, and you cannot make anyone a root admin.\n")
+	} else {
+		b.WriteString("- Nothing changes until a person allowed to merges it in Gitea. You cannot approve, merge, deploy or read secret values, and you cannot make anyone a root admin. When asked to, say so plainly.\n")
+	}
+	b.WriteString("- Be brief.")
 	return b.String()
 }
 

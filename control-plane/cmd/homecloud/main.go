@@ -377,10 +377,12 @@ func gatewayCmd(args []string) error {
 	if *browser != "" {
 		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain}
 	}
+	serviceKey := gateway.ServiceKey(g.Password)
 	mcp := &gateway.MCP{
-		Tools:    tools,
-		Verifier: verifier,
-		Agents:   catalog,
+		Tools:      tools,
+		Verifier:   verifier,
+		Agents:     catalog,
+		ServiceKey: serviceKey,
 	}
 	sync := &gateway.OpenWebUI{
 		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
@@ -400,6 +402,7 @@ func gatewayCmd(args []string) error {
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)
 	mux.Handle("/mcp/", mcp)
+	mux.Handle("POST /internal/post", gateway.PostHandler(sync, serviceKey))
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)
 		mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
@@ -561,9 +564,11 @@ func agentsCmd(args []string) error {
 		Agents:       &agentapi.GiteaAgents{Gitea: g},
 		Verifier:     verifier,
 		LLM:          &agentapi.LLM{URL: base, KeyFile: *keyFile},
-		Gateway:      &agentapi.Gateway{URL: *gatewayURL},
+		Gateway:      &agentapi.Gateway{URL: *gatewayURL, ServiceKey: gateway.ServiceKey(g.Password)},
 		Domain:       domain,
 		DefaultModel: model,
+		Gitea:        g,
+		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp") + "/internal/post", ServiceKey: gateway.ServiceKey(g.Password)},
 	}
 	if *image != "" {
 		// The sandbox image is pulled from Gitea's registry as the admin, if
@@ -596,6 +601,7 @@ func agentsCmd(args []string) error {
 				log.Fatalf("agents: sandboxes: %v", err)
 			}
 		}()
+		go (&agentapi.Routines{Server: srv, Gitea: g}).Run(ctx)
 		log.Printf("agents: sandboxes from %s on %s, served on %s", *image, *network, *sandboxListen)
 	}
 	// Turns stream for minutes: no write timeout.

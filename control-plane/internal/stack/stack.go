@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sync"
 
@@ -17,6 +18,38 @@ import (
 
 // MainEnvironment is the environment whose hostname is the stack name.
 const MainEnvironment = "main"
+
+// PreviewEnvironment, if a stack has it, is no branch: each open pull
+// request of the repo is deployed like it, as the environment pr-<number>
+// at pr-<number>-<stack>.<domain>, and taken down when the pull request
+// closes.
+const PreviewEnvironment = "preview"
+
+var previewName = regexp.MustCompile(`^pr-[0-9]+$`)
+
+// PreviewName is the environment of pull request n.
+func PreviewName(n int) string { return fmt.Sprintf("pr-%d", n) }
+
+// Branches are the environments deployed from a branch of their name.
+func (s *Stack) Branches() []string {
+	return slices.DeleteFunc(s.EnvironmentNames(), func(e string) bool { return e == PreviewEnvironment })
+}
+
+// WithPreviews makes the environments of the previews names (pr-<n>) like
+// the preview environment, and drops it, as it is deployed only through
+// them. It does nothing to a stack without previews.
+func (s *Stack) WithPreviews(names []string) {
+	p, ok := s.Environments[PreviewEnvironment]
+	if !ok {
+		return
+	}
+	delete(s.Environments, PreviewEnvironment)
+	for _, n := range names {
+		e := p
+		e.Hostname = s.Hostname(n)
+		s.Environments[n] = e
+	}
+}
 
 // schemaURL only names the embedded schema in error messages.
 const schemaURL = "homecloud:///schemas/stack.schema.json"
@@ -155,6 +188,9 @@ func (s *Stack) check() error {
 
 	seen := map[string]string{}
 	for _, env := range s.EnvironmentNames() {
+		if previewName.MatchString(env) {
+			fail("environment %q: pr-<number> are the previews of pull requests; name the branch otherwise", env)
+		}
 		want := s.Hostname(env)
 		if got := s.Environments[env].Hostname; got != "" && got != want {
 			fail("environment %q must have hostname %q, not %q", env, want, got)

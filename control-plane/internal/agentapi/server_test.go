@@ -70,11 +70,30 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type fakeMCP struct {
 	mu    sync.Mutex
 	calls []string // "token agent tool"
+	seen  []string // "owner|started by" of each request
+}
+
+func (f *fakeMCP) headers() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.seen...)
+}
+
+// sawUnattended tells whether a request came without a token, for owner,
+// started by startedBy, with the service key.
+func (f *fakeMCP) sawUnattended(owner, startedBy string) bool {
+	for _, h := range f.headers() {
+		if h == "|"+owner+"|"+startedBy+"|k" {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeMCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.seen = append(f.seen, r.Header.Get("Authorization")+"|"+r.Header.Get(gateway.OwnerHeader)+"|"+r.Header.Get(gateway.StartedByHeader)+"|"+r.Header.Get(gateway.ServiceHeader))
 	var req struct {
 		Method string `json:"method"`
 		Params struct {

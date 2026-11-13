@@ -6,11 +6,13 @@ package gateway
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -82,7 +84,17 @@ type MCP struct {
 	Tools    *Tools
 	Verifier Verifier
 	Agents   *Catalog
+	// ServiceKey lets the agent service say what started a run and run an
+	// agent without a person (ServiceKey()). Empty: neither.
+	ServiceKey string
 }
+
+// Headers of the agent service, believed only with its key.
+const (
+	ServiceHeader   = "X-Homecloud-Service"
+	StartedByHeader = "X-Homecloud-Started-By"
+	OwnerHeader     = "X-Homecloud-Owner" // a run without a person: the routine's owner
+)
 
 // AgentHeader names the agent a request is for.
 const AgentHeader = "X-Homecloud-Agent"
@@ -130,20 +142,17 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || raw == "" {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="homecloud"`)
-		http.Error(w, "a Keycloak access token is required", http.StatusUnauthorized)
+	person, ok := m.person(w, r, agent)
+	if !ok {
 		return
 	}
-	person, err := m.Verifier.Verify(r.Context(), raw)
-	if err != nil {
-		log.Printf("mcp: refused token: %v", err)
-		w.Header().Set("WWW-Authenticate", `Bearer realm="homecloud", error="invalid_token"`)
-		http.Error(w, "invalid token", http.StatusUnauthorized)
+	if allowed, err := m.Tools.Gitea.CanUse(r.Context(), agent, person); err != nil {
+		http.Error(w, "cannot read the namespace's members", http.StatusBadGateway)
+		return
+	} else if !allowed {
+		http.Error(w, fmt.Sprintf("%s may not use the agent %s: it is for the people of %s", person.Name, agent.ID(), agent.Namespace), http.StatusForbidden)
 		return
 	}
-	person.Token = raw
 	var req rpcRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.JSONRPC != "2.0" || req.Method == "" {
 		writeRPC(w, nil, nil, &rpcError{Code: -32700, Message: "parse error"})
@@ -155,6 +164,49 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	result, rerr := m.handle(r.Context(), person, agent, req)
 	writeRPC(w, req.ID, result, rerr)
+}
+
+// person is who a request acts for: the person whose Keycloak token it
+// carries, or, from the agent service, a routine's owner in a run without a
+// person, which then acts with the agent's own account.
+func (m *MCP) person(w http.ResponseWriter, r *http.Request, agent *agents.Agent) (Person, bool) {
+	service := m.ServiceKey != "" && hmac.Equal([]byte(r.Header.Get(ServiceHeader)), []byte(m.ServiceKey))
+	raw, hasToken := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if service && (!hasToken || raw == "") && r.Header.Get(OwnerHeader) != "" {
+		owner := r.Header.Get(OwnerHeader)
+		if agent == nil || !userName.MatchString(owner) {
+			http.Error(w, "a run without a person needs an agent and its owner", http.StatusBadRequest)
+			return Person{}, false
+		}
+		return Person{Name: AgentAccount(agent), Unattended: true, Owner: owner, StartedBy: startedBy(r)}, true
+	}
+	if !hasToken || raw == "" {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="homecloud"`)
+		http.Error(w, "a Keycloak access token is required", http.StatusUnauthorized)
+		return Person{}, false
+	}
+	p, err := m.Verifier.Verify(r.Context(), raw)
+	if err != nil {
+		log.Printf("mcp: refused token: %v", err)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="homecloud", error="invalid_token"`)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return Person{}, false
+	}
+	p.Token = raw
+	p.StartedBy = "person"
+	if service {
+		p.StartedBy = startedBy(r)
+	}
+	return p, true
+}
+
+var startedByValue = regexp.MustCompile(`^(person|agent [A-Za-z0-9._/-]{1,200}|routine [A-Za-z0-9._/-]{1,200})$`)
+
+func startedBy(r *http.Request) string {
+	if v := r.Header.Get(StartedByHeader); startedByValue.MatchString(v) {
+		return v
+	}
+	return "person"
 }
 
 func (m *MCP) handle(ctx context.Context, p Person, agent *agents.Agent, req rpcRequest) (any, *rpcError) {
@@ -195,13 +247,21 @@ func (m *MCP) handle(ctx context.Context, p Person, agent *agents.Agent, req rpc
 			if errors.Is(err, ErrForbidden) {
 				msg = fmt.Sprintf("not allowed: %s may not do this", p.Name)
 			}
-			log.Printf("mcp: %s: %s: %s: %s", p.Name, agentID(agent), params.Name, msg)
+			log.Printf("mcp: %s: %s: %s [%s]: %s", who(p), agentID(agent), params.Name, p.StartedBy, msg)
 			return map[string]any{"content": []map[string]any{{"type": "text", "text": "error: " + msg}}, "isError": true}, nil
 		}
-		log.Printf("mcp: %s: %s: %s", p.Name, agentID(agent), params.Name)
+		log.Printf("mcp: %s: %s: %s [%s]", who(p), agentID(agent), params.Name, p.StartedBy)
 		return map[string]any{"content": []map[string]any{{"type": "text", "text": out}}}, nil
 	}
 	return nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method}
+}
+
+// who names whom a request acts for, in the log.
+func who(p Person) string {
+	if p.Unattended {
+		return p.Owner + " (nobody watching, as " + p.Name + ")"
+	}
+	return p.Name
 }
 
 func agentID(a *agents.Agent) string {

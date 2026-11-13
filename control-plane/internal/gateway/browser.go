@@ -24,6 +24,8 @@ import (
 type Browser struct {
 	URL    string // Chrome's DevTools, e.g. http://control-plane_browser:9222
 	Domain string
+
+	browsing browsing // tabs of browse, by person and agent
 }
 
 // Shot is a screenshot and what the page was.

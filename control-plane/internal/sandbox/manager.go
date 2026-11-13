@@ -58,7 +58,7 @@ type Session struct {
 	token     string
 	container string
 	pi        *Pi
-	caller    string // the Keycloak token of the person whose turn runs
+	run       *Run // whom the running turn is for; nil between turns
 	lastUsed  time.Time
 	stderr    *tail
 }
@@ -89,11 +89,24 @@ func (m *Manager) init() {
 // ErrBusy: the person has as many sandboxes working as allowed.
 var ErrBusy = errors.New("busy")
 
+// Run is whom a turn is for and what started it.
+type Run struct {
+	Token      string   // the Keycloak token of the person whose message started it; empty without one
+	StartedBy  string   // person, agent <namespace>/<agent>, routine <namespace>/<agent>/<name>
+	Chain      []string // the agents of this run, the first one first, this one last
+	Unattended bool     // nobody is watching: a routine
+	Owner      string   // then: the routine's owner
+	Admin      bool     // the person is a root admin
+	// Show, if set, shows progress to whoever waits for the run, e.g. the
+	// person whose agent asked this one.
+	Show func(string) `json:"-"`
+}
+
 // Turn runs fn with the key's sandbox, started or restarted as needed, while
-// the sandbox acts for caller (the person's Keycloak token). Turns of one
-// key run one after another; a sandbox whose agent definition or image has
-// changed is restarted before the turn, never during one.
-func (m *Manager) Turn(ctx context.Context, want Want, caller string, fn func(*Session) error) error {
+// the sandbox acts for run. Turns of one key run one after another; a
+// sandbox whose agent definition or image has changed is restarted before
+// the turn, never during one.
+func (m *Manager) Turn(ctx context.Context, want Want, run Run, fn func(*Session) error) error {
 	m.mu.Lock()
 	m.init()
 	s := m.sessions[want.Key]
@@ -119,12 +132,12 @@ func (m *Manager) Turn(ctx context.Context, want Want, caller string, fn func(*S
 		}
 	}
 	s.want = want
-	s.caller = caller
+	s.run = &run
 	s.lastUsed = time.Now()
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		s.caller = ""
+		s.run = nil
 		s.lastUsed = time.Now()
 		s.mu.Unlock()
 	}()
@@ -285,8 +298,10 @@ func (m *Manager) stop(ctx context.Context, s *Session) {
 type Caller struct {
 	Agent  string // <namespace>/<agent>
 	Model  string
-	Person string // whose turn runs
-	Token  string // their Keycloak token
+	Chat   string
+	Person string // whose turn runs: the person, or a routine's owner
+	Token  string // their Keycloak token; empty without a person
+	Run    Run
 }
 
 // Caller is who the sandbox with token acts for. ok is false for an unknown
@@ -303,10 +318,10 @@ func (m *Manager) Caller(token string) (Caller, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.caller == "" {
+	if s.run == nil {
 		return Caller{}, false
 	}
-	return Caller{Agent: s.want.Agent, Model: s.want.Model, Person: s.want.Person, Token: s.caller}, true
+	return Caller{Agent: s.want.Agent, Model: s.want.Model, Chat: s.want.Chat, Person: s.want.Person, Token: s.run.Token, Run: *s.run}, true
 }
 
 // Clean removes the sandbox containers left from before this service

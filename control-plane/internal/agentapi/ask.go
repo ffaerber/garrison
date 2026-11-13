@@ -1,0 +1,229 @@
+package agentapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/gateway"
+	"homecloud/control-plane/internal/sandbox"
+)
+
+// MaxChain is how many agents one run may hold: the one a person asked,
+// and those it asks in turn.
+const MaxChain = 3
+
+// Poster posts an answer no message waits for into a channel.
+type Poster interface {
+	Post(ctx context.Context, p gateway.Post) error
+}
+
+// GatewayPoster posts through the gateway, which holds Open WebUI's account.
+type GatewayPoster struct {
+	URL        string // e.g. http://control-plane_gateway:8080/internal/post
+	ServiceKey string
+	HTTP       *http.Client
+}
+
+func (g *GatewayPoster) Post(ctx context.Context, p gateway.Post) error {
+	body, _ := json.Marshal(p)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.URL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
+	client := g.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
+		return fmt.Errorf("post: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
+
+// collect gathers an asked agent's answer, showing its progress, line by
+// line under its name, to whoever waits.
+type collect struct {
+	mu     sync.Mutex
+	show   func(string)
+	prefix string
+	inLine bool
+	text   strings.Builder
+}
+
+func (c *collect) reasoning(s string) {
+	if c.show == nil || s == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(s, "\n") {
+		if line == "" {
+			continue
+		}
+		if !c.inLine {
+			b.WriteString(c.prefix)
+		}
+		b.WriteString(line)
+		c.inLine = !strings.HasSuffix(line, "\n")
+	}
+	c.show(b.String())
+}
+
+func (c *collect) content(s string) {
+	c.mu.Lock()
+	c.text.WriteString(s)
+	c.mu.Unlock()
+}
+
+func (c *collect) answer() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSpace(c.text.String())
+}
+
+// askSpec is the tool ask_agent, for an agent that may ask others.
+func askSpec(a agents.Agent) toolSpec {
+	return toolSpec{
+		Name:        "ask_agent",
+		Description: "Hands work to another agent and returns its answer. It works for the same person, with its own tools and rights, in a workspace of its own. With background, it works on after this turn and posts its answer in this channel instead (only in a channel).",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent":      map[string]any{"type": "string", "enum": a.Asks, "description": "the agent to ask"},
+				"task":       map[string]any{"type": "string", "description": "what it should do, with what it needs to know, e.g. the repo and branch"},
+				"limits":     map[string]any{"type": "string", "description": "what bounds it: what not to do, how far to go"},
+				"done_when":  map[string]any{"type": "string", "description": "what a good answer looks like"},
+				"background": map[string]any{"type": "boolean", "description": "do not wait; it posts its answer in the channel"},
+			},
+			"required":             []string{"agent", "task", "done_when"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+// askAgent runs ask_agent for the sandbox c: a turn of the asked agent, for
+// the same person, in its own sandbox of the same chat.
+func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMessage) (string, bool) {
+	var in struct {
+		Agent      string `json:"agent"`
+		Task       string `json:"task"`
+		Limits     string `json:"limits"`
+		DoneWhen   string `json:"done_when"`
+		Background bool   `json:"background"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil || strings.TrimSpace(in.Task) == "" {
+		return "error: ask_agent needs agent, task and done_when", true
+	}
+	asker, ok, err := s.Agents.Get(ctx, c.Agent)
+	if err != nil || !ok {
+		return "error: cannot read your own agent folder", true
+	}
+	switch {
+	case !slices.Contains(asker.Asks, in.Agent):
+		return fmt.Sprintf("not allowed: you may ask only %s (agents in your agent.yaml)", strings.Join(asker.Asks, ", ")), true
+	case slices.Contains(c.Run.Chain, in.Agent):
+		return fmt.Sprintf("not allowed: %s is already part of this run (%s); it cannot be asked again", in.Agent, strings.Join(c.Run.Chain, " → ")), true
+	case len(c.Run.Chain) >= MaxChain:
+		return fmt.Sprintf("not allowed: this run already holds %d agents (%s), the most there may be; do it yourself or answer with what you have", len(c.Run.Chain), strings.Join(c.Run.Chain, " → ")), true
+	}
+	target, ok, err := s.Agents.Get(ctx, in.Agent)
+	if err != nil {
+		return "error: " + err.Error(), true
+	}
+	if !ok {
+		return "error: there is no agent " + in.Agent, true
+	}
+	who := c.Person
+	if s.Gitea != nil {
+		person := gateway.Person{Name: c.Person, Admin: c.Run.Admin, Unattended: c.Run.Unattended, Owner: c.Run.Owner}
+		if c.Run.Unattended {
+			// Nobody is watching: the owner must be one who may use it.
+			person = gateway.Person{Name: c.Run.Owner}
+		}
+		if ok, err := s.Gitea.CanUse(ctx, &target, person); err != nil {
+			return "error: " + err.Error(), true
+		} else if !ok {
+			return fmt.Sprintf("not allowed: %s is for the people of %s, and %s is not one of them", target.ID(), target.Namespace, who), true
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s asks you, working for %s", c.Agent, who)
+	if c.Run.Unattended {
+		b.WriteString(" with nobody watching")
+	}
+	fmt.Fprintf(&b, ".\n\nTask: %s\n", strings.TrimSpace(in.Task))
+	if strings.TrimSpace(in.Limits) != "" {
+		fmt.Fprintf(&b, "Limits: %s\n", strings.TrimSpace(in.Limits))
+	}
+	if strings.TrimSpace(in.DoneWhen) != "" {
+		fmt.Fprintf(&b, "A good answer: %s\n", strings.TrimSpace(in.DoneWhen))
+	}
+	fmt.Fprintf(&b, "\nYour last message is your answer; %s gets it word for word.", c.Agent)
+	text := b.String()
+	msg := func(bool) (string, []sandbox.Image) { return text, nil }
+	run := sandbox.Run{
+		Token: c.Token, StartedBy: "agent " + c.Agent, Chain: append(slices.Clone(c.Run.Chain), target.ID()),
+		Unattended: c.Run.Unattended, Owner: c.Run.Owner, Admin: c.Run.Admin,
+	}
+	key := c.Chat + "\x00" + target.ID()
+	log.Printf("agents: %s: %s asks %s (%s)", who, c.Agent, target.ID(), strings.Join(run.Chain, " → "))
+
+	if in.Background {
+		channel, inChannel := strings.CutPrefix(c.Chat, "channel:")
+		if s.Poster == nil || (!inChannel && !c.Run.Unattended) {
+			return "error: background works only in a channel, where the answer can be posted; ask without it", true
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), s.turnTimeout())
+			defer cancel()
+			out := &collect{}
+			_, err := s.sandboxTurn(ctx, run, c.Person, c.Chat, key, target, msg, out)
+			answer := out.answer()
+			if err != nil {
+				answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())
+			}
+			if err := s.Poster.Post(ctx, gateway.Post{Agent: target.ID(), Channel: channel,
+				Text: fmt.Sprintf("For %s, asked by %s:\n\n%s", who, c.Agent, answer)}); err != nil {
+				log.Printf("agents: %s: %s's answer for %s: %v", who, target.ID(), c.Agent, err)
+			}
+		}()
+		where := "this channel"
+		if !inChannel {
+			where = "the channel of " + target.Namespace
+		}
+		return fmt.Sprintf("%s is working on it and will post its answer in %s. Tell the person so; do not wait for it.", target.ID(), where), false
+	}
+
+	out := &collect{show: c.Run.Show, prefix: "[" + target.ID() + "] "}
+	if out.show != nil {
+		out.show("\n")
+	}
+	_, err = s.sandboxTurn(ctx, run, c.Person, c.Chat, key, target, msg, out)
+	answer := out.answer()
+	if err != nil {
+		return fmt.Sprintf("%s stopped: %v\nWhat it said before: %s", target.ID(), err, answer), true
+	}
+	if answer == "" {
+		answer = "(no answer)"
+	}
+	return target.ID() + " answers:\n" + answer, false
+}

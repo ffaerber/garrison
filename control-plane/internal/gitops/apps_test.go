@@ -32,6 +32,7 @@ type fakeApps struct {
 	files    map[string]map[string]string // org/repo@branch -> file -> content
 	commits  map[string]string            // org/repo@branch -> commit
 	packages map[string]bool              // owner/name/tag
+	pulls    map[string]string            // org/repo -> its open pull requests, as JSON
 	calls    []string
 }
 
@@ -58,6 +59,13 @@ func (f *fakeApps) api(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		json.NewEncoder(w).Encode(out)
+	case strings.HasSuffix(p, "/pulls"):
+		parts := strings.Split(p, "/")
+		if js, ok := f.pulls[parts[2]+"/"+parts[3]]; ok {
+			w.Write([]byte(js))
+			return
+		}
+		w.Write([]byte("[]"))
 	case strings.HasSuffix(p, "/branches"):
 		parts := strings.Split(p, "/")
 		var out []map[string]string
@@ -286,5 +294,53 @@ func TestAHostnameIsFirstComeFirstServed(t *testing.T) {
 	}
 	if _, ok := apps["homepage/todo@main"]; !ok {
 		t.Error("the first app lost its deployment")
+	}
+}
+
+func TestPullRequestsGetPreviews(t *testing.T) {
+	c, f := setupApps(t)
+	ctx := context.Background()
+	withPreview := todoStack + "  preview: { private: true }\n"
+	f.files["homepage/todo@main"] = map[string]string{"stack.yaml": withPreview}
+	// The checkout of a preview is named after it: the fake knows it by that.
+	f.files["homepage/todo@pr-7"] = map[string]string{"stack.yaml": withPreview}
+	f.commits["homepage/todo@pr-7"] = "eeeeeeeeeeee5555"
+	f.packages["homepage/todo/eeeeeeeeeeee"] = true
+	f.pulls = map[string]string{"homepage/todo": `[
+ {"number":7,"head":{"ref":"agent/dev/bob-1","repo":{"full_name":"homepage/todo"}}},
+ {"number":6,"head":{"ref":"feature","repo":{"full_name":"someone/fork"}}}]`}
+	apps, errs := c.syncApps(ctx, false, map[string]App{})
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if a, ok := apps["homepage/todo@pr-7"]; !ok || a.Stack != "pr-7-todo" || a.Commit != "eeeeeeeeeeee5555" {
+		t.Fatalf("apps = %+v", apps)
+	}
+	if _, ok := apps["homepage/todo@pr-6"]; ok {
+		t.Error("a fork's pull request got a preview")
+	}
+	if _, ok := apps["homepage/todo@preview"]; ok {
+		t.Error("the preview environment itself was deployed")
+	}
+	fetched := false
+	for _, call := range f.calls {
+		fetched = fetched || (strings.HasPrefix(call, "git clone") && strings.Contains(call, "--branch agent/dev/bob-1"))
+	}
+	if !fetched {
+		t.Errorf("the pull request's branch was not checked out: %v", f.calls)
+	}
+	// The pull request is merged or closed: its preview goes.
+	f.pulls = nil
+	f.calls = nil
+	apps, _ = c.syncApps(ctx, false, apps)
+	if _, ok := apps["homepage/todo@pr-7"]; ok {
+		t.Error("the preview stayed")
+	}
+	removed := false
+	for _, call := range f.calls {
+		removed = removed || call == "docker stack rm pr-7-todo"
+	}
+	if !removed {
+		t.Errorf("not taken down: %v", f.calls)
 	}
 }

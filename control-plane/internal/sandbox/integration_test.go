@@ -24,7 +24,7 @@ func TestRealSandbox(t *testing.T) {
 	want := sandbox.Want{Key: "integration", Chat: "test", Agent: "homepage/operator", Person: "alice", Model: "gpt-oss:120b",
 		Prompt: "You are homepage/operator. Be brief.", Definition: "1"}
 	turn := func(msg string) (answer string, tools []string) {
-		err := m.Turn(ctx, want, "kc", func(s *sandbox.Session) error {
+		err := m.Turn(ctx, want, sandbox.Run{Token: "kc"}, func(s *sandbox.Session) error {
 			return s.Pi().Prompt(ctx, msg, nil, func(ev sandbox.Event) {
 				switch {
 				case ev.Type == "tool_execution_start":

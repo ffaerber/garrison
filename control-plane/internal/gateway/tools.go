@@ -24,8 +24,13 @@ type Person struct {
 	Email string `json:"email"`
 	Admin bool   `json:"admin"` // member of root-admins
 	// Token is their Keycloak access token, for tools that act as them
-	// elsewhere, e.g. the browser. Never shown or logged.
+	// elsewhere, e.g. the browser. Never shown or logged. Empty in a run
+	// without a person.
 	Token string `json:"-"`
+	// Set by the agent service (see ServiceKey):
+	StartedBy  string `json:"-"` // what started the run: person, agent <id>, routine <agent>/<name>
+	Unattended bool   `json:"-"` // a run without a person: Name is the agent's account
+	Owner      string `json:"-"` // in such a run, the routine's owner, for whom grants are checked
 }
 
 // SystemNamespace is the namespace the deployer deploys.
@@ -34,7 +39,8 @@ const SystemNamespace = "system"
 // Tools are what the operator agents may do. Reads of the cluster (stacks,
 // logs, metrics) are open to everyone signed in, as everything is; reads and
 // proposals in Gitea go as the person, so Gitea applies their own rights.
-// Nothing here can merge or deploy: a person merges in Gitea.
+// Nothing here merges or deploys, except merge_change for agents whose
+// grants allow it (grants.go).
 type Tools struct {
 	Gitea      *Gitea
 	Run        apply.Runner // docker CLI
@@ -69,14 +75,15 @@ func str(desc string) map[string]any { return map[string]any{"type": "string", "
 
 var nsArg = str("the namespace, i.e. the Gitea organisation, e.g. system")
 
-// Specs are the tools of the plain /mcp endpoint: every base tool.
-func (t *Tools) Specs() []Spec { return baseSpecs() }
+// Specs are the tools of the plain /mcp endpoint.
+func (t *Tools) Specs() []Spec { return SpecsFor(nil) }
 
 // SpecsFor are an agent's tools: the base tools its agent.yaml lists, and
 // the skill tools if it has skills. A nil agent has every base tool.
 func SpecsFor(a *agents.Agent) []Spec {
 	if a == nil {
-		return baseSpecs()
+		// Merging is only ever an agent's, under its grants.
+		return slices.DeleteFunc(baseSpecs(), func(s Spec) bool { return s.Name == "merge_change" })
 	}
 	var out []Spec
 	for _, s := range baseSpecs() {
@@ -127,6 +134,18 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "namespace", "repo", "patch", "title"),
+		spec("merge_change", "Merges a pull request of one of your proposals, with your own account, if one of your grants allows merging into its base branch for the person you talk to and its checks have passed. A merge into a branch that deploys (main, dev) deploys it. If it is refused, say why; do not work around it.", map[string]any{
+			"namespace": nsArg,
+			"repo":      str("repo name"),
+			"number":    map[string]any{"type": "integer", "description": "the pull request's number"},
+		}, "namespace", "repo", "number"),
+		spec("browse", "Uses a page of the home cloud as the person you talk to, signed in as them, one step per call: open a page (url), click an element (click), or type into one (type_into and text, with submit to press Enter). Each call answers with the page as it is then: its text and its links, buttons and fields, numbered. The tab stays open between calls for a few minutes. Only pages at https://<name>.<domain> load. It acts as the person: click nothing that deletes, sends or pays unless they asked for exactly that.", map[string]any{
+			"url":       str("the page to open, e.g. https://pr-7-todo.example.com/; empty to act on the open page"),
+			"click":     map[string]any{"type": "integer", "description": "the number of the element to click"},
+			"type_into": map[string]any{"type": "integer", "description": "the number of the field to type into"},
+			"text":      str("what to type"),
+			"submit":    map[string]any{"type": "boolean", "description": "press Enter after typing"},
+		}),
 		spec("screenshot", "Takes a screenshot of a page of the home cloud, signed in as the person asking, and proposes it as a PNG file in a repo: a pull request, as with propose_change. Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
 			"namespace":   nsArg,
 			"repo":        str("repo the PNG goes into"),
@@ -146,7 +165,10 @@ var swarmName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,100}$`)
 type args struct {
 	Namespace, Stack, Service, Repo, Path, Content, Title, Description, Query, Name, Skill string
 	Patch, Base, Branch                                                                    string
-	Lines, Width, Height                                                                   int
+	Lines, Width, Height, Number, Click                                                    int
+	TypeInto                                                                               int `json:"type_into"`
+	Text                                                                                   string
+	Submit                                                                                 bool
 	URL                                                                                    string `json:"url"`
 	FullPage                                                                               bool   `json:"full_page"`
 }
@@ -163,12 +185,18 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 			return "", fmt.Errorf("%w: arguments: %v", ErrInvalid, err)
 		}
 	}
+	// A run without a person acts with the agent's account, which may write
+	// to its granted repos: only propose_patch and merge_change, which check
+	// the grants, change anything then. The browser needs a person's sign-in.
+	if p.Unattended && (name == "propose_change" || name == "screenshot" || name == "browse") {
+		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
+	}
 	var out string
 	var err error
 	if name == "load_skill" || name == "read_skill_file" {
 		out, err = t.skill(ctx, p, agent, name, a)
 	} else {
-		out, err = t.call(ctx, p, name, a)
+		out, err = t.call(ctx, p, agent, name, a)
 	}
 	if len(out) > maxToolOutput {
 		out = out[:maxToolOutput] + "\n[truncated]"
@@ -176,7 +204,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 	return out, err
 }
 
-func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string, error) {
+func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name string, a args) (string, error) {
 	switch name {
 	case "list_namespaces":
 		nss, err := t.Gitea.Namespaces(ctx, p.Name)
@@ -291,12 +319,22 @@ func (t *Tools) call(ctx context.Context, p Person, name string, a args) (string
 		return b.String(), nil
 	case "screenshot":
 		return t.screenshot(ctx, p, a)
-	case "propose_patch":
-		c, branch, err := t.Gitea.ProposePatch(ctx, p.Name, a.Namespace, a.Repo, a.Base, a.Branch, a.Patch, a.Title, a.Description)
+	case "browse":
+		if t.Browser == nil {
+			return "", errors.New("this installation has no browser")
+		}
+		page, err := t.Browser.Browse(ctx, p.Name+"\x00"+agentID(agent), p.Token, Action{URL: a.URL, Click: a.Click, Type: a.TypeInto, Text: a.Text, Submit: a.Submit})
 		if err != nil {
+			if page.URL != "" {
+				return "", fmt.Errorf("%w\n%s", err, page)
+			}
 			return "", err
 		}
-		return fmt.Sprintf("Change %s/%s#%d now holds the patch, on branch %s.\nBranch: %s\nNothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, branch, branch, c.URL), nil
+		return page.String(), nil
+	case "propose_patch":
+		return t.proposePatch(ctx, p, agent, a)
+	case "merge_change":
+		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
 	case "propose_change":
 		c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, a.Content, a.Title, a.Description)
 		if err != nil {

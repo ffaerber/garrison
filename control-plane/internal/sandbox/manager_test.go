@@ -17,7 +17,7 @@ func manager(t *testing.T) (*sandbox.Manager, *sandboxtest.Docker) {
 func ask(t *testing.T, m *sandbox.Manager, want sandbox.Want, msg string) string {
 	t.Helper()
 	var answer string
-	err := m.Turn(context.Background(), want, "kc-token", func(s *sandbox.Session) error {
+	err := m.Turn(context.Background(), want, sandbox.Run{Token: "kc-token"}, func(s *sandbox.Session) error {
 		return s.Pi().Prompt(context.Background(), msg, nil, func(ev sandbox.Event) {
 			if ev.Type == "message_end" && ev.Message.StopReason == "stop" {
 				answer = ev.Message.Text()
@@ -82,8 +82,8 @@ func TestAPersonsOldestIdleSandboxMakesRoom(t *testing.T) {
 func TestAllBusyIsRefused(t *testing.T) {
 	m, _ := manager(t)
 	m.PerPerson = 1
-	err := m.Turn(context.Background(), sandbox.Want{Key: "a", Person: "alice"}, "kc", func(*sandbox.Session) error {
-		return m.Turn(context.Background(), sandbox.Want{Key: "b", Person: "alice"}, "kc", func(*sandbox.Session) error { return nil })
+	err := m.Turn(context.Background(), sandbox.Want{Key: "a", Person: "alice"}, sandbox.Run{Token: "kc"}, func(*sandbox.Session) error {
+		return m.Turn(context.Background(), sandbox.Want{Key: "b", Person: "alice"}, sandbox.Run{Token: "kc"}, func(*sandbox.Session) error { return nil })
 	})
 	if !errors.Is(err, sandbox.ErrBusy) {
 		t.Errorf("err %v", err)
