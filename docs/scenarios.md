@@ -11,7 +11,7 @@ Alice: *@homepage/operator Add carol as an admin and bob as a member of the name
 - The agent opens a pull request on `homepage/config`, as alice, that lists carol under admins and bob under members.
 - It waits: the approval check is pending. Alice cannot approve her own pull request, and it cannot be merged.
 - A root admin who did not write it approves it; the check passes; alice merges it.
-- Carol joins the team `admins`, bob the team `members`; bob may now push to `homepage`'s repos.
+- Carol joins the team `admins`, bob the team `members`; bob may now push to `homepage`'s repos, and now sees homepage's agents in Open WebUI, which before showed them only to its people.
 
 ## 2. Bob tries to make himself an admin
 
@@ -69,6 +69,38 @@ Alice adds `homepage/developer` (tools `list_repos`, `read_file`, `propose_patch
 - The follow-up goes into the same pull request as a further commit; no second pull request appears.
 - The sandbox can fetch but not push: Git's push endpoint is refused.
 
+## 4g. Agents get rights of their own
+
+Alice proposes a grant on `config` for the developer: the approval check fails it and says no agent may have a grant on `config`. Then she proposes, and carol approves:
+
+- `homepage/developer` gets `merge_change`, may ask `homepage/tester`, a grant `{repo: todo, branch: dev, level: autonomous}` (for members), and a routine `main-moved` that runs, for bob, when `main` of todo moves.
+- `homepage/tester` browses (`browse`) and has no grants.
+- `homepage/desk` is visible to everyone and may propose to todo for everyone.
+
+Afterwards the developer and the desk have Gitea accounts, `agent-homepage-developer` and `agent-homepage-desk`, which may write to todo and nothing else; the tester has none.
+
+## 4h. Bob has the developer change dev and merge it there
+
+Alice makes the branch `dev` of todo. Bob: *@homepage/developer Change 'Homepage todos' to 'Dev todos' on dev, propose it for dev, then merge it with merge_change.*
+
+- The pull request is bob's (he may write to todo), for `dev`; the developer merges it with its own account, as its grant allows for a member.
+- The gateway logs the merge for bob, started by a person; `dev-todo` shows *Dev todos* once the pipeline has built it. `main` is untouched.
+
+## 4i. Previews, and the tester tries one for the developer
+
+Alice adds `preview: { private: true }` to todo's `stack.yaml`. Bob has the developer propose a file without merging it.
+
+- The pull request gets a preview, `pr-<n>-todo`.
+- Bob: *@homepage/developer Ask homepage/tester to open the preview and tell you its heading.* The tester browses it, for bob, started by the developer (the gateway logs both), and the answer names the heading.
+- Closing the pull request takes the preview down.
+
+## 4j. A routine runs when main moves, with nobody watching
+
+Alice's push to `main` (4i) starts the developer's routine `main-moved`.
+
+- It reads with the agent's own account, for bob, started by the routine; the gateway logs it as nobody watching.
+- Its answer is posted in homepage's channel under the agent's name.
+
 ## 5. Alice removes bob
 
 Alice: *@homepage/operator Remove bob from the namespace homepage.*
@@ -76,6 +108,13 @@ Alice: *@homepage/operator Remove bob from the namespace homepage.*
 - The agent opens a pull request on `homepage/config`, as alice, without bob.
 - Carol approves it (she neither wrote it nor changes role); alice merges it.
 - Bob leaves the team `members` and may no longer push to `homepage`'s repos. He can still read everything, as everyone signed in can.
+- Bob no longer sees homepage's agents in Open WebUI, except the desk, which is visible to everyone.
+
+## 5b. Bob, no longer in homepage, asks the desk for a change
+
+Bob: *@homepage/desk Propose a new file IDEAS.md in todo.*
+
+- He may not write to todo, but the desk may propose there for everyone: the pull request is by `agent-homepage-desk`, on a branch `agent/desk/bob-...`, and says *Asked by bob (not in homepage) through homepage/desk.*
 
 ## 6. Alice adds an agent that may only read
 
