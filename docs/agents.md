@@ -1,6 +1,6 @@
 # Agents — Design
 
-How agents are defined, run and updated. Status: steps 1 to 3 of the plan are built, and the proxies of step 4: agent folders and their checks; the agent service, which Open WebUI talks to; and a sandbox per chat, Pi in a container with its workspace in a volume, which gets the LLM and the agent's platform tools through the agent service. The gateway serves each agent only its own tools and skills. Agents can clone the repos the person may read into their workspace and propose their changes as pull requests by the person. Still design: datasets instead of volumes, clean-up of old chats, Pi's native skills; agent accounts and grants, agents asking agents, and runs without a person (steps 7 to 10). See Chat in [spec.md](spec.md).
+How agents are defined, run and updated. Status: steps 1 to 3 of the plan are built, and the proxies of step 4: agent folders and their checks; the agent service, which Open WebUI talks to; and a sandbox per chat, Pi in a container with its workspace in a volume, which gets the LLM and the agent's platform tools through the agent service. The gateway serves each agent only its own tools and skills. Agents can clone the repos the person may read into their workspace and propose their changes as pull requests by the person. Steps 7 to 10 are built too: agents' own accounts and grants, agents asking agents, routines that run without a person, previews of pull requests and browsing. Still design: datasets instead of volumes, clean-up of old chats, Pi's native skills. See Chat in [spec.md](spec.md).
 
 ## Goals
 
@@ -85,20 +85,20 @@ grants:                      # rights of its own (see Accounts and grants); none
 
 ## Accounts and grants
 
-By default an agent has no rights of its own: every tool call acts as the person whose message started the turn, and changes leave only as pull requests by that person. A namespace can give an agent more, per repo and branch, with the autonomy levels of [spec.md](spec.md) (Rights and autonomy).
+By default an agent has no rights of its own: every tool call acts as the person whose message started the turn, and changes leave only as pull requests by that person. A namespace can give an agent more, per repo and branch, with the autonomy levels of [spec.md](spec.md) (Rights and autonomy). Built: `control-plane/internal/agents/grants.go` (the file format and its checks), `internal/gateway/grants.go` (the decisions), `internal/gateway/members.go` (the accounts).
 
 ### Who sees an agent
 
 `visible` decides who sees an agent in Open WebUI and may talk to it:
 
 - `members` (the default): the people in the namespace's `members.yaml`, admins included, and root admins.
-- `everyone`: everyone signed in, for agents meant to serve all, e.g. a help desk or `system/operator`.
+- `everyone`: everyone signed in, for agents meant to serve all, e.g. a help desk. In `system`, which has no `members.yaml`, it is the default, so `system/operator` serves everyone.
 
-The gateway sets this as the agent's access in Open WebUI, by group, as it keeps the Gitea teams in line with `members.yaml`. The agent service checks it again on every request, since Open WebUI is not the only way in, and answers someone who may not use the agent with a refusal that says why. Today every agent is visible to everyone.
+The gateway keeps an Open WebUI group per namespace, `homecloud <namespace>`, with the people of its `members.yaml` who have signed in to Open WebUI (matched by their email in Gitea), and gives members-only agents to that group. Root admins are Open WebUI's admins and see every agent. The agent service and the gateway check it again on every request, since Open WebUI is not the only way in: someone who may not use the agent gets a refusal that says why.
 
 ### The agent's account
 
-Each agent with grants gets an account in Gitea, `agent-<namespace>-<name>` (e.g. `agent-homepage-dev`), made and removed by the gateway as agent folders come and go. It has no password. Its token is held by the agent service and never enters the sandbox; the sandbox keeps only its per-turn token, as now. A Keycloak account per agent comes with runs without a person (below), when the gateway's other tools need an identity that is not a person's.
+Each agent with grants or routines gets an account in Gitea, `agent-<namespace>-<name>` (e.g. `agent-homepage-dev`; a hash where that is longer than Gitea allows), with the full name `Agent <namespace>/<name>`. The gateway makes it, gives it write access to the repos its grants name and to no other repo of the namespace, and locks it, with that access taken away, when the agent is gone, switched off or without grants. Nobody signs in with it and no token of it exists: the gateway acts as it through Gitea's Sudo, as it acts as people.
 
 ### Grants
 
@@ -112,63 +112,83 @@ grants:
     branch: main
     level: autonomous
     for: admins
-    checks: [ci]          # must be green before it merges; Gitea's required checks always apply too
+    checks: [ci]          # commit statuses that must be green before it merges
   - repo: todo
     level: propose        # outsiders' proposals, see below
     for: everyone
+    unattended: true      # routines may use it too
 ```
 
 | Level | The agent may, with its own account |
 | --- | --- |
-| `propose` | Push its own branches, `agent/<name>/*`, and open pull requests from them |
-| `merge` | Also merge its pull requests into `branch` once the checks pass; a person approves the deploy |
-| `autonomous` | Also deploy: the merge deploys as any merge to `main` or `dev` does |
+| `propose` | Write its own branches, `agent/<name>/...`, and open pull requests from them |
+| `merge` | Also merge proposals into `branch` once the checks pass |
+| `autonomous` | The same on a branch that deploys: the merge deploys as any merge to `main` or `dev` does |
 
-- **`for` says whose requests may use a grant**, and only names groups of the agent's own namespace: `members` (admins included) or `admins`. `everyone` is allowed for `propose` only. A grant naming another namespace's group fails the approval check. Without `for`, a member could get through the agent what they may not do themselves, e.g. merge to `main`.
-- **Each action is decided at the gateway, in this order:** if the person may do it themselves, it is done as the person, as today. Otherwise, if a grant covers the repo, branch and level and the person is in its `for`, it is done with the agent's account. Otherwise it is refused, and the agent is told which grant would be needed and that it can propose instead.
-- **Gitea enforces it too.** The gateway puts the agent's account into the push and merge allowlists of the branches it was granted, and protects `agent/<name>/*` for it alone. If the gateway erred, Gitea still refuses.
+- **`for` says whose requests may use a grant**, and only names groups of the agent's own namespace: `members` (the default, admins included) or `admins`. `everyone` is allowed for `propose` only. Anything else fails the approval check. Without `for`, a member could get through the agent what they may not do themselves, e.g. merge to `main`. Root admins count as admins everywhere.
+- **Each action is decided at the gateway, in this order:** if the person may do it themselves, it is done as the person, as before. Otherwise, if a grant covers the repo, branch and level and the person is in its `for`, it is done with the agent's account. Otherwise it is refused, and the agent is told which grant would be needed.
+- **Gitea limits the account too:** it may write only to its granted repos. Which branches it may merge into is the gateway's decision, as app repos take pushes from their members and have no branch protection.
 - **`merge` waits for the deployer.** Until the deployer can hold a deploy for a person's approval (not built), every merge to `main` or `dev` deploys, so the approval check refuses `merge` on those branches and asks for `autonomous`, which says what happens.
-- **Pull requests and logs name who asked.** A pull request the agent opens or merges says "Asked by bob in <chat>", written by the gateway, not the model. Commits pushed from the sandbox are authored by the agent's account; their messages are the model's and prove nothing, so the agent service logs each push and merge with the person, the agent and what started the run.
-- **A shared channel is one workspace,** so one person's turn may carry another's work: bob edits, alice says "merge it". A grant on `main` therefore merges only a pull request approved by someone other than its author. The request of the person whose grant is used counts as that approval if they did not write it and the agent showed them the diff in that turn.
+- **Pull requests name whom they were for.** The gateway, not the model, writes *Asked by bob through homepage/dev.* into each pull request an agent opens, and *Changes added, asked by alice ...* as a comment on each addition; merges carry the same line. Runs without a person say so: *Asked by bob through homepage/dev, routine homepage/dev/nightly, with nobody watching.* The gateway logs every call with the person, the agent and what started the run.
+- **Someone else's work needs someone else's approval.** A shared channel is one workspace, so one person's turn may carry another's work: bob edits, alice says "merge it". The agent merges a pull request only if everyone it was asked for (its author, if a person, and every *Asked by*) is the person asking now, or if someone who did not ask for it approved it in Gitea. So people can put their own work live through an agent, and never another's unreviewed.
 
-### Pushing and merging
+### Proposing and merging
 
-- **Push:** the Git proxy of the agent service serves `git-receive-pack` too, for agents with a grant on the repo. It reads the ref updates at the start of the push and refuses any ref other than `refs/heads/agent/<name>/...`, then forwards the push to Gitea with the agent's token. Granted branches such as `main` are reached only by merging a pull request, never by a push, so every change keeps its diff, its checks and an easy revert. `propose_workspace_changes` stays for agents without grants.
-- **Merge:** a tool `merge_change(namespace, repo, number)`. The gateway checks the grant, `for`, the checks and the approval rule above, then merges as the agent's account.
+- **Propose:** `propose_patch` (`propose_workspace_changes` in a sandbox) as before. Where the person may not write to the repo but a grant lets the agent propose there for them, Gitea applies the patch as the agent's account, on a branch `agent/<name>/<person>-<time>`. The Git proxy stays read-only: changes leave the sandbox only as patches, and granted branches are reached only by merging a pull request, so every change keeps its diff, its checks and an easy revert. `propose_workspace_changes` takes a `base`, e.g. `dev`.
+- **Merge:** a tool `merge_change(namespace, repo, number)`, only for agents (never on the plain `/mcp` endpoint), and only of proposals (branches `change/...` and `agent/<name>/...`). The gateway checks the grant, `for`, the checks and the approval rule above, then has Gitea merge as the agent's account.
 - **Deploy and roll back:** no tool of their own. A merge deploys through the pipeline, as for people. Rolling back is a revert, merged the same way.
+- **Keeping proposals current:** when the base branch of an open proposal moves, the gateway has Gitea merge the base into it, as the pull request's author. Where they conflict, it says so once in the pull request, for a person or the agent to resolve. `config`'s proposals are left alone: a new head would undo their approval.
 
 ### Outsiders
 
-With `propose` for `everyone`, someone who is not in the namespace can ask its agent for a change. The agent pushes the branch with its own account, since the person cannot write there, and opens the pull request "on behalf of bob (not in shop)". The namespace's people review and merge it as any pull request. The gateway caps such proposals per person and day. Without that grant, an outsider gets the agent with their own rights: they read what they may read, and proposing fails with the reason.
+With `propose` for `everyone`, someone who is not in the namespace can ask its agent (one visible to everyone) for a change. The agent's account writes the branch, since the person cannot, and the pull request says *Asked by bob (not in shop) through shop/desk.* The namespace's people review and merge it as any pull request. Without that grant, an outsider gets the agent with their own rights: they read what they may read, and proposing fails with the reason.
 
 ### What no grant can lift
 
 The gateway refuses these whatever an agent folder says, and the approval check refuses grants that would need them:
 
-- Writing to a `config` repo, so an agent never widens its own grants, and changing `members.yaml`.
-- Changing branch protection, deleting repos, or anything in Gitea's or Open WebUI's settings.
-- Grants on repos of another namespace. Grants in `system` need a root admin's approval.
-- `enabled: false` in `agent.yaml`, or a root admin stopping the agent, revokes its token at once and ends its running turns.
+- Writing to a `config` repo, so an agent never widens its own grants, and so changing `members.yaml`.
+- Changing branch protection, deleting repos, or anything in Gitea's or Open WebUI's settings: there is no tool for it, and the agent's account has no admin rights.
+- Grants on repos of another namespace. Grants in `system` need a root admin's approval, as every change to `system/config` does.
+- `enabled: false` in `agent.yaml` switches an agent off: at the next sync, seconds after the merge, it leaves Open WebUI and the gateway's catalogue, its tool calls are refused and its account is locked. A turn already running ends at its next tool call.
 
 ## Agents asking agents
 
-A tool, `ask_agent(agent, task, limits, done_when)`, hands work to another agent: what to do, what bounds it, and what a good answer looks like, as fields, not a paragraph the other agent has to guess from.
+A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the agent service to agents with an `agents` list, hands work to another agent: what to do, what bounds it, and what a good answer looks like, as fields, not a paragraph the other agent has to guess from.
 
-- **Whom:** only the agents in the asker's `agents` list, and only those the person may use themselves (`visible`). The approval check checks that the listed agents exist.
-- **Rights:** the asked agent runs for the same person, with its own tools and grants. A grant is always checked against the person who started the chain, never against the asking agent, so no detour adds rights: bob asking `homepage/dev` to ask `shop/dev` is bob asking `shop/dev`.
-- **Where:** in its own sandbox for the same chat (key: the chat and the asked agent), with its own workspace. The two share work through Git, e.g. the asker pushes `agent/dev/login` and asks the tester to check that branch.
-- **Depth:** at most three hops. The agent service keeps the depth in the turn's state, not in anything the model writes, so A asking B asking A ends.
-- **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and shows in the reasoning under its name.
-- **Reporting back later** (the asked agent works on and posts in the channel when done, e.g. a tester after the preview is deployed) needs runs without a person, below.
+- **Whom:** only the agents in the asker's `agents` list, and only those the person may use themselves (`visible`). The approval check checks that listed agents of the same namespace exist; others are looked up when asked.
+- **Rights:** the asked agent runs for the same person, with its own tools and grants. A grant is always checked against the person who started the chain, never against the asking agent, so no detour adds rights: bob asking `homepage/dev` to ask `shop/dev` is bob asking `shop/dev`. The gateway logs the asked agent's calls as started by `agent homepage/dev`.
+- **Where:** in its own sandbox for the same chat (key: the chat and the asked agent), with its own workspace. The two share work through Git, e.g. a proposal's branch or its preview.
+- **Limits:** at most three agents in one run, and never one twice, so A asking B asking A ends at once. The agent service keeps the chain in the turn's state, not in anything the model writes.
+- **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and its progress shows in the reasoning, each line under its name.
+- **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
 
 ## Runs without a person
 
-Design to be worked out; it is the base for routines, reporting back, and keeping branches current when `main` moves.
+Routines: work an agent starts by itself, in its `agent.yaml`.
 
-- **What starts a run:** a person (today), another agent, a routine (a schedule, in the agent's folder), or an event (a push, a pull request, an alert).
-- **Rights:** a routine names its owner, a member of the namespace, and runs for them; it uses a grant only if the owner is in its `for` and the grant says `unattended: true`. Otherwise an unattended run only reads and proposes, as the spec says.
-- **Where the answer goes:** the agent service posts into the namespace's channel, or the chat that asked, under the agent's name.
-- **The record:** every action logs the person it acts for, the account used (the person's or the agent's) and what started it. "Nobody watching" (a routine, an event or an agent) is one filter in Grafana.
+```yaml
+routines:
+  - name: nightly
+    every: 24h                         # 10m to 7 days
+    owner: bob                         # a person of the namespace
+    task: Update the dependencies of todo and propose it.
+  - name: main-moved
+    on_push: {repo: todo, branch: main} # when the branch moves
+    owner: bob
+    task: Check what changed and say whether it needs a follow-up.
+```
+
+- **Who:** a routine acts with the agent's own account, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Tools that need a person's sign-in (`screenshot`, `browse`, `propose_change`) are refused.
+- **When:** the agent service looks every minute. A routine with `every` first runs one interval after it is first seen; one with `on_push` runs when the branch moves after that. When each last ran is kept in memory, so a restart starts the intervals afresh and misses pushes in between. One run of a routine at a time.
+- **Where the answer goes:** posted in the namespace's channel, under the agent's name, by the gateway's Open WebUI account.
+- **How the gateway knows:** the agent service and the gateway derive a key from the admin password, which both hold. With it, the agent service tells the gateway what started each run (`person`, `agent <id>`, `routine <id>/<name>`) and, for a routine, its owner instead of a person's token. The gateway logs such calls as `bob (nobody watching, as agent-homepage-dev)`.
+
+## Previews and browsing
+
+- **Previews:** a stack whose `stack.yaml` has an environment `preview` gets one per open pull request of its repo, from a branch of the repo itself: `pr-<n>`, at `pr-<n>-<stack>.<domain>`, deployed like `preview` from the pull request's branch once its pipeline has built the image, and taken down when the pull request closes. At most the three newest pull requests of a repo have one. Branches named `pr-<number>` cannot be environments.
+- **`browse`:** an agent uses a page as the person would, in the gateway's Chrome, signed in as them: open a page, click an element, type into a field (and press Enter), each call answered with the page's text and its links, buttons and fields, numbered. Each person and agent has a tab of its own, in a browser context of its own, kept for five minutes between calls. Like `screenshot`, it loads only the installation's own names.
+- Together: an agent proposes a change, waits for its preview, and tries it with `browse`, or asks a tester agent to.
 
 ## Skills
 
@@ -199,7 +219,7 @@ A container belongs to a chat, not to an agent or a person.
 | Alice returns to her first chat the next day | Hers starts again where it left off |
 
 - **Workspaces are separate.** Each chat has its own volume (built: a Docker volume `homecloud-agent-<hash>`; planned: a ZFS dataset, for snapshots and quotas) holding the workspace and the session, so drafts of one chat never show in another. Agents share work through Git (branches and pull requests) and the namespace's media library, like people do.
-- **Rights are separate.** Every tool call acts as the person whose message started the turn.
+- **Rights are separate.** Every tool call acts as the person whose message started the turn, or with the agent's account where only a grant allows it (Accounts and grants).
 - **Team channels:** a namespace channel is one conversation shared by its members. Open WebUI names the channel (`channel:<id>`), not the thread, in its requests, so a channel gets one container per agent for all its threads; each thread's history still comes along with each message. Each turn acts as the person who mentioned the agent in that message. The workspace is visible to everyone in the thread; private work belongs in a private chat.
 - **One turn at a time per chat;** a message sent while the agent works waits for the turn to end.
 
@@ -249,15 +269,19 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 4. LLM and tool proxies; per-agent tool lists enforced; skills. Proxies built, with the per-agent tool lists of step 1. Git built: the agent service serves Git's fetch protocol to sandboxes (`$HOMECLOUD_GIT/<namespace>/<repo>.git`) for the repos the person may read, and the gateway's `propose_patch` applies a patch as the person on a `change/...` branch with a pull request; in Pi it is `propose_workspace_changes`, which proposes a checkout's changes and adds later ones to the same pull request. Several agents work on one repo like people do: each on its own branch, merged by a person. To come: Pi's native skills, Git LFS.
 5. Move the operator agents over; remove the model preset sync.
 6. Marketing agent: `screenshot` tool, built: headless Chrome in the control plane, signed in as the person, the PNG proposed as a pull request; tested with a media agent that bob asks for a screenshot of the todo app. To come: Git LFS for larger media, the media library, video.
-7. Accounts and grants: `visible` set in Open WebUI and checked by the agent service; an account per agent with grants; grants parsed and checked on `config` pull requests, with the limits no grant lifts; Gitea's allowlists kept in line; pushes to `agent/<name>/*`; `merge_change`; outsiders' proposals.
-8. `ask_agent`, waiting for the answer.
-9. Runs without a person: routines and events, posting into channels, the record of what started a run; keeping pull requests current when their base moves.
-10. Previews of `change/` and `agent/` branches, and a `browse` tool (click, type, read) on the gateway's Chrome, so an agent can try its change in the running app.
+7. Accounts and grants, built: `visible`, kept as Open WebUI groups and checked by the agent service and the gateway; an account per agent with grants or routines, writing only to its granted repos; grants checked on `config` pull requests, with the limits no grant lifts; proposals by the agent's account on `agent/<name>/...`; `merge_change`; outsiders' proposals. Tested in scenarios 4g, 4h and 5b.
+8. `ask_agent`, built: waiting for the answer, or, in a channel, posting it later. Tested in 4i.
+9. Runs without a person, built: routines (`every`, `on_push`), posting into the namespace's channel, the record of what started a run; keeping proposals current when their base moves. Tested in 4j.
+10. Previews of pull requests and `browse`, built. Tested in 4i.
 
 ## Open questions
 
 - Branching Pi's session when a message is edited or regenerated in Open WebUI: today the newest message is simply sent on.
 - Thread ids for channels, so each thread gets its own sandbox.
 - GPU or a local LLM for agents that run many turns.
-- How Open WebUI shows an answer posted by the agent service without a person's message (runs without a person, reporting back).
+- Posts from routines and background answers come from the gateway's account with the agent's name in bold; Open WebUI has no way to post as a model. They go to the channel, not into a thread.
+- A background `ask_agent` acts with the person's Keycloak token, which lasts five minutes.
+- Routines keep their schedule in memory; a restart misses pushes.
+- Previews' datasets and secrets stay after the preview is taken down, like a deleted branch's.
 - Whether `merge` on `main` and `dev` becomes usable once the deployer holds deploys for approval.
+- An agent account for Keycloak, so routines could use the tools that need a person's sign-in (`screenshot`, `browse`).
