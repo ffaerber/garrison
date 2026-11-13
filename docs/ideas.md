@@ -35,3 +35,15 @@ Basic auth in front of such apps was considered: SSO covers the same need, witho
 **Before Gitea's UI can close,** the front end must cover what people do there: pull requests (diff, approve, merge, including the approvals of `members.yaml`), files and history, and pipeline status and logs.
 
 **Order:** a read-only overview with the inbox; pull requests; the agent chat with "start agent"; routines; then close Gitea's UI. Whether Open WebUI stays for team channels and free chat is decided later.
+
+## Metrics and logs by namespace and repo
+
+**Problem:** Prometheus (through cAdvisor) and Loki have every container's metrics and logs, but know them only by Swarm stack and service, e.g. `pr-7-todo` and `pr-7-todo_web`. Which namespace, repo and branch a stack belongs to only the deployer knows: the services it renders carry Traefik labels and nothing more.
+
+**Idea:**
+
+1. The deployer labels every container it starts with `homecloud.namespace`, `homecloud.repo`, `homecloud.environment` (`main`, `dev`, `pr-7`) and `homecloud.commit`; the `system` stacks too, with namespace `system` and the stack as repo.
+2. cAdvisor passes these labels on, so Prometheus has them as they are; one rule in Alloy makes them Loki labels, as `stack` and `service` are today.
+3. Then everything of a namespace, of a repo or of its previews is one query. Grafana's Stack dashboard can offer namespace, repo and environment instead of the stack's name; the front end (above) shows a namespace's apps (CPU, memory, errors, restarts) on its page, and a repo's per environment, with their logs next to its pipeline logs and its agents' activity.
+
+**To watch:** everyone signed in reads everything in Grafana, the logs of private repos' apps too. The front end would read metrics and logs through the gateway as the person, and show a private repo's only to its namespace's people; Grafana itself would need the same, e.g. data per namespace, together with the idea on private repos' apps above.
