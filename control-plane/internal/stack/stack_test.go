@@ -150,3 +150,21 @@ environments:
 		t.Errorf("standalone: %v", err)
 	}
 }
+
+func TestParseRestore(t *testing.T) {
+	r, err := ParseRestore([]byte("stack: todo\nsnapshot: autosnap_2026-11-13_15:00:01_hourly\n"))
+	if err != nil || r.Environment != MainEnvironment || r.Stack != "todo" {
+		t.Errorf("r = %+v, err = %v", r, err)
+	}
+	for _, bad := range []string{
+		"stack: todo\n",                           // no snapshot
+		"stack: ../x\nsnapshot: s\n",              // not a stack name
+		"stack: todo\nsnapshot: 'a b'\n",          // not a snapshot name
+		"stack: todo\nsnapshot: s\nwhen: never\n", // unknown field
+		"stack: todo\nenvironment: Dev\nsnapshot: s\n",
+	} {
+		if _, err := ParseRestore([]byte(bad)); err == nil {
+			t.Errorf("%q passed", bad)
+		}
+	}
+}

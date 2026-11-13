@@ -87,6 +87,12 @@ func TestTheApprovalCheckReadsStacks(t *testing.T) {
 		"broken.yaml": "entrypoint: web\n",
 		"named.yaml":  "stack: other\nentrypoint: web\nservices:\n  web: { image: a, port: 80 }\nenvironments:\n  main: {}\n",
 	}
+	restores := map[string]string{
+		"good.yaml":    "stack: todo\nsnapshot: deploy-20261113-150405-abc1234\n",
+		"nostack.yaml": "stack: broken\nsnapshot: s1\n",
+		"noenv.yaml":   "stack: todo\nenvironment: dev\nsnapshot: s1\n",
+		"bad.yaml":     "stack: todo\n",
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
 		switch {
@@ -100,6 +106,14 @@ func TestTheApprovalCheckReadsStacks(t *testing.T) {
 		case strings.Contains(p, "/config/raw/stacks/"):
 			n := p[strings.LastIndex(p, "/")+1:]
 			io.WriteString(w, files[n])
+		case strings.HasSuffix(p, "/config/contents/restores"):
+			var list []map[string]string
+			for n := range restores {
+				list = append(list, map[string]string{"name": n, "type": "file"})
+			}
+			json.NewEncoder(w).Encode(list)
+		case strings.Contains(p, "/config/raw/restores/"):
+			io.WriteString(w, restores[p[strings.LastIndex(p, "/")+1:]])
 		case p == "/repos/homepage/todo":
 			io.WriteString(w, "{}")
 		default:
@@ -113,12 +127,13 @@ func TestTheApprovalCheckReadsStacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(problems, "\n")
-	for _, want := range []string{"stacks/ghost.yaml: there is no repo homepage/ghost", "stacks/broken.yaml:", "stacks/named.yaml: stack: other", "stacks/notes.txt: stacks/ holds only"} {
+	for _, want := range []string{"stacks/ghost.yaml: there is no repo homepage/ghost", "stacks/broken.yaml:", "stacks/named.yaml: stack: other", "stacks/notes.txt: stacks/ holds only",
+		"restores/nostack.yaml: there is no valid stack broken", "restores/noenv.yaml: todo has no environment dev", "restores/bad.yaml: snapshot must be"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("problems lack %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "todo.yaml") {
+	if strings.Contains(got, "todo.yaml") || strings.Contains(got, "good.yaml") {
 		t.Errorf("a good stack has problems:\n%s", got)
 	}
 	if problems, _ := g.stackProblems(context.Background(), "system", "abc"); len(problems) == 0 || !strings.Contains(problems[0], "system holds the platform") {

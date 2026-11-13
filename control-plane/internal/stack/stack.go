@@ -30,6 +30,9 @@ var previewName = regexp.MustCompile(`^pr-[0-9]+$`)
 // PreviewName is the environment of pull request n.
 func PreviewName(n int) string { return fmt.Sprintf("pr-%d", n) }
 
+// IsPreview tells whether an environment is a pull request's preview.
+func IsPreview(env string) bool { return previewName.MatchString(env) }
+
 // Branches are the environments deployed from a branch of their name.
 func (s *Stack) Branches() []string {
 	return slices.DeleteFunc(s.EnvironmentNames(), func(e string) bool { return e == PreviewEnvironment })

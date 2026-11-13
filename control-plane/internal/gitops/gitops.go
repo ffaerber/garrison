@@ -54,6 +54,10 @@ type Config struct {
 	home     string            // HOME for git, holding the .netrc
 	waiting  map[string]string // app environment -> commit whose image is awaited, to log it once
 	signedIn bool              // the Docker client is signed in to the registry
+
+	snapsChanged bool            // the deployer took or restored a snapshot since snapshots.json was written
+	snapsListed  time.Time       // when snapshots.json was last written
+	restoreTried map[string]bool // stack@commit of restore requests carried out or failed
 }
 
 // Dashboards syncs the dashboards/*.json of a namespace's repos, given as
@@ -405,6 +409,11 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	next.Applied = time.Now().UTC()
 	if err := c.writeState(next); err != nil {
 		errs = append(errs, err)
+	}
+	if c.Apps {
+		if err := c.listSnapshots(ctx); err != nil {
+			log.Printf("snapshots: %v", err)
+		}
 	}
 	// Dashboards follow every sync; Grafana may still be starting, so a
 	// failure is logged and retried on the next one without holding up deploys.

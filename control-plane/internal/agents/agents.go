@@ -361,6 +361,7 @@ const Platform = `How the home cloud works:
       main: { private: true }
   With code of its own, add source: <repo>, take image: "{{registry}}/<namespace>/<repo>:{{commit}}" for it, and add environments such as dev and preview, which only a source has.
 - Another service with a port can have an address of its own: public: api makes it https://<hostname>-api.<domain>. The entrypoint has the hostname already. Services without a port are reachable only by the others.
+- Data: each environment's datasets are snapshotted before every redeploy (deploy-…) and hourly, daily and monthly (autosnap_…); list_snapshots shows them. To bring an app's data back, propose restores/<name>.yaml in config, three lines: stack: <stack name>, environment: main (or dev), snapshot: <as listed>. Once merged, the app stops, its data is copied back and it starts again; what was written since is lost but kept in a restore-… snapshot, so a restore can itself be undone. Shares are not restored. Tell the person what will be lost before proposing it.
 - Secrets are made by the deployer; never ask anyone to make one by hand. A secret from outside (e.g. an API key) cannot be set yet: say so.
 - You have no internet: you cannot look up images or their versions. Use versions you know, pinned, and tell the person to check them in the review. Each service of the app needs its image: databases, caches (e.g. valkey/valkey:8-alpine for Redis) and workers too.
 `

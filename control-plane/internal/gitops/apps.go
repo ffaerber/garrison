@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -247,6 +248,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			continue
 		}
 		files, _ := filepath.Glob(filepath.Join(cfgDir, stack.Dir, "*.yaml"))
+		parsed := map[string]*stack.Stack{} // the namespace's stacks that could be read, by name
 		for _, file := range files {
 			name := strings.TrimSuffix(filepath.Base(file), ".yaml")
 			declared[ns+"/"+name] = true
@@ -321,6 +323,18 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					keep(key)
 					continue
 				}
+				// A redeploy may migrate or break the data: the deployer
+				// snapshots it first, and does not deploy if it cannot.
+				if _, ok := prev[key]; ok && !stack.IsPreview(env) {
+					snap := apply.DeploySnapshot + apply.SnapshotStamp(time.Now()) + "-" + commit[:min(7, len(commit))]
+					took, err := apply.SnapshotEnv(ctx, c.Run, "", s, env, snap)
+					if err != nil {
+						fail("deploy %s: no snapshot before it, so not deployed: %v", key, err)
+						keep(key)
+						continue
+					}
+					c.snapsChanged = c.snapsChanged || took
+				}
 				if err := apply.Stack(ctx, c.Run, s, render.Options{Environment: env, Domain: c.Domain, Commit: commit}); err != nil {
 					fail("deploy %s: %v", key, err)
 					keep(key)
@@ -329,6 +343,10 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				next[key] = app
 				log.Printf("apps: deployed %s at %.12s as %s", key, commit, app.Stack)
 			}
+			parsed[name] = s
+		}
+		for _, err := range c.restores(ctx, ns, cfgDir, parsed, next) {
+			fail("%v", err)
 		}
 	}
 

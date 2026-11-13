@@ -111,6 +111,7 @@ func baseSpecs() []Spec {
 			"lines":     map[string]any{"type": "integer", "description": "how many lines, at most 500; default 100"},
 		}, "namespace", "service"),
 		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"namespace": nsArg, "stack": str("stack name, e.g. grafana")}, "namespace", "stack"),
+		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the namespace's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"namespace": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "namespace", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for system, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_repos", "Lists the repos of a namespace. In system, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
@@ -264,6 +265,24 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		// Containers log to both streams. The names are arguments, never part of the script.
 		out, err := t.Run(ctx, nil, nil, "sh", "-c", `docker service logs --tail "$1" --no-task-ids --timestamps "$2" 2>&1`, "sh", fmt.Sprint(n), a.Service)
 		return string(out), err
+	case "list_snapshots":
+		if err := t.ownStack(a.Namespace, a.Stack); err != nil {
+			return "", err
+		}
+		all, at, err := gitops.ReadSnapshots(t.WorkDir)
+		if err != nil {
+			return "", err
+		}
+		env, ok := all[a.Stack]
+		if !ok || env.Namespace != a.Namespace || len(env.Snapshots) == 0 {
+			return fmt.Sprintf("%s has no snapshots: it keeps no data, or none were taken yet.", a.Stack), nil
+		}
+		var b strings.Builder
+		for _, sn := range env.Snapshots {
+			fmt.Fprintf(&b, "%s\t%s\n", sn.Name, sn.Created.Format(time.RFC3339))
+		}
+		fmt.Fprintf(&b, "(as of %s)\n", at.UTC().Format(time.RFC3339))
+		return b.String(), nil
 	case "service_usage":
 		if err := t.ownStack(a.Namespace, a.Stack); err != nil {
 			return "", err

@@ -32,6 +32,7 @@ type fakeApps struct {
 	commits  map[string]string            // org/repo@branch -> commit
 	packages map[string]bool              // owner/name/tag
 	pulls    map[string]string            // org/repo -> its open pull requests, as JSON
+	props    map[string]string            // ZFS dataset -> homecloud:restored
 	calls    []string
 }
 
@@ -127,6 +128,17 @@ func (f *fakeApps) run(_ context.Context, _ []string, _ []byte, name string, arg
 		}
 	case name == "git" && slices.Contains(args, "rev-parse"):
 		return []byte(f.commits[branchOf(dirArg())] + "\n"), nil
+	case name == "git" && slices.Contains(args, "log"):
+		// The commit that last changed a file: config's head will do.
+		return []byte(f.commits[branchOf(dirArg())] + "\n"), nil
+	case name == "zfs" && args[0] == "get":
+		if v, ok := f.props[args[len(args)-1]]; ok {
+			return []byte(v + "\n"), nil
+		}
+		return []byte("-\n"), nil
+	case name == "zfs" && args[0] == "set":
+		_, v, _ := strings.Cut(args[1], "=")
+		f.props[args[len(args)-1]] = v
 	}
 	return nil, nil
 }
@@ -154,6 +166,7 @@ func setupApps(t *testing.T) (*Config, *fakeApps) {
 			"homepage/notes@main":  "cccccccccccc3333",
 		},
 		packages: map[string]bool{"homepage/todo/aaaaaaaaaaaa": true},
+		props:    map[string]string{},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(f.api))
 	t.Cleanup(srv.Close)
@@ -367,5 +380,69 @@ func TestPullRequestsGetPreviews(t *testing.T) {
 	}
 	if !removed {
 		t.Errorf("not taken down: %v", f.calls)
+	}
+}
+
+func (f *fakeApps) called(prefix string) []string {
+	var out []string
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
+	c, f := setupApps(t)
+	ctx := context.Background()
+	apps, errs := c.syncApps(ctx, false, map[string]App{})
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	// The first deploy has no data to keep.
+	if got := f.called("zfs snapshot"); len(got) != 0 {
+		t.Errorf("snapshot before the first deploy: %v", got)
+	}
+
+	// A new commit: its data is snapshotted before the redeploy.
+	f.commits["homepage/todo@main"] = "eeeeeeeeeeee5555"
+	f.packages["homepage/todo/eeeeeeeeeeee"] = true
+	f.calls = nil
+	apps, _ = c.syncApps(ctx, false, apps)
+	snap := f.called("zfs snapshot -r homecloud/ns/homepage/stacks/todo@deploy-")
+	deploy := slices.IndexFunc(f.calls, func(s string) bool { return strings.HasPrefix(s, "docker stack deploy") })
+	if len(snap) != 1 || !strings.HasSuffix(snap[0], "-eeeeeee") || deploy < slices.Index(f.calls, snap[0]) {
+		t.Errorf("calls = %v", f.calls)
+	}
+
+	// A restore request in config: carried out, then todo deployed again at its commit.
+	f.files["homepage/config@main"]["restores/todo.yaml"] = "stack: todo\nsnapshot: deploy-20261113-150405-aaaaaaa\n"
+	f.commits["homepage/config@main"] = "c0c0c0c0c0c04444"
+	f.calls = nil
+	apps, errs = c.syncApps(ctx, false, apps)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if got := f.called("zfs set homecloud:restored=c0c0c0c0c0c04444 homecloud/ns/homepage/stacks/todo"); len(got) != 1 {
+		t.Errorf("not restored: %v", f.calls)
+	}
+	if got := strings.Join(f.deployed(), " "); got != "todo" {
+		t.Errorf("deployed %q after the restore, want todo", got)
+	}
+	// It is done: the next sync leaves it alone.
+	f.calls = nil
+	c.restoreTried = nil
+	c.syncApps(ctx, false, apps)
+	if got := f.called("docker service scale"); len(got) != 0 {
+		t.Errorf("restored twice: %v", got)
+	}
+
+	// A request for an environment that is not deployed is reported.
+	f.files["homepage/config@main"]["restores/todo.yaml"] = "stack: todo\nenvironment: dev\nsnapshot: deploy-1\n"
+	f.commits["homepage/config@main"] = "c0c0c0c0c0c05555"
+	_, errs = c.syncApps(ctx, false, apps)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "restores/todo.yaml: todo is not deployed in dev") {
+		t.Errorf("errs = %v", errs)
 	}
 }

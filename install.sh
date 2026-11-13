@@ -49,6 +49,8 @@ command -v zfs     >/dev/null || need+=(zfsutils-linux)
 command -v openssl >/dev/null || need+=(openssl)
 command -v curl    >/dev/null || need+=(curl)
 command -v git     >/dev/null || need+=(git)
+command -v rsync   >/dev/null || need+=(rsync)    # copies a dataset back from a snapshot
+command -v sanoid  >/dev/null || need+=(sanoid)   # scheduled snapshots
 if [ ${#need[@]} -gt 0 ]; then
   apt-get update -qq
   apt-get install -y -qq "${need[@]}" >/dev/null
@@ -103,6 +105,31 @@ fi
 for ds in system system/postgres system/gitea system/gitea-runner ns; do
   zfs list "$POOL/$ds" >/dev/null 2>&1 || zfs create "$POOL/$ds"
 done
+
+# Scheduled snapshots of all data, the platform's and the apps': Sanoid's
+# timer takes and prunes them every 15 minutes. The deployer also snapshots
+# an app before each redeploy, and keeps its own; restores use either.
+mkdir -p /etc/sanoid
+cat > /etc/sanoid/sanoid.conf <<SANOID
+# Written by the homecloud installer; changes are overwritten.
+[$POOL/system]
+  use_template = homecloud
+  recursive = yes
+
+[$POOL/ns]
+  use_template = homecloud
+  recursive = yes
+
+[template_homecloud]
+  frequently = 0
+  hourly = 24
+  daily = 30
+  monthly = 6
+  yearly = 0
+  autosnap = yes
+  autoprune = yes
+SANOID
+systemctl enable --now sanoid.timer >/dev/null
 
 # ---------- secrets ----------
 say "Generating secrets"

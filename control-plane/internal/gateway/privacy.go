@@ -123,12 +123,13 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 	f := configFiles{g: g, ns: ns, ref: ref}
 	entries, err := f.List(ctx, stack.Dir)
 	if errors.Is(err, agents.ErrNotExist) {
-		return nil, nil
+		entries, err = nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	var out []string
+	parsed := map[string]*stack.Stack{}
 	for _, e := range entries {
 		path := stack.Dir + "/" + e.Name
 		name, ok := strings.CutSuffix(e.Name, ".yaml")
@@ -149,6 +150,7 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 			out = append(out, path+": "+err.Error())
 			continue
 		}
+		parsed[name] = s
 		if s.Source != "" {
 			status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s", ns, s.Source), nil, nil)
 			if status == http.StatusNotFound {
@@ -156,6 +158,47 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 			} else if err != nil {
 				return nil, err
 			}
+		}
+	}
+	more, err := restoreProblems(ctx, f, parsed)
+	return append(out, more...), err
+}
+
+// restoreProblems checks the restore requests, restores/<name>.yaml: each
+// names a valid stack of the namespace and one of its environments. Whether
+// the snapshot exists, the deployer tells.
+func restoreProblems(ctx context.Context, f configFiles, stacks map[string]*stack.Stack) ([]string, error) {
+	entries, err := f.List(ctx, stack.RestoreDir)
+	if errors.Is(err, agents.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		path := stack.RestoreDir + "/" + e.Name
+		if e.Type != "file" || !strings.HasSuffix(e.Name, ".yaml") {
+			out = append(out, path+": "+stack.RestoreDir+"/ holds only <name>.yaml files")
+			continue
+		}
+		data, err := f.Read(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		r, err := stack.ParseRestore([]byte(data))
+		if err != nil {
+			out = append(out, path+": "+strings.ReplaceAll(err.Error(), "\n", "; "))
+			continue
+		}
+		s, ok := stacks[r.Stack]
+		if !ok {
+			out = append(out, fmt.Sprintf("%s: there is no valid stack %s in %s/", path, r.Stack, stack.Dir))
+			continue
+		}
+		// Previews keep no snapshots.
+		if _, ok := s.Environments[r.Environment]; !ok || r.Environment == stack.PreviewEnvironment {
+			out = append(out, fmt.Sprintf("%s: %s has no environment %s whose data can be restored", path, r.Stack, r.Environment))
 		}
 	}
 	return out, nil

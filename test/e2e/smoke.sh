@@ -79,13 +79,14 @@ until_true() {
   local deadline=$((SECONDS + $1)); shift
   until "$@" >/dev/null 2>&1; do [ $SECONDS -ge $deadline ] && return 1; sleep 3; done
 }
-# set_stack NS NAME FILE|- [APPROVER]: alice proposes config/stacks/NAME.yaml
-# of the namespace NS as FILE, or its removal with -; APPROVER (by default the
-# local admin, a root admin) approves it, and alice merges it once the
+# set_config NS PATH FILE|- [APPROVER]: alice proposes the file PATH of the
+# namespace NS's config as FILE, or its removal with -; APPROVER (by default
+# the local admin, a root admin) approves it, and alice merges it once the
 # approval check passes. Fails if a step does.
-set_stack() {
-  local ns=$1 name=$2 file=$3 approver=${4:-} cfg=$api/repos/$1/config path=stacks/$2.yaml branch sha body pr st i
-  branch="stack-$name-$(date +%s%N | cut -c1-13)"
+set_config() {
+  local ns=$1 path=$2 file=$3 approver=${4:-} cfg=$api/repos/$1/config name branch sha body pr st i
+  name=$(basename "$path" .yaml)
+  branch="config-$name-$(date +%s%N | cut -c1-13)"
   sha=$(gitea_api "" "$cfg/contents/$path" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)
   body=$(python3 -c '
 import base64,json,sys
@@ -97,7 +98,7 @@ else:
     if sha: op["sha"]=sha
 print(json.dumps({"branch":"main","new_branch":branch,"message":("Remove " if file=="-" else "Set ")+path,"files":[op]}))' "$file" "$path" "$branch" "$sha") || return 1
   [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$body" "$cfg/contents")" = 201 ] || { echo "cannot write $path"; return 1; }
-  pr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"Stack '"$name"'"}' "$cfg/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])') || return 1
+  pr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"Set '"$path"'"}' "$cfg/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])') || return 1
   [ "$(gitea_api "$approver" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$cfg/pulls/$pr/reviews")" = 200 ] || { echo "cannot approve #$pr"; return 1; }
   for i in $(seq 60); do
     st=$(gitea_api "" "$cfg/commits/$(gitea_api "" "$cfg/pulls/$pr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
@@ -109,6 +110,8 @@ for s in json.load(sys.stdin).get("statuses") or []:
   done
   [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$cfg/pulls/$pr/merge")" = 200 ] || { echo "cannot merge #$pr ($st)"; return 1; }
 }
+# set_stack NS NAME FILE|- [APPROVER]: set_config for config/stacks/NAME.yaml.
+set_stack() { set_config "$1" "stacks/$2.yaml" "$3" "${4:-}"; }
 smoke_running() { docker service ls --filter name=smoke_web --format '{{.Replicas}}' | grep -qx 1/1; }
 smoke_gone()    { ! docker stack ls --format '{{.Name}}' | grep -qx smoke; }
 deployer_image() { docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
@@ -600,6 +603,30 @@ until_true 900 pipeline_done "$fixed"
 check "the fix passes the pipeline"        pipeline_is "$fixed" success
 check "the deployer deploys it"          until_true 300 deployed main "$fixed"
 check "the todo survived the redeploy"     until_true 120 bash -c "$(declare -f web todo_api); ETC=$ETC DOMAIN=$DOMAIN tmp=$tmp; todo_api todo https://todo.$DOMAIN/api/todos | grep -q 'Water the plants'"
+
+echo "# snapshots and restore"
+todo_ds=homecloud/ns/homepage/stacks/todo
+snap=$(zfs list -H -t snapshot -o name -s creation -d 1 "$todo_ds" | grep "@deploy-.*-${fixed:0:7}$" | tail -n1 | cut -d@ -f2)
+check "the deployer snapshots todo before redeploying it" test -n "$snap"
+check "with its database"                  zfs list "$todo_ds/todo-db@$snap"
+listed() { grep -q "\"$snap\"" /var/lib/homecloud/deployer/snapshots.json; }
+check "and lists it for the agents"        until_true 60 listed
+check "Sanoid snapshots on a schedule"     systemctl is-active sanoid.timer
+sanoid --take-snapshots >/dev/null 2>&1
+autosnap() { zfs list -H -t snapshot -o name "$todo_ds/todo-db" | grep -q '@autosnap_.*_hourly$'; }
+check "the apps' data too"                 autosnap
+plants() { todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import json,sys; print(" ".join(str(t["id"]) for t in json.load(sys.stdin) if t["title"]=="Water the plants"))'; }
+for id in $(plants); do todo_api todo -o /dev/null -X POST "https://todo.$DOMAIN/todos/$id/delete"; done
+no_plants() { [ -z "$(plants)" ] && todo_api todo "https://todo.$DOMAIN/api/todos" | grep -q '^\['; }
+check "alice deletes the todo by mistake"  no_plants
+printf 'stack: todo\nenvironment: main\nsnapshot: %s\n' "$snap" > "$tmp/restore.yaml"
+check "she asks to restore todo's data, a root admin approves" set_config homepage restores/todo.yaml "$tmp/restore.yaml"
+restored() { [ "$(zfs get -H -o value homecloud:restored "$todo_ds")" != - ]; }
+check "the deployer restores it"           until_true 300 restored
+has_plants() { [ -n "$(plants)" ]; }
+check "the todo is back"                   until_true 180 has_plants
+before() { zfs list -H -t snapshot -o name -d 1 "$todo_ds" | grep -q '@restore-'; }
+check "the state before is kept, to undo it" before
 
 echo "# the user runner's limits"
 gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/escape"
