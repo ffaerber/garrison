@@ -296,8 +296,8 @@ check "Prometheus and Loki publish no port on the host" bash -c '! (ss -ltn | gr
 
 echo "# dashboards from Git"
 folder_count() { grafana_api "" "$g/api/search?type=dash-db&folderUIDs=ns-system&tag=git" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
-five_dashboards() { [ "$(folder_count)" -ge 5 ]; }
-check "the system folder holds the dashboards from Git" until_true 180 five_dashboards
+six_dashboards() { [ "$(folder_count)" -ge 6 ]; }
+check "the system folder holds the dashboards from Git" until_true 180 six_dashboards
 sso_login "$tmp/grafana-bob.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-bob.html" bob >/dev/null 2>&1
 check "bob can open the overview"          test "$(grafana_api bob -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/homecloud-overview")" = 200
 check "bob cannot change it" \
@@ -318,7 +318,7 @@ for f in sorted(glob.glob("system/grafana/dashboards/*.json")):
     for p in d["panels"]:
         for t in p.get("targets", []):
             expr = t.get("expr", "")
-            for k, v in {"$stack": "grafana", "$service": ".*", "$search": "", "$__auto": "1m", "$__interval": "1m"}.items():
+            for k, v in {"$stack": "grafana", "$service": ".*", "$agent": ".*", "$search": "", "$__auto": "1m", "$__interval": "1m"}.items():
                 expr = expr.replace(k, v)
             if t["datasource"]["uid"] == "loki":
                 r = get("/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=1&" + urllib.parse.urlencode({"query": expr}))
@@ -924,6 +924,13 @@ docker rm -f "$sb" >/dev/null
 answer=$(ask_agent homepage bob "Which line did you write into notes.txt just before? Check your workspace." media)
 check "a new container resumes the chat"   test -n "$(sandbox_of homepage/media)" -a "$(sandbox_of homepage/media)" != "$sb"
 check "it still has the file"              grep -q "pelican 42" <<<"$answer"
+# Grafana's Agents dashboard: the sandbox's metrics carry its agent and
+# person; its output, the conversation, stays out of Loki.
+prom_value() { grafana_api "" "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1")" | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)'; }
+media_measured() { [ "$(prom_value 'count(container_memory_working_set_bytes{container_label_homecloud_sandbox="true", container_label_homecloud_agent="homepage/media", container_label_homecloud_person="bob"})')" != 0 ]; }
+check "Prometheus measures the sandbox, by agent and person" until_true 120 media_measured
+sandbox_logs() { grafana_api "" "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=5&since=2h&query=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("{container=~\"homecloud-agent-.*\"}"))')"; }
+check "Loki holds nothing a sandbox printed" bash -c 'grep -q "\"result\":\[\]" <<<"$0"' "$(sandbox_logs)"
 
 echo "# 4f. bob has the developer agent change the app with Git"
 dpr=$(add_agent developer developer 'list_repos, read_file, propose_patch' "Changes the code of the namespace's apps" \

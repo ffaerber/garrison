@@ -260,9 +260,9 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 
 ## Observability
 
-- Running sandboxes are a Grafana dashboard: chat, person, agent, state (working, idle, stopped), CPU and memory.
-- A `list_sessions` tool shows the same to the operator agents.
-- Each turn logs the person, agent, tools called and outcome to Loki.
+- The Grafana dashboard **Agents** (`system/grafana/dashboards/agents.json`), built: running sandboxes, by agent and by person, their memory and CPU, and a table of each with its chat; from cAdvisor, which passes on the sandboxes' labels `homecloud.agent`, `homecloud.person` and `homecloud.chat`. Below, what agents did: the agent service's log (turns with person, agent, chat and number of tool calls; Git fetches; agents asking agents; routines) and the gateway's (every tool call with person, agent, tool and what started the run, refusals with why).
+- What was said stays out of it: a sandbox's output is Pi's conversation, with whatever the agent read, private repos included, so Alloy does not ship sandboxes' logs to Loki, which everyone signed in reads. Loki keeps logs without a time limit, so installations that ran sandboxes before this still hold their conversations.
+- To come: a `list_sessions` tool that shows the same to the operator agents; whether a sandbox is working or idle.
 
 ## Plan
 
