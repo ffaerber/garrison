@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// Who may see an agent and talk to it (agent.yaml: visible).
-const (
-	VisibleMembers  = "members"  // the namespace's admins and members, and root admins
-	VisibleEveryone = "everyone" // everyone signed in
-)
+// VisibleMembers in agent.yaml (visible) keeps an agent to its
+// namespace's people (admins, members and root admins) even if all its
+// repos are public. Without it, an agent is for everyone unless it works on
+// a private repo: see the gateway's AgentPrivate.
+const VisibleMembers = "members"
 
 // Levels of a grant, as the spec's autonomy levels: each includes the one
 // before.
@@ -215,6 +215,20 @@ func (a Agent) GrantFor(repo, branch, level, role string, unattended bool) (Gran
 // NeedsAccount tells whether the agent acts with an account of its own:
 // it has grants or routines.
 func (a Agent) NeedsAccount() bool { return len(a.Grants) > 0 || len(a.Routines) > 0 }
+
+// WorksOn are the repos an agent works on: those it names, those of its
+// grants and those its routines watch. If one is private, so is the agent.
+func (a Agent) WorksOn() []string {
+	out := append([]string{}, a.Repos...)
+	out = append(out, a.GrantedRepos()...)
+	for _, r := range a.Routines {
+		if r.OnPush != nil {
+			out = append(out, r.OnPush.Repo)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
 
 // GrantedRepos are the repos the agent's account may write to.
 func (a Agent) GrantedRepos() []string {

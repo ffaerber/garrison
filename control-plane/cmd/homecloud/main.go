@@ -403,6 +403,7 @@ func gatewayCmd(args []string) error {
 	mux.Handle("/mcp", mcp)
 	mux.Handle("/mcp/", mcp)
 	mux.Handle("POST /internal/post", gateway.PostHandler(sync, serviceKey))
+	mux.Handle("GET /internal/channels/{id}", gateway.ChannelHandler(sync, serviceKey))
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)
 		mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
@@ -568,7 +569,7 @@ func agentsCmd(args []string) error {
 		Domain:       domain,
 		DefaultModel: model,
 		Gitea:        g,
-		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp") + "/internal/post", ServiceKey: gateway.ServiceKey(g.Password)},
+		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
 	}
 	if *image != "" {
 		// The sandbox image is pulled from Gitea's registry as the admin, if

@@ -11,7 +11,7 @@ Alice: *@homepage/operator Add carol as an admin and bob as a member of the name
 - The agent opens a pull request on `homepage/config`, as alice, that lists carol under admins and bob under members.
 - It waits: the approval check is pending. Alice cannot approve her own pull request, and it cannot be merged.
 - A root admin who did not write it approves it; the check passes; alice merges it.
-- Carol joins the team `admins`, bob the team `members`; bob may now push to `homepage`'s repos, and now sees homepage's agents in Open WebUI, which before showed them only to its people.
+- Carol joins the team `admins`, bob the team `members`; bob may now push to `homepage`'s repos.
 
 ## 2. Bob tries to make himself an admin
 
@@ -75,7 +75,7 @@ Alice proposes a grant on `config` for the developer: the approval check fails i
 
 - `homepage/developer` gets `merge_change`, may ask `homepage/tester`, a grant `{repo: todo, branch: dev, level: autonomous}` (for members), and a routine `main-moved` that runs, for bob, when `main` of todo moves.
 - `homepage/tester` browses (`browse`) and has no grants.
-- `homepage/desk` is visible to everyone and may propose to todo for everyone.
+- `homepage/desk` may propose to todo for everyone. Todo is public, so everyone may use it.
 
 Afterwards the developer and the desk have Gitea accounts, `agent-homepage-developer` and `agent-homepage-desk`, which may write to todo and nothing else; the tester has none.
 
@@ -108,13 +108,20 @@ Alice: *@homepage/operator Remove bob from the namespace homepage.*
 - The agent opens a pull request on `homepage/config`, as alice, without bob.
 - Carol approves it (she neither wrote it nor changes role); alice merges it.
 - Bob leaves the team `members` and may no longer push to `homepage`'s repos. He can still read everything, as everyone signed in can.
-- Bob no longer sees homepage's agents in Open WebUI, except the desk, which is visible to everyone.
 
 ## 5b. Bob, no longer in homepage, asks the desk for a change
 
 Bob: *@homepage/desk Propose a new file IDEAS.md in todo.*
 
 - He may not write to todo, but the desk may propose there for everyone: the pull request is by `agent-homepage-desk`, on a branch `agent/desk/bob-...`, and says *Asked by bob (not in homepage) through homepage/desk.*
+
+## 5c. A private repo has a private agent
+
+Alice makes a private repo `homepage/secret` and adds `homepage/keeper` with `repos: [secret]`; carol approves.
+
+- Carol, in homepage, sees the keeper in Open WebUI; bob, no longer in homepage, does not, though he still sees the agents of public repos.
+- Homepage has a team channel, `homepage-team`, which carol sees and bob does not.
+- Carol mentions the keeper in homepage's channel, which everyone reads: the agent service refuses it there. In `homepage-team` it answers her from the repo.
 
 ## 6. Alice adds an agent that may only read
 

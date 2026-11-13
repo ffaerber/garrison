@@ -614,10 +614,15 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 				head, rosterErr = ParseRoster([]byte(raw))
 			}
 		}
-		_, problems, err := g.Agents(ctx, ns, pr.Head.SHA)
+		list, problems, err := g.Agents(ctx, ns, pr.Head.SHA)
 		if err != nil {
 			return err
 		}
+		more, err := g.grantProblems(ctx, ns, list)
+		if err != nil {
+			return err
+		}
+		problems = append(problems, more...)
 		if rosterErr != nil {
 			state, desc = "failure", rosterErr.Error()
 		} else if len(problems) > 0 {

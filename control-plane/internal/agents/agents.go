@@ -38,7 +38,7 @@ type Agent struct {
 	Repos       []string // repos it works on, for its workspace
 	Prompt      string   // prompt.md
 	Skills      []Skill  // shared ones it names, then its own
-	Visible     string   // who may use it: members or everyone
+	Visible     string   // members: only the namespace's people; empty: as its repos (WorksOn)
 	Asks        []string // agents it may ask for work, <namespace>/<agent>
 	Grants      []Grant  // rights of its own
 	Routines    []Routine
@@ -83,16 +83,12 @@ type config struct {
 	Tools       []string  `yaml:"tools"`
 	Skills      []string  `yaml:"skills"`
 	Repos       []string  `yaml:"repos"`
-	Visible     string    `yaml:"visible,omitempty"`
+	Visible     string    `yaml:"visible,omitempty"` // only "members"
 	Agents      []string  `yaml:"agents,omitempty"`
 	Grants      []Grant   `yaml:"grants,omitempty"`
 	Routines    []Routine `yaml:"routines,omitempty"`
 	Enabled     *bool     `yaml:"enabled,omitempty"`
 }
-
-// SystemNamespace is the platform's own namespace. It has no members.yaml,
-// and its agents serve everyone unless they say otherwise.
-const SystemNamespace = "system"
 
 // Load reads every agent of namespace. tools are the names agents may list.
 // A namespace without an agents folder has the operator, with every tool.
@@ -201,15 +197,8 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 			why = append(why, fmt.Sprintf("%q is not a repo name", r))
 		}
 	}
-	switch c.Visible {
-	case "":
-		c.Visible = VisibleMembers
-		if namespace == SystemNamespace {
-			c.Visible = VisibleEveryone // system has no members; its agents serve everyone
-		}
-	case VisibleMembers, VisibleEveryone:
-	default:
-		why = append(why, fmt.Sprintf("visible must be members or everyone, not %q", c.Visible))
+	if c.Visible != "" && c.Visible != VisibleMembers {
+		why = append(why, fmt.Sprintf("visible can only be members, to keep the agent to the namespace's people; without it the agent follows its repos: for everyone, unless one is private. Not %q", c.Visible))
 	}
 	why = append(why, checkAsks(namespace+"/"+name, c.Agents)...)
 	grants, w := checkGrants(c.Grants)
@@ -320,14 +309,10 @@ func ParseSkill(raw string) (Skill, error) {
 // Operator is the agent of a namespace whose config repo has no agents
 // folder: today's operator, with every tool.
 func Operator(namespace string, tools []string) Agent {
-	visible := VisibleMembers
-	if namespace == SystemNamespace {
-		visible = VisibleEveryone
-	}
 	return Agent{
 		Namespace: namespace, Name: OperatorName,
 		Description: "Operator agent of the namespace " + namespace,
-		Tools:       tools, Prompt: OperatorPrompt, Visible: visible,
+		Tools:       tools, Prompt: OperatorPrompt,
 	}
 }
 

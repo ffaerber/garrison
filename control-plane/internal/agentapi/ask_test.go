@@ -17,8 +17,13 @@ import (
 )
 
 type fakePoster struct {
-	mu    sync.Mutex
-	posts []gateway.Post
+	mu       sync.Mutex
+	posts    []gateway.Post
+	channels map[string]gateway.ChannelInfo
+}
+
+func (f *fakePoster) Channel(_ context.Context, id string) (gateway.ChannelInfo, error) {
+	return f.channels[id], nil
 }
 
 func (f *fakePoster) Post(_ context.Context, p gateway.Post) error {
@@ -156,7 +161,8 @@ func TestRoutines(t *testing.T) {
 	head = "c2"
 	r.Check(context.Background()) // main moved
 	posts := wait(1)
-	if len(posts) != 1 || !strings.Contains(posts[0].Text, "Routine on-main, for bob (main of homepage/todo moved to c2)") || posts[0].Channel != "" {
+	// todo is unknown to this Gitea, so private: the post goes to the team channel.
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "Routine on-main, for bob (main of homepage/todo moved to c2)") || posts[0].Channel != "" || !posts[0].Team {
 		t.Fatalf("on push: %+v", posts)
 	}
 	now = now.Add(31 * time.Minute)
@@ -181,5 +187,49 @@ func TestRoutines(t *testing.T) {
 	// saying what started it.
 	if !mcp.sawUnattended("bob", "routine homepage/dev/hourly") {
 		t.Errorf("the gateway was not told: %v", mcp.headers())
+	}
+}
+
+func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
+	s, _, _ := setup(t)
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [alice]\n")
+		case "/api/v1/repos/homepage/secret":
+			io.WriteString(w, `{"private":true}`)
+		case "/api/v1/repos/homepage/site":
+			io.WriteString(w, `{"private":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	s.Gitea = &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	s.Poster = &fakePoster{channels: map[string]gateway.ChannelInfo{
+		"pub": {Namespace: "homepage"}, "team": {Namespace: "homepage", Team: true}, "other-team": {Namespace: "shop", Team: true},
+	}}
+	s.Agents = fakeAgents{
+		{Namespace: "homepage", Name: "keeper", Prompt: "Keep.", Repos: []string{"secret"}},
+		{Namespace: "homepage", Name: "desk", Prompt: "Desk.", Repos: []string{"site"}},
+	}
+	withSandboxes(t, s)
+	for _, c := range []struct {
+		agent, chat string
+		code        int
+	}{
+		{"homepage/keeper", "channel:pub", http.StatusForbidden},
+		{"homepage/keeper", "channel:other-team", http.StatusForbidden},
+		{"homepage/keeper", "channel:team", http.StatusOK},
+		{"homepage/keeper", "chat-1", http.StatusOK},
+		{"homepage/desk", "channel:pub", http.StatusOK},
+	} {
+		w := post(t, s, "tok-alice", map[string]string{ChatHeader: c.chat}, map[string]any{"model": c.agent, "stream": true, "messages": []Message{{Role: "user", Content: "hi"}}})
+		if w.Code != c.code {
+			t.Errorf("%s in %s: %d, want %d: %s", c.agent, c.chat, w.Code, c.code, w.Body)
+		}
+		if c.code == http.StatusForbidden && !strings.Contains(w.Body.String(), "homepage-team") {
+			t.Errorf("the refusal does not say where: %s", w.Body)
+		}
 	}
 }

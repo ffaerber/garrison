@@ -1,6 +1,6 @@
 # Agents — Design
 
-How agents are defined, run and updated. Status: steps 1 to 3 of the plan are built, and the proxies of step 4: agent folders and their checks; the agent service, which Open WebUI talks to; and a sandbox per chat, Pi in a container with its workspace in a volume, which gets the LLM and the agent's platform tools through the agent service. The gateway serves each agent only its own tools and skills. Agents can clone the repos the person may read into their workspace and propose their changes as pull requests by the person. Steps 7 to 10 are built too: agents' own accounts and grants, agents asking agents, routines that run without a person, previews of pull requests and browsing. Still design: datasets instead of volumes, clean-up of old chats, Pi's native skills. See Chat in [spec.md](spec.md).
+How agents are defined, run and updated. Status: steps 1 to 3 of the plan are built, and the proxies of step 4: agent folders and their checks; the agent service, which Open WebUI talks to; and a sandbox per chat, Pi in a container with its workspace in a volume, which gets the LLM and the agent's platform tools through the agent service. The gateway serves each agent only its own tools and skills. Agents can clone the repos the person may read into their workspace and propose their changes as pull requests by the person. Steps 7 to 10 are built too: agents' own accounts and grants, private agents for private repos, agents asking agents, routines that run without a person, previews of pull requests and browsing. Still design: datasets instead of volumes, clean-up of old chats, Pi's native skills. See Chat in [spec.md](spec.md).
 
 ## Goals
 
@@ -69,7 +69,7 @@ tools:                       # gateway tools this agent may use
   - screenshot
 skills: [homepage-screenshots]   # shared skills; its own skills/ are always included
 repos: [homepage]            # optional: repos checked out into the workspace
-visible: members             # who sees and may talk to it: members (default) or everyone
+visible: members             # optional: only the namespace's people, even if its repos are public
 agents: [homepage/tester]    # agents it may ask for work (see Agents asking agents)
 grants:                      # rights of its own (see Accounts and grants); none by default
   - repo: todo
@@ -87,14 +87,15 @@ grants:                      # rights of its own (see Accounts and grants); none
 
 By default an agent has no rights of its own: every tool call acts as the person whose message started the turn, and changes leave only as pull requests by that person. A namespace can give an agent more, per repo and branch, with the autonomy levels of [spec.md](spec.md) (Rights and autonomy). Built: `control-plane/internal/agents/grants.go` (the file format and its checks), `internal/gateway/grants.go` (the decisions), `internal/gateway/members.go` (the accounts).
 
-### Who sees an agent
+### Private repos and who sees an agent
 
-`visible` decides who sees an agent in Open WebUI and may talk to it:
+Rights are per namespace: its people (`members.yaml`) change its repos, everyone signed in reads the public ones, and only its people read the private ones. There are no people of single repos. An agent follows the repos it works on (`repos`, those of its grants, and those its routines watch):
 
-- `members` (the default): the people in the namespace's `members.yaml`, admins included, and root admins.
-- `everyone`: everyone signed in, for agents meant to serve all, e.g. a help desk. In `system`, which has no `members.yaml`, it is the default, so `system/operator` serves everyone.
+- **All public, or none named** (like the operator): everyone sees the agent and may talk to it. It acts with each person's rights, so someone outside the namespace gets answers but no changes: proposing fails, as they may not write.
+- **One is private**: the agent is private. Only the namespace's people and root admins see it, and it answers only where only they read: a private chat, or the namespace's team channel, `<namespace>-team`. In the namespace's channel, which everyone reads, the agent service refuses it with a note saying where to ask. Its routines post into the team channel. A repo an agent names that does not exist yet counts as private.
+- `visible: members` makes an agent private even if its repos are public.
 
-The gateway keeps an Open WebUI group per namespace, `homecloud <namespace>`, with the people of its `members.yaml` who have signed in to Open WebUI (matched by their email in Gitea), and gives members-only agents to that group. Root admins are Open WebUI's admins and see every agent. The agent service and the gateway check it again on every request, since Open WebUI is not the only way in: someone who may not use the agent gets a refusal that says why.
+The gateway keeps an Open WebUI group per namespace, `homecloud <namespace>`, with the people of its `members.yaml` who have signed in to Open WebUI (matched by their email in Gitea). Private agents and the team channel are given to that group; root admins are Open WebUI's admins and see everything. The agent service and the gateway check it again on every request, since Open WebUI is not the only way in: someone who may not use the agent gets a refusal that says why.
 
 ### The agent's account
 
@@ -125,7 +126,8 @@ grants:
 | `merge` | Also merge proposals into `branch` once the checks pass |
 | `autonomous` | The same on a branch that deploys: the merge deploys as any merge to `main` or `dev` does |
 
-- **`for` says whose requests may use a grant**, and only names groups of the agent's own namespace: `members` (the default, admins included) or `admins`. `everyone` is allowed for `propose` only. Anything else fails the approval check. Without `for`, a member could get through the agent what they may not do themselves, e.g. merge to `main`. Root admins count as admins everywhere.
+- **`for` says whose requests may use a grant**, and only names groups of the agent's own namespace: `members` (the default, admins included) or `admins`. `everyone` is allowed for `propose` only, and not on a private repo. Anything else fails the approval check.
+- **The agent's account acts only for people who may read the repo.** Before it proposes or merges for someone, the gateway asks Gitea whether they may read it; nobody changes, or learns about, a repo they cannot see through an agent. Without `for`, a member could get through the agent what they may not do themselves, e.g. merge to `main`. Root admins count as admins everywhere.
 - **Each action is decided at the gateway, in this order:** if the person may do it themselves, it is done as the person, as before. Otherwise, if a grant covers the repo, branch and level and the person is in its `for`, it is done with the agent's account. Otherwise it is refused, and the agent is told which grant would be needed.
 - **Gitea limits the account too:** it may write only to its granted repos. Which branches it may merge into is the gateway's decision, as app repos take pushes from their members and have no branch protection.
 - **`merge` waits for the deployer.** Until the deployer can hold a deploy for a person's approval (not built), every merge to `main` or `dev` deploys, so the approval check refuses `merge` on those branches and asks for `autonomous`, which says what happens.
@@ -161,6 +163,7 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 - **Where:** in its own sandbox for the same chat (key: the chat and the asked agent), with its own workspace. The two share work through Git, e.g. a proposal's branch or its preview.
 - **Limits:** at most three agents in one run, and never one twice, so A asking B asking A ends at once. The agent service keeps the chain in the turn's state, not in anything the model writes.
 - **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and its progress shows in the reasoning, each line under its name.
+- **Private agents** are asked only where they may answer: an agent in the namespace's public channel cannot ask a private one.
 - **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
 
 ## Runs without a person
@@ -181,7 +184,7 @@ routines:
 
 - **Who:** a routine acts with the agent's own account, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Tools that need a person's sign-in (`screenshot`, `browse`, `propose_change`) are refused.
 - **When:** the agent service looks every minute. A routine with `every` first runs one interval after it is first seen; one with `on_push` runs when the branch moves after that. When each last ran is kept in memory, so a restart starts the intervals afresh and misses pushes in between. One run of a routine at a time.
-- **Where the answer goes:** posted in the namespace's channel, under the agent's name, by the gateway's Open WebUI account.
+- **Where the answer goes:** posted in the namespace's channel, or for a private agent its team channel, under the agent's name, by the gateway's Open WebUI account.
 - **How the gateway knows:** the agent service and the gateway derive a key from the admin password, which both hold. With it, the agent service tells the gateway what started each run (`person`, `agent <id>`, `routine <id>/<name>`) and, for a routine, its owner instead of a person's token. The gateway logs such calls as `bob (nobody watching, as agent-homepage-dev)`.
 
 ## Previews and browsing
@@ -269,7 +272,7 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 4. LLM and tool proxies; per-agent tool lists enforced; skills. Proxies built, with the per-agent tool lists of step 1. Git built: the agent service serves Git's fetch protocol to sandboxes (`$HOMECLOUD_GIT/<namespace>/<repo>.git`) for the repos the person may read, and the gateway's `propose_patch` applies a patch as the person on a `change/...` branch with a pull request; in Pi it is `propose_workspace_changes`, which proposes a checkout's changes and adds later ones to the same pull request. Several agents work on one repo like people do: each on its own branch, merged by a person. To come: Pi's native skills, Git LFS.
 5. Move the operator agents over; remove the model preset sync.
 6. Marketing agent: `screenshot` tool, built: headless Chrome in the control plane, signed in as the person, the PNG proposed as a pull request; tested with a media agent that bob asks for a screenshot of the todo app. To come: Git LFS for larger media, the media library, video.
-7. Accounts and grants, built: `visible`, kept as Open WebUI groups and checked by the agent service and the gateway; an account per agent with grants or routines, writing only to its granted repos; grants checked on `config` pull requests, with the limits no grant lifts; proposals by the agent's account on `agent/<name>/...`; `merge_change`; outsiders' proposals. Tested in scenarios 4g, 4h and 5b.
+7. Accounts and grants, built: private agents for private repos, kept as Open WebUI groups and team channels and checked by the agent service and the gateway; an account per agent with grants or routines, writing only to its granted repos; grants checked on `config` pull requests, with the limits no grant lifts; proposals by the agent's account on `agent/<name>/...`; `merge_change`; outsiders' proposals. Tested in scenarios 4g, 4h, 5b and 5c.
 8. `ask_agent`, built: waiting for the answer, or, in a channel, posting it later. Tested in 4i.
 9. Runs without a person, built: routines (`every`, `on_push`), posting into the namespace's channel, the record of what started a run; keeping proposals current when their base moves. Tested in 4j.
 10. Previews of pull requests and `browse`, built. Tested in 4i.

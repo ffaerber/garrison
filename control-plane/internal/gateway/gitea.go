@@ -24,6 +24,8 @@ type Gitea struct {
 	User     string // admin account
 	Password string
 	HTTP     *http.Client
+
+	privacy privacy // which repos are private, for a few seconds
 }
 
 // ErrForbidden means Gitea refused the person.
@@ -260,7 +262,9 @@ func (g *Gitea) CanWrite(ctx context.Context, as, org, repo string) error {
 			Push bool `json:"push"`
 		} `json:"permissions"`
 	}
-	if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s", org, repo), nil, &r); err != nil {
+	if status, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s", org, repo), nil, &r); status == http.StatusNotFound {
+		return ErrForbidden // Gitea hides what a person may not see
+	} else if err != nil {
 		return err
 	}
 	if !r.Permissions.Push {

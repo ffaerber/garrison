@@ -104,11 +104,15 @@ func (p Person) asker() string {
 	return p.Name
 }
 
-// CanUse tells whether p may talk to agent: anyone if it is visible to
-// everyone, else the people of its namespace and root admins.
+// CanUse tells whether p may talk to agent: anyone, unless it is private
+// (AgentPrivate); then the people of its namespace and root admins.
 func (g *Gitea) CanUse(ctx context.Context, a *agents.Agent, p Person) (bool, error) {
-	if a == nil || a.Visible == agents.VisibleEveryone || p.Admin || p.Unattended {
+	if a == nil || p.Admin || p.Unattended {
 		return true, nil
+	}
+	private, err := g.AgentPrivate(ctx, a)
+	if err != nil || !private {
+		return !private, err
 	}
 	role, err := g.Role(ctx, a.Namespace, p.Name)
 	return role != "", err
@@ -134,6 +138,9 @@ func (t *Tools) proposer(ctx context.Context, p Person, agent *agents.Agent, org
 		}
 	}
 	if agent != nil && agent.Namespace == org {
+		if err := t.mayRead(ctx, p, org, repo); err != nil {
+			return "", false, err
+		}
 		role, err := t.role(ctx, p, org)
 		if err != nil {
 			return "", false, err
@@ -194,6 +201,9 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	}
 	if number <= 0 {
 		return "", fmt.Errorf("%w: the pull request's number is missing", ErrInvalid)
+	}
+	if err := t.mayRead(ctx, p, org, repo); err != nil {
+		return "", err
 	}
 	g := t.Gitea
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", org, repo, number)

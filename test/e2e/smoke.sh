@@ -612,17 +612,27 @@ done
 admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" \
   "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-channel_of() { chat_api bob "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == sys.argv[1]))' "$1" 2>/dev/null; }
+# channel_of NAME [PERSON]: the id of a channel PERSON (bob) sees.
+channel_of() { chat_api "${2:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == sys.argv[1]))' "$1" 2>/dev/null; }
 : > "$tmp/posted"
-# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent of the namespace,
-# its operator by default, in its channel and prints its answer from the thread.
-ask_agent() {
-  local ns=$1 who=$2 question=$3 id=$1/${4:-operator} cid mid i
-  cid=$(channel_of "$ns")
-  mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:%s|%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$id" "$question")" \
+# mention CHANNEL PERSON AGENT TEXT: PERSON posts TEXT in CHANNEL, mentioning
+# AGENT; prints the channel's and the message's id.
+mention() {
+  local cid mid
+  cid=$(channel_of "$1" "$2") || return 1
+  mid=$(chat_api "$2" -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:%s|%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$3" "$4")" \
     "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
   echo "$cid $mid" >> "$tmp/posted"
+  echo "$cid $mid"
+}
+# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent of the namespace,
+# its operator by default, in its channel (or $CHANNEL) and prints its answer
+# from the thread.
+ask_agent() {
+  local ns=$1 who=$2 question=$3 id=$1/${4:-operator} cid mid i
+  read -r cid mid <<<"$(mention "${CHANNEL:-$ns}" "$who" "$id" "$question")"
+  [ -n "$mid" ] || return 1
   for i in $(seq 72); do
     chat_api "$who" "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c '
 import json,sys
@@ -720,7 +730,6 @@ cannot_push() { ! can_push "$1"; }
 
 check "homepage has its config, alice its first admin" test "$(roster main)" = "admins=alice members="
 not_seen() { ! has_model "$1" "$2"; }
-check "bob, not in homepage, does not see its agents" not_seen homepage/operator bob
 check "bob may not push to homepage's repos yet" cannot_push bob
 nopush=$(printf 'admins: [alice, bob]\nmembers: []\n' | base64 -w0)
 check "nobody changes members.yaml without a pull request" \
@@ -746,7 +755,6 @@ check "alice merges it"                    test "$(merge config alice "$pr")" = 
 check "carol joins the admins"             until_true 90 team_has admins carol
 check "bob joins the members"              until_true 90 team_has members bob
 check "bob may now push to homepage's repos" until_true 60 can_push bob
-check "bob now sees homepage's agents"     until_true 120 has_model homepage/operator bob
 
 echo "# 2. bob tries to make himself an admin"
 since=$(last_pr config)
@@ -1001,7 +1009,6 @@ printf 'You try the namespace'"'"'s apps in the browser, as the person you work 
 ' > "$tmp/tester.md"
 cat > "$tmp/desk.yaml" <<'YAML'
 description: Takes requests for changes to the namespace's apps from anyone
-visible: everyone
 tools: [read_file, propose_patch]
 grants:
   - {repo: todo, level: propose, for: everyone}
@@ -1101,8 +1108,6 @@ gone_from_members() { ! team_has members bob; }
 check "bob leaves the members"             until_true 90 gone_from_members
 check "bob may no longer push"             until_true 60 cannot_push bob
 check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$hp/todo")" = 200
-check "bob no longer sees homepage's agents" until_true 120 not_seen homepage/developer bob
-check "but the desk, for everyone"         has_model homepage/desk bob
 
 echo "# 5b. bob, no longer in homepage, asks the desk for a change"
 since=$(last_pr todo)
@@ -1117,6 +1122,27 @@ check "the desk proposes it with its own account" test -n "$opr"
 check "it says for whom"                   grep -q 'Asked by bob (not in homepage) through homepage/desk' <<<"$(gitea_api "" "$hp/todo/pulls/${opr:-0}")"
 check "on a branch of the desk's"          grep -q '"ref":"agent/desk/bob-' <<<"$(gitea_api "" "$hp/todo/pulls/${opr:-0}")"
 [ -n "$opr" ] && gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$opr"
+
+echo "# 5c. a private repo has a private agent"
+check "alice makes a private repo secret"  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"secret","private":true,"auto_init":true,"default_branch":"main"}' "$api/orgs/homepage/repos")" = 201
+printf 'description: Knows the repo secret\ntools: [read_file]\nrepos: [secret]\n' > "$tmp/keeper.yaml"
+printf 'You answer questions about the namespace'"'"'s repo secret, reading its files.\n' > "$tmp/keeper.md"
+kpr=$(propose_config keeper "Add the keeper" "agents/keeper/agent.yaml=$tmp/keeper.yaml" "agents/keeper/prompt.md=$tmp/keeper.md")
+check "carol approves the keeper"          test "$(review config carol "$kpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$kpr" success
+check "alice merges it"                    test "$(merge config alice "$kpr")" = 200
+check "carol, in homepage, sees it"        until_true 120 has_model homepage/keeper carol
+check "bob, no longer in homepage, does not" not_seen homepage/keeper bob
+check "he still sees the agents of public repos" has_model homepage/developer bob
+check "homepage has a team channel for carol" test -n "$(channel_of homepage-team carol)"
+check "which bob does not see"             test -z "$(channel_of homepage-team bob)"
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+mention homepage carol homepage/keeper "What is in the repo secret?" >/dev/null
+refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: homepage/keeper: refused in channel:.*: private"; }
+check "it does not answer in the channel everyone reads" until_true 120 refused_here
+answer=$(CHANNEL=homepage-team ask_agent homepage carol "Read README.md of the repo secret of the namespace homepage and tell me its first line." keeper)
+check "it answers carol in the team channel" grep -qi secret <<<"$answer"
+gitea_api "" -o /dev/null -X DELETE "$hp/secret"
 
 echo "# 6. alice adds an agent that may only read"
 check "homepage's config has its operator" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" = 200

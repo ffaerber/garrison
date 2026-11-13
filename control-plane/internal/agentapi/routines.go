@@ -117,11 +117,17 @@ func (r *Routines) Check(ctx context.Context) {
 
 func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, key, why string) {
 	s := r.Server
+	// A private agent's findings go where only the namespace's people read.
+	private, err := r.Gitea.AgentPrivate(ctx, &a)
+	if err != nil {
+		log.Printf("routines: %s: %v", key, err)
+		return
+	}
 	post := func(text string) {
 		if s.Poster == nil {
 			return
 		}
-		if err := s.Poster.Post(ctx, gateway.Post{Agent: a.ID(), Text: text}); err != nil {
+		if err := s.Poster.Post(ctx, gateway.Post{Agent: a.ID(), Team: private, Text: text}); err != nil {
 			log.Printf("routines: %s: post: %v", key, err)
 		}
 	}
@@ -136,7 +142,7 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 		return
 	}
 	log.Printf("routines: %s for %s: %s", key, rt.Owner, why)
-	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.
+	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in a channel of %s for its people to read, so say plainly what you found or did, with links.
 
 Task: %s`, rt.Name, rt.Owner, why, a.Namespace, strings.TrimSpace(rt.Task))
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }

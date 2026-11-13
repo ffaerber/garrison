@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -22,31 +23,54 @@ import (
 // and those it asks in turn.
 const MaxChain = 3
 
-// Poster posts an answer no message waits for into a channel.
+// Poster posts an answer no message waits for into a channel, and tells
+// what a channel is.
 type Poster interface {
 	Post(ctx context.Context, p gateway.Post) error
+	Channel(ctx context.Context, id string) (gateway.ChannelInfo, error)
 }
 
 // GatewayPoster posts through the gateway, which holds Open WebUI's account.
 type GatewayPoster struct {
-	URL        string // e.g. http://control-plane_gateway:8080/internal/post
+	URL        string // the gateway, e.g. http://control-plane_gateway:8080
 	ServiceKey string
 	HTTP       *http.Client
 }
 
+func (g *GatewayPoster) client() *http.Client {
+	if g.HTTP != nil {
+		return g.HTTP
+	}
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
+func (g *GatewayPoster) Channel(ctx context.Context, id string) (gateway.ChannelInfo, error) {
+	var info gateway.ChannelInfo
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.URL+"/internal/channels/"+url.PathEscape(id), nil)
+	if err != nil {
+		return info, err
+	}
+	req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return info, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return info, fmt.Errorf("channel %s: %s", id, resp.Status)
+	}
+	return info, json.NewDecoder(resp.Body).Decode(&info)
+}
+
 func (g *GatewayPoster) Post(ctx context.Context, p gateway.Post) error {
 	body, _ := json.Marshal(p)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.URL+"/internal/post", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
-	client := g.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	resp, err := client.Do(req)
+	resp, err := g.client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -165,6 +189,11 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 			return fmt.Sprintf("not allowed: %s is for the people of %s, and %s is not one of them", target.ID(), target.Namespace, who), true
 		}
 	}
+	if why, err := s.privateHere(ctx, target, c.Chat); err != nil {
+		return "error: " + err.Error(), true
+	} else if why != "" {
+		return "not allowed: " + why, true
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s asks you, working for %s", c.Agent, who)
 	if c.Run.Unattended {
@@ -226,4 +255,28 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		answer = "(no answer)"
 	}
 	return target.ID() + " answers:\n" + answer, false
+}
+
+// privateHere says why a private agent may not answer in chat, where people
+// outside its namespace would read it: a channel other than its namespace's
+// team channel. "" if it may: a public agent, a private chat, a routine.
+func (s *Server) privateHere(ctx context.Context, a agents.Agent, chat string) (string, error) {
+	id, inChannel := strings.CutPrefix(chat, "channel:")
+	if !inChannel || s.Gitea == nil {
+		return "", nil
+	}
+	private, err := s.Gitea.AgentPrivate(ctx, &a)
+	if err != nil || !private {
+		return "", err
+	}
+	if s.Poster != nil {
+		info, err := s.Poster.Channel(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if info.Team && info.Namespace == a.Namespace {
+			return "", nil
+		}
+	}
+	return fmt.Sprintf("%s works on private repos of %s, so it answers only where only %s's people read: ask it in the channel %s%s or in a private chat", a.ID(), a.Namespace, a.Namespace, a.Namespace, gateway.TeamSuffix), nil
 }

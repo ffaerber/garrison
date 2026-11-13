@@ -26,21 +26,21 @@ func load1(t *testing.T, ns, yaml string, more ...string) (Agent, []string) {
 	return Agent{}, problems
 }
 
-func TestVisibleDefaultsToMembersButSystemServesEveryone(t *testing.T) {
-	if a, p := load1(t, "homepage", "tools: []\n"); a.Visible != VisibleMembers || len(p) > 0 {
-		t.Errorf("homepage: %q %v", a.Visible, p)
+func TestVisible(t *testing.T) {
+	if a, p := load1(t, "homepage", "tools: []\n"); a.Visible != "" || len(p) > 0 {
+		t.Errorf("default: %q %v", a.Visible, p)
 	}
-	if a, p := load1(t, "system", "tools: []\n"); a.Visible != VisibleEveryone || len(p) > 0 {
-		t.Errorf("system: %q %v", a.Visible, p)
+	if a, _ := load1(t, "homepage", "visible: members\n"); a.Visible != VisibleMembers {
+		t.Errorf("members: %q", a.Visible)
 	}
-	if a, _ := load1(t, "homepage", "visible: everyone\n"); a.Visible != VisibleEveryone {
-		t.Errorf("everyone: %q", a.Visible)
+	for _, v := range []string{"everyone", "friends"} {
+		if _, p := load1(t, "homepage", "visible: "+v+"\n"); len(p) != 1 {
+			t.Errorf("%s: %v", v, p)
+		}
 	}
-	if _, p := load1(t, "homepage", "visible: friends\n"); len(p) != 1 {
-		t.Errorf("friends: %v", p)
-	}
-	if Operator("homepage", tools).Visible != VisibleMembers || Operator("system", tools).Visible != VisibleEveryone {
-		t.Error("the operator's visibility")
+	a, _ := load1(t, "homepage", "repos: [site]\ngrants: [{repo: todo, level: propose}]\nroutines: [{name: r, on_push: {repo: api, branch: main}, owner: bob, task: t}]\n")
+	if strings.Join(a.WorksOn(), ",") != "api,site,todo" {
+		t.Errorf("works on %v", a.WorksOn())
 	}
 }
 

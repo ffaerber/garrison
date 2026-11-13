@@ -44,6 +44,13 @@ func (f *grantsGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/repos/homepage/config/raw/members.yaml":
 		io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+	case p == "/repos/homepage/secret":
+		// Private: hidden from carol, who is not in homepage.
+		if as == "carol" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"private":true,"permissions":{"push":%v}}`, f.writers[as])
 	case p == "/repos/homepage/todo" && r.Method == http.MethodGet:
 		fmt.Fprintf(w, `{"permissions":{"push":%v}}`, f.writers[as])
 	case p == "/repos/homepage/todo/diffpatch":
@@ -249,5 +256,32 @@ func TestServiceKeyRuns(t *testing.T) {
 	m.ServiceKey = ""
 	if c := call(map[string]string{ServiceHeader: "", OwnerHeader: "bob"}); c != http.StatusUnauthorized {
 		t.Errorf("with no key configured: %d", c)
+	}
+}
+
+func TestPrivateReposAreForTheNamespacesPeople(t *testing.T) {
+	f := newGrantsGitea()
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	desk := &agents.Agent{Namespace: "homepage", Name: "desk", Tools: []string{"propose_patch", "merge_change"}, Grants: []agents.Grant{
+		{Repo: "secret", Level: agents.LevelPropose, For: agents.ForEveryone},
+		{Repo: "secret", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers},
+	}}
+	ctx := context.Background()
+	raw, _ := json.Marshal(map[string]any{"namespace": "homepage", "repo": "secret", "patch": "diff --git a/x b/x\n", "title": "T"})
+	if _, err := tools.Call(ctx, Person{Name: "carol"}, desk, "propose_patch", raw); err == nil || !strings.Contains(err.Error(), "carol cannot see homepage/secret") {
+		t.Errorf("carol proposed to a repo she cannot see: %v", err)
+	}
+	raw, _ = json.Marshal(map[string]any{"namespace": "homepage", "repo": "secret", "number": 1})
+	if _, err := tools.Call(ctx, Person{Name: "carol"}, desk, "merge_change", raw); err == nil || !strings.Contains(err.Error(), "cannot see") {
+		t.Errorf("carol learnt about a pull request she cannot see: %v", err)
+	}
+	problems, err := tools.Gitea.grantProblems(ctx, "homepage", []agents.Agent{*desk})
+	if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "secret is private") {
+		t.Errorf("approval check: %v %v", problems, err)
+	}
+	if private, _ := tools.Gitea.AgentPrivate(ctx, desk); !private {
+		t.Error("an agent with a grant on a private repo is not private")
 	}
 }

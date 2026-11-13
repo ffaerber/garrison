@@ -83,6 +83,10 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "[]")
 	case p == "/users/alice":
 		io.WriteString(w, `{"email":"alice@example.com"}`)
+	case p == "/repos/homepage/site" && as == "":
+		io.WriteString(w, `{"private":false}`)
+	case p == "/repos/homepage/secret" && as == "":
+		io.WriteString(w, `{"private":true}`)
 	case p == "/repos/homepage/config/raw/members.yaml":
 		io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
 	// homepage/config has two agents, one of them broken, and a skill.
@@ -498,10 +502,20 @@ func TestOpenWebUISync(t *testing.T) {
 	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Only homepage's people see its agents; system's are for everyone.
+	// Agents on public repos are for everyone; homepage has a group of its
+	// people, and a team channel only they read.
 	gid := "g" + GroupPrefix + "homepage"
-	if models["homepage/marketing"].Meta[AccessMarker] != "group:"+gid || models["system/operator"].Meta[AccessMarker] != "everyone" {
+	if models["homepage/marketing"].Meta[AccessMarker] != "everyone" || models["system/operator"].Meta[AccessMarker] != "everyone" {
 		t.Errorf("access: %v %v", models["homepage/marketing"].Meta, models["system/operator"].Meta)
+	}
+	team := 0
+	for _, c := range channels {
+		if c.Meta[TeamMarker] == "homepage" && c.Name == "homepage-team" {
+			team++
+		}
+	}
+	if team != 1 {
+		t.Errorf("homepage's team channel: %v", channels)
 	}
 	if strings.Join(groupUsers[gid], ",") != "u-alice" {
 		t.Errorf("homepage's group: %v (alice is in it; bob has not signed in to Open WebUI; carol is not in homepage)", groupUsers[gid])
@@ -672,13 +686,20 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Errorf("unknown agent in the path: %d", w.Code)
 	}
-	// carol is not in homepage: its agents, visible to its members, are not hers.
-	if code, _ := rpcAt(t, m, "/mcp/homepage/reader", "tok-carol", "tools/list", nil); code != http.StatusForbidden {
-		t.Errorf("carol used homepage/reader: %d", code)
-	}
-	m.Agents.Set([]agents.Agent{{Namespace: "homepage", Name: "desk", Visible: agents.VisibleEveryone, Tools: []string{"read_file"}}})
-	if code, _ := rpcAt(t, m, "/mcp/homepage/desk", "tok-carol", "tools/list", nil); code != http.StatusOK {
-		t.Errorf("carol could not use an agent for everyone: %d", code)
+	// carol is not in homepage: she may use its agents on public repos, not
+	// those on private ones or kept to its people.
+	m.Agents.Set([]agents.Agent{
+		{Namespace: "homepage", Name: "desk", Tools: []string{"read_file"}, Repos: []string{"site"}},
+		{Namespace: "homepage", Name: "keeper", Tools: []string{"read_file"}, Repos: []string{"secret"}},
+		{Namespace: "homepage", Name: "inner", Tools: []string{"read_file"}, Visible: agents.VisibleMembers},
+	})
+	for agent, want := range map[string]int{"desk": http.StatusOK, "keeper": http.StatusForbidden, "inner": http.StatusForbidden} {
+		if code, _ := rpcAt(t, m, "/mcp/homepage/"+agent, "tok-carol", "tools/list", nil); code != want {
+			t.Errorf("carol and homepage/%s: %d, want %d", agent, code, want)
+		}
+		if code, _ := rpcAt(t, m, "/mcp/homepage/"+agent, "tok-bob", "tools/list", nil); code != http.StatusOK {
+			t.Errorf("bob, a member, and homepage/%s: %d", agent, code)
+		}
 	}
 	m.Agents.Set([]agents.Agent{
 		{Namespace: "homepage", Name: "marketing", Tools: []string{"list_repos"},

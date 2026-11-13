@@ -17,6 +17,7 @@ import (
 type Post struct {
 	Agent   string `json:"agent"`   // <namespace>/<agent>
 	Channel string `json:"channel"` // an Open WebUI channel id; empty for the namespace's
+	Team    bool   `json:"team"`    // without Channel: the namespace's team channel, for a private agent
 	Text    string `json:"text"`
 }
 
@@ -42,8 +43,12 @@ func (o *OpenWebUI) Post(ctx context.Context, p Post) error {
 		if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
 			return err
 		}
+		marker := ChannelMarker
+		if p.Team {
+			marker = TeamMarker
+		}
 		for _, c := range all {
-			if c.Meta[ChannelMarker] == ns {
+			if c.Meta[marker] == ns {
 				id = c.ID
 			}
 		}
@@ -79,5 +84,56 @@ func PostHandler(o *OpenWebUI, key string) http.Handler {
 		}
 		log.Printf("post: %s in channel %q", p.Agent, p.Channel)
 		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+// ChannelInfo is what a channel is to the platform.
+type ChannelInfo struct {
+	Namespace string `json:"namespace"` // empty: not a namespace's
+	Team      bool   `json:"team"`      // its team channel, which only its people read
+}
+
+// Channel tells what the channel id is.
+func (o *OpenWebUI) Channel(ctx context.Context, id string) (ChannelInfo, error) {
+	token, err := o.session(ctx)
+	if err != nil {
+		return ChannelInfo{}, err
+	}
+	var all []owuiChannel
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
+		return ChannelInfo{}, err
+	}
+	for _, c := range all {
+		if c.ID != id {
+			continue
+		}
+		if ns, ok := c.Meta[TeamMarker].(string); ok {
+			return ChannelInfo{Namespace: ns, Team: true}, nil
+		}
+		ns, _ := c.Meta[ChannelMarker].(string)
+		return ChannelInfo{Namespace: ns}, nil
+	}
+	return ChannelInfo{}, nil
+}
+
+// ChannelHandler serves GET /internal/channels/{id} for the agent service.
+func ChannelHandler(o *OpenWebUI, key string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if key == "" || !hmac.Equal([]byte(r.Header.Get(ServiceHeader)), []byte(key)) {
+			http.Error(w, "only for the agent service", http.StatusUnauthorized)
+			return
+		}
+		id := r.PathValue("id")
+		if !channelID.MatchString(id) {
+			http.Error(w, "not a channel", http.StatusBadRequest)
+			return
+		}
+		info, err := o.Channel(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(info)
 	})
 }

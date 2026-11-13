@@ -142,6 +142,14 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	chat := r.Header.Get(ChatHeader)
+	if why, err := s.privateHere(r.Context(), agent, chat); err != nil {
+		apiError(w, http.StatusBadGateway, err.Error())
+		return
+	} else if why != "" {
+		log.Printf("agents: %s: %s: refused in %s: private", person.Name, agent.ID(), chat)
+		apiError(w, http.StatusForbidden, why)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.turnTimeout())
 	defer cancel()
 
