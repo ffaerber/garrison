@@ -19,3 +19,19 @@ Things worth building later, written down so they are not lost. Not planned yet;
 **Maybe:** `private: team` in `stack.yaml`, for a public repo whose app should still be for its people only.
 
 Basic auth in front of such apps was considered: SSO covers the same need, without passwords to hand around.
+
+## A front end of our own, with Gitea's web UI only for root admins
+
+**Problem:** people use Gitea's web UI directly, where they can click around in settings and delete things (see [unfixable.md](unfixable.md)). The home cloud has no front end of its own that shows it as one thing: namespaces, repos, apps, agents.
+
+**Idea:** the dashboard the spec plans becomes the main front end, and Gitea's web UI is for root admins only.
+
+- **Gitea's UI closed to others:** Gitea cannot switch its UI off, but Traefik can put a check in front of the web pages of `git.<domain>` that lets only root admins in, keeping Git over HTTP (clone, fetch), the registry and the sign-in paths open. The control plane reaches Gitea internally anyway.
+- **Namespaces and repos:** a list of namespaces, their repos, a repo's files and history, its pull requests and its apps and previews, all read and changed as the signed-in person through the gateway, which already has these as tools; it would need a plain API for a web page next to its MCP endpoint.
+- **Agents in the page:** "start agent" on a namespace or a repo opens a chat with its agent, or a coding agent with the repo already set, talking to the agent service directly (it speaks the OpenAI streaming API that Open WebUI uses). Sandboxes, workspaces and pull requests stay as they are.
+- **Routines:** per agent a list of its routines (schedule, owner, last run and its answer), with a button to run one now. Editing one opens a pull request on `agent.yaml`, so Git stays the truth and changes stay reviewed.
+- **Inbox:** pull requests to approve, previews to look at, failed deploys and pipelines, as the spec describes.
+
+**Before Gitea's UI can close,** the front end must cover what people do there: pull requests (diff, approve, merge, including the approvals of `members.yaml`), files and history, and pipeline status and logs.
+
+**Order:** a read-only overview with the inbox; pull requests; the agent chat with "start agent"; routines; then close Gitea's UI. Whether Open WebUI stays for team channels and free chat is decided later.
