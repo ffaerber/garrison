@@ -386,10 +386,28 @@ func TestOpenWebUISync(t *testing.T) {
 				list = append(list, m)
 			}
 			json.NewEncoder(w).Encode(list)
-		case "/api/v1/models/create", "/api/v1/models/model/update":
+		case "/api/v1/models/create":
 			var m owuiModel
 			json.NewDecoder(r.Body).Decode(&m)
 			models[m.ID] = m
+			io.WriteString(w, "{}")
+		case "/api/v1/models/model/update":
+			// As Open WebUI: the update keeps the access grants; only
+			// model/access/update changes them.
+			var m owuiModel
+			json.NewDecoder(r.Body).Decode(&m)
+			m.AccessGrants = models[m.ID].AccessGrants
+			models[m.ID] = m
+			io.WriteString(w, "{}")
+		case "/api/v1/models/model/access/update":
+			var b struct {
+				ID           string `json:"id"`
+				AccessGrants []any  `json:"access_grants"`
+			}
+			json.NewDecoder(r.Body).Decode(&b)
+			m := models[b.ID]
+			m.AccessGrants = b.AccessGrants
+			models[b.ID] = m
 			io.WriteString(w, "{}")
 		case "/api/v1/models/model/delete":
 			var b map[string]string

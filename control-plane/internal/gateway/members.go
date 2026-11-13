@@ -167,7 +167,9 @@ func (m *Members) Sync(ctx context.Context) error {
 		}
 	}
 	var errs []error
+	present := map[string]bool{}
 	for _, ns := range namespaces {
+		present[ns.Name] = true
 		if ns.Name == SystemNamespace {
 			if err := m.system(ctx, roots); err != nil {
 				errs = append(errs, fmt.Errorf("config of system: %w", err))
@@ -182,21 +184,48 @@ func (m *Members) Sync(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("changes of %s: %w", ns.Name, err))
 		}
 	}
+	// The agents of a namespace that is gone: their accounts are locked, so
+	// a namespace made again under its name starts without them.
+	for _, u := range users {
+		rest, ok := strings.CutPrefix(u.FullName, AccountPrefix)
+		ns, _, ok2 := strings.Cut(rest, "/")
+		if !ok || !ok2 || present[ns] || u.ProhibitLogin {
+			continue
+		}
+		if err := m.lock(ctx, u.Login); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		log.Printf("members: locked the account %s: its namespace %s is gone", u.Login, ns)
+	}
 	return errors.Join(errs...)
+}
+
+// lock keeps an agent's account from acting: Gitea refuses its sign-ins
+// and the gateway's Sudo as it.
+func (m *Members) lock(ctx context.Context, login string) error {
+	_, err := m.Gitea.do(ctx, "", http.MethodPatch, "/admin/users/"+login, map[string]any{
+		"login_name": login, "source_id": 0, "prohibit_login": true,
+	}, nil)
+	return err
 }
 
 type giteaUser struct {
 	Login         string `json:"login"`
 	FullName      string `json:"full_name"`
+	Email         string `json:"email"`
 	IsAdmin       bool   `json:"is_admin"`
 	ProhibitLogin bool   `json:"prohibit_login"`
 }
 
-func (m *Members) users(ctx context.Context) ([]giteaUser, error) {
+func (m *Members) users(ctx context.Context) ([]giteaUser, error) { return m.Gitea.users(ctx) }
+
+// users lists every Gitea account.
+func (g *Gitea) users(ctx context.Context) ([]giteaUser, error) {
 	var out []giteaUser
 	for page := 1; page < 40; page++ {
 		var users []giteaUser
-		if _, err := m.Gitea.do(ctx, "", http.MethodGet, fmt.Sprintf("/admin/users?limit=50&page=%d", page), nil, &users); err != nil {
+		if _, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/admin/users?limit=50&page=%d", page), nil, &users); err != nil {
 			return nil, err
 		}
 		out = append(out, users...)
@@ -284,9 +313,7 @@ func (m *Members) accounts(ctx context.Context, ns string, users []giteaUser) er
 			return err
 		}
 		if !u.ProhibitLogin {
-			if _, err := g.do(ctx, "", http.MethodPatch, "/admin/users/"+u.Login, map[string]any{
-				"login_name": u.Login, "source_id": 0, "prohibit_login": true,
-			}, nil); err != nil {
+			if err := m.lock(ctx, u.Login); err != nil {
 				return err
 			}
 			log.Printf("members: locked the account %s: its agent is gone, switched off or has no grants", u.Login)

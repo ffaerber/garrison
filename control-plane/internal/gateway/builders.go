@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"homecloud/control-plane/internal/hooks"
@@ -49,13 +50,36 @@ func (b *Builders) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	present := map[string]bool{}
 	for _, ns := range namespaces {
+		present[ns.Name] = true
 		if ns.Name == SystemNamespace {
 			continue
 		}
 		if err := b.setup(ctx, ns.Name); err != nil {
 			return fmt.Errorf("build account of %s: %w", ns.Name, err)
 		}
+	}
+	return b.removeGone(ctx, present)
+}
+
+// removeGone deletes the build accounts of namespaces that are gone, and
+// with them their tokens: a namespace made again under the same name gets
+// an account of its own, and the old token pushes nowhere.
+func (b *Builders) removeGone(ctx context.Context, present map[string]bool) error {
+	users, err := b.Gitea.users(ctx)
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		ns, ok := strings.CutSuffix(u.Login, "-builder")
+		if !ok || present[ns] || u.Email != u.Login+"@noreply."+b.Domain {
+			continue
+		}
+		if _, err := b.Gitea.do(ctx, "", http.MethodDelete, "/admin/users/"+u.Login, nil, nil); err != nil {
+			return fmt.Errorf("remove the build account of %s, which is gone: %w", ns, err)
+		}
+		log.Printf("builders: removed %s: its namespace is gone", u.Login)
 	}
 	return nil
 }

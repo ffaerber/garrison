@@ -91,6 +91,21 @@ func (f *fakeBuilderGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, "{}")
+	case p0 == "/admin/users" && r.Method == "GET":
+		var out []map[string]string
+		if r.URL.Query().Get("page") == "1" {
+			for n := range f.users {
+				email := n + "@noreply.example.com"
+				if n == "jo-builder" {
+					email = "jo@example.com" // a person, not a build account
+				}
+				out = append(out, map[string]string{"login": n, "email": email})
+			}
+		}
+		json.NewEncoder(w).Encode(out)
+	case strings.HasPrefix(p0, "/admin/users/") && r.Method == "DELETE":
+		delete(f.users, strings.TrimPrefix(p0, "/admin/users/"))
+		w.WriteHeader(204)
 	case p0 == "/admin/users":
 		f.users[body["username"].(string)] = body["password"].(string)
 		w.WriteHeader(201)
@@ -104,7 +119,7 @@ func (f *fakeBuilderGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestBuilders(t *testing.T) {
-	f := &fakeBuilderGitea{users: map[string]string{}, teams: map[string]map[string]any{}, secrets: map[string]map[string]string{}, variables: map[string]string{}}
+	f := &fakeBuilderGitea{users: map[string]string{"oldns-builder": "x", "jo-builder": "y"}, teams: map[string]map[string]any{}, secrets: map[string]map[string]string{}, variables: map[string]string{}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	b := &Builders{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}, Domain: "example.com", CA: "-----BEGIN CERTIFICATE-----"}
@@ -113,6 +128,12 @@ func TestBuilders(t *testing.T) {
 	}
 	if _, ok := f.users["homepage-builder"]; !ok {
 		t.Fatalf("users = %v", f.users)
+	}
+	if _, ok := f.users["oldns-builder"]; ok {
+		t.Error("the build account of a namespace that is gone was kept")
+	}
+	if _, ok := f.users["jo-builder"]; !ok {
+		t.Error("a person whose name ends in -builder was removed")
 	}
 	if _, ok := f.users["system-builder"]; ok {
 		t.Error("system got a build account; it builds on its own runner")

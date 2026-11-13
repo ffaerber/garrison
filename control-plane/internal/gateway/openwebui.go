@@ -249,6 +249,11 @@ func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.
 			if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/model/update", want, nil); err != nil {
 				return err
 			}
+			// The update keeps the access grants: an agent whose repo went
+			// private would stay visible to everyone.
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/model/access/update", map[string]any{"id": want.ID, "access_grants": want.AccessGrants}, nil); err != nil {
+				return err
+			}
 			log.Printf("open webui: updated the agent %s", want.ID)
 		}
 	}

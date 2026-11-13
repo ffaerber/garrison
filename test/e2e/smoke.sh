@@ -1346,11 +1346,14 @@ while read -r c m; do
 done < "$tmp/posted"
 }
 
+# crud: made, read, changed and removed, every kind of thing a namespace holds.
+. test/e2e/crud.sh
+
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
   t0=$SECONDS
-  case $s in system|login|platform|agent|deploy|talk) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent|deploy|talk|crud) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
   echo "time  section $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
 done
 # Slow checks: each check's time, longest first.
