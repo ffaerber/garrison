@@ -129,6 +129,15 @@ cat > /etc/sanoid/sanoid.conf <<SANOID
   autosnap = yes
   autoprune = yes
 SANOID
+# Sanoid caches its list of datasets; without --force-update a new app's
+# datasets would wait for the cache to expire before their first snapshot.
+mkdir -p /etc/systemd/system/sanoid.service.d
+cat > /etc/systemd/system/sanoid.service.d/homecloud.conf <<UNIT
+[Service]
+ExecStart=
+ExecStart=/usr/sbin/sanoid --take-snapshots --force-update --verbose
+UNIT
+systemctl daemon-reload
 systemctl enable --now sanoid.timer >/dev/null
 
 # ---------- secrets ----------

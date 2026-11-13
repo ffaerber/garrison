@@ -4,7 +4,7 @@ Go. One image, run in Swarm as the stack `control-plane` from the repo `system/c
 
 | Service | Does |
 | --- | --- |
-| `deployer` | Makes the machine match Git: deploys every repo of `system` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana. Later also holds the SOPS key, takes snapshots and writes change records. |
+| `deployer` | Makes the machine match Git: deploys every repo of `system` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana, snapshots an app's data before each redeploy and carries out restore requests (`restores/*.yaml` in a namespace's config). Later also holds the SOPS key and writes change records. |
 | `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each namespace's agents (from `agents/` in its config repo; each gets only its own tools), their accounts for grants, its channels and Open WebUI group, its members and approval checks, and its build account. Acts as an agent's own account where only a grant allows it (`merge_change`, outsiders' proposals), keeps open proposals up to date, and drives the browser for `screenshot` and `browse`. Changes nothing that runs. |
 | `agents` | The agent service: the OpenAI-compatible API Open WebUI talks to, whose models are the namespaces' agents. Runs each chat with an agent in a sandbox of its own (image from `sandbox/`, built with this one): Pi, the agent harness, with a workspace kept in a volume per chat. Passes on to the sandboxes the LLM, whose key only it holds, and the agent's tools from the gateway, acting as the person chatting. Serves `ask_agent` and runs the agents' routines. |
 | `sandbox-guard` | The Docker API for the agent service, letting through only sandboxes: the sandbox image, labelled, with limits, on the sandboxes network. |
@@ -55,7 +55,7 @@ What rendered stacks expect from the system stack is in `system/platform/contrac
 
 ## Not built yet
 
-Snapshots, SOPS, migrations, change records, approvals, restore, and namespaces other than `system`. See `docs/status.md`.
+SOPS, migrations, change records, approvals, and restoring code and data together. See `docs/status.md`.
 
 ## Known gaps
 

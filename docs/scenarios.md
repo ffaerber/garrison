@@ -142,3 +142,11 @@ Alice, in system's channel: *@system/operator Set up a new app: a namespace phot
 - It proposes `stacks/gallery.yaml` in `photos/config`, as alice, one the deployer takes. It makes no repo for it, and nothing goes into `system`.
 - A root admin who did not write it approves it, the approval check passes, alice merges it; the deployer deploys `gallery`.
 - Bob asks for a namespace of his own: Gitea refuses him, as only root admins make namespaces, and the gateway logs every try as refused.
+
+## 9. Alice has the operator bring todo's data back
+
+Alice: *@homepage/operator I deleted todos in the todo app by mistake. Bring todo's data on main back to the newest snapshot taken before a deploy.*
+
+- The operator lists todo's snapshots (`list_snapshots`), as alice, and proposes a restore request, `restores/<name>.yaml` in `homepage/config`, naming one of them.
+- Carol approves it, the approval check passes, alice merges it.
+- The deployer snapshots todo's current data, stops todo, copies its database back from the snapshot and starts it again; todo answers.

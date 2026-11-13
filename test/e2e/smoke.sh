@@ -612,7 +612,8 @@ check "with its database"                  zfs list "$todo_ds/todo-db@$snap"
 listed() { grep -q "\"$snap\"" /var/lib/homecloud/deployer/snapshots.json; }
 check "and lists it for the agents"        until_true 60 listed
 check "Sanoid snapshots on a schedule"     systemctl is-active sanoid.timer
-sanoid --take-snapshots >/dev/null 2>&1
+# As its timer does every 15 minutes.
+systemctl start sanoid.service
 autosnap() { zfs list -H -t snapshot -o name "$todo_ds/todo-db" | grep -q '@autosnap_.*_hourly$'; }
 check "the apps' data too"                 autosnap
 plants() { todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import json,sys; print(" ".join(str(t["id"]) for t in json.load(sys.stdin) if t["title"]=="Water the plants"))'; }
@@ -1299,6 +1300,44 @@ answer=$(ask_agent system bob "Make me a namespace bobs for my own apps.")
 check "bob cannot make a namespace"        test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/bobs")" = 404
 refused_ns() { refused_only "$since" bob create_namespace "only root admins may"; }
 check "the gateway refused every try"      refused_ns
+
+echo "# 9. alice has the operator bring todo's data back"
+todo_ds=homecloud/ns/homepage/stacks/todo
+was=$(zfs get -H -o value homecloud:restored "$todo_ds")
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent homepage alice "I deleted todos in the todo app by mistake. Bring todo's data on main back to the newest snapshot taken before a deploy. Propose it; I know newer data gets lost. Do not ask back.")
+# restore_pr: the open pull request of homepage/config by alice that changes restores/.
+restore_pr() {
+  local n
+  for n in $(gitea_api "" "$hp/config/pulls?state=open&limit=10" | python3 -c 'import json,sys; [print(p["number"]) for p in json.load(sys.stdin) if p["user"]["login"]=="alice"]' 2>/dev/null); do
+    gitea_api "" "$hp/config/pulls/$n/files" | grep -q '"filename":"restores/[^"]*\.yaml"' && { echo "$n"; return 0; }
+  done
+  return 1
+}
+if ! restore_pr >/dev/null; then
+  printf 'retry the operator proposed no restore; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage alice "Please go ahead now: list_snapshots for the stack todo in homepage, take the newest deploy-… one, and propose restores/todo.yaml in homepage/config with propose_change (stack: todo, environment: main, snapshot: <its name>).")
+fi
+lists_snaps() { mcp_calls "$since" alice | grep -q "mcp: alice: list_snapshots"; }
+check "it lists todo's snapshots, as alice" lists_snaps
+rpr=$(restore_pr)
+check "it proposes a restore in homepage's config, as alice" test -n "$rpr"
+rhead=$(gitea_api "" "$hp/config/pulls/${rpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)
+rfile=$(gitea_api "" "$hp/config/pulls/${rpr:-0}/files" | python3 -c 'import json,sys; [print(f["filename"]) for f in json.load(sys.stdin) if f["filename"].startswith("restores/")]' 2>/dev/null | head -n1)
+rsnap=$(gitea_api "" "$hp/config/raw/$rfile?ref=$rhead" | python3 -c 'import sys,yaml; print((yaml.safe_load(sys.stdin) or {}).get("snapshot",""))' 2>/dev/null)
+check "of a snapshot todo has"             zfs list "$todo_ds@${rsnap:-none}"
+check "carol approves it"                  test "$(gitea_api carol -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Go ahead."}' "$hp/config/pulls/${rpr:-0}/reviews")" = 200
+restore_approved() {
+  gitea_api "" "$hp/config/commits/$rhead/status" | python3 -c '
+import json,sys
+sys.exit(0 if any(s["context"] == "homecloud/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
+}
+check "the approval check passes"          until_true 120 restore_approved
+check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/config/pulls/${rpr:-0}/merge")" = 200
+restored_again() { v=$(zfs get -H -o value homecloud:restored "$todo_ds"); [ "$v" != - ] && [ "$v" != "$was" ]; }
+check "the deployer restores it"           until_true 300 restored_again
+todo_back() { status_is 302 todo / 5; }
+check "todo answers again"                 until_true 180 todo_back
 
 while read -r c m; do
   for id in $(web -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do
