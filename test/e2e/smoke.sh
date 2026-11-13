@@ -1198,6 +1198,38 @@ gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
 quotes_gone() { ! docker service inspect quotes_web >/dev/null 2>&1; }
 check "deleting the repo takes the app down" until_true 120 quotes_gone
 
+echo "# 8. alice has the operator set up a new app, from nothing"
+since_ns=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent system alice "Set up a new app for us: make a namespace photos for our photo apps, in it a repo gallery, and propose its stack.yaml: a small web app that shows who is visiting, the image traefik/whoami:v1.11 on port 80, behind the sign-in. You have everything you need; do not ask back.")
+org_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/photos")" = 200 ]; }
+if ! org_made || [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" != 200 ]; then
+  printf 'retry the operator did not make both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent system alice "Please go ahead now: create_namespace photos, create_repo gallery in photos, then propose its stack.yaml with propose_change (image traefik/whoami:v1.11, port 80, private)." )
+fi
+check "it makes the namespace photos, as alice" org_made
+photos_admin() { gitea_api "" "$api/repos/photos/config/raw/members.yaml" | python3 -c 'import sys,yaml; sys.exit(0 if (yaml.safe_load(sys.stdin) or {}).get("admins") == ["alice"] else 1)'; }
+check "with alice as its first admin"      until_true 180 photos_admin
+check "and the repo gallery in it"         test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" = 200
+gallery_pr() { gitea_api "" "$api/repos/photos/gallery/pulls?state=open&limit=10" | python3 -c 'import json,sys; l=[p["number"] for p in json.load(sys.stdin) if p["user"]["login"]=="alice"]; print(l[0] if l else "")'; }
+gpr=$(gallery_pr)
+if [ -z "$gpr" ]; then
+  printf 'retry the operator proposed no stack.yaml; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent system alice "Please propose the stack.yaml for photos/gallery now with propose_change: stack gallery, namespace photos, the image traefik/whoami:v1.11 on port 80, environment main private.")
+  gpr=$(gallery_pr)
+fi
+check "it proposes a stack.yaml, as alice" test -n "$gpr"
+gitea_api "" "$api/repos/photos/gallery/raw/stack.yaml?ref=$(gitea_api "" "$api/repos/photos/gallery/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/gallery.yaml"
+check "one the deployer takes"             homecloud validate "$tmp/gallery.yaml"
+check "nothing went into system"           test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/gallery")" = 404
+check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$api/repos/photos/gallery/pulls/${gpr:-0}/merge")" = 200
+gallery_deployed() { homecloud applied | grep -q "^app photos/gallery@main gallery "; }
+check "the deployer deploys it"            until_true 300 gallery_deployed
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask_agent system bob "Make me a namespace bobs for my own apps.")
+check "bob cannot make a namespace"        test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/bobs")" = 404
+refused_ns() { refused_only "$since" bob create_namespace "only root admins may"; }
+check "the gateway refused every try"      refused_ns
+
 while read -r c m; do
   for id in $(web -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do
     web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$id/delete"

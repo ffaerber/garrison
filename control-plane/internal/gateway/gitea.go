@@ -478,3 +478,65 @@ func (g *Gitea) Changes(ctx context.Context, as, org string) ([]Change, error) {
 }
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// CreateNamespace makes a namespace, a Gitea organisation, as person. Gitea
+// lets only its admins, the root admins, make organisations. Its creator is
+// its first owner; the members sync then makes its config repo, with them as
+// its first admin, and the Open WebUI sync its channel.
+func (g *Gitea) CreateNamespace(ctx context.Context, as, name, description string) (string, error) {
+	if err := validOrg(name); err != nil {
+		return "", err
+	}
+	if len(name) > 40 || strings.ToLower(name) != name || strings.ContainsAny(name, "._") {
+		return "", fmt.Errorf("%w: a namespace's name is lowercase letters, digits and dashes, at most 40: %q", ErrInvalid, name)
+	}
+	status, err := g.do(ctx, as, http.MethodPost, "/orgs", map[string]any{
+		"username": name, "description": description, "visibility": "limited",
+	}, nil)
+	switch {
+	case status == http.StatusUnprocessableEntity || status == http.StatusConflict:
+		return "", fmt.Errorf("%w: there is a namespace or user %q already", ErrInvalid, name)
+	case errors.Is(err, ErrForbidden):
+		return "", refused{as + " may not make namespaces: only root admins may"}
+	case err != nil:
+		return "", err
+	}
+	return name, nil
+}
+
+// CreateRepo makes an empty repo in a namespace, as person: Gitea lets the
+// namespace's admins and the root admins. It starts with a README on main,
+// so changes can be proposed to it; nothing in it runs until a pull request
+// with a stack.yaml is merged.
+func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description string, private bool) (string, error) {
+	if err := validOrg(org); err != nil {
+		return "", err
+	}
+	if err := validRepo(repo); err != nil {
+		return "", err
+	}
+	if repo == ConfigRepo {
+		return "", fmt.Errorf("%w: config is made with the namespace", ErrInvalid)
+	}
+	if strings.ToLower(repo) != repo || len(repo) > 40 || strings.ContainsAny(repo, "._") {
+		return "", fmt.Errorf("%w: a repo's name is lowercase letters, digits and dashes, at most 40, as it may become a hostname: %q", ErrInvalid, repo)
+	}
+	var r struct {
+		HTMLURL string `json:"html_url"`
+	}
+	status, err := g.do(ctx, as, http.MethodPost, "/orgs/"+org+"/repos", map[string]any{
+		"name": repo, "description": description, "private": private,
+		"auto_init": true, "default_branch": "main", "readme": "Default",
+	}, &r)
+	switch {
+	case status == http.StatusConflict || status == http.StatusUnprocessableEntity:
+		return "", fmt.Errorf("%w: %s/%s exists already", ErrInvalid, org, repo)
+	case status == http.StatusNotFound:
+		return "", fmt.Errorf("%w: there is no namespace %s", ErrInvalid, org)
+	case errors.Is(err, ErrForbidden):
+		return "", refused{fmt.Sprintf("%s may not make repos in %s: its admins and root admins may", as, org)}
+	case err != nil:
+		return "", err
+	}
+	return r.HTMLURL, nil
+}

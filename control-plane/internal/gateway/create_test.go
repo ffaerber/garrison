@@ -1,0 +1,81 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestMakingNamespacesAndRepos(t *testing.T) {
+	var made []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		as := r.Header.Get("Sudo")
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		switch r.URL.Path {
+		case "/api/v1/orgs": // Gitea lets only its admins make organisations
+			if as != "alice" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			if body["username"] == "homepage" {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				return
+			}
+			made = append(made, "org "+body["username"].(string)+" "+body["visibility"].(string))
+			io.WriteString(w, "{}")
+		case "/api/v1/orgs/photos/repos":
+			if as != "alice" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			made = append(made, "repo photos/"+body["name"].(string))
+			io.WriteString(w, `{"html_url":"https://git/photos/`+body["name"].(string)+`"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	call := func(who, tool string, args map[string]any) (string, error) {
+		raw, _ := json.Marshal(args)
+		return tools.Call(context.Background(), Person{Name: who}, nil, tool, raw)
+	}
+	if out, err := call("alice", "create_namespace", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") {
+		t.Errorf("alice: %q %v", out, err)
+	}
+	if _, err := call("bob", "create_namespace", map[string]any{"name": "bobs"}); err == nil || !strings.Contains(err.Error(), "only root admins may") {
+		t.Errorf("bob: %v", err)
+	}
+	if _, err := call("alice", "create_namespace", map[string]any{"name": "homepage"}); err == nil || !strings.Contains(err.Error(), "already") {
+		t.Errorf("an existing one: %v", err)
+	}
+	for _, bad := range []string{"Photos", "a.b", "../x"} {
+		if _, err := call("alice", "create_namespace", map[string]any{"name": bad}); err == nil {
+			t.Errorf("namespace %q made", bad)
+		}
+	}
+	if out, err := call("alice", "create_repo", map[string]any{"namespace": "photos", "repo": "immich"}); err != nil || !strings.Contains(out, "https://git/photos/immich") {
+		t.Errorf("repo: %q %v", out, err)
+	}
+	if _, err := call("bob", "create_repo", map[string]any{"namespace": "photos", "repo": "mine"}); err == nil || !strings.Contains(err.Error(), "may not make repos in photos") {
+		t.Errorf("bob's repo: %v", err)
+	}
+	for _, bad := range []string{"config", "Immich", "a_b"} {
+		if _, err := call("alice", "create_repo", map[string]any{"namespace": "photos", "repo": bad}); err == nil {
+			t.Errorf("repo %q made", bad)
+		}
+	}
+	if strings.Join(made, ",") != "org photos limited,repo photos/immich" {
+		t.Errorf("made %v", made)
+	}
+	// Not without a person.
+	raw, _ := json.Marshal(map[string]any{"name": "x"})
+	if _, err := tools.Call(context.Background(), Person{Name: "agent-x", Unattended: true, Owner: "alice"}, nil, "create_namespace", raw); err == nil {
+		t.Error("a routine made a namespace")
+	}
+}

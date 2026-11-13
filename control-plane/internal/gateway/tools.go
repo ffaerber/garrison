@@ -134,6 +134,16 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "namespace", "repo", "patch", "title"),
+		spec("create_namespace", "Makes a new namespace (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml, its operator agent and its channel.", map[string]any{
+			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
+			"description": str("what it is for"),
+		}, "name"),
+		spec("create_repo", "Makes an empty repo in a namespace, as the person asking: its admins and root admins may. Then propose its files with propose_change or propose_patch; a repo whose main branch holds a stack.yaml is deployed as an app once that is merged.", map[string]any{
+			"namespace":   nsArg,
+			"repo":        str("lowercase letters, digits and dashes; an app's repo is named after it, e.g. immich"),
+			"description": str("what it holds"),
+			"private":     map[string]any{"type": "boolean", "description": "only the namespace's people may read it; default false"},
+		}, "namespace", "repo"),
 		spec("merge_change", "Merges a pull request of one of your proposals, with your own account, if one of your grants allows merging into its base branch for the person you talk to and its checks have passed. A merge into a branch that deploys (main, dev) deploys it. If it is refused, say why; do not work around it.", map[string]any{
 			"namespace": nsArg,
 			"repo":      str("repo name"),
@@ -167,6 +177,7 @@ type args struct {
 	Patch, Base, Branch                                                                    string
 	Lines, Width, Height, Number, Click                                                    int
 	TypeInto                                                                               int `json:"type_into"`
+	Private                                                                                bool
 	Text                                                                                   string
 	Submit                                                                                 bool
 	URL                                                                                    string `json:"url"`
@@ -188,7 +199,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 	// A run without a person acts with the agent's account, which may write
 	// to its granted repos: only propose_patch and merge_change, which check
 	// the grants, change anything then. The browser needs a person's sign-in.
-	if p.Unattended && (name == "propose_change" || name == "screenshot" || name == "browse") {
+	if p.Unattended && (name == "propose_change" || name == "screenshot" || name == "browse" || name == "create_namespace" || name == "create_repo") {
 		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
 	}
 	var out string
@@ -333,6 +344,18 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		return page.String(), nil
 	case "propose_patch":
 		return t.proposePatch(ctx, p, agent, a)
+	case "create_namespace":
+		name, err := t.Gitea.CreateNamespace(ctx, p.Name, a.Name, a.Description)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. Within a minute it has its config repo (members.yaml, its agents), its operator and its channel. Make its repos with create_repo.", name, p.Name), nil
+	case "create_repo":
+		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Namespace, a.Repo, a.Description, a.Private)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, u), nil
 	case "merge_change":
 		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
 	case "propose_change":

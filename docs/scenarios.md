@@ -133,3 +133,12 @@ Alice proposes `agents/reader` with a tool that does not exist: the approval che
 The app `homepage/quotes` builds, but exits at start: its `stack.yaml` does not set `QUOTES_FILE`. Alice: *@homepage/operator The quotes app does not work. Find out why and tell me what to change.*
 
 - The agent looks at the stack's tasks or logs, as alice, and names the missing setting.
+
+## 8. Alice has the operator set up a new app, from nothing
+
+Alice, in system's channel: *@system/operator Set up a new app: a namespace photos, in it a repo gallery, and its stack.yaml: traefik/whoami:v1.11 on port 80, behind the sign-in.*
+
+- The operator makes the namespace `photos`, as alice; within a minute it has its config, with alice as its first admin.
+- It makes the repo `photos/gallery` and proposes a `stack.yaml` the deployer takes, as alice. Nothing goes into `system`.
+- Alice merges it; the deployer deploys `gallery`.
+- Bob asks for a namespace of his own: Gitea refuses him, as only root admins make namespaces, and the gateway logs every try as refused.
