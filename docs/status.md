@@ -36,7 +36,9 @@ History repos and the rest of the config repo (secrets); snapshots, SOPS, change
 
 ## Known limits
 
-Problems the platform cannot close itself, as Gitea, Open WebUI or Docker offer no way to, are in [unfixable.md](unfixable.md).
+Problems the platform cannot close itself, as Gitea, Open WebUI or Docker offer no way to, are in [unfixable.md](unfixable.md); ideas for later in [ideas.md](ideas.md).
+
+- The apps, `dev-` environments and previews of private repos can be opened by everyone signed in, not only the namespace's people (an idea to fix it is in [ideas.md](ideas.md)).
 
 - The deployer pulls its image from the local Docker daemon, which built it. A second node would need registry credentials.
 - The system runner's jobs can use the Docker daemon, which is root on the machine. It serves only the `system` organisation, which only root admins can write to.
