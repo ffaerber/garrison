@@ -59,7 +59,7 @@ inputs() {
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
     agent)    echo test/e2e/smoke.sh ;;
     deploy)   echo test/e2e/smoke.sh examples installer/push-repo.sh ;;
-    talk)     echo test/e2e/smoke.sh docs/scenarios.md ;;
+    talk)     echo test/e2e/smoke.sh test/e2e/apps docs/scenarios.md ;;
   esac
 }
 

@@ -138,7 +138,7 @@ func baseSpecs() []Spec {
 			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
 			"description": str("what it is for"),
 		}, "name"),
-		spec("create_repo", "Makes an empty repo in a namespace, as the person asking: its admins and root admins may. Then propose its files with propose_change or propose_patch; a repo whose main branch holds a stack.yaml is deployed as an app once that is merged.", map[string]any{
+		spec("create_repo", "Makes an empty repo in a namespace, as the person asking: its admins and root admins may. For an app's own code: the app itself is deployed from stacks/<name>.yaml in the namespace's config, which names the repo as its source. Propose the repo's files with propose_change or propose_patch.", map[string]any{
 			"namespace":   nsArg,
 			"repo":        str("lowercase letters, digits and dashes; an app's repo is named after it, e.g. immich"),
 			"description": str("what it holds"),
@@ -233,7 +233,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			return "", err
 		}
 		if len(stacks) == 0 {
-			return "No stacks are deployed in this namespace. Each repo with a stack.yaml is deployed from its branches, once its image is built.", nil
+			return "No apps are deployed in this namespace. Each file stacks/<name>.yaml in its repo config is an app, deployed once its images exist.", nil
 		}
 		var b strings.Builder
 		for _, s := range stacks {
@@ -355,7 +355,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, u), nil
+		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); to deploy it, propose stacks/%s.yaml in %s/config with source: %s. Nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, a.Repo, a.Namespace, a.Repo, u), nil
 	case "merge_change":
 		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
 	case "propose_change":

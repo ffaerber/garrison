@@ -27,7 +27,7 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 
 - **Root (system):** the platform itself and its shared services, the namespace `system`. One per installation.
 - **Namespace:** a Gitea organisation: a flat group of stacks with its own members, channel and Docker network. No nesting.
-- **Stack:** one app, possibly several services, in one repo of its namespace. App stacks are described in the platform's stack format; system stacks are plain Compose files, because they are the platform itself.
+- **Stack:** one app, possibly several services, described in the platform's stack format in its namespace's config repo, `config/stacks/<name>.yaml`. An app with code of its own names the repo holding it as its source; the repo itself holds nothing of the home cloud. System stacks are plain Compose files, one repo each, because they are the platform itself.
 - **Service:** one container in a stack. Exactly one is the entry point.
 - **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-homepage.domain.com.
 - **Agents:** operator agents (system, namespace) run the cluster; coding agents build apps.
@@ -70,17 +70,17 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 | --- | --- | --- | --- |
 | System repos | The `system` organisation, one per system stack | `compose.yaml` and the files it uses; for the deployer also its source and build | Root admins, system agent via PR |
 | Platform repo | `system/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, system agent via PR |
-| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `system`), `agents/` and `skills/`; later repos, autonomy levels, branch rights, hostnames, SOPS-encrypted secrets | Namespace admins (root admins in `system`), agents via PR |
+| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `system`), `agents/` and `skills/`, `stacks/` (its apps; not in `system`); later SOPS-encrypted secrets | Namespace admins (root admins in `system`), agents via PR |
 | History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Deployer only |
-| App repos | Inside a namespace, one per stack | Code, `stack.yaml`, numbered migrations | Members, coding agents |
+| App repos | Inside a namespace, one per app with code of its own | Code, Dockerfile, tests, the pipeline that builds its image, numbered migrations | Members, coding agents |
 
 Config files are JSON or YAML, validated by JSON Schema. Every repo, including the system repos and every namespace's config and history, is readable by everyone who is signed in; nothing is readable without signing in. Secret values stay SOPS-encrypted and readable by no one.
 
 ## Stack format
 
+`media/config/stacks/jellyfin.yaml`: its place names the stack and its namespace.
+
 ```yaml
-stack: jellyfin
-namespace: media
 entrypoint: app
 
 services:
@@ -102,7 +102,20 @@ services:
 
 environments:
   main: {}
-  dev:  { private: true }
+```
+
+An app with code of its own names its repo as `source`; its branches and pull requests are then its environments, each deployed at its newest commit:
+
+```yaml
+# homepage/config/stacks/todo.yaml
+source: todo
+entrypoint: web
+services:
+  web: { image: "{{registry}}/homepage/todo:{{commit}}", port: 8080 }
+environments:
+  main:    { private: true }
+  dev:     { private: true }   # the branch dev
+  preview: { private: true }   # each open pull request, as pr-<n>
 ```
 
 - The entry point gets the environment's hostname; `public: admin` gives `<hostname>-admin`, so jellyfin-admin.domain.com on main and dev-jellyfin-admin.domain.com on dev; other services stay internal.
@@ -113,9 +126,9 @@ environments:
 - A volume is mounted at `/<volume name>` in the container, so `config` appears at `/config`; `path` overrides this.
 - Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login.
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
-- The stack file carries no policy. Autonomy levels and branch rights live only in the namespace config repo, so nobody who can write an app repo can change them. The deployer rejects a `stack.yaml` with policy keys, or any other key the schema does not know.
+- The stack file carries no policy, and lives in the namespace's config repo, so changing how an app runs needs an admin's approval, like `members.yaml`; nobody who can only write an app repo can change it. The deployer and the approval check reject any key the schema does not know.
 - `env` sets environment variables; `{{url}}` and `{{host}}` in a value become the environment's address. An image may say `{{registry}}/<namespace>/<name>:{{commit}}`: the deployer then deploys a commit only once the namespace's pipeline has pushed that image, so a failing pipeline leaves the app at its last good commit.
-- In a namespace other than `system`, every repo with a `stack.yaml` is an app; its stack name must equal the repo's name and its namespace the organisation's. Each environment is deployed from the branch of the same name, and taken down when the branch or repo is deleted.
+- In a namespace other than `system`, every file `config/stacks/<name>.yaml` on `main` is an app named `<name>`. With a `source`, each environment is deployed from the source repo's branch of the same name, at its newest commit, and taken down when the branch is deleted; with `preview`, each open pull request of the source repo gets its environment `pr-<n>`. Without a source, only `main` exists, deployed as the file says. Removing the file takes the app down; a change to it redeploys it.
 - The format names no orchestrator; the deployer renders it to Swarm in the MVP.
 
 ## Pipelines
@@ -198,10 +211,10 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 - The gateway serves an agent only the tools its `agent.yaml` lists (plus `load_skill` and `read_skill_file` if it has skills); a call that names no agent of a namespace gets none. It keeps an entry per agent in Open WebUI, for everyone, or only for the namespace's people if the agent works on a private repo, and one channel per namespace, for its people, adding and removing them as folders and organisations come and go. People can also chat with an agent privately.
 - The `homecloud/approval` check on config pull requests also checks the agent files: an agent with an unknown tool or skill, or without a prompt, fails it.
 - The gateway is an MCP server. The agent service calls it with the signed-in person's Keycloak access token, so every tool acts with that person's rights: reads and proposals go to Gitea as them. Neither is reachable from outside.
-- Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, propose a change to a file, and take a screenshot of a page. As the person, they make namespaces (root admins only, as Gitea allows) and empty repos (a namespace's admins); everything in a repo still comes as a pull request. Every agent's system prompt says how the home cloud works: namespaces, `system` only for the platform, apps as repos with a `stack.yaml`, secrets made by the deployer.
+- Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, propose a change to a file, and take a screenshot of a page. As the person, they make namespaces (root admins only, as Gitea allows) and empty repos (a namespace's admins); everything in a repo still comes as a pull request. Every agent's system prompt says how the home cloud works: namespaces, `system` only for the platform, apps as files in `config/stacks/`, secrets made by the deployer.
 - `screenshot` loads a page of the installation in the control plane's headless Chrome, signed in as the person: the browser sends their Keycloak token, which the sign-in in front of the apps accepts (Open WebUI's tokens name `sso` as an audience), and Traefik removes it before the request reaches the app. The browser's only network reaches Traefik and the gateway, every name it looks up goes to Traefik, and the gateway refuses its requests to other names. Each screenshot gets a fresh browser context. The PNG becomes a pull request, as with `propose_change`.
 - `propose_change` opens a pull request as the person. It cannot merge or deploy: a person allowed to merges in Gitea, and the deployer deploys `main`. The agent always gives the link.
-- Agents with grants have accounts of their own: they propose for people who may not write themselves, and merge with `merge_change` where a grant allows it for the person asking. Agents ask each other with `ask_agent`, run routines with nobody watching, and use pages with `browse`; pull requests of an app whose `stack.yaml` has a `preview` environment get a preview each. See [agents.md](agents.md).
+- Agents with grants have accounts of their own: they propose for people who may not write themselves, and merge with `merge_change` where a grant allows it for the person asking. Agents ask each other with `ask_agent`, run routines with nobody watching, and use pages with `browse`; pull requests of an app's source repo get a preview each if its stack has a `preview` environment. See [agents.md](agents.md).
 - Not yet: conversational setup on a draft branch.
 
 ## Notifications

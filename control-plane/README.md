@@ -16,12 +16,12 @@ The same binary is installed on the host as `homecloud`: the installer uses it t
 
 | Package | Does |
 | --- | --- |
-| `internal/stack` | Parses `stack.yaml`, validates it against `schemas/stack.schema.json` and the rules a schema cannot express, fills in hostnames |
+| `internal/stack` | Parses stack files (`config/stacks/<name>.yaml`, or standalone for the CLI), validates them against `schemas/stack.schema.json` and the rules a schema cannot express, fills in hostnames |
 | `internal/hostnames` | Lists the hostnames a stack claims and rejects clashes and reserved names |
 | `internal/render` | Renders one environment of a stack as a Compose file for `docker stack deploy` |
 | `internal/apply` | Creates the ZFS datasets and Swarm secrets a stack needs, then runs `docker stack deploy` |
 | `internal/system` | Deploys a system stack: a plain Compose file, its datasets and config hash |
-| `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`; the deployer itself last |
+| `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`, the deployer itself last; and every other namespace's apps, `config/stacks/<name>.yaml`, from their source repos' branches and pull requests |
 | `internal/hooks` | Gitea's webhooks: puts one on every organisation, its secret derived from the admin password, checks the signature of each call, and wakes the sync loops |
 | `internal/dashboards` | Keeps `dashboards/*.json` of every repo in Grafana |
 | `internal/agentapi` | The agent service: models, chat completions (streamed), turns in sandboxes and the API they use (LLM, tools, read-only Git), `ask_agent`, routines, the in-process loop for requests without a chat, Open WebUI's tasks |

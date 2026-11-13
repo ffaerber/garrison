@@ -5,8 +5,6 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "stack",
-    "namespace",
     "entrypoint",
     "services",
     "environments"
@@ -14,10 +12,15 @@
   "properties": {
     "stack": {
       "$ref": "#/$defs/label",
-      "description": "Stack name. Also the hostname of the main environment."
+      "description": "Stack name, also the hostname of the main environment. In a namespace's config repo (stacks/<name>.yaml) the file's name says it; there it may be left out."
     },
     "namespace": {
-      "$ref": "#/$defs/label"
+      "$ref": "#/$defs/label",
+      "description": "The namespace. In a config repo its place says it; there it may be left out."
+    },
+    "source": {
+      "$ref": "#/$defs/label",
+      "description": "A repo of the namespace with the app's code. Its branches are the environments (main, dev...), each deployed at its newest commit, and with an environment preview each open pull request gets one; {{commit}} in an image is that commit. Without it, only main exists, deployed as this file says."
     },
     "entrypoint": {
       "$ref": "#/$defs/label",

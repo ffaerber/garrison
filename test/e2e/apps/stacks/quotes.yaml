@@ -1,6 +1,6 @@
-# A deliberately broken app for the agent tests: QUOTES_FILE is missing.
-stack: quotes
-namespace: homepage
+# homepage/config/stacks/quotes.yaml: a deliberately broken app for the
+# agent tests: QUOTES_FILE is missing. Its code is the repo homepage/quotes.
+source: quotes
 entrypoint: web
 
 services:

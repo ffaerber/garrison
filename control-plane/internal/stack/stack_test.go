@@ -112,3 +112,41 @@ func TestParseRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestStacksInAConfigRepo(t *testing.T) {
+	own := `source: todo
+entrypoint: web
+services:
+  web: { image: "{{registry}}/homepage/todo:{{commit}}", port: 8080 }
+environments:
+  main: { private: true }
+  dev: {}
+  preview: {}
+`
+	s, err := ParseIn([]byte(own), "homepage", "todo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Name != "todo" || s.Namespace != "homepage" || s.Source != "todo" || s.Environments["dev"].Hostname != "dev-todo" {
+		t.Errorf("%+v", s)
+	}
+	upstream := "entrypoint: web\nservices:\n  web: { image: ghcr.io/immich-app/immich-server:v1.135.3, port: 2283 }\nenvironments:\n  main: { private: true }\n"
+	if s, err := ParseIn([]byte(upstream), "photos", "immich"); err != nil || s.Source != "" || s.Environments["main"].Hostname != "immich" {
+		t.Errorf("upstream: %+v %v", s, err)
+	}
+	for name, c := range map[string]struct{ file, data, want string }{
+		"other name":        {"todo", "stack: other\n" + own, "leave it out"},
+		"other ns":          {"todo", "namespace: shop\n" + own, "leave it out"},
+		"bad file name":     {"To_do", own, "lowercase"},
+		"dev, no source":    {"x", "entrypoint: web\nservices:\n  web: { image: a, port: 80 }\nenvironments:\n  main: {}\n  dev: {}\n", "needs a source repo"},
+		"commit, no source": {"x", "entrypoint: web\nservices:\n  web: { image: \"{{registry}}/a/b:{{commit}}\", port: 80 }\nenvironments:\n  main: {}\n", "needs a source repo"},
+	} {
+		if _, err := ParseIn([]byte(c.data), "homepage", c.file); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// On its own, a stack file names itself.
+	if _, err := Parse([]byte(upstream)); err == nil || !strings.Contains(err.Error(), "names its stack and namespace") {
+		t.Errorf("standalone: %v", err)
+	}
+}

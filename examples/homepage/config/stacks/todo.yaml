@@ -1,8 +1,9 @@
-# The todo app of the namespace homepage: a web app and its database.
-# main is at https://todo.<domain>, a branch dev at https://dev-todo.<domain>;
-# both behind the installation's sign-in. Each has its own database.
-stack: todo
-namespace: homepage
+# homepage/config/stacks/todo.yaml: the todo app of the namespace homepage,
+# a web app and its database. Its code is the repo homepage/todo (source);
+# the branch main is at https://todo.<domain>, a branch dev at
+# https://dev-todo.<domain>; both behind the installation's sign-in. Each
+# has its own database.
+source: todo
 entrypoint: web
 
 services:

@@ -2,7 +2,8 @@ package gitops
 
 import (
 	"context"
-	"errors"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,15 +21,17 @@ import (
 	"homecloud/control-plane/internal/stack"
 )
 
-// App is one deployed environment of an app: a repo with a stack.yaml in a
-// namespace other than system, deployed from the branch named after the
-// environment.
+// App is one deployed environment of an app: a stack of a namespace other
+// than system, stacks/<name>.yaml in its config repo, deployed from the
+// branch of its source repo named after the environment, or as config says.
 type App struct {
 	Namespace   string `json:"namespace"`
-	Repo        string `json:"repo"`
+	Repo        string `json:"repo"` // the stack's name: config/stacks/<repo>.yaml
 	Environment string `json:"environment"`
-	Stack       string `json:"stack"` // Swarm stack name: the environment's hostname
-	Commit      string `json:"commit"`
+	Stack       string `json:"stack"`  // Swarm stack name: the environment's hostname
+	Commit      string `json:"commit"` // of the source repo's branch; of config without a source
+	Source      string `json:"source,omitempty"`
+	Spec        string `json:"spec,omitempty"` // a hash of the stack file, which redeploys when it changes
 }
 
 func appKey(ns, repo, env string) string { return ns + "/" + repo + "@" + env }
@@ -85,12 +88,14 @@ func (c *Config) namespaces(ctx context.Context) ([]string, error) {
 const MaxPreviews = 3
 
 // previews are the open pull requests of a repo that get a preview, by
-// number, with their branch: the newest, from branches of the repo itself.
+// number, with their newest commit: the newest, from branches of the repo
+// itself.
 func (c *Config) previews(ctx context.Context, org, repo string) (map[int]string, error) {
 	var prs []struct {
 		Number int `json:"number"`
 		Head   struct {
 			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
 			Repo struct {
 				FullName string `json:"full_name"`
 			} `json:"repo"`
@@ -103,6 +108,7 @@ func (c *Config) previews(ctx context.Context, org, repo string) (map[int]string
 		Number int `json:"number"`
 		Head   struct {
 			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
 			Repo struct {
 				FullName string `json:"full_name"`
 			} `json:"repo"`
@@ -115,23 +121,27 @@ func (c *Config) previews(ctx context.Context, org, repo string) (map[int]string
 		if len(out) == MaxPreviews {
 			break
 		}
-		if p.Head.Repo.FullName == org+"/"+repo && p.Head.Ref != "" {
-			out[p.Number] = p.Head.Ref
+		if p.Head.Repo.FullName == org+"/"+repo && p.Head.SHA != "" {
+			out[p.Number] = p.Head.SHA
 		}
 	}
 	return out, nil
 }
 
-func (c *Config) branches(ctx context.Context, org, repo string) ([]string, error) {
+// heads are a repo's branches with their newest commits.
+func (c *Config) heads(ctx context.Context, org, repo string) (map[string]string, error) {
 	var batch []struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Commit struct {
+			ID string `json:"id"`
+		} `json:"commit"`
 	}
 	if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/branches?limit=50", url.PathEscape(org), url.PathEscape(repo)), &batch); err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(batch))
+	out := make(map[string]string, len(batch))
 	for _, b := range batch {
-		out = append(out, b.Name)
+		out[b.Name] = b.Commit.ID
 	}
 	return out, nil
 }
@@ -161,14 +171,6 @@ func (c *Config) checkout(ctx context.Context, org, repo, branch, dir string) (s
 		}
 	}
 	return c.git(ctx, "-C", dir, "rev-parse", "HEAD")
-}
-
-func readStack(dir string) (*stack.Stack, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "stack.yaml"))
-	if err != nil {
-		return nil, err
-	}
-	return stack.Parse(data)
 }
 
 // reserved reads root's reserved hostnames from the platform repo's checkout.
@@ -235,111 +237,83 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		errs = append(errs, err)
 	}
 
+	declared := map[string]bool{} // ns/name of every stack in a config repo
 	for _, ns := range namespaces {
-		repos, err := c.reposOf(ctx, ns)
+		cfgDir := filepath.Join(c.WorkDir, "apps", ns, "config", "@main")
+		cfgCommit, err := c.checkout(ctx, ns, "config", "main", cfgDir)
 		if err != nil {
-			fail("list repos of %s: %v", ns, err)
+			fail("fetch %s/config: %v", ns, err)
 			keepNamespace(ns)
 			continue
 		}
-		for _, r := range repos {
-			base := filepath.Join(c.WorkDir, "apps", ns, r.Name)
-			mainDir := filepath.Join(base, "@"+r.DefaultBranch)
-			if _, err := c.checkout(ctx, ns, r.Name, r.DefaultBranch, mainDir); err != nil {
-				fail("fetch %s/%s: %v", ns, r.Name, err)
-				keepApp(ns, r.Name)
-				continue
+		files, _ := filepath.Glob(filepath.Join(cfgDir, stack.Dir, "*.yaml"))
+		for _, file := range files {
+			name := strings.TrimSuffix(filepath.Base(file), ".yaml")
+			declared[ns+"/"+name] = true
+			data, err := os.ReadFile(file)
+			var s *stack.Stack
+			if err == nil {
+				s, err = stack.ParseIn(data, ns, name)
 			}
-			if _, err := os.Stat(filepath.Join(mainDir, "stack.yaml")); err != nil {
-				continue // not an app
-			}
-			s, err := readStack(mainDir)
 			if err != nil {
-				fail("%s/%s: stack.yaml: %v", ns, r.Name, err)
-				keepApp(ns, r.Name)
+				fail("%s/config/%s/%s.yaml: %v", ns, stack.Dir, name, err)
+				keepApp(ns, name)
 				continue
 			}
-			if s.Name != r.Name || s.Namespace != ns {
-				fail("%s/%s: stack.yaml must say stack: %s and namespace: %s", ns, r.Name, r.Name, ns)
-				keepApp(ns, r.Name)
-				continue
-			}
-			branches, err := c.branches(ctx, ns, r.Name)
-			if err != nil {
-				fail("branches of %s/%s: %v", ns, r.Name, err)
-				keepApp(ns, r.Name)
-				continue
-			}
-			// Environments and the branch each is deployed from: those named
-			// in stack.yaml, and a preview of each open pull request.
+			sum := sha256.Sum256(data)
+			spec := hex.EncodeToString(sum[:8])
+			// Environments and the commit each is deployed at: the source
+			// repo's branches named in the stack, and a preview of each of
+			// its open pull requests; without a source, main as config says.
 			from := map[string]string{}
-			for _, env := range s.Branches() {
-				if slices.Contains(branches, env) {
-					from[env] = env
-				}
-			}
 			var previews []string
-			if _, ok := s.Environments[stack.PreviewEnvironment]; ok {
-				prs, err := c.previews(ctx, ns, r.Name)
+			if s.Source == "" {
+				from[stack.MainEnvironment] = cfgCommit
+			} else {
+				heads, err := c.heads(ctx, ns, s.Source)
 				if err != nil {
-					fail("pull requests of %s/%s: %v", ns, r.Name, err)
-					keepApp(ns, r.Name)
+					fail("%s/%s: its source %s/%s: %v", ns, name, ns, s.Source, err)
+					keepApp(ns, name)
 					continue
 				}
-				for n, head := range prs {
-					from[stack.PreviewName(n)] = head
-					previews = append(previews, stack.PreviewName(n))
+				for _, env := range s.Branches() {
+					if sha, ok := heads[env]; ok {
+						from[env] = sha
+					}
+				}
+				if _, ok := s.Environments[stack.PreviewEnvironment]; ok {
+					prs, err := c.previews(ctx, ns, s.Source)
+					if err != nil {
+						fail("pull requests of %s/%s: %v", ns, s.Source, err)
+						keepApp(ns, name)
+						continue
+					}
+					for n, sha := range prs {
+						from[stack.PreviewName(n)] = sha
+						previews = append(previews, stack.PreviewName(n))
+					}
 				}
 			}
 			s.WithPreviews(previews)
 			if err := reg.Claim(s); err != nil {
-				fail("%s/%s: not deployed: %v", ns, r.Name, err)
-				keepApp(ns, r.Name)
+				fail("%s/%s: not deployed: %v", ns, name, err)
+				keepApp(ns, name)
 				continue
 			}
 			for _, env := range s.EnvironmentNames() {
-				key := appKey(ns, r.Name, env)
-				branch, ok := from[env]
+				key := appKey(ns, name, env)
+				commit, ok := from[env]
 				if !ok {
 					continue // no branch, no environment
 				}
-				dir := mainDir
-				if branch != r.DefaultBranch {
-					dir = filepath.Join(base, "@"+env)
-				}
-				commit, err := c.checkout(ctx, ns, r.Name, branch, dir)
-				if err != nil {
-					fail("fetch %s branch %s: %v", key, branch, err)
-					keep(key)
-					continue
-				}
-				es, err := readStack(dir)
-				if err == nil && (es.Name != s.Name || es.Namespace != ns) {
-					err = errors.New("stack.yaml names another stack or namespace than on " + r.DefaultBranch)
-				}
-				if err == nil {
-					want := env
-					if slices.Contains(previews, env) {
-						want = stack.PreviewEnvironment
-						es.WithPreviews([]string{env})
-					}
-					if _, ok := es.Environments[env]; !ok {
-						err = fmt.Errorf("stack.yaml on %s has no environment %s", branch, want)
-					}
-				}
-				if err != nil {
-					fail("%s: %v", key, err)
-					keep(key)
-					continue
-				}
-				app := App{Namespace: ns, Repo: r.Name, Environment: env, Stack: render.StackName(es, env), Commit: commit}
-				if old, ok := prev[key]; ok && !force && old.Commit == commit {
+				app := App{Namespace: ns, Repo: name, Environment: env, Stack: render.StackName(s, env), Commit: commit, Source: s.Source, Spec: spec}
+				if old, ok := prev[key]; ok && !force && old.Spec == spec && (s.Source == "" || old.Commit == commit) {
 					next[key] = old
 					continue
 				}
 				// An image the pipeline builds for this commit must exist
 				// first; a failed pipeline leaves the app where it was.
-				if missing := c.missingImages(ctx, es, commit); len(missing) > 0 {
+				if missing := c.missingImages(ctx, s, commit); len(missing) > 0 {
 					if c.waiting[key] != commit {
 						log.Printf("apps: %s at %.12s waits for %s", key, commit, strings.Join(missing, ", "))
 						c.waiting[key] = commit
@@ -347,7 +321,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					keep(key)
 					continue
 				}
-				if err := apply.Stack(ctx, c.Run, es, render.Options{Environment: env, Domain: c.Domain, Commit: commit}); err != nil {
+				if err := apply.Stack(ctx, c.Run, s, render.Options{Environment: env, Domain: c.Domain, Commit: commit}); err != nil {
 					fail("deploy %s: %v", key, err)
 					keep(key)
 					continue
@@ -376,7 +350,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		for _, n := range next {
 			still = still || (n.Namespace == a.Namespace && n.Repo == a.Repo)
 		}
-		if !still && !c.appDeclared(namespaces, a.Namespace, a.Repo) {
+		if !still && !declared[a.Namespace+"/"+a.Repo] {
 			reg.Release(a.Namespace, a.Repo)
 		}
 	}
@@ -384,23 +358,6 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		errs = append(errs, err)
 	}
 	return next, errs
-}
-
-// appDeclared reports whether the app's main checkout still has a stack.yaml,
-// so an app with no deployed environment keeps its hostnames.
-func (c *Config) appDeclared(namespaces []string, ns, repo string) bool {
-	if !slices.Contains(namespaces, ns) {
-		return false
-	}
-	matches, _ := filepath.Glob(filepath.Join(c.WorkDir, "apps", ns, repo, "@*", "stack.yaml"))
-	return len(matches) > 0 && c.repoExists(ns, repo)
-}
-
-func (c *Config) repoExists(ns, repo string) bool {
-	var r struct {
-		Name string `json:"name"`
-	}
-	return c.get(context.Background(), fmt.Sprintf("/repos/%s/%s", url.PathEscape(ns), url.PathEscape(repo)), &r) == nil
 }
 
 // AppsOf lists the deployed apps of a namespace, for the gateway.

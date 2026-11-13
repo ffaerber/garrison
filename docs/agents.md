@@ -136,7 +136,7 @@ grants:
 
 ### New namespaces and repos
 
-`create_namespace` and `create_repo` act as the person: Gitea lets only root admins make namespaces, and a namespace's admins and root admins make its repos. A new namespace gets its config, its operator and its channel from the gateway within a minute, the person as its first admin. A new repo is empty but for a README; its files come as a pull request like any other change. Every agent's system prompt (`agents.Platform`) says how the home cloud is laid out, with a full `stack.yaml` that a test checks the deployer takes, so a request for a new app becomes a namespace, a repo and a proposed `stack.yaml`, never a stack in `system` or a secret made by hand.
+`create_namespace` and `create_repo` act as the person: Gitea lets only root admins make namespaces, and a namespace's admins and root admins make its repos. A new namespace gets its config, its operator and its channel from the gateway within a minute, the person as its first admin. A new repo is empty but for a README, and only for code of an app's own; its files come as a pull request like any other change. Every agent's system prompt (`agents.Platform`) says how the home cloud is laid out, with a full `config/stacks/<name>.yaml` that a test checks the deployer takes, so a request for a new app becomes a namespace if needed and a proposed stack in its config, never a stack in `system` or a secret made by hand.
 
 ### Proposing and merging
 
@@ -193,7 +193,7 @@ routines:
 
 ## Previews and browsing
 
-- **Previews:** a stack whose `stack.yaml` has an environment `preview` gets one per open pull request of its repo, from a branch of the repo itself: `pr-<n>`, at `pr-<n>-<stack>.<domain>`, deployed like `preview` from the pull request's branch once its pipeline has built the image, and taken down when the pull request closes. At most the three newest pull requests of a repo have one. Branches named `pr-<number>` cannot be environments.
+- **Previews:** a stack with an environment `preview` gets one per open pull request of its source repo, from a branch of the repo itself: `pr-<n>`, at `pr-<n>-<stack>.<domain>`, deployed like `preview` from the pull request's branch once its pipeline has built the image, and taken down when the pull request closes. At most the three newest pull requests of a repo have one. Branches named `pr-<number>` cannot be environments.
 - **`browse`:** an agent uses a page as the person would, in the gateway's Chrome, signed in as them: open a page, click an element, type into a field (and press Enter), each call answered with the page's text and its links, buttons and fields, numbered. Each person and agent has a tab of its own, in a browser context of its own, kept for five minutes between calls. Like `screenshot`, it loads only the installation's own names.
 - Together: an agent proposes a change, waits for its preview, and tries it with `browse`, or asks a tester agent to.
 

@@ -79,6 +79,36 @@ until_true() {
   local deadline=$((SECONDS + $1)); shift
   until "$@" >/dev/null 2>&1; do [ $SECONDS -ge $deadline ] && return 1; sleep 3; done
 }
+# set_stack NS NAME FILE|- [APPROVER]: alice proposes config/stacks/NAME.yaml
+# of the namespace NS as FILE, or its removal with -; APPROVER (by default the
+# local admin, a root admin) approves it, and alice merges it once the
+# approval check passes. Fails if a step does.
+set_stack() {
+  local ns=$1 name=$2 file=$3 approver=${4:-} cfg=$api/repos/$1/config path=stacks/$2.yaml branch sha body pr st i
+  branch="stack-$name-$(date +%s%N | cut -c1-13)"
+  sha=$(gitea_api "" "$cfg/contents/$path" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)
+  body=$(python3 -c '
+import base64,json,sys
+file,path,branch,sha=sys.argv[1:5]
+op={"path":path}
+if file=="-": op.update(operation="delete",sha=sha)
+else:
+    op.update(operation="update" if sha else "create",content=base64.b64encode(open(file,"rb").read()).decode())
+    if sha: op["sha"]=sha
+print(json.dumps({"branch":"main","new_branch":branch,"message":("Remove " if file=="-" else "Set ")+path,"files":[op]}))' "$file" "$path" "$branch" "$sha") || return 1
+  [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$body" "$cfg/contents")" = 201 ] || { echo "cannot write $path"; return 1; }
+  pr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"Stack '"$name"'"}' "$cfg/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])') || return 1
+  [ "$(gitea_api "$approver" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$cfg/pulls/$pr/reviews")" = 200 ] || { echo "cannot approve #$pr"; return 1; }
+  for i in $(seq 60); do
+    st=$(gitea_api "" "$cfg/commits/$(gitea_api "" "$cfg/pulls/$pr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
+import json,sys
+for s in json.load(sys.stdin).get("statuses") or []:
+    if s["context"] == "homecloud/approval": print(s["status"], s["description"]); break' 2>/dev/null)
+    case $st in success*) break ;; failure*) echo "approval: $st"; return 1 ;; esac
+    sleep 2
+  done
+  [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$cfg/pulls/$pr/merge")" = 200 ] || { echo "cannot merge #$pr ($st)"; return 1; }
+}
 smoke_running() { docker service ls --filter name=smoke_web --format '{{.Replicas}}' | grep -qx 1/1; }
 smoke_gone()    { ! docker stack ls --format '{{.Name}}' | grep -qx smoke; }
 deployer_image() { docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
@@ -487,6 +517,9 @@ has_build_account() { gitea_api "" "$api/orgs/homepage/actions/secrets" | grep -
 check "the namespace gets its build account" until_true 150 has_build_account
 check "its build account is a member"     test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/homepage/members/homepage-builder")" = 204
 check "the todo app's source goes to homepage/todo" installer/push-repo.sh --update homepage/todo examples/homepage/todo
+has_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/homepage/config")" = 200 ]; }
+check "homepage has its config"            until_true 120 has_config
+check "alice adds its stack to homepage's config" set_stack homepage todo examples/homepage/config/stacks/todo.yaml
 # head_of BRANCH: the branch's commit, waiting for Gitea to have it.
 head_of() {
   local i sha
@@ -579,13 +612,12 @@ check "the guard refused it"               bash -c 'docker service logs --since 
 gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/escape"
 
 echo "# hostnames"
-gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"name":"grafana","auto_init":true,"default_branch":"main"}' "$api/orgs/homepage/repos"
-taken=$(printf 'stack: grafana\nnamespace: homepage\nentrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 80 }\nenvironments:\n  main: {}\n' | base64 -w0)
-gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Claim grafana","branch":"main","content":"'$taken'"}' "$api/repos/homepage/grafana/contents/stack.yaml"
+printf 'entrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 80 }\nenvironments:\n  main: {}\n' > "$tmp/grafana.yaml"
+check "a stack named grafana passes review" set_stack homepage grafana "$tmp/grafana.yaml"
 refused() { docker service logs --since 5m control-plane_deployer 2>&1 | grep -q "homepage/grafana: not deployed: hostname \"grafana\" is reserved"; }
-check "an app cannot take a reserved hostname" until_true 120 refused
+check "but cannot take the reserved hostname" until_true 120 refused
 check "it is not deployed"                 bash -c '! homecloud applied | grep -q "app homepage/grafana"'
-gitea_api "" -o /dev/null -X DELETE "$api/repos/homepage/grafana"
+check "alice removes it"                   set_stack homepage grafana -
 
 echo "# taking an environment down"
 check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$repo/branches/dev")" = 204
@@ -1017,7 +1049,7 @@ routines:
   - name: main-moved
     on_push: {repo: todo, branch: main}
     owner: bob
-    task: Call read_file on stack.yaml of the repo todo of the namespace homepage, then say in one sentence which environments it has. Change nothing.
+    task: Call read_file on stacks/todo.yaml of the repo config of the namespace homepage, then say in one sentence which environments it has. Change nothing.
 YAML
 cat > "$tmp/tester.yaml" <<'YAML'
 description: Tries the namespace's apps in the browser
@@ -1071,11 +1103,13 @@ main_untouched() { ! gitea_api "" "$hp/todo/raw/page.html?ref=main" | grep -q "D
 check "main is untouched"                  main_untouched
 
 echo "# 4i. previews, and the tester tries one for the developer"
-printf '%s\n  preview: { private: true }\n' "$(gitea_api "" "$hp/todo/raw/stack.yaml?ref=main")" > "$tmp/stack.yaml"
+printf '%s\n  preview: { private: true }\n' "$(gitea_api "" "$hp/config/raw/stacks/todo.yaml?ref=main")" > "$tmp/todo-stack.yaml"
+check "alice gives todo previews, carol approves" set_stack homepage todo "$tmp/todo-stack.yaml" carol
 # Waits until the routine has seen main, so this push is news to it.
 while [ $((SECONDS - routines_seen)) -lt 90 ]; do sleep 10; done
 mainmoved=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-check "alice gives todo previews"          bash -c '[ "$0" = 201 ] || [ "$0" = 200 ]' "$(set_file todo main stack.yaml "$tmp/stack.yaml" "Previews of pull requests")"
+printf 'Notes.\n' > "$tmp/notes.md"
+check "alice pushes to todo's main"        bash -c '[ "$0" = 201 ] || [ "$0" = 200 ]' "$(set_file todo main NOTES.md "$tmp/notes.md" "Notes")"
 since=$(last_pr todo)
 answer=$(ask_agent homepage bob "Clone the repo todo of the namespace homepage, add a file PREVIEW.md with the line: Preview test. Propose it with propose_workspace_changes, titled: Preview test. Do not merge it." developer)
 ppr=$(newest_pr todo bob "$since")
@@ -1186,6 +1220,7 @@ check "it cannot propose a change"         test -z "$(newest_pr todo alice "$sin
 
 echo "# 7. the operator finds out why an app does not run"
 check "the quotes app's source goes to homepage/quotes" installer/push-repo.sh --update homepage/quotes test/e2e/apps/quotes
+check "alice adds its stack, carol approves" set_stack homepage quotes test/e2e/apps/stacks/quotes.yaml carol
 quotes_deployed() { homecloud applied | grep -q "^app homepage/quotes@main quotes "; }
 check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed
 quotes_crashes() { docker service ps quotes_web --format '{{.Error}}' 2>/dev/null | grep -q 'non-zero exit'; }
@@ -1194,34 +1229,42 @@ at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent homepage alice "The quotes app of the namespace homepage, https://quotes.$DOMAIN/, does not work. Find out why and tell me what to change.")
 check "it looks at the stack, as alice"    grep -qE "mcp: alice: (stack_status|service_logs)" <<<"$(mcp_calls "$at" alice)"
 check "it names the missing setting"       grep -q QUOTES_FILE <<<"$answer"
-gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
+check "alice removes its stack, carol approves" set_stack homepage quotes - carol
 quotes_gone() { ! docker service inspect quotes_web >/dev/null 2>&1; }
-check "deleting the repo takes the app down" until_true 120 quotes_gone
+check "that takes the app down"            until_true 120 quotes_gone
+gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
 
 echo "# 8. alice has the operator set up a new app, from nothing"
-since_ns=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent system alice "Set up a new app for us: make a namespace photos for our photo apps, in it a repo gallery, and propose its stack.yaml: a small web app that shows who is visiting, the image traefik/whoami:v1.11 on port 80, behind the sign-in. You have everything you need; do not ask back.")
+answer=$(ask_agent system alice "Set up a new app for us: make a namespace photos for our photo apps, and in it the app gallery, a small web app that shows who is visiting: the image traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own. Propose its stack. You have everything you need; do not ask back.")
 org_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/photos")" = 200 ]; }
-if ! org_made || [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" != 200 ]; then
-  printf 'retry the operator did not make both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent system alice "Please go ahead now: create_namespace photos, create_repo gallery in photos, then propose its stack.yaml with propose_change (image traefik/whoami:v1.11, port 80, private)." )
+# stack_pr: the open pull request of photos/config by alice that adds stacks/gallery.yaml.
+stack_pr() {
+  local n
+  for n in $(gitea_api "" "$api/repos/photos/config/pulls?state=open&limit=10" | python3 -c 'import json,sys; [print(p["number"]) for p in json.load(sys.stdin) if p["user"]["login"]=="alice"]' 2>/dev/null); do
+    gitea_api "" "$api/repos/photos/config/pulls/$n/files" | grep -q '"filename":"stacks/gallery.yaml"' && { echo "$n"; return 0; }
+  done
+  return 1
+}
+if ! org_made || ! stack_pr >/dev/null; then
+  printf 'retry the operator did not do both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent system alice "Please go ahead now: create_namespace photos if it is missing, then propose stacks/gallery.yaml in photos/config with propose_change (image traefik/whoami:v1.11, port 80, entrypoint web, environment main private).")
 fi
 check "it makes the namespace photos, as alice" org_made
 photos_admin() { gitea_api "" "$api/repos/photos/config/raw/members.yaml" | python3 -c 'import sys,yaml; sys.exit(0 if (yaml.safe_load(sys.stdin) or {}).get("admins") == ["alice"] else 1)'; }
 check "with alice as its first admin"      until_true 180 photos_admin
-check "and the repo gallery in it"         test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" = 200
-gallery_pr() { gitea_api "" "$api/repos/photos/gallery/pulls?state=open&limit=10" | python3 -c 'import json,sys; l=[p["number"] for p in json.load(sys.stdin) if p["user"]["login"]=="alice"]; print(l[0] if l else "")'; }
-gpr=$(gallery_pr)
-if [ -z "$gpr" ]; then
-  printf 'retry the operator proposed no stack.yaml; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent system alice "Please propose the stack.yaml for photos/gallery now with propose_change: stack gallery, namespace photos, the image traefik/whoami:v1.11 on port 80, environment main private.")
-  gpr=$(gallery_pr)
-fi
-check "it proposes a stack.yaml, as alice" test -n "$gpr"
-gitea_api "" "$api/repos/photos/gallery/raw/stack.yaml?ref=$(gitea_api "" "$api/repos/photos/gallery/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/gallery.yaml"
-check "one the deployer takes"             homecloud validate "$tmp/gallery.yaml"
-check "nothing went into system"           test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/gallery")" = 404
-check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$api/repos/photos/gallery/pulls/${gpr:-0}/merge")" = 200
+gpr=$(stack_pr)
+check "it proposes stacks/gallery.yaml in photos' config, as alice" test -n "$gpr"
+check "no repo for it, and nothing in system" bash -c '[ "$0" = 404 ] && [ "$1" = 404 ]' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/gallery")"
+gitea_api "" "$api/repos/photos/config/raw/stacks/gallery.yaml?ref=$(gitea_api "" "$api/repos/photos/config/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/gallery.yaml"
+check "one the deployer takes"             homecloud validate --in photos "$tmp/gallery.yaml"
+check "a root admin who did not write it approves" test "$(gitea_api "" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$api/repos/photos/config/pulls/${gpr:-0}/reviews")" = 200
+photos_approved() {
+  gitea_api "" "$api/repos/photos/config/commits/$(gitea_api "" "$api/repos/photos/config/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
+import json,sys
+sys.exit(0 if any(s["context"] == "homecloud/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
+}
+check "the approval check passes"          until_true 120 photos_approved
+check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$api/repos/photos/config/pulls/${gpr:-0}/merge")" = 200
 gallery_deployed() { homecloud applied | grep -q "^app photos/gallery@main gallery "; }
 check "the deployer deploys it"            until_true 300 gallery_deployed
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)

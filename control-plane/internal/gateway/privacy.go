@@ -12,10 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/stack"
 )
 
 // privacyTTL is how long a repo's privacy is remembered: it is asked on
@@ -112,4 +114,49 @@ func (t *Tools) mayRead(ctx context.Context, p Person, org, repo string) error {
 		return refused{fmt.Sprintf("%s cannot see %s/%s", p.asker(), org, repo)}
 	}
 	return err
+}
+
+// stackProblems checks the stacks of a namespace's config repo at ref, as
+// the deployer will read them: stacks/<name>.yaml, each valid, its source a
+// repo of the namespace. system has none: it holds the platform, not apps.
+func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, error) {
+	f := configFiles{g: g, ns: ns, ref: ref}
+	entries, err := f.List(ctx, stack.Dir)
+	if errors.Is(err, agents.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		path := stack.Dir + "/" + e.Name
+		name, ok := strings.CutSuffix(e.Name, ".yaml")
+		switch {
+		case ns == SystemNamespace:
+			out = append(out, path+": system holds the platform, not apps; put the app into a namespace of its own")
+			continue
+		case e.Type != "file" || !ok:
+			out = append(out, path+": "+stack.Dir+"/ holds only <name>.yaml files")
+			continue
+		}
+		data, err := f.Read(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		s, err := stack.ParseIn([]byte(data), ns, name)
+		if err != nil {
+			out = append(out, path+": "+err.Error())
+			continue
+		}
+		if s.Source != "" {
+			status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s", ns, s.Source), nil, nil)
+			if status == http.StatusNotFound {
+				out = append(out, fmt.Sprintf("%s: there is no repo %s/%s to be its source", path, ns, s.Source))
+			} else if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
 }

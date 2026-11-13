@@ -623,10 +623,16 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 			return err
 		}
 		problems = append(problems, more...)
+		stacks, err := g.stackProblems(ctx, ns, pr.Head.SHA)
+		if err != nil {
+			return err
+		}
 		if rosterErr != nil {
 			state, desc = "failure", rosterErr.Error()
 		} else if len(problems) > 0 {
 			state, desc = "failure", "agents: "+strings.Join(problems, "; ")
+		} else if len(stacks) > 0 {
+			state, desc = "failure", "stacks: "+strings.Join(stacks, "; ")
 		} else {
 			var reviews []struct {
 				User struct {

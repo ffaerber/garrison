@@ -6,6 +6,6 @@ A small todo list on Postgres: the example app of the namespace `homepage`.
 - `main_test.go`: its tests, run in the Dockerfile's test stage.
 - `Dockerfile`: its image: tests first, then the build, with Go's caches kept between builds.
 - `.gitea/workflows/pipeline.yaml`: on every push, one BuildKit build that tests, builds and pushes `git.<domain>/homepage/todo:<commit>`, with its layer cache kept in Gitea's registry as `:buildcache`.
-- `stack.yaml`: the app and its database. The deployer deploys `main` to `https://todo.<domain>` and a branch `dev` to `https://dev-todo.<domain>` once the commit's image exists. Each environment has its own database on its own ZFS dataset.
+How it runs is not in this repo: `homepage/config/stacks/todo.yaml` (see `examples/homepage/config/stacks/todo.yaml`) names this repo as its source. The deployer deploys `main` to `https://todo.<domain>` and a branch `dev` to `https://dev-todo.<domain>` once the commit's image exists. Each environment has its own database on its own ZFS dataset.
 
 A failing test stops the pipeline, so no image is built and the app keeps running at its last good commit.

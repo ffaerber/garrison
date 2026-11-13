@@ -506,8 +506,8 @@ func (g *Gitea) CreateNamespace(ctx context.Context, as, name, description strin
 
 // CreateRepo makes an empty repo in a namespace, as person: Gitea lets the
 // namespace's admins and the root admins. It starts with a README on main,
-// so changes can be proposed to it; nothing in it runs until a pull request
-// with a stack.yaml is merged.
+// so changes can be proposed to it; nothing in it runs until a stack in the
+// namespace's config names it as its source.
 func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description string, private bool) (string, error) {
 	if err := validOrg(org); err != nil {
 		return "", err

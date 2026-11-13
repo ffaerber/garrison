@@ -79,3 +79,49 @@ func TestMakingNamespacesAndRepos(t *testing.T) {
 		t.Error("a routine made a namespace")
 	}
 }
+
+func TestTheApprovalCheckReadsStacks(t *testing.T) {
+	files := map[string]string{
+		"todo.yaml":   "source: todo\nentrypoint: web\nservices:\n  web: { image: a, port: 80 }\nenvironments:\n  main: {}\n",
+		"ghost.yaml":  "source: ghost\nentrypoint: web\nservices:\n  web: { image: a, port: 80 }\nenvironments:\n  main: {}\n",
+		"broken.yaml": "entrypoint: web\n",
+		"named.yaml":  "stack: other\nentrypoint: web\nservices:\n  web: { image: a, port: 80 }\nenvironments:\n  main: {}\n",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		switch {
+		case strings.HasSuffix(p, "/config/contents/stacks"):
+			var list []map[string]string
+			for n := range files {
+				list = append(list, map[string]string{"name": n, "type": "file"})
+			}
+			list = append(list, map[string]string{"name": "notes.txt", "type": "file"})
+			json.NewEncoder(w).Encode(list)
+		case strings.Contains(p, "/config/raw/stacks/"):
+			n := p[strings.LastIndex(p, "/")+1:]
+			io.WriteString(w, files[n])
+		case p == "/repos/homepage/todo":
+			io.WriteString(w, "{}")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	g := &Gitea{URL: srv.URL, User: "admin", Password: "pw"}
+	problems, err := g.stackProblems(context.Background(), "homepage", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(problems, "\n")
+	for _, want := range []string{"stacks/ghost.yaml: there is no repo homepage/ghost", "stacks/broken.yaml:", "stacks/named.yaml: stack: other", "stacks/notes.txt: stacks/ holds only"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("problems lack %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "todo.yaml") {
+		t.Errorf("a good stack has problems:\n%s", got)
+	}
+	if problems, _ := g.stackProblems(context.Background(), "system", "abc"); len(problems) == 0 || !strings.Contains(problems[0], "system holds the platform") {
+		t.Errorf("system: %v", problems)
+	}
+}

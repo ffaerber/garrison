@@ -60,6 +60,7 @@ const maxLabel = 63
 type Stack struct {
 	Name         string                 `yaml:"stack"`
 	Namespace    string                 `yaml:"namespace"`
+	Source       string                 `yaml:"source,omitempty"` // the repo whose branches are its environments
 	Entrypoint   string                 `yaml:"entrypoint"`
 	Services     map[string]Service     `yaml:"services"`
 	Environments map[string]Environment `yaml:"environments"`
@@ -114,9 +115,75 @@ var compiled = sync.OnceValue(func() *jsonschema.Schema {
 	return c.MustCompile(schemaURL)
 })
 
-// Parse validates a stack file against the JSON Schema and the rules the
-// schema cannot express, and fills in default hostnames.
+// Dir is where a namespace's stacks are in its config repo: one file each,
+// stacks/<name>.yaml.
+const Dir = "stacks"
+
+// Parse validates a stack file that stands alone, e.g. one the host's CLI
+// deploys: it names its stack and namespace.
 func Parse(data []byte) (*Stack, error) {
+	s, err := parse(data)
+	if err != nil {
+		return nil, err
+	}
+	if s.Name == "" || s.Namespace == "" {
+		return nil, errors.New("a stack file on its own names its stack and namespace (stack:, namespace:)")
+	}
+	return s, nil
+}
+
+var fileName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+
+// ParseIn validates the stack stacks/<name>.yaml of a namespace's config
+// repo, whose place names its stack and namespace. Without a source repo,
+// it has only main, and no image of its own build.
+func ParseIn(data []byte, namespace, name string) (*Stack, error) {
+	if !fileName.MatchString(name) {
+		return nil, fmt.Errorf("%s/%s.yaml: the name must be lowercase letters, digits and dashes, at most 40, as it is a hostname", Dir, name)
+	}
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	for key, want := range map[string]string{"stack": name, "namespace": namespace} {
+		if v, ok := raw[key]; ok && v != want {
+			return nil, fmt.Errorf("%s: %v, but the file is %s/%s.yaml of %s; leave it out", key, v, Dir, name, namespace)
+		}
+		raw[key] = want
+	}
+	full, err := yaml.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	s, err := parse(full)
+	if err != nil {
+		return nil, err
+	}
+	if s.Source == "" {
+		var errs []error
+		for _, env := range s.EnvironmentNames() {
+			if env != MainEnvironment {
+				errs = append(errs, fmt.Errorf("environment %s needs a source repo, whose branches and pull requests it follows; without one there is only main", env))
+			}
+		}
+		for _, svc := range s.ServiceNames() {
+			if img := s.Services[svc].Image; regexp.MustCompile(`\{\{\s*commit\s*\}\}`).MatchString(img) {
+				errs = append(errs, fmt.Errorf("service %s: {{commit}} in its image needs a source repo, whose commits it names", svc))
+			}
+		}
+		if err := errors.Join(errs...); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// parse validates a stack file against the JSON Schema and the rules the
+// schema cannot express, and fills in default hostnames.
+func parse(data []byte) (*Stack, error) {
 	var raw any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)

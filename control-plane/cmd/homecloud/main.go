@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -41,6 +42,7 @@ import (
 
 const usage = `usage:
   homecloud validate STACK.yaml...
+  homecloud validate --in NAMESPACE NAME.yaml...   (as config/stacks/NAME.yaml of NAMESPACE)
   homecloud claims [-reserved FILE] STACK.yaml...
   homecloud render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
   homecloud apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
@@ -100,12 +102,30 @@ func load(file string) (*stack.Stack, error) {
 	return s, nil
 }
 
+// validate checks stack files: standalone ones, or with --in NAMESPACE
+// ones as stacks/<name>.yaml of that namespace's config repo.
 func validate(files []string) error {
+	ns := ""
+	if len(files) >= 2 && files[0] == "--in" {
+		ns, files = files[1], files[2:]
+	}
 	if len(files) == 0 {
 		return fmt.Errorf("validate needs at least one stack file")
 	}
 	for _, f := range files {
-		if _, err := load(f); err != nil {
+		var err error
+		if ns == "" {
+			_, err = load(f)
+		} else {
+			var data []byte
+			if data, err = os.ReadFile(f); err == nil {
+				_, err = stack.ParseIn(data, ns, strings.TrimSuffix(filepath.Base(f), ".yaml"))
+			}
+			if err != nil {
+				err = fmt.Errorf("%s: %w", f, err)
+			}
+		}
+		if err != nil {
 			return err
 		}
 		fmt.Println(f, "ok")

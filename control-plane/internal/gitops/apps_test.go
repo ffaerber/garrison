@@ -13,8 +13,7 @@ import (
 	"testing"
 )
 
-const todoStack = `stack: todo
-namespace: homepage
+const todoStack = `source: todo
 entrypoint: web
 services:
   web: { image: "{{registry}}/homepage/todo:{{commit}}", port: 8080 }
@@ -68,10 +67,14 @@ func (f *fakeApps) api(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[]"))
 	case strings.HasSuffix(p, "/branches"):
 		parts := strings.Split(p, "/")
-		var out []map[string]string
-		for k := range f.commits {
+		if !slices.Contains(f.repos[parts[2]], parts[3]) {
+			http.NotFound(w, r)
+			return
+		}
+		var out []map[string]any
+		for k, sha := range f.commits {
 			if strings.HasPrefix(k, parts[2]+"/"+parts[3]+"@") {
-				out = append(out, map[string]string{"name": strings.SplitN(k, "@", 2)[1]})
+				out = append(out, map[string]any{"name": strings.SplitN(k, "@", 2)[1], "commit": map[string]string{"id": sha}})
 			}
 		}
 		json.NewEncoder(w).Encode(out)
@@ -119,6 +122,7 @@ func (f *fakeApps) run(_ context.Context, _ []string, _ []byte, name string, arg
 		os.RemoveAll(dir)
 		os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 		for file, content := range f.files[branchOf(dir)] {
+			os.MkdirAll(filepath.Dir(filepath.Join(dir, file)), 0o755)
 			os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644)
 		}
 	case name == "git" && slices.Contains(args, "rev-parse"):
@@ -139,16 +143,15 @@ func (f *fakeApps) deployed() []string {
 
 func setupApps(t *testing.T) (*Config, *fakeApps) {
 	f := &fakeApps{t: t,
-		repos: map[string][]string{"homepage": {"todo", "notes"}},
+		repos: map[string][]string{"homepage": {"config", "todo", "notes"}},
 		files: map[string]map[string]string{
-			"homepage/todo@main":  {"stack.yaml": todoStack},
-			"homepage/todo@dev":   {"stack.yaml": todoStack},
-			"homepage/notes@main": {"README.md": "no stack here"},
+			"homepage/config@main": {"members.yaml": "admins: [alice]\n", "stacks/todo.yaml": todoStack},
 		},
 		commits: map[string]string{
-			"homepage/todo@main":  "aaaaaaaaaaaa1111",
-			"homepage/todo@dev":   "bbbbbbbbbbbb2222",
-			"homepage/notes@main": "cccccccccccc3333",
+			"homepage/config@main": "c0c0c0c0c0c01111",
+			"homepage/todo@main":   "aaaaaaaaaaaa1111",
+			"homepage/todo@dev":    "bbbbbbbbbbbb2222",
+			"homepage/notes@main":  "cccccccccccc3333",
 		},
 		packages: map[string]bool{"homepage/todo/aaaaaaaaaaaa": true},
 	}
@@ -213,8 +216,26 @@ func TestAppsDeployOnceTheirImageExists(t *testing.T) {
 		t.Error("dev still recorded")
 	}
 
-	// The repo is deleted: todo is taken down and its hostnames are free again.
-	f.repos["homepage"] = []string{"notes"}
+	// A change to its stack file redeploys it (main back at its built commit).
+	f.commits["homepage/todo@main"] = "aaaaaaaaaaaa1111"
+	f.files["homepage/config@main"]["stacks/todo.yaml"] = strings.Replace(todoStack, "port: 8080 }", "port: 8080, resources: { memory: 128Mi } }", 1)
+	f.commits["homepage/config@main"] = "c0c0c0c0c0c02222"
+	f.calls = nil
+	apps, _ = c.syncApps(ctx, false, apps)
+	if got := strings.Join(f.deployed(), " "); got != "todo" {
+		t.Errorf("deployed %q after its stack changed, want todo", got)
+	}
+	// Another change of config, not to it, does not.
+	f.files["homepage/config@main"]["members.yaml"] = "admins: [alice, carol]\n"
+	f.commits["homepage/config@main"] = "c0c0c0c0c0c03333"
+	f.calls = nil
+	apps, _ = c.syncApps(ctx, false, apps)
+	if len(f.deployed()) != 0 {
+		t.Errorf("redeployed %v for members.yaml", f.deployed())
+	}
+
+	// The stack file is removed: todo is taken down and its hostnames are free again.
+	delete(f.files["homepage/config@main"], "stacks/todo.yaml")
 	f.calls = nil
 	apps, _ = c.syncApps(ctx, false, apps)
 	if !slices.Contains(f.calls, "docker stack rm todo") || len(apps) != 0 {
@@ -252,23 +273,17 @@ func TestNoAppIsDeployedWithoutRegistryCredentials(t *testing.T) {
 }
 
 func TestAppsThatBreakTheRulesAreNotDeployed(t *testing.T) {
-	for name, stack := range map[string]string{
-		"stack named unlike its repo": strings.Replace(todoStack, "stack: todo", "stack: other", 1),
-		"stack of another namespace":  strings.Replace(todoStack, "namespace: homepage", "namespace: system", 1),
-		"reserved hostname":           strings.Replace(todoStack, "stack: todo", "stack: grafana", 1),
-		"not a valid stack":           "stack: todo\n",
+	for name, c := range map[string]struct{ file, stack string }{
+		"stack named unlike its file": {"todo", "stack: other\n" + todoStack},
+		"stack of another namespace":  {"todo", "namespace: system\n" + todoStack},
+		"reserved hostname":           {"grafana", todoStack},
+		"not a valid stack":           {"todo", "source: todo\n"},
+		"source that does not exist":  {"todo", strings.Replace(todoStack, "source: todo", "source: nothing", 1)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, f := setupApps(t)
-			if name == "reserved hostname" {
-				f.repos["homepage"] = []string{"grafana"}
-				f.files["homepage/grafana@main"] = map[string]string{"stack.yaml": stack}
-				f.commits["homepage/grafana@main"] = "eeee"
-				f.packages["homepage/todo/eeee"] = true
-			} else {
-				f.files["homepage/todo@main"] = map[string]string{"stack.yaml": stack}
-			}
-			apps, errs := c.syncApps(context.Background(), false, map[string]App{})
+			cfg, f := setupApps(t)
+			f.files["homepage/config@main"] = map[string]string{"stacks/" + c.file + ".yaml": c.stack}
+			apps, errs := cfg.syncApps(context.Background(), false, map[string]App{})
 			if len(errs) == 0 {
 				t.Error("no error reported")
 			}
@@ -279,13 +294,34 @@ func TestAppsThatBreakTheRulesAreNotDeployed(t *testing.T) {
 	}
 }
 
+func TestAStackWithoutSourceIsDeployedAsConfigSays(t *testing.T) {
+	c, f := setupApps(t)
+	ctx := context.Background()
+	f.files["homepage/config@main"]["stacks/whoami.yaml"] = "entrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 80 }\nenvironments:\n  main: { private: true }\n"
+	apps, errs := c.syncApps(ctx, false, map[string]App{})
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if a := apps["homepage/whoami@main"]; a.Stack != "whoami" || a.Commit != "c0c0c0c0c0c01111" || a.Source != "" {
+		t.Fatalf("apps = %+v", apps)
+	}
+	// Config moves on without touching it: it stays.
+	f.commits["homepage/config@main"] = "c0c0c0c0c0c02222"
+	f.calls = nil
+	apps, _ = c.syncApps(ctx, false, apps)
+	if slices.Contains(f.deployed(), "whoami") {
+		t.Errorf("redeployed: %v", f.deployed())
+	}
+}
+
 func TestAHostnameIsFirstComeFirstServed(t *testing.T) {
 	c, f := setupApps(t)
 	ctx := context.Background()
 	apps, _ := c.syncApps(ctx, false, map[string]App{})
 	// Another namespace's todo would take the same hostnames.
-	f.repos["other"] = []string{"todo"}
-	f.files["other/todo@main"] = map[string]string{"stack.yaml": strings.Replace(todoStack, "namespace: homepage", "namespace: other", 1)}
+	f.repos["other"] = []string{"config", "todo"}
+	f.files["other/config@main"] = map[string]string{"stacks/todo.yaml": todoStack}
+	f.commits["other/config@main"] = "eeee"
 	f.commits["other/todo@main"] = "ffff"
 	f.calls = nil
 	apps, errs := c.syncApps(ctx, false, apps)
@@ -300,15 +336,11 @@ func TestAHostnameIsFirstComeFirstServed(t *testing.T) {
 func TestPullRequestsGetPreviews(t *testing.T) {
 	c, f := setupApps(t)
 	ctx := context.Background()
-	withPreview := todoStack + "  preview: { private: true }\n"
-	f.files["homepage/todo@main"] = map[string]string{"stack.yaml": withPreview}
-	// The checkout of a preview is named after it: the fake knows it by that.
-	f.files["homepage/todo@pr-7"] = map[string]string{"stack.yaml": withPreview}
-	f.commits["homepage/todo@pr-7"] = "eeeeeeeeeeee5555"
+	f.files["homepage/config@main"]["stacks/todo.yaml"] = todoStack + "  preview: { private: true }\n"
 	f.packages["homepage/todo/eeeeeeeeeeee"] = true
 	f.pulls = map[string]string{"homepage/todo": `[
- {"number":7,"head":{"ref":"agent/dev/bob-1","repo":{"full_name":"homepage/todo"}}},
- {"number":6,"head":{"ref":"feature","repo":{"full_name":"someone/fork"}}}]`}
+ {"number":7,"head":{"ref":"agent/dev/bob-1","sha":"eeeeeeeeeeee5555","repo":{"full_name":"homepage/todo"}}},
+ {"number":6,"head":{"ref":"feature","sha":"ffffffffffff6666","repo":{"full_name":"someone/fork"}}}]`}
 	apps, errs := c.syncApps(ctx, false, map[string]App{})
 	if len(errs) != 0 {
 		t.Fatal(errs)
@@ -321,13 +353,6 @@ func TestPullRequestsGetPreviews(t *testing.T) {
 	}
 	if _, ok := apps["homepage/todo@preview"]; ok {
 		t.Error("the preview environment itself was deployed")
-	}
-	fetched := false
-	for _, call := range f.calls {
-		fetched = fetched || (strings.HasPrefix(call, "git clone") && strings.Contains(call, "--branch agent/dev/bob-1"))
-	}
-	if !fetched {
-		t.Errorf("the pull request's branch was not checked out: %v", f.calls)
 	}
 	// The pull request is merged or closed: its preview goes.
 	f.pulls = nil

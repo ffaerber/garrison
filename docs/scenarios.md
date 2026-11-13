@@ -88,7 +88,7 @@ Alice makes the branch `dev` of todo. Bob: *@homepage/developer Change 'Homepage
 
 ## 4i. Previews, and the tester tries one for the developer
 
-Alice adds `preview: { private: true }` to todo's `stack.yaml`. Bob has the developer propose a file without merging it.
+Alice adds `preview: { private: true }` to `homepage/config/stacks/todo.yaml`; carol approves. Bob has the developer propose a file without merging it.
 
 - The pull request gets a preview, `pr-<n>-todo`.
 - Bob: *@homepage/developer Ask homepage/tester to open the preview and tell you its heading.* The tester browses it, for bob, started by the developer (the gateway logs both), and the answer names the heading.
@@ -130,15 +130,15 @@ Alice proposes `agents/reader` with a tool that does not exist: the approval che
 
 ## 7. The operator finds out why an app does not run
 
-The app `homepage/quotes` builds, but exits at start: its `stack.yaml` does not set `QUOTES_FILE`. Alice: *@homepage/operator The quotes app does not work. Find out why and tell me what to change.*
+The app `quotes` builds, but exits at start: its stack, `homepage/config/stacks/quotes.yaml`, does not set `QUOTES_FILE`. Alice: *@homepage/operator The quotes app does not work. Find out why and tell me what to change.*
 
 - The agent looks at the stack's tasks or logs, as alice, and names the missing setting.
 
 ## 8. Alice has the operator set up a new app, from nothing
 
-Alice, in system's channel: *@system/operator Set up a new app: a namespace photos, in it a repo gallery, and its stack.yaml: traefik/whoami:v1.11 on port 80, behind the sign-in.*
+Alice, in system's channel: *@system/operator Set up a new app: a namespace photos, and in it the app gallery: traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own.*
 
 - The operator makes the namespace `photos`, as alice; within a minute it has its config, with alice as its first admin.
-- It makes the repo `photos/gallery` and proposes a `stack.yaml` the deployer takes, as alice. Nothing goes into `system`.
-- Alice merges it; the deployer deploys `gallery`.
+- It proposes `stacks/gallery.yaml` in `photos/config`, as alice, one the deployer takes. It makes no repo for it, and nothing goes into `system`.
+- A root admin who did not write it approves it, the approval check passes, alice merges it; the deployer deploys `gallery`.
 - Bob asks for a namespace of his own: Gitea refuses him, as only root admins make namespaces, and the gateway logs every try as refused.
