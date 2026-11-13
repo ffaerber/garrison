@@ -32,7 +32,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-History repos and the rest of the config repo (autonomy levels, branch rights, secrets); snapshots, SOPS, change records, approvals and restore in the deployer; the dashboard, alerts and ntfy, Sanoid and restic, Playwright tests.
+History repos and the rest of the config repo (secrets; autonomy levels and branch rights are designed as agents' grants in [agents.md](agents.md)); agents asking agents, and runs without a person; snapshots, SOPS, change records, approvals and restore in the deployer; the dashboard, alerts and ntfy, Sanoid and restic, Playwright tests.
 
 ## Known limits
 
@@ -42,4 +42,5 @@ Problems the platform cannot close itself, as Gitea, Open WebUI or Docker offer 
 - The system runner's jobs can use the Docker daemon, which is root on the machine. It serves only the `system` organisation, which only root admins can write to.
 - Agent sandboxes share one network with the agent service, so they can reach each other; nothing listens in them, but an agent could start a server. Their volumes are not yet removed when a chat is unused for long.
 - In a channel, one sandbox serves all threads with an agent: Open WebUI names the channel, not the thread.
+- Every agent is visible to everyone signed in. Someone outside its namespace gets it with their own rights: they can read, but proposing fails.
 - BuildKit runs privileged, outside Swarm. Build steps run in its own sandboxes without privileges; a flaw in BuildKit itself would reach the host. Its build cache is shared between namespaces.
