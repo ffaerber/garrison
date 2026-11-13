@@ -118,6 +118,18 @@ func (c *collect) content(s string) {
 	c.mu.Unlock()
 }
 
+// step: the text so far was a step before a tool call. It shows as
+// progress; the answer is the last message alone.
+func (c *collect) step() {
+	c.mu.Lock()
+	t := strings.TrimSpace(c.text.String())
+	c.text.Reset()
+	c.mu.Unlock()
+	if t != "" {
+		c.reasoning(t + "\n")
+	}
+}
+
 func (c *collect) answer() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

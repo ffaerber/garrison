@@ -47,6 +47,10 @@ type output interface {
 	content(string)
 }
 
+// stepper is an output told when text it got as content was a step before
+// a tool call, not the answer.
+type stepper interface{ step() }
+
 // prompt is the message a turn sends Pi; fresh is true for a session that
 // has no messages yet.
 type prompt func(fresh bool) (string, []sandbox.Image)
@@ -89,27 +93,53 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 		defer cancel()
 		capped := false
 		var failure string
+		// Text goes out as Pi writes it. Whether a message is the answer or
+		// a step before a tool call shows only at its end, so a step's text
+		// stays in the answer, and the next message's follows a blank line.
+		streamed, wrote := false, false
+		say := func(s string) {
+			if !streamed && wrote {
+				out.content("\n\n")
+			}
+			out.content(s)
+			streamed, wrote = true, true
+		}
 		err = pi.Prompt(turn, text, images, func(ev sandbox.Event) {
 			switch ev.Type {
 			case "message_update":
-				if ev.Delta != nil && ev.Delta.Type == "thinking_delta" {
+				if ev.Delta == nil {
+					return
+				}
+				switch ev.Delta.Type {
+				case "thinking_delta":
 					out.reasoning(ev.Delta.Delta)
+				case "text_delta":
+					say(ev.Delta.Delta)
 				}
 			case "message_end":
 				m := ev.Message
 				if m == nil || m.Role != "assistant" {
 					return
 				}
+				was := streamed
+				streamed = false
 				switch m.StopReason {
 				case "toolUse":
-					if t := strings.TrimSpace(m.Text()); t != "" {
+					if was {
+						if st, ok := out.(stepper); ok {
+							st.step()
+						}
+					} else if t := strings.TrimSpace(m.Text()); t != "" {
 						out.reasoning(t + "\n")
 					}
 				case "error":
 					failure = m.ErrorMessage
 				case "aborted":
 				default:
-					out.content(m.Text())
+					if !was { // a provider that does not stream
+						say(m.Text())
+						streamed = false
+					}
 				}
 			case "tool_execution_start":
 				calls++

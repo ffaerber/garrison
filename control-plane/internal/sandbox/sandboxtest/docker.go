@@ -227,6 +227,11 @@ func (d *Docker) attach(w http.ResponseWriter, c *Container) {
 				emit(map[string]any{"type": "tool_execution_end", "toolName": "list_repos", "isError": false})
 			}
 			emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "thinking_delta", "delta": "hmm"}})
+			// The answer streams in two pieces, as Pi sends a model's text.
+			half := len(answer) / 2
+			for _, part := range []string{answer[:half], answer[half:]} {
+				emit(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_delta", "delta": part}})
+			}
 			emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "stop", "content": []any{map[string]any{"type": "text", "text": answer}}}})
 			emit(map[string]any{"type": "agent_end", "messages": []any{}})
 			d.mu.Lock()

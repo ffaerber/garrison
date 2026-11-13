@@ -142,3 +142,18 @@ func TestPromptFrom(t *testing.T) {
 		t.Errorf("fresh text %q", text)
 	}
 }
+
+func TestTheAnswerStreamsAsItIsWritten(t *testing.T) {
+	s, _, _ := setup(t)
+	withSandboxes(t, s)
+	w := post(t, s, "tok-alice", map[string]string{ChatHeader: "chat-1"}, map[string]any{"model": "homepage/reader", "stream": true, "messages": []Message{{Role: "user", Content: "hello there"}}})
+	chunks := 0
+	for _, line := range strings.Split(w.Body.String(), "\n") {
+		if strings.Contains(line, `"content":"`) && !strings.Contains(line, `"content":""`) {
+			chunks++
+		}
+	}
+	if _, content, _ := events(t, w.Body.String()); content != "echo: hello there" || chunks < 2 {
+		t.Errorf("content %q in %d chunks; want it in pieces as Pi writes it", content, chunks)
+	}
+}

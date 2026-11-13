@@ -232,3 +232,15 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAskedAgentsAnswerIsItsLastMessage(t *testing.T) {
+	var shown strings.Builder
+	c := &collect{show: func(s string) { shown.WriteString(s) }, prefix: "[x] "}
+	c.content("Let me ")
+	c.content("look.")
+	c.step() // that was before a tool call
+	c.content("\n\nIt works.")
+	if c.answer() != "It works." || shown.String() != "[x] Let me look.\n" {
+		t.Errorf("answer %q, shown %q", c.answer(), shown.String())
+	}
+}

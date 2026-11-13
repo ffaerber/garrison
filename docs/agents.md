@@ -213,7 +213,7 @@ An OpenAI-compatible API, reachable only from Open WebUI on the system network.
 - Open WebUI's connection sends, as custom headers, `X-Homecloud-Chat: {{CHAT_ID}}` and `X-Homecloud-Task: {{TASK}}`, and the person's Keycloak token (`system_oauth`), which the agent service verifies.
 - Requests with a task header (titles, tags, follow-up suggestions) go straight to the LLM without a sandbox.
 - Open WebUI sends the whole conversation each time. The agent service passes on only the new message, and Open WebUI's own system messages (a channel thread's history): the harness keeps its own session, including tool calls and results. A fresh session, e.g. of a chat begun before sandboxes, gets the earlier messages as context. Branching the session when a message is edited or regenerated is to come.
-- In the answer, Pi's thinking, its tool calls, failed tool results and what it says between tool calls show as reasoning; its last message is the content.
+- The answer streams as Pi writes it: its thinking, tool calls and failed tool results as reasoning, its text as content, piece by piece. Text before a tool call stays in the answer as a step ("Let me look at the logs."), as only a message's end says whether it was the answer. For an agent asked by another, only its last message is the answer; earlier text shows as progress.
 
 ## Sessions
 
