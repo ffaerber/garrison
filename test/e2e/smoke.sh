@@ -652,6 +652,13 @@ import json,sys
 prs=[p["number"] for p in json.load(sys.stdin) if p["user"]["login"]==sys.argv[1] and p["number"] > int(sys.argv[2])]
 print(max(prs) if prs else "")' "$2" "${3:-0}"
 }
+# newest_any_pr REPO AUTHOR AFTER: as newest_pr, merged and closed ones too.
+newest_any_pr() {
+  gitea_api "" "$hp/$1/pulls?state=all&limit=50" | python3 -c '
+import json,sys
+prs=[p["number"] for p in json.load(sys.stdin) if p["user"]["login"]==sys.argv[1] and p["number"] > int(sys.argv[2])]
+print(max(prs) if prs else "")' "$2" "$3"
+}
 last_pr() { gitea_api "" "$hp/$1/pulls?state=all&limit=1" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(l[0]["number"] if l else 0)'; }
 head_sha() { gitea_api "" "$hp/$1/pulls/$2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])'; }
 # roster REF: members.yaml of homepage/config at REF, as "admins=a,b members=c".
@@ -842,12 +849,12 @@ check "Open WebUI has homepage/media"      until_true 120 has_model homepage/med
 since=$(last_pr todo)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 media_from=$at  # the channel's conversation with the media agent begins
-answer=$(ask_agent homepage bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the repo todo as docs/screenshots/todo.png. Title: Screenshot of the todo app." media)
-spr=$(newest_pr todo bob "$since")
+answer=$(ask_agent homepage bob "Take one screenshot of https://todo.$DOMAIN/ and put it into the repo todo as docs/screenshots/todo.png. Title: Screenshot of the todo app. Just this one, not the homepage screenshots of your skill." media)
+spr=$(pr_with todo bob "$since" docs/screenshots/todo.png | cut -d' ' -f1)
 if [ -z "$spr" ]; then
-  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent homepage bob "Please take that screenshot now with the screenshot tool: url https://todo.$DOMAIN/, namespace homepage, repo todo, path docs/screenshots/todo.png." media)
-  spr=$(newest_pr todo bob "$since")
+  printf 'retry the agent opened no pull request with todo.png; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please take that one screenshot now with the screenshot tool: url https://todo.$DOMAIN/, namespace homepage, repo todo, path docs/screenshots/todo.png." media)
+  spr=$(pr_with todo bob "$since" docs/screenshots/todo.png | cut -d' ' -f1)
 fi
 check "the media agent takes it, as bob"   grep -q "mcp: bob: screenshot" <<<"$(mcp_calls "$at" bob)"
 check "it proposes the screenshot, as bob" test -n "$spr"
@@ -856,12 +863,16 @@ body=$(gitea_api "" "$hp/todo/pulls/$spr" | python3 -c 'import json,sys; print(j
 check "it shows the todo app, signed in as bob" \
   bash -c 'grep -q "Screenshot of https://todo.$1/ as bob" <<<"$0" && grep -q "Homepage todos" <<<"$0"' "$body" "$DOMAIN"
 check "the answer links it"                grep -q "/homepage/todo/pulls/$spr" <<<"$answer"
-gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$spr"
+# Close it, and whatever else it proposed (a model may follow its skill
+# unasked), so 4c starts afresh.
+for n in $(gitea_api "" "$hp/todo/pulls?state=open&limit=50" | python3 -c 'import json,sys; [print(p["number"]) for p in json.load(sys.stdin) if p["user"]["login"]=="bob" and p["number"] > int(sys.argv[1])]' "$since"); do
+  gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/todo/pulls/$n"
+done
 
 echo "# 4c. the media agent follows its skill"
 since=$(last_pr todo)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent homepage bob "Make the homepage screenshots of the todo app." media)
+answer=$(ask_agent homepage bob "Make the homepage screenshots of the todo app, new ones: earlier ones were closed." media)
 if ! pr_with todo bob "$since" docs/screenshots/todo-phone.png >/dev/null || ! pr_with todo bob "$since" docs/screenshots/todo-desktop.png >/dev/null; then
   printf 'retry the agent did not make both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent homepage bob "Please load your skill homepage-screenshots and follow it for the app todo now: both screenshots." media)
@@ -1033,13 +1044,11 @@ check "alice makes the branch dev"         test "$(gitea_api alice -o /dev/null 
 since=$(last_pr todo)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent homepage bob "Clone the repo todo of the namespace homepage, check out its branch dev, change the text 'Homepage todos' to 'Dev todos' everywhere (grep -rn), and propose it with propose_workspace_changes with base dev, titled: Dev heading. Then merge that pull request into dev with merge_change, and give me the link." developer)
-dvpr=$(newest_pr todo bob "$since")
+dvpr=$(newest_any_pr todo bob "$since")
 if [ -z "$dvpr" ]; then
-  printf 'retry the agent opened no pull request; it said: %s
-' "$(head -c 300 <<<"$answer" | tr '
-' ' ')"
+  printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent homepage bob "Please propose your checkout of todo now with propose_workspace_changes, base dev, then merge it into dev with merge_change." developer)
-  dvpr=$(newest_pr todo bob "$since")
+  dvpr=$(newest_any_pr todo bob "$since")
 fi
 merged_by() { gitea_api "" "$hp/todo/pulls/$1" | python3 -c 'import json,sys; p=json.load(sys.stdin); print((p.get("merged_by") or {}).get("login","") if p.get("merged") else "")'; }
 if [ -n "$dvpr" ] && [ -z "$(merged_by "$dvpr")" ]; then
