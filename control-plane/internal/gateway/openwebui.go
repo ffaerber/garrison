@@ -38,11 +38,11 @@ type OpenWebUI struct {
 	Agents   *Catalog // filled with the agents read, for the MCP endpoints
 	HTTP     *http.Client
 
-	mu         sync.Mutex        // guards token: posts come from other goroutines
-	token      string            // kept between syncs: Open WebUI limits sign-ins
-	teamAccess map[string]string // team channel -> the access last set; Open WebUI returns it in its own shape
-	accountID  string            // the gateway's own Open WebUI account
-	problems   map[string]bool   // agent problems already logged
+	mu            sync.Mutex        // guards token: posts come from other goroutines
+	token         string            // kept between syncs: Open WebUI limits sign-ins
+	channelAccess map[string]string // channel -> the access last set; Open WebUI returns it in its own shape
+	accountID     string            // the gateway's own Open WebUI account
+	problems      map[string]bool   // agent problems already logged
 }
 
 // AgentMarker in a model's meta names the agent it is; the sync owns such
@@ -76,7 +76,7 @@ func (o *OpenWebUI) want(a agents.Agent, groups map[string]string, private bool)
 	}
 	access, grants := "everyone", []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}}
 	if private {
-		desc += " (works on private repos: ask it in a private chat or in " + a.Namespace + TeamSuffix + ")"
+		desc += " (works on private repos: for " + a.Namespace + "'s people)"
 		access, grants = "admins", []any{}
 		if id := groups[a.Namespace]; id != "" {
 			access, grants = "group:"+id, []any{map[string]any{"principal_type": "group", "principal_id": id, "permission": "read"}}
@@ -139,8 +139,8 @@ func (o *OpenWebUI) call(ctx context.Context, token, method, path string, body, 
 // Sync makes Open WebUI's agents and channels match the
 // namespaces and their agents in Gitea.
 func (o *OpenWebUI) Sync(ctx context.Context) error {
-	if o.teamAccess == nil {
-		o.teamAccess = map[string]string{}
+	if o.channelAccess == nil {
+		o.channelAccess = map[string]string{}
 	}
 	token, err := o.session(ctx)
 	if err != nil {
@@ -308,7 +308,10 @@ For example:
 
 It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention an agent are for the people here.
 
-An agent acts with your rights. Everyone may ask anything. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are folders under agents/ in the repo config.`, example.ID())
+An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are folders under agents/ in the repo config.`, example.ID())
+	if ns.Name != SystemNamespace {
+		b.WriteString("\n\nOnly the people of " + ns.Name + " read this channel. Others can talk to its agents that work on public repos in a private chat.")
+	}
 	return b.String()
 }
 
@@ -364,15 +367,19 @@ func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns N
 const ChannelMarker = "homecloud_namespace"
 
 type owuiChannel struct {
-	ID          string         `json:"id"`
-	Type        *string        `json:"type"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Meta        map[string]any `json:"meta"`
+	ID           string         `json:"id"`
+	Type         *string        `json:"type"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Meta         map[string]any `json:"meta"`
+	AccessGrants []any          `json:"access_grants,omitempty"`
 }
 
 func (o *OpenWebUI) channelDescription(ns Namespace) string {
-	return fmt.Sprintf("Team chat of the namespace %s. Ask its agents with @%s/<agent>; see the pinned message.", ns.Name, ns.Name)
+	if ns.Name == SystemNamespace {
+		return "Chat of the platform, for everyone signed in. Ask its agents with @system/<agent>; see the pinned message."
+	}
+	return fmt.Sprintf("Team chat of the namespace %s: only its people read it. Ask its agents with @%s/<agent>; see the pinned message.", ns.Name, ns.Name)
 }
 
 var everyoneReadsAndWrites = []any{
@@ -380,21 +387,14 @@ var everyoneReadsAndWrites = []any{
 	map[string]any{"principal_type": "user", "principal_id": "*", "permission": "write"},
 }
 
-// TeamMarker in a channel's meta names the namespace whose team channel it
-// is: <namespace>-team, which only the namespace's people read. Agents that
-// work on private repos answer only there and in private chats.
-const (
-	TeamMarker = "homecloud_team"
-	TeamSuffix = "-team"
-)
-
-func (o *OpenWebUI) teamDescription(ns Namespace) string {
-	return fmt.Sprintf("Team chat of the namespace %s: only its people read it. Agents that work on its private repos answer here, and post what their routines found.", ns.Name)
-}
-
-// teamAccess lets the namespace's group read and write; without a group
-// (system, whose people are root admins), only Open WebUI's admins.
-func teamAccess(group string) []any {
+// channelAccess is who reads and writes a namespace's channel: its people,
+// by its Open WebUI group (root admins, Open WebUI's admins, read every
+// channel). system's is for everyone signed in: it has no people of its own,
+// and its repos and agents serve everyone.
+func channelAccess(ns, group string) []any {
+	if ns == SystemNamespace {
+		return everyoneReadsAndWrites
+	}
 	if group == "" {
 		return []any{}
 	}
@@ -404,75 +404,53 @@ func teamAccess(group string) []any {
 	}
 }
 
-// syncChannels keeps two channels per namespace, as they were made: its
-// channel, for everyone, and its team channel, for its people.
+// legacyTeamMarker marked the team channels of an earlier version, which
+// the sync removes: a namespace's channel is for its people now.
+const legacyTeamMarker = "homecloud_team"
+
+// syncChannels keeps one channel per namespace, as it was made, for the
+// namespace's people.
 func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces []Namespace, byNS map[string][]agents.Agent, groups map[string]string) error {
 	var all []owuiChannel
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
 		return err
 	}
 	have := map[string]owuiChannel{}
-	teams := map[string]owuiChannel{}
 	for _, c := range all {
 		if ns, ok := c.Meta[ChannelMarker].(string); ok {
 			have[ns] = c
 		}
-		if ns, ok := c.Meta[TeamMarker].(string); ok {
-			teams[ns] = c
+		if ns, ok := c.Meta[legacyTeamMarker].(string); ok {
+			if err := o.call(ctx, token, http.MethodDelete, "/api/v1/channels/"+c.ID+"/delete", nil, nil); err != nil {
+				return err
+			}
+			log.Printf("open webui: removed the team channel of namespace %s: its channel is for its people now", ns)
 		}
 	}
 	for _, ns := range namespaces {
-		name := ns.Name + TeamSuffix
-		meta := map[string]any{TeamMarker: ns.Name}
-		access := teamAccess(groups[ns.Name])
-		cur, ok := teams[ns.Name]
-		delete(teams, ns.Name)
+		meta := map[string]any{ChannelMarker: ns.Name}
+		access := channelAccess(ns.Name, groups[ns.Name])
 		key, _ := json.Marshal(access)
+		cur, ok := have[ns.Name]
+		delete(have, ns.Name)
 		switch {
 		case !ok:
-			form := map[string]any{"name": name, "description": o.teamDescription(ns), "meta": meta, "access_grants": access}
+			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta, "access_grants": access}
 			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/create", form, &cur); err != nil {
 				return err
 			}
-			o.teamAccess[cur.ID] = string(key)
-			log.Printf("open webui: added the team channel of namespace %s", ns.Name)
-		case cur.Name != name || cur.Description != o.teamDescription(ns) || o.teamAccess[cur.ID] != string(key):
-			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/update", map[string]any{"name": name, "description": o.teamDescription(ns), "meta": meta}, nil); err != nil {
+			o.channelAccess[cur.ID] = string(key)
+			log.Printf("open webui: added the channel of namespace %s", ns.Name)
+		case cur.Name != ns.Name || cur.Description != o.channelDescription(ns) || o.channelAccess[cur.ID] != string(key):
+			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta}
+			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/update", form, nil); err != nil {
 				return err
 			}
 			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/access/update", map[string]any{"access_grants": access}, nil); err != nil {
 				return err
 			}
-			o.teamAccess[cur.ID] = string(key)
-			log.Printf("open webui: set the team channel of namespace %s", ns.Name)
-		}
-	}
-	for ns, c := range teams {
-		if err := o.call(ctx, token, http.MethodDelete, "/api/v1/channels/"+c.ID+"/delete", nil, nil); err != nil {
-			return err
-		}
-		log.Printf("open webui: removed the team channel of namespace %s, which is gone", ns)
-	}
-	for _, ns := range namespaces {
-		meta := map[string]any{ChannelMarker: ns.Name}
-		cur, ok := have[ns.Name]
-		delete(have, ns.Name)
-		switch {
-		case !ok:
-			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta, "access_grants": everyoneReadsAndWrites}
-			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/create", form, &cur); err != nil {
-				return err
-			}
-			log.Printf("open webui: added the channel of namespace %s", ns.Name)
-		case cur.Name != ns.Name || cur.Description != o.channelDescription(ns):
-			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta}
-			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/update", form, nil); err != nil {
-				return err
-			}
-			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/access/update", map[string]any{"access_grants": everyoneReadsAndWrites}, nil); err != nil {
-				return err
-			}
-			log.Printf("open webui: put back the channel of namespace %s", ns.Name)
+			o.channelAccess[cur.ID] = string(key)
+			log.Printf("open webui: set the channel of namespace %s", ns.Name)
 		}
 		if err := o.syncHowTo(ctx, token, cur.ID, ns, byNS[ns.Name]); err != nil {
 			return err

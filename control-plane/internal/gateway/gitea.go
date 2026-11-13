@@ -393,7 +393,9 @@ func (g *Gitea) ProposePatch(ctx context.Context, as string, pp Proposal) (Chang
 // Propose writes one file on a new branch, as person, and opens a pull
 // request for it. Nothing reaches main, and so the cluster, until a person
 // allowed to merges it in Gitea; the gateway cannot merge.
-func (g *Gitea) Propose(ctx context.Context, as, org, repo, path, content, title, description string) (Change, error) {
+// branch names the new branch (empty: change/<as>-<time>); note, if set,
+// ends the pull request's description (whom it was asked for).
+func (g *Gitea) Propose(ctx context.Context, as, org, repo, path, content, title, description, branch, note string) (Change, error) {
 	if err := validOrg(org); err != nil {
 		return Change{}, err
 	}
@@ -406,7 +408,12 @@ func (g *Gitea) Propose(ctx context.Context, as, org, repo, path, content, title
 	if strings.TrimSpace(title) == "" {
 		return Change{}, fmt.Errorf("%w: a change needs a title", ErrInvalid)
 	}
-	branch := fmt.Sprintf("change/%s-%d", as, time.Now().UnixNano()/1e6)
+	if branch == "" {
+		branch = fmt.Sprintf("%s%s-%d", ChangeBranch, as, time.Now().UnixNano()/1e6)
+	}
+	if note != "" {
+		description = strings.TrimSpace(description + "\n\n" + note)
+	}
 	file := fmt.Sprintf("/repos/%s/%s/contents/%s", org, repo, escapePath(path))
 	req := map[string]any{
 		"branch":     "main",

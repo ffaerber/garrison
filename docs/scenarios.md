@@ -111,7 +111,7 @@ Alice: *@homepage/operator Remove bob from the namespace homepage.*
 
 ## 5b. Bob, no longer in homepage, asks the desk for a change
 
-Bob: *@homepage/desk Propose a new file IDEAS.md in todo.*
+Bob no longer sees homepage's channel. In a chat of his own: *homepage/desk, propose a new file IDEAS.md in todo.*
 
 - He may not write to todo, but the desk may propose there for everyone: the pull request is by `agent-homepage-desk`, on a branch `agent/desk/bob-...`, and says *Asked by bob (not in homepage) through homepage/desk.*
 
@@ -120,8 +120,7 @@ Bob: *@homepage/desk Propose a new file IDEAS.md in todo.*
 Alice makes a private repo `homepage/secret` and adds `homepage/keeper` with `repos: [secret]`; carol approves.
 
 - Carol, in homepage, sees the keeper in Open WebUI; bob, no longer in homepage, does not, though he still sees the agents of public repos.
-- Homepage has a team channel, `homepage-team`, which carol sees and bob does not.
-- Carol mentions the keeper in homepage's channel, which everyone reads: the agent service refuses it there. In `homepage-team` it answers her from the repo.
+- Carol mentions the keeper in `system`'s channel, which everyone reads: the agent service refuses it there. In homepage's channel, which only homepage's people read, it answers her from the repo.
 
 ## 6. Alice adds an agent that may only read
 

@@ -161,8 +161,7 @@ func TestRoutines(t *testing.T) {
 	head = "c2"
 	r.Check(context.Background()) // main moved
 	posts := wait(1)
-	// todo is unknown to this Gitea, so private: the post goes to the team channel.
-	if len(posts) != 1 || !strings.Contains(posts[0].Text, "Routine on-main, for bob (main of homepage/todo moved to c2)") || posts[0].Channel != "" || !posts[0].Team {
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "Routine on-main, for bob (main of homepage/todo moved to c2)") || posts[0].Channel != "" {
 		t.Fatalf("on push: %+v", posts)
 	}
 	now = now.Add(31 * time.Minute)
@@ -207,7 +206,7 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 	defer gitea.Close()
 	s.Gitea = &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
 	s.Poster = &fakePoster{channels: map[string]gateway.ChannelInfo{
-		"pub": {Namespace: "homepage"}, "team": {Namespace: "homepage", Team: true}, "other-team": {Namespace: "shop", Team: true},
+		"homepage": {Namespace: "homepage", Members: true}, "system": {Namespace: "system"}, "shop": {Namespace: "shop", Members: true},
 	}}
 	s.Agents = fakeAgents{
 		{Namespace: "homepage", Name: "keeper", Prompt: "Keep.", Repos: []string{"secret"}},
@@ -218,17 +217,17 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 		agent, chat string
 		code        int
 	}{
-		{"homepage/keeper", "channel:pub", http.StatusForbidden},
-		{"homepage/keeper", "channel:other-team", http.StatusForbidden},
-		{"homepage/keeper", "channel:team", http.StatusOK},
+		{"homepage/keeper", "channel:system", http.StatusForbidden}, // everyone reads it
+		{"homepage/keeper", "channel:shop", http.StatusForbidden},   // shop's people do
+		{"homepage/keeper", "channel:homepage", http.StatusOK},
 		{"homepage/keeper", "chat-1", http.StatusOK},
-		{"homepage/desk", "channel:pub", http.StatusOK},
+		{"homepage/desk", "channel:system", http.StatusOK},
 	} {
 		w := post(t, s, "tok-alice", map[string]string{ChatHeader: c.chat}, map[string]any{"model": c.agent, "stream": true, "messages": []Message{{Role: "user", Content: "hi"}}})
 		if w.Code != c.code {
 			t.Errorf("%s in %s: %d, want %d: %s", c.agent, c.chat, w.Code, c.code, w.Body)
 		}
-		if c.code == http.StatusForbidden && !strings.Contains(w.Body.String(), "homepage-team") {
+		if c.code == http.StatusForbidden && !strings.Contains(w.Body.String(), "ask it in the channel homepage or in a private chat") {
 			t.Errorf("the refusal does not say where: %s", w.Body)
 		}
 	}

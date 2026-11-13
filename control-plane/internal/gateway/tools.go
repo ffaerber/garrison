@@ -336,7 +336,27 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 	case "merge_change":
 		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
 	case "propose_change":
-		c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, a.Content, a.Title, a.Description)
+		if err := validOrg(a.Namespace); err != nil {
+			return "", err
+		}
+		if err := validRepo(a.Repo); err != nil {
+			return "", err
+		}
+		as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, a.Repo)
+		if err != nil {
+			return "", err
+		}
+		note := ""
+		if agent != nil {
+			role := "member"
+			if viaAgent {
+				if role, err = t.role(ctx, p, a.Namespace); err != nil {
+					return "", err
+				}
+			}
+			note = askedBy(p, agent, role)
+		}
+		c, err := t.Gitea.Propose(ctx, as, a.Namespace, a.Repo, a.Path, a.Content, a.Title, a.Description, newBranch(p, agent, viaAgent), note)
 		if err != nil {
 			return "", err
 		}
@@ -376,7 +396,7 @@ func (t *Tools) screenshot(ctx context.Context, p Person, a args) (string, error
 		desc += "\n\n"
 	}
 	desc += fmt.Sprintf("Screenshot of %s as %s, %dx%d: page title %q.", shot.URL, p.Name, w, h, shot.Title)
-	c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, string(shot.PNG), a.Title, desc)
+	c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, string(shot.PNG), a.Title, desc, "", "")
 	if err != nil {
 		return "", err
 	}

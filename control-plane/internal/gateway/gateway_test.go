@@ -351,6 +351,7 @@ func TestOpenWebUISync(t *testing.T) {
 	channels := map[string]owuiChannel{
 		"c-gone":  {ID: "c-gone", Name: "gone", Meta: map[string]any{ChannelMarker: "gone"}},
 		"c-other": {ID: "c-other", Name: "random"},
+		"c-team":  {ID: "c-team", Name: "homepage-team", Meta: map[string]any{legacyTeamMarker: "homepage"}},
 	}
 	nextChannel := 0
 	profileName := "Installer"
@@ -502,20 +503,27 @@ func TestOpenWebUISync(t *testing.T) {
 	if err := o.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Agents on public repos are for everyone; homepage has a group of its
-	// people, and a team channel only they read.
+	// Agents on public repos are for everyone; homepage's channel is for its
+	// group, system's for everyone; the team channel of before is gone.
 	gid := "g" + GroupPrefix + "homepage"
 	if models["homepage/marketing"].Meta[AccessMarker] != "everyone" || models["system/operator"].Meta[AccessMarker] != "everyone" {
 		t.Errorf("access: %v %v", models["homepage/marketing"].Meta, models["system/operator"].Meta)
 	}
-	team := 0
 	for _, c := range channels {
-		if c.Meta[TeamMarker] == "homepage" && c.Name == "homepage-team" {
-			team++
+		grants, _ := json.Marshal(c.AccessGrants)
+		switch c.Meta[ChannelMarker] {
+		case "homepage":
+			if !strings.Contains(string(grants), `"principal_id":"`+gid+`"`) || strings.Contains(string(grants), `"*"`) {
+				t.Errorf("homepage's channel is for %s", grants)
+			}
+		case "system":
+			if c.AccessGrants != nil && !strings.Contains(string(grants), `"*"`) {
+				t.Errorf("system's channel is for %s", grants)
+			}
 		}
-	}
-	if team != 1 {
-		t.Errorf("homepage's team channel: %v", channels)
+		if c.Meta[legacyTeamMarker] != nil {
+			t.Errorf("a team channel is left: %v", c)
+		}
 	}
 	if strings.Join(groupUsers[gid], ",") != "u-alice" {
 		t.Errorf("homepage's group: %v (alice is in it; bob has not signed in to Open WebUI; carol is not in homepage)", groupUsers[gid])

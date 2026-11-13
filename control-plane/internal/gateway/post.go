@@ -17,7 +17,6 @@ import (
 type Post struct {
 	Agent   string `json:"agent"`   // <namespace>/<agent>
 	Channel string `json:"channel"` // an Open WebUI channel id; empty for the namespace's
-	Team    bool   `json:"team"`    // without Channel: the namespace's team channel, for a private agent
 	Text    string `json:"text"`
 }
 
@@ -43,12 +42,8 @@ func (o *OpenWebUI) Post(ctx context.Context, p Post) error {
 		if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
 			return err
 		}
-		marker := ChannelMarker
-		if p.Team {
-			marker = TeamMarker
-		}
 		for _, c := range all {
-			if c.Meta[marker] == ns {
+			if c.Meta[ChannelMarker] == ns {
 				id = c.ID
 			}
 		}
@@ -90,7 +85,9 @@ func PostHandler(o *OpenWebUI, key string) http.Handler {
 // ChannelInfo is what a channel is to the platform.
 type ChannelInfo struct {
 	Namespace string `json:"namespace"` // empty: not a namespace's
-	Team      bool   `json:"team"`      // its team channel, which only its people read
+	// Members: only the namespace's people read it. Every namespace's
+	// channel but system's.
+	Members bool `json:"members"`
 }
 
 // Channel tells what the channel id is.
@@ -107,11 +104,8 @@ func (o *OpenWebUI) Channel(ctx context.Context, id string) (ChannelInfo, error)
 		if c.ID != id {
 			continue
 		}
-		if ns, ok := c.Meta[TeamMarker].(string); ok {
-			return ChannelInfo{Namespace: ns, Team: true}, nil
-		}
 		ns, _ := c.Meta[ChannelMarker].(string)
-		return ChannelInfo{Namespace: ns}, nil
+		return ChannelInfo{Namespace: ns, Members: ns != "" && ns != SystemNamespace}, nil
 	}
 	return ChannelInfo{}, nil
 }

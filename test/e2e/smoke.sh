@@ -1027,7 +1027,7 @@ printf 'You try the namespace'"'"'s apps in the browser, as the person you work 
 ' > "$tmp/tester.md"
 cat > "$tmp/desk.yaml" <<'YAML'
 description: Takes requests for changes to the namespace's apps from anyone
-tools: [read_file, propose_patch]
+tools: [read_file, propose_change, propose_patch]
 grants:
   - {repo: todo, level: propose, for: everyone}
 YAML
@@ -1125,13 +1125,22 @@ check "bob leaves the members"             until_true 90 gone_from_members
 check "bob may no longer push"             until_true 60 cannot_push bob
 check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$hp/todo")" = 200
 
+check "bob no longer sees homepage's channel" test -z "$(channel_of homepage bob)"
+
 echo "# 5b. bob, no longer in homepage, asks the desk for a change"
+# ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
+# through Open WebUI's API, and prints its answer.
+ask_private() {
+  chat_api "$1" --max-time 600 -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3")" \
+    "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
+}
 since=$(last_pr todo)
-answer=$(ask_agent homepage bob "In the repo todo of the namespace homepage, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else." desk)
+answer=$(ask_private bob homepage/desk "In the repo todo of the namespace homepage, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else.")
 opr=$(newest_pr todo agent-homepage-desk "$since")
 if [ -z "$opr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent homepage bob "Please propose that IDEAS.md for homepage/todo now: clone it, add the file, and call propose_workspace_changes." desk)
+  answer=$(ask_private bob homepage/desk "Please propose that IDEAS.md for homepage/todo now with propose_change: namespace homepage, repo todo, path IDEAS.md, content: Dark mode, please.")
   opr=$(newest_pr todo agent-homepage-desk "$since")
 fi
 check "the desk proposes it with its own account" test -n "$opr"
@@ -1150,14 +1159,12 @@ check "alice merges it"                    test "$(merge config alice "$kpr")" =
 check "carol, in homepage, sees it"        until_true 120 has_model homepage/keeper carol
 check "bob, no longer in homepage, does not" not_seen homepage/keeper bob
 check "he still sees the agents of public repos" has_model homepage/developer bob
-check "homepage has a team channel for carol" test -n "$(channel_of homepage-team carol)"
-check "which bob does not see"             test -z "$(channel_of homepage-team bob)"
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-mention homepage carol homepage/keeper "What is in the repo secret?" >/dev/null
+mention system carol homepage/keeper "What is in the repo secret?" >/dev/null
 refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: homepage/keeper: refused in channel:.*: private"; }
-check "it does not answer in the channel everyone reads" until_true 120 refused_here
-answer=$(CHANNEL=homepage-team ask_agent homepage carol "Read README.md of the repo secret of the namespace homepage and tell me its first line." keeper)
-check "it answers carol in the team channel" grep -qi secret <<<"$answer"
+check "it does not answer in system's channel, which everyone reads" until_true 120 refused_here
+answer=$(ask_agent homepage carol "Read README.md of the repo secret of the namespace homepage and tell me its first line." keeper)
+check "it answers carol in homepage's channel" grep -qi secret <<<"$answer"
 gitea_api "" -o /dev/null -X DELETE "$hp/secret"
 
 echo "# 6. alice adds an agent that may only read"
@@ -1192,7 +1199,7 @@ quotes_gone() { ! docker service inspect quotes_web >/dev/null 2>&1; }
 check "deleting the repo takes the app down" until_true 120 quotes_gone
 
 while read -r c m; do
-  for id in $(chat_api bob "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do
+  for id in $(web -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do
     web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$id/delete"
   done
 done < "$tmp/posted"

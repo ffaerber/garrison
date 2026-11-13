@@ -258,8 +258,9 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 }
 
 // privateHere says why a private agent may not answer in chat, where people
-// outside its namespace would read it: a channel other than its namespace's
-// team channel. "" if it may: a public agent, a private chat, a routine.
+// outside its namespace would read it: a channel other than its namespace's,
+// which only its people read. "" if it may: a public agent, a private chat,
+// a routine.
 func (s *Server) privateHere(ctx context.Context, a agents.Agent, chat string) (string, error) {
 	id, inChannel := strings.CutPrefix(chat, "channel:")
 	if !inChannel || s.Gitea == nil {
@@ -274,9 +275,9 @@ func (s *Server) privateHere(ctx context.Context, a agents.Agent, chat string) (
 		if err != nil {
 			return "", err
 		}
-		if info.Team && info.Namespace == a.Namespace {
+		if info.Members && info.Namespace == a.Namespace {
 			return "", nil
 		}
 	}
-	return fmt.Sprintf("%s works on private repos of %s, so it answers only where only %s's people read: ask it in the channel %s%s or in a private chat", a.ID(), a.Namespace, a.Namespace, a.Namespace, gateway.TeamSuffix), nil
+	return fmt.Sprintf("%s works on private repos of %s, so it answers only where only %s's people read: ask it in the channel %s or in a private chat", a.ID(), a.Namespace, a.Namespace, a.Namespace), nil
 }
