@@ -382,6 +382,7 @@ func OperatorFiles(tools []string) map[string]string {
 One folder per agent. People mention an agent in the chat as ` + "`@<namespace>/<folder>`" + `.
 
 - ` + "`agent.yaml`" + `: ` + "`description`" + `, ` + "`model`" + ` (empty for the default), ` + "`tools`" + ` (the gateway tools it may use), ` + "`skills`" + ` (shared skills from ` + "`skills/`" + ` at the top of this repo), ` + "`repos`" + ` and ` + "`internet`" + ` (what its sandbox reaches: ` + "`packages`" + `, the package registries; ` + "`all`" + `; or a list of ` + "`packages`" + ` and domains; none without it).
+- ` + "`routines`" + `: work it does by itself, for an ` + "`owner`" + `, with a ` + "`task`" + `: on a ` + "`schedule`" + ` (cron, e.g. ` + "`\"30 6 * * mon-fri\"`" + `, in the home cloud's time zone), ` + "`every`" + ` (e.g. ` + "`6h`" + `) or ` + "`on_push`" + ` (` + "`{repo, branch}`" + `). Its answer goes to the namespace's channel.
 - ` + "`prompt.md`" + `: its instructions. The platform adds its own rules after them.
 - ` + "`skills/<name>/SKILL.md`" + `: skills of this agent only, in the Agent Skills format.
 

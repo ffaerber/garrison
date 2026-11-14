@@ -29,9 +29,12 @@ done
 [ -r "$ANSWERS" ] || fail "cannot read answers file $ANSWERS"
 
 DOMAIN= TLS_MODE=selfsigned ADMIN_USER=admin ADMIN_EMAIL= ADMIN_PASSWORD= POOL_DEVICE= POOL_SIZE=20G REGISTRY_MIRROR=
-LLM_BASE_URL=https://ollama.com/v1 LLM_MODEL=gpt-oss:120b LLM_API_KEY=
+LLM_BASE_URL=https://ollama.com/v1 LLM_MODEL=gpt-oss:120b LLM_API_KEY= TIMEZONE=
 # shellcheck disable=SC1090
 . "$ANSWERS"
+# The time zone routines' schedules are read in; the machine's by default.
+[ -n "$TIMEZONE" ] || TIMEZONE=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+[ -n "$TIMEZONE" ] || TIMEZONE=UTC
 [ -n "$DOMAIN" ] || fail "answers file must set DOMAIN"
 [ -n "$ADMIN_EMAIL" ] || ADMIN_EMAIL="$ADMIN_USER@$DOMAIN"
 case $TLS_MODE in
@@ -198,6 +201,7 @@ ADMIN_USER=$ADMIN_USER
 ADMIN_EMAIL=$ADMIN_EMAIL
 LLM_BASE_URL=$LLM_BASE_URL
 LLM_MODEL=$LLM_MODEL
+TIMEZONE=$TIMEZONE
 ENV
 
 # The agents' LLM key, root-only. It may also be put in this file by hand:

@@ -156,6 +156,14 @@ check "a private agent reaching the whole internet fails the check" \
   refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a6 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\ninternet: all\n')"
 check "it says the registries are the most" grep -q "internet: packages), no more" "$tmp/refused.out"
 check "the package registries it may reach" change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a7 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\ninternet: packages\n')"
+check "a routine every five minutes fails the check" \
+  refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a8 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\nroutines:\n  - { name: often, schedule: "*/5 * * * *", owner: alice, task: Look. }\n')"
+check "it says how often it may run"       grep -q "runs more often than every 10m" "$tmp/refused.out"
+check "a routine at 6:30 every morning passes" change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a9 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\nroutines:\n  - { name: morning, schedule: "30 6 * * *", owner: alice, task: Sum up the notes. }\n')"
+# The agent service keeps when it saw it in Postgres, so a restart does not
+# forget a run that is due.
+kept() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d homecloud -tAc "SELECT last IS NOT NULL FROM routine_state WHERE key = '$ns/helper/morning'" | grep -qx t; }
+check "the agent service keeps its state"  until_true 150 kept
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"private":false}' "$api/repos/$ns/notes"
 check "public again, bob sees it again"    until_true 120 sees_model bob $ns/helper
 check "alice takes the grant away"         change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a5 'Helps with the notes, now')"

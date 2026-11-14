@@ -59,7 +59,7 @@ func Open(ctx context.Context, url string, wait time.Duration) (*Postgres, error
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		_, err = pool.Exec(ctx, schema)
+		_, err = pool.Exec(ctx, schema+routineSchema)
 		if err == nil || time.Now().After(deadline) || ctx.Err() != nil {
 			break
 		}
@@ -240,4 +240,52 @@ func (p *Postgres) Prune(ctx context.Context) {
 		case <-time.After(time.Hour):
 		}
 	}
+}
+
+// RoutineState is what the agent service's scheduler keeps of a routine:
+// when it last started, and the commit an on_push routine last saw.
+type RoutineState struct {
+	Last time.Time
+	Head string
+}
+
+const routineSchema = `
+CREATE TABLE IF NOT EXISTS routine_state (
+  key  text PRIMARY KEY,
+  last timestamptz,
+  head text NOT NULL DEFAULT ''
+);`
+
+func (p *Postgres) RoutineStates(ctx context.Context) (map[string]RoutineState, error) {
+	rows, err := p.Pool.Query(ctx, "SELECT key, last, head FROM routine_state")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]RoutineState{}
+	for rows.Next() {
+		var k string
+		var last *time.Time
+		var s RoutineState
+		if err := rows.Scan(&k, &last, &s.Head); err != nil {
+			return nil, err
+		}
+		if last != nil {
+			s.Last = *last
+		}
+		out[k] = s
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) SaveRoutineState(ctx context.Context, key string, s RoutineState) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	var last any
+	if !s.Last.IsZero() {
+		last = s.Last.UTC()
+	}
+	_, err := p.Pool.Exec(ctx, `INSERT INTO routine_state (key, last, head) VALUES ($1, $2, $3)
+ON CONFLICT (key) DO UPDATE SET last = excluded.last, head = excluded.head`, key, last, s.Head)
+	return err
 }

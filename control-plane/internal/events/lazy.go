@@ -101,3 +101,19 @@ func (l *Lazy) Prune(ctx context.Context) {
 		}
 	}
 }
+
+func (l *Lazy) RoutineStates(ctx context.Context) (map[string]RoutineState, error) {
+	pg, err := l.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return pg.RoutineStates(ctx)
+}
+
+func (l *Lazy) SaveRoutineState(ctx context.Context, key string, s RoutineState) error {
+	pg, err := l.get(ctx)
+	if err != nil {
+		return err
+	}
+	return pg.SaveRoutineState(ctx, key, s)
+}

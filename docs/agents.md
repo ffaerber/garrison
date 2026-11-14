@@ -180,6 +180,10 @@ Routines: work an agent starts by itself, in its `agent.yaml`.
 routines:
   - name: nightly
     every: 24h                         # 10m to 7 days
+  - name: morning
+    schedule: "30 6 * * mon-fri"       # cron, in the home cloud's time zone
+    owner: alice
+    task: Sum up what happened in todo yesterday.
     owner: bob                         # a person of the namespace
     task: Update the dependencies of todo and propose it.
   - name: main-moved
@@ -189,7 +193,12 @@ routines:
 ```
 
 - **Who:** a routine acts with the agent's own account, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Tools that need a person's sign-in (`screenshot`, `browse`, `propose_change`) are refused.
-- **When:** the agent service looks every minute. A routine with `every` first runs one interval after it is first seen; one with `on_push` runs when the branch moves after that. When each last ran is kept in memory, so a restart starts the intervals afresh and misses pushes in between. One run of a routine at a time.
+- **When:** each routine has one of `schedule`, `every` and `on_push`. The agent service looks every minute.
+  - `schedule` is cron's five fields, minute hour day-of-month month day-of-week (names like `mon-fri` and `dec` work), or `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`. It is read in the home cloud's time zone, `TIMEZONE` in `install.env` (the machine's at install, else UTC). A time a clock change skips runs right after the change. The approval check refuses a schedule that never comes or runs more often than every 10 minutes.
+  - A routine with `schedule` first runs at the next time it names after it is first seen; one with `every` one interval after; one with `on_push` when the branch moves after that.
+  - When each last ran, and the commit each `on_push` routine last saw, are kept in Postgres (`routine_state` in `homecloud`). After a restart, a schedule missed meanwhile runs once, and a push made meanwhile starts its routine. Until the agent service can read that state, no routine runs.
+  - One run of a routine at a time.
+- **In the feed:** each run is in the dashboard's feed with its answer, for the namespace's people and the owner, and its thread shows what it did.
 - **Where the answer goes:** posted in the namespace's channel, which only its people read, under the agent's name, by the gateway's Open WebUI account.
 - **How the gateway knows:** the agent service and the gateway derive a key from the admin password, which both hold. With it, the agent service tells the gateway what started each run (`person`, `agent <id>`, `routine <id>/<name>`) and, for a routine, its owner instead of a person's token. The gateway logs such calls as `bob (nobody watching, as agent-homepage-dev)`.
 
@@ -283,7 +292,7 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 6. Marketing agent: `screenshot` tool, built: headless Chrome in the control plane, signed in as the person, the PNG proposed as a pull request; tested with a media agent that bob asks for a screenshot of the todo app. To come: Git LFS for larger media, the media library, video.
 7. Accounts and grants, built: private agents for private repos, kept as Open WebUI groups and checked by the agent service and the gateway; an account per agent with grants or routines, writing only to its granted repos; grants checked on `config` pull requests, with the limits no grant lifts; proposals by the agent's account on `agent/<name>/...`; `merge_change`; outsiders' proposals. Tested in scenarios 4g, 4h, 5b and 5c.
 8. `ask_agent`, built: waiting for the answer, or, in a channel, posting it later. Tested in 4i.
-9. Runs without a person, built: routines (`every`, `on_push`), posting into the namespace's channel, the record of what started a run; keeping proposals current when their base moves. Tested in 4j.
+9. Runs without a person, built: routines (`schedule`, `every`, `on_push`, kept across restarts), posting into the namespace's channel, the record of what started a run; keeping proposals current when their base moves. Tested in 4j.
 10. Previews of pull requests and `browse`, built. Tested in 4i.
 
 ## Open questions
@@ -293,7 +302,6 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 - GPU or a local LLM for agents that run many turns.
 - Posts from routines and background answers come from the gateway's account with the agent's name in bold; Open WebUI has no way to post as a model. They go to the channel, not into a thread.
 - A background `ask_agent` acts with the person's Keycloak token, which lasts five minutes.
-- Routines keep their schedule in memory; a restart misses pushes.
 - Previews' datasets and secrets stay after the preview is taken down, like a deleted branch's.
 - Whether `merge` on `main` and `dev` becomes usable once the deployer holds deploys for approval.
 - An agent account for Keycloak, so routines could use the tools that need a person's sign-in (`screenshot`, `browse`).

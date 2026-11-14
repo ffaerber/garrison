@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	_ "time/tzdata" // schedules in the home cloud's time zone, whatever the image holds
 
 	"gopkg.in/yaml.v3"
 
@@ -677,7 +678,11 @@ func agentsCmd(args []string) error {
 				log.Fatalf("agents: sandboxes: %v", err)
 			}
 		}()
-		go (&agentapi.Routines{Server: srv, Gitea: g}).Run(ctx)
+		routines := &agentapi.Routines{Server: srv, Gitea: g, Location: zone(vars["TIMEZONE"])}
+		if store != nil {
+			routines.Store = store
+		}
+		go routines.Run(ctx)
 		log.Printf("agents: sandboxes from %s on %s under %q, served on %s, proxy on %s", *image, *network, *runtime, *sandboxListen, *internetListen)
 	}
 	// Turns stream for minutes: no write timeout.
@@ -783,4 +788,18 @@ func homeCmd(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// zone is the home cloud's time zone, TIMEZONE in install.env (e.g.
+// Europe/Berlin); UTC if unset or unknown.
+func zone(name string) *time.Location {
+	if name == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Printf("TIMEZONE %q: %v; schedules run in UTC", name, err)
+		return time.UTC
+	}
+	return loc
 }

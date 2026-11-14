@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/cron"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/gateway"
 	"homecloud/control-plane/internal/sandbox"
 )
@@ -242,5 +244,115 @@ func TestAnAskedAgentsAnswerIsItsLastMessage(t *testing.T) {
 	c.content("\n\nIt works.")
 	if c.answer() != "It works." || shown.String() != "[x] Let me look.\n" {
 		t.Errorf("answer %q, shown %q", c.answer(), shown.String())
+	}
+}
+
+// memState is a RoutineStore in memory, standing in for Postgres.
+type memState struct {
+	mu sync.Mutex
+	m  map[string]RoutineState
+}
+
+func (s *memState) RoutineStates(context.Context) (map[string]RoutineState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]RoutineState{}
+	for k, v := range s.m {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (s *memState) SaveRoutineState(_ context.Context, key string, v RoutineState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]RoutineState{}
+	}
+	s.m[key] = v
+	return nil
+}
+
+func TestSchedulesAndRestarts(t *testing.T) {
+	s, _, _ := setup(t)
+	head := "c1"
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+		case "/api/v1/repos/homepage/todo/branches/main":
+			io.WriteString(w, `{"commit":{"id":"`+head+`"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	g := &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	morning, err := cron.Parse("30 6 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+		{Name: "morning", Schedule: "30 6 * * *", Cron: morning, Owner: "bob", Task: "Sum up."},
+		{Name: "on-main", OnPush: &agents.Push{Repo: "todo", Branch: "main"}, Owner: "bob", Task: "Look at main."},
+	}}}
+	withSandboxes(t, s)
+	poster := &fakePoster{}
+	s.Poster = poster
+	feed := &events.Memory{}
+	s.Events = feed
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	now := time.Date(2026, 11, 13, 22, 0, 0, 0, berlin)
+	state := &memState{}
+	start := func() *Routines {
+		return &Routines{Server: s, Gitea: g, Store: state, Location: berlin, Now: func() time.Time { return now }}
+	}
+	posts := func(n int) []gateway.Post {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for len(poster.all()) < n && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		return poster.all()
+	}
+	r := start()
+	r.Check(context.Background()) // first seen
+	now = now.Add(8 * time.Hour)  // 06:00: not yet
+	r.Check(context.Background())
+	if got := posts(0); len(got) != 0 {
+		t.Fatalf("ran early: %+v", got)
+	}
+
+	// The agent service restarts; meanwhile 06:30 passes and main moves.
+	r = start()
+	now = now.Add(45 * time.Minute)
+	head = "c2"
+	r.Check(context.Background())
+	got := posts(2)
+	var texts []string
+	for _, p := range got {
+		texts = append(texts, p.Text)
+	}
+	all := strings.Join(texts, "\n")
+	if len(got) != 2 || !strings.Contains(all, "Routine morning, for bob (it is scheduled for Sat 14 Nov 06:30 (30 6 * * *, Europe/Berlin))") ||
+		!strings.Contains(all, "Routine on-main, for bob (main of homepage/todo moved to c2)") {
+		t.Fatalf("after the restart: %s", all)
+	}
+	// Once each: a later look, the same day, starts nothing.
+	now = now.Add(2 * time.Hour)
+	r.Check(context.Background())
+	if got := posts(3); len(got) != 2 {
+		t.Errorf("ran again: %+v", got)
+	}
+	// The feed has each run, ended.
+	runs := 0
+	for _, e := range feed.All() {
+		if e.Kind == events.KindRoutine && e.Status == events.StatusOK && e.Actor == "bob" {
+			runs++
+		}
+	}
+	if runs != 2 {
+		t.Errorf("feed: %+v", feed.All())
 	}
 }

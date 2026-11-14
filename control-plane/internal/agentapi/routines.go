@@ -20,18 +20,49 @@ import (
 // only what grants with unattended: true allow for the owner. Its answer is
 // posted in the namespace's channel.
 //
-// When each last ran is kept in memory: after a restart, a routine runs
-// again one interval later, and a push that came meanwhile is missed.
+// When each last ran, and the commit each on_push routine last saw, are
+// kept in Store: after a restart, a schedule missed meanwhile runs once, and
+// a push that came meanwhile starts its routine. Without a Store, they are
+// kept in memory only.
 type Routines struct {
-	Server *Server
-	Gitea  *gateway.Gitea
-	Tick   time.Duration // how often to look; 0: a minute
-	Now    func() time.Time
+	Server   *Server
+	Gitea    *gateway.Gitea
+	Store    RoutineStore   // nil: memory only
+	Location *time.Location // the time zone schedules are read in; nil: UTC
+	Tick     time.Duration  // how often to look; 0: a minute
+	Now      func() time.Time
 
 	mu      sync.Mutex
+	loaded  bool
 	last    map[string]time.Time // routine -> when it last started
 	heads   map[string]string    // routine -> the commit its branch was at
 	running map[string]bool
+}
+
+// RoutineState is what the scheduler keeps of a routine.
+type RoutineState = events.RoutineState
+
+// RoutineStore keeps the routines' state across restarts.
+type RoutineStore interface {
+	RoutineStates(ctx context.Context) (map[string]RoutineState, error)
+	SaveRoutineState(ctx context.Context, key string, s RoutineState) error
+}
+
+func (r *Routines) loc() *time.Location {
+	if r.Location != nil {
+		return r.Location
+	}
+	return time.UTC
+}
+
+// save keeps key's state, if there is a store.
+func (r *Routines) save(ctx context.Context, key string) {
+	if r.Store == nil {
+		return
+	}
+	if err := r.Store.SaveRoutineState(ctx, key, RoutineState{Last: r.last[key], Head: r.heads[key]}); err != nil {
+		log.Printf("routines: %s: keep its state: %v", key, err)
+	}
 }
 
 func (r *Routines) now() time.Time {
@@ -71,15 +102,46 @@ func (r *Routines) Check(ctx context.Context) {
 	if r.last == nil {
 		r.last, r.heads, r.running = map[string]time.Time{}, map[string]string{}, map[string]bool{}
 	}
+	if r.Store != nil && !r.loaded {
+		// Without what ran before, nothing runs: a schedule could run twice,
+		// or a push go unnoticed.
+		states, err := r.Store.RoutineStates(ctx)
+		if err != nil {
+			log.Printf("routines: waiting for their state: %v", err)
+			return
+		}
+		for k, s := range states {
+			if !s.Last.IsZero() {
+				r.last[k] = s.Last
+			}
+			if s.Head != "" {
+				r.heads[k] = s.Head
+			}
+		}
+		r.loaded = true
+	}
 	now := r.now()
 	for _, a := range list {
 		for _, rt := range a.Routines {
 			key := a.ID() + "/" + rt.Name
 			why := ""
-			if rt.Every > 0 {
+			if rt.Cron != nil {
+				last, seen := r.last[key]
+				if !seen {
+					r.last[key] = now // first seen: it runs at the next time its schedule names
+					r.save(ctx, key)
+					continue
+				}
+				next := rt.Cron.Next(last, r.loc())
+				if next.IsZero() || next.After(now) {
+					continue
+				}
+				why = fmt.Sprintf("it is scheduled for %s (%s, %s)", next.Format("Mon 2 Jan 15:04"), rt.Schedule, r.loc())
+			} else if rt.Every > 0 {
 				last, seen := r.last[key]
 				if !seen {
 					r.last[key] = now // first seen: its first run is one interval on
+					r.save(ctx, key)
 					continue
 				}
 				if now.Sub(last) < rt.Every {
@@ -94,6 +156,9 @@ func (r *Routines) Check(ctx context.Context) {
 				}
 				prev, seen := r.heads[key]
 				r.heads[key] = head
+				if head != prev {
+					r.save(ctx, key)
+				}
 				if !seen || head == prev || head == "" {
 					continue
 				}
@@ -103,6 +168,7 @@ func (r *Routines) Check(ctx context.Context) {
 				continue // still at it; the next one waits
 			}
 			r.last[key] = now
+			r.save(ctx, key)
 			r.running[key] = true
 			go func(a agents.Agent, rt agents.Routine, key, why string) {
 				defer func() {

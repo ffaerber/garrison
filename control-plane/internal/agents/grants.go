@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"homecloud/control-plane/internal/cron"
 	"regexp"
 	"slices"
 	"strings"
@@ -52,12 +53,14 @@ type Grant struct {
 // Routine is work an agent starts by itself, for its owner: every so
 // often, or when a branch moves.
 type Routine struct {
-	Name   string        `yaml:"name"`
-	Every  time.Duration `yaml:"-"`
-	Raw    string        `yaml:"every"`
-	OnPush *Push         `yaml:"on_push"`
-	Owner  string        `yaml:"owner"` // a person of the namespace; grants are checked for them
-	Task   string        `yaml:"task"`  // the instruction, in words
+	Name     string         `yaml:"name"`
+	Every    time.Duration  `yaml:"-"`
+	Raw      string         `yaml:"every"`
+	Schedule string         `yaml:"schedule"` // cron: minute hour day month weekday, in the home cloud's time zone
+	Cron     *cron.Schedule `yaml:"-"`
+	OnPush   *Push          `yaml:"on_push"`
+	Owner    string         `yaml:"owner"` // a person of the namespace; grants are checked for them
+	Task     string         `yaml:"task"`  // the instruction, in words
 }
 
 // Push names a branch whose new commits start a routine.
@@ -144,9 +147,28 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 			why = append(why, fmt.Sprintf("%s: there are two routines %q", at, r.Name))
 		}
 		seen[r.Name] = true
+		set := 0
+		for _, ok := range []bool{r.Raw != "", r.Schedule != "", r.OnPush != nil} {
+			if ok {
+				set++
+			}
+		}
 		switch {
-		case r.Raw != "" && r.OnPush != nil:
-			why = append(why, at+": either every or on_push, not both")
+		case set > 1:
+			why = append(why, at+": one of every, schedule and on_push, not several")
+		case r.Schedule != "":
+			s, err := cron.Parse(r.Schedule)
+			if err != nil {
+				why = append(why, fmt.Sprintf("%s: schedule: %v", at, err))
+				break
+			}
+			from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			if s.Next(from, time.UTC).IsZero() {
+				why = append(why, fmt.Sprintf("%s: schedule %q never comes", at, r.Schedule))
+			} else if s.MinGap(from, time.UTC) < MinEvery {
+				why = append(why, fmt.Sprintf("%s: schedule %q runs more often than every %s", at, r.Schedule, MinEvery))
+			}
+			r.Cron = s
 		case r.Raw != "":
 			d, err := time.ParseDuration(r.Raw)
 			if err != nil {
@@ -160,7 +182,7 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 				why = append(why, at+": on_push needs a repo of this namespace and a branch")
 			}
 		default:
-			why = append(why, at+": when it runs is missing: every (e.g. 6h) or on_push (repo and branch)")
+			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h) or on_push (repo and branch)")
 		}
 		if !person.MatchString(r.Owner) {
 			why = append(why, at+": owner must be the username of a person of this namespace")

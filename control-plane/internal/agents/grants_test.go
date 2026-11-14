@@ -109,8 +109,9 @@ func TestRoutines(t *testing.T) {
 routines:
   - {name: nightly, every: 24h, owner: alice, task: Update the dependencies.}
   - {name: on-main, on_push: {repo: todo, branch: main}, owner: bob, task: Check the change.}
+  - {name: morning, schedule: "30 6 * * mon-fri", owner: bob, task: Sum up yesterday.}
 `)
-	if len(p) > 0 || len(a.Routines) != 2 || a.Routines[0].Every != 24*time.Hour || a.Routines[1].OnPush.Repo != "todo" {
+	if len(p) > 0 || len(a.Routines) != 3 || a.Routines[0].Every != 24*time.Hour || a.Routines[1].OnPush.Repo != "todo" || a.Routines[2].Cron == nil {
 		t.Fatalf("%v %+v", p, a.Routines)
 	}
 	if !a.NeedsAccount() {
@@ -122,7 +123,11 @@ routines:
 		"routines: [{name: x, every: 1h, task: t}]":                                                    "owner",
 		"routines: [{name: x, every: 1h, owner: alice}]":                                               "task",
 		"routines: [{name: x, every: 1h, owner: a, task: t}, {name: x, every: 2h, owner: a, task: t}]": "two routines",
-		"routines: [{name: x, every: 1h, on_push: {repo: todo, branch: main}, owner: a, task: t}]":     "not both",
+		"routines: [{name: x, every: 1h, on_push: {repo: todo, branch: main}, owner: a, task: t}]":     "not several",
+		`routines: [{name: x, every: 1h, schedule: "@daily", owner: a, task: t}]`:                      "not several",
+		`routines: [{name: x, schedule: "*/5 * * * *", owner: a, task: t}]`:                            "more often than every 10m",
+		`routines: [{name: x, schedule: "0 0 30 2 *", owner: a, task: t}]`:                             "never comes",
+		`routines: [{name: x, schedule: "at six", owner: a, task: t}]`:                                 "want five fields",
 	} {
 		if _, p := load1(t, "homepage", yaml); !strings.Contains(strings.Join(p, "\n"), want) {
 			t.Errorf("%s: %v", yaml, p)

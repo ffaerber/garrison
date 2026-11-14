@@ -66,4 +66,16 @@ func TestPostgres(t *testing.T) {
 	if len(ns) != 1 || ns[0] != "todo" {
 		t.Errorf("namespaces: %v", ns)
 	}
+
+	pg.Pool.Exec(ctx, "TRUNCATE routine_state")
+	at := time.Date(2026, 11, 14, 6, 30, 0, 0, time.UTC)
+	if err := pg.SaveRoutineState(ctx, "todo/dev/morning", RoutineState{Last: at}); err != nil {
+		t.Fatal(err)
+	}
+	pg.SaveRoutineState(ctx, "todo/dev/on-main", RoutineState{Head: "c1"})
+	pg.SaveRoutineState(ctx, "todo/dev/on-main", RoutineState{Head: "c2"})
+	st, err := pg.RoutineStates(ctx)
+	if err != nil || len(st) != 2 || !st["todo/dev/morning"].Last.Equal(at) || st["todo/dev/on-main"].Head != "c2" || !st["todo/dev/on-main"].Last.IsZero() {
+		t.Errorf("routine state: %v %+v", err, st)
+	}
 }
