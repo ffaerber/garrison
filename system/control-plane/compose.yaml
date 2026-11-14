@@ -19,7 +19,8 @@ services:
       # run, so changes deploy at once; the deployer still checks every 15 s.
       - -listen=:8090
       - -hook-url=http://control-plane_deployer:8090/hook
-      # What it deploys, and Gitea's deliveries, go to the dashboard's feed.
+      # What it deploys, and Gitea's deliveries, go to the dashboard's feed;
+      # Prometheus reads the services' health at /metrics here.
       - -events-db=postgres://homecloud@postgres_postgres:5432/homecloud
     secrets:
       - admin-password
@@ -84,9 +85,12 @@ services:
       - -sandbox-image=git.${DOMAIN}/system/sandbox:bootstrap
       # The routines' runs go to the feed.
       - -events-db=postgres://homecloud@postgres_postgres:5432/homecloud
+      # Alertmanager's alerts: into the feed, and they start routines.
+      - -alerts-listen=:8073
     secrets:
       - admin-password
       - homecloud-db-password
+      - alerts-token
       - { source: tls-cert, target: tls.crt }
     volumes:
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
@@ -221,6 +225,7 @@ secrets:
   tls-cert: { external: true }
   gitea-user-runner-token: { external: true }
   homecloud-db-password: { external: true }
+  alerts-token: { external: true }
 
 networks:
   system:

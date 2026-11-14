@@ -1,6 +1,8 @@
-# Metrics. Prometheus scrapes every node (node-exporter) and every container
-# (cAdvisor). It has no login of its own, so it is not routed: Grafana reads it
-# over the system network.
+# Metrics and alerts. Prometheus scrapes every node (node-exporter), every
+# container (cAdvisor) and the deployer's view of the Swarm services, and
+# evaluates alerts.yml; Alertmanager hands what fires to the agent service.
+# Neither has a login of its own, so neither is routed: Grafana reads
+# Prometheus over the system network.
 services:
   prometheus:
     image: prom/prometheus:v3.7.3
@@ -12,6 +14,8 @@ services:
     configs:
       - source: prometheus
         target: /etc/prometheus/prometheus.yml
+      - source: alerts
+        target: /etc/prometheus/alerts.yml
     volumes:
       - type: bind
         source: /homecloud/system/prometheus
@@ -19,6 +23,25 @@ services:
     networks: [default, system]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=   # one machine: no peers to gossip with
+    configs:
+      - source: alertmanager
+        target: /etc/alertmanager/alertmanager.yml
+    secrets:
+      - alerts-token
+    # The agent service on the system network.
+    networks: [default, system]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://localhost:9093/-/ready"]
       interval: 5s
       timeout: 3s
       retries: 60
@@ -50,6 +73,15 @@ configs:
   prometheus:
     name: prometheus-${CONFIG_HASH}
     file: ./prometheus.yml
+  alerts:
+    name: prometheus-alerts-${CONFIG_HASH}
+    file: ./alerts.yml
+  alertmanager:
+    name: alertmanager-${CONFIG_HASH}
+    file: ./alertmanager.yml
+
+secrets:
+  alerts-token: { external: true }
 
 networks:
   system:

@@ -1,0 +1,29 @@
+# Tests of alerts.yml: docker run --rm -v "$PWD":/c -w /c --entrypoint promtool prom/prometheus:v3.7.3 test rules alerts_test.yml
+rule_files: [alerts.yml]
+evaluation_interval: 30s
+tests:
+  - interval: 30s
+    input_series:
+      - series: 'homecloud_service_failed_tasks{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"}'
+        values: '0 1 3 4 4 4 4'
+      - series: 'homecloud_service_replicas_desired{namespace="todo",app="todo",environment="main",stack="todo",service="todo_web"}'
+        values: '1x20'
+      - series: 'traefik_service_requests_total{service="todo@swarm",code="500"}'
+        values: '0+10x20'
+      - series: 'traefik_service_requests_total{service="todo@swarm",code="200"}'
+        values: '0+10x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ServiceFailing
+        exp_alerts:
+          - exp_labels: { severity: critical, namespace: todo, app: quotes, environment: main, stack: quotes, service: quotes_web }
+            exp_annotations:
+              summary: "quotes_web keeps failing: 4 tasks failed in 10 minutes"
+              description: "The service quotes_web of the app quotes (main) in todo starts and fails again. Its tasks (stack_status) and logs (service_logs) say why."
+      - eval_time: 9m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels: { severity: warning, namespace: todo, app: todo, environment: main, stack: todo }
+            exp_annotations:
+              summary: "todo answers 50% of its requests with a server error"
+              description: "The app todo (main) in todo has answered more than a fifth of its requests with 5xx for 5 minutes."

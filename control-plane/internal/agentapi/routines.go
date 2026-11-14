@@ -90,25 +90,18 @@ func (r *Routines) Run(ctx context.Context) {
 	}
 }
 
-// Check starts the routines that are due.
-func (r *Routines) Check(ctx context.Context) {
-	list, err := r.Server.Agents.All(ctx)
-	if err != nil {
-		log.Printf("routines: %v", err)
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// prepare readies the state, loading it from the store once. Without what
+// ran before, nothing runs: a schedule could run twice, or a push go
+// unnoticed. Called with r.mu held.
+func (r *Routines) prepare(ctx context.Context) bool {
 	if r.last == nil {
 		r.last, r.heads, r.running = map[string]time.Time{}, map[string]string{}, map[string]bool{}
 	}
 	if r.Store != nil && !r.loaded {
-		// Without what ran before, nothing runs: a schedule could run twice,
-		// or a push go unnoticed.
 		states, err := r.Store.RoutineStates(ctx)
 		if err != nil {
 			log.Printf("routines: waiting for their state: %v", err)
-			return
+			return false
 		}
 		for k, s := range states {
 			if !s.Last.IsZero() {
@@ -119,6 +112,39 @@ func (r *Routines) Check(ctx context.Context) {
 			}
 		}
 		r.loaded = true
+	}
+	return true
+}
+
+// start runs a routine in the background, unless it is running. Called
+// with r.mu held.
+func (r *Routines) start(ctx context.Context, a agents.Agent, rt agents.Routine, key, why string) bool {
+	if r.running[key] {
+		return false
+	}
+	r.running[key] = true
+	go func() {
+		defer func() {
+			r.mu.Lock()
+			r.running[key] = false
+			r.mu.Unlock()
+		}()
+		r.run(context.WithoutCancel(ctx), a, rt, key, why)
+	}()
+	return true
+}
+
+// Check starts the routines that are due.
+func (r *Routines) Check(ctx context.Context) {
+	list, err := r.Server.Agents.All(ctx)
+	if err != nil {
+		log.Printf("routines: %v", err)
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.prepare(ctx) {
+		return
 	}
 	now := r.now()
 	for _, a := range list {
@@ -163,6 +189,8 @@ func (r *Routines) Check(ctx context.Context) {
 					continue
 				}
 				why = fmt.Sprintf("%s of %s/%s moved to %.12s", rt.OnPush.Branch, a.Namespace, rt.OnPush.Repo, head)
+			} else {
+				continue // on_alert: started by alerts, not by the clock
 			}
 			if r.running[key] {
 				continue // still at it; the next one waits

@@ -188,12 +188,15 @@ routines:
     task: Update the dependencies of todo and propose it.
   - name: main-moved
     on_push: {repo: todo, branch: main} # when the branch moves
+  - name: on-failure
+    on_alert: {alertname: ServiceFailing} # when one of this namespace's alerts fires
     owner: bob
     task: Check what changed and say whether it needs a follow-up.
 ```
 
 - **Who:** a routine acts with the agent's own account, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Tools that need a person's sign-in (`screenshot`, `browse`, `propose_change`) are refused.
-- **When:** each routine has one of `schedule`, `every` and `on_push`. The agent service looks every minute.
+- **When:** each routine has one of `schedule`, `every`, `on_push` and `on_alert`. The agent service looks every minute.
+  - `on_alert` lists label values an alert of this namespace must have, e.g. `{alertname: ServiceFailing}` or `{alertname: ServiceDown, app: todo}`; `{}` takes every alert of the namespace. The platform's own alerts belong to `system`. The routine starts once per firing, and its task is told the alert's summary, labels and description. If it is still running from an earlier one, Alertmanager's next reminder (every 4 hours) starts it.
   - `schedule` is cron's five fields, minute hour day-of-month month day-of-week (names like `mon-fri` and `dec` work), or `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`. It is read in the home cloud's time zone, `TIMEZONE` in `install.env` (the machine's at install, else UTC). A time a clock change skips runs right after the change. The approval check refuses a schedule that never comes or runs more often than every 10 minutes.
   - A routine with `schedule` first runs at the next time it names after it is first seen; one with `every` one interval after; one with `on_push` when the branch moves after that.
   - When each last ran, and the commit each `on_push` routine last saw, are kept in Postgres (`routine_state` in `homecloud`). After a restart, a schedule missed meanwhile runs once, and a push made meanwhile starts its routine. Until the agent service can read that state, no routine runs.

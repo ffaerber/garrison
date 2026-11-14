@@ -59,8 +59,11 @@ type Routine struct {
 	Schedule string         `yaml:"schedule"` // cron: minute hour day month weekday, in the home cloud's time zone
 	Cron     *cron.Schedule `yaml:"-"`
 	OnPush   *Push          `yaml:"on_push"`
-	Owner    string         `yaml:"owner"` // a person of the namespace; grants are checked for them
-	Task     string         `yaml:"task"`  // the instruction, in words
+	// OnAlert starts it when an alert of its namespace fires whose labels
+	// have these values, e.g. {alertname: ServiceDown}; {} for every alert.
+	OnAlert map[string]string `yaml:"on_alert"`
+	Owner   string            `yaml:"owner"` // a person of the namespace; grants are checked for them
+	Task    string            `yaml:"task"`  // the instruction, in words
 }
 
 // Push names a branch whose new commits start a routine.
@@ -68,6 +71,8 @@ type Push struct {
 	Repo   string `yaml:"repo"`
 	Branch string `yaml:"branch"`
 }
+
+var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`)
 
 // Limits of routines.
 const (
@@ -148,14 +153,25 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 		}
 		seen[r.Name] = true
 		set := 0
-		for _, ok := range []bool{r.Raw != "", r.Schedule != "", r.OnPush != nil} {
+		for _, ok := range []bool{r.Raw != "", r.Schedule != "", r.OnPush != nil, r.OnAlert != nil} {
 			if ok {
 				set++
 			}
 		}
 		switch {
 		case set > 1:
-			why = append(why, at+": one of every, schedule and on_push, not several")
+			why = append(why, at+": one of schedule, every, on_push and on_alert, not several")
+		case r.OnAlert != nil:
+			for k, v := range r.OnAlert {
+				switch {
+				case !labelName.MatchString(k):
+					why = append(why, fmt.Sprintf("%s: on_alert: %q is not a label name", at, k))
+				case k == "namespace":
+					why = append(why, at+": on_alert: namespace is always this namespace")
+				case v == "" || len(v) > 200:
+					why = append(why, fmt.Sprintf("%s: on_alert: %s needs a value", at, k))
+				}
+			}
 		case r.Schedule != "":
 			s, err := cron.Parse(r.Schedule)
 			if err != nil {
@@ -182,7 +198,7 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 				why = append(why, at+": on_push needs a repo of this namespace and a branch")
 			}
 		default:
-			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h) or on_push (repo and branch)")
+			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h), on_push (repo and branch) or on_alert (label values, e.g. {alertname: ServiceDown})")
 		}
 		if !person.MatchString(r.Owner) {
 			why = append(why, at+": owner must be the username of a person of this namespace")

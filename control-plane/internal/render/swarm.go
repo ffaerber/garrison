@@ -4,6 +4,7 @@ package render
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -19,7 +20,13 @@ const (
 	TraefikNetwork    = "traefik-public" // overlay network Traefik routes over
 	TraefikEntrypoint = "websecure"      // HTTPS entry point with the wildcard certificate
 	SSOMiddleware     = "sso@file"       // forward-auth middleware backed by Keycloak
-	GPUResource       = "GPU"            // generic resource the installer advertises per GPU
+
+	// Labels of every app service: its namespace, app (the stack file's
+	// name) and environment.
+	LabelNamespace   = "homecloud.namespace"
+	LabelApp         = "homecloud.app"
+	LabelEnvironment = "homecloud.environment"
+	GPUResource      = "GPU" // generic resource the installer advertises per GPU
 )
 
 type Options struct {
@@ -153,7 +160,12 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 				out.Environment[k] = strings.ReplaceAll(v, "$", "$$")
 			}
 		}
-		deploy := composeDeploy{}
+		// Who the service belongs to, for the deployer's metrics and alerts.
+		deploy := composeDeploy{Labels: map[string]string{
+			LabelNamespace:   s.Namespace,
+			LabelApp:         s.Name,
+			LabelEnvironment: o.Environment,
+		}}
 
 		if host := s.ServiceHostname(o.Environment, name); host != "" {
 			out.Networks = append(out.Networks, TraefikNetwork)
@@ -161,7 +173,7 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 				file.Networks = map[string]external{}
 			}
 			file.Networks[TraefikNetwork] = external{External: true}
-			deploy.Labels = routeLabels(host, o.Domain, svc.Port, env.Private)
+			maps.Copy(deploy.Labels, routeLabels(host, o.Domain, svc.Port, env.Private))
 		}
 
 		for _, vol := range sortedKeys(svc.Volumes) {

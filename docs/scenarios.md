@@ -143,9 +143,15 @@ Alice proposes `agents/reader` with a tool that does not exist: the approval che
 
 ## 7. The operator finds out why an app does not run
 
-The app `quotes` builds, but exits at start: its stack, `todo/config/stacks/quotes.yaml`, does not set `QUOTES_FILE`. Alice: *@todo/operator The quotes app does not work. Find out why and tell me what to change.*
+First alice gives the operator a routine, `on_alert: {alertname: ServiceFailing}`, for her; carol approves. The app `quotes` builds, but exits at start: its stack, `todo/config/stacks/quotes.yaml`, does not set `QUOTES_FILE`.
+
+- The alert ServiceFailing fires for it. Todo's people see it in the dashboard's feed; bob, no longer in todo, does not.
+- It starts the operator's routine, with nobody watching: the operator posts in todo's channel what is wrong, naming the missing setting, and its run is in the feed.
+
+Alice: *@todo/operator The quotes app does not work. Find out why and tell me what to change.*
 
 - The agent looks at the stack's tasks or logs, as alice, and names the missing setting.
+- Once alice removes the stack, the alert resolves, on the same entry of the feed.
 
 ## 8. Alice has the operator set up a new app, from nothing
 

@@ -356,3 +356,83 @@ func TestSchedulesAndRestarts(t *testing.T) {
 		t.Errorf("feed: %+v", feed.All())
 	}
 }
+
+func TestAlertsStartRoutines(t *testing.T) {
+	s, _, _ := setup(t)
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/homepage/config/raw/members.yaml" {
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer gitea.Close()
+	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+		{Name: "down", OnAlert: map[string]string{"alertname": "ServiceDown"}, Owner: "bob", Task: "Find out why."},
+		{Name: "disk", OnAlert: map[string]string{"alertname": "DiskFull"}, Owner: "bob", Task: "Free some space."},
+	}}}
+	withSandboxes(t, s)
+	poster := &fakePoster{}
+	s.Poster = poster
+	feed := &events.Memory{}
+	s.Events = feed
+	state := &memState{}
+	r := &Routines{Server: s, Gitea: &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}, Store: state}
+	h := r.AlertHandler("tok")
+	send := func(token, body string) int {
+		req := httptest.NewRequest("POST", "/alerts", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	alert := func(ns, status string) string {
+		return `{"alerts":[{"status":"` + status + `","fingerprint":"f1","startsAt":"2026-11-14T10:00:00Z",
+ "labels":{"alertname":"ServiceDown","namespace":"` + ns + `","app":"quotes","service":"quotes_web"},
+ "annotations":{"summary":"quotes_web does not run","description":"0 of 1 tasks run."}}]}`
+	}
+	if code := send("wrong", alert("homepage", "firing")); code != http.StatusUnauthorized {
+		t.Fatalf("a wrong token: %d", code)
+	}
+	if code := send("tok", alert("homepage", "firing")); code != http.StatusNoContent {
+		t.Fatalf("firing: %d", code)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	posts := poster.all()
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "Routine down, for bob (the alert ServiceDown fired at Sat 14 Nov 10:00: quotes_web does not run") {
+		t.Fatalf("posts: %+v", posts)
+	}
+	// Alertmanager sends it again: it started its routine before.
+	send("tok", alert("homepage", "firing"))
+	// Another namespace's alert starts nothing here.
+	send("tok", strings.Replace(alert("shop", "firing"), `"f1"`, `"f2"`, 1))
+	time.Sleep(200 * time.Millisecond)
+	if n := len(poster.all()); n != 1 {
+		t.Errorf("%d posts", n)
+	}
+	if _, ok := state.m["homepage/dev/down#alert:f1:1794650400"]; !ok {
+		t.Errorf("not kept: %v", state.m)
+	}
+	send("tok", alert("homepage", "resolved"))
+	var mine []events.Event
+	for _, e := range feed.All() {
+		if e.Kind == events.KindAlert && e.Namespace == "homepage" {
+			mine = append(mine, e)
+		}
+	}
+	if len(mine) != 1 || mine[0].Status != events.StatusOK || mine[0].Title != "resolved: ServiceDown: quotes_web does not run" ||
+		mine[0].Audience != events.AudienceMembers || !strings.Contains(mine[0].Detail, "0 of 1 tasks run.") {
+		t.Errorf("feed: %+v", mine)
+	}
+	ran := false
+	for _, e := range feed.All() {
+		ran = ran || e.Kind == events.KindRoutine && strings.Contains(e.Title, "the alert ServiceDown fired")
+	}
+	if !ran {
+		t.Errorf("the run is not in the feed: %+v", feed.All())
+	}
+}

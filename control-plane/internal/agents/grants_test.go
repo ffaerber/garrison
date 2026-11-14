@@ -110,8 +110,10 @@ routines:
   - {name: nightly, every: 24h, owner: alice, task: Update the dependencies.}
   - {name: on-main, on_push: {repo: todo, branch: main}, owner: bob, task: Check the change.}
   - {name: morning, schedule: "30 6 * * mon-fri", owner: bob, task: Sum up yesterday.}
+  - {name: down, on_alert: {alertname: ServiceDown}, owner: bob, task: Find out why.}
+  - {name: any, on_alert: {}, owner: bob, task: Look.}
 `)
-	if len(p) > 0 || len(a.Routines) != 3 || a.Routines[0].Every != 24*time.Hour || a.Routines[1].OnPush.Repo != "todo" || a.Routines[2].Cron == nil {
+	if len(p) > 0 || len(a.Routines) != 5 || a.Routines[3].OnAlert["alertname"] != "ServiceDown" || a.Routines[4].OnAlert == nil || a.Routines[0].Every != 24*time.Hour || a.Routines[1].OnPush.Repo != "todo" || a.Routines[2].Cron == nil {
 		t.Fatalf("%v %+v", p, a.Routines)
 	}
 	if !a.NeedsAccount() {
@@ -125,6 +127,8 @@ routines:
 		"routines: [{name: x, every: 1h, owner: a, task: t}, {name: x, every: 2h, owner: a, task: t}]": "two routines",
 		"routines: [{name: x, every: 1h, on_push: {repo: todo, branch: main}, owner: a, task: t}]":     "not several",
 		`routines: [{name: x, every: 1h, schedule: "@daily", owner: a, task: t}]`:                      "not several",
+		`routines: [{name: x, on_alert: {namespace: shop}, owner: a, task: t}]`:                        "always this namespace",
+		`routines: [{name: x, on_alert: {"a-b": c}, owner: a, task: t}]`:                               "not a label name",
 		`routines: [{name: x, schedule: "*/5 * * * *", owner: a, task: t}]`:                            "more often than every 10m",
 		`routines: [{name: x, schedule: "0 0 30 2 *", owner: a, task: t}]`:                             "never comes",
 		`routines: [{name: x, schedule: "at six", owner: a, task: t}]`:                                 "want five fields",

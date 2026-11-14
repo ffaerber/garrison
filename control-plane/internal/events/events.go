@@ -18,6 +18,7 @@ const (
 	SourceDeployer = "deployer"
 	SourceGateway  = "gateway"
 	SourceAgents   = "agents"
+	SourceAlerts   = "alerts" // Alertmanager
 )
 
 // Statuses: how it went.

@@ -36,6 +36,7 @@ import (
 	"homecloud/control-plane/internal/gateway"
 	"homecloud/control-plane/internal/gitops"
 	"homecloud/control-plane/internal/guard"
+	"homecloud/control-plane/internal/health"
 	"homecloud/control-plane/internal/home"
 	"homecloud/control-plane/internal/hooks"
 	"homecloud/control-plane/internal/hostnames"
@@ -270,6 +271,7 @@ func deployCmd(args []string) error {
 	apps := fs.Bool("apps", true, "also deploy the apps of every other namespace (repos with a stack.yaml)")
 	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
+	dockerSocket := fs.String("docker-socket", "/var/run/docker.sock", "Docker's API, for the services' metrics on -listen (/metrics)")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 
@@ -340,7 +342,7 @@ func deployCmd(args []string) error {
 		}
 		wake := &hooks.Wake{}
 		c.Wake = wake.Subscribe()
-		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent); err != nil {
+		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent, (&health.Docker{Socket: *dockerSocket}).Handler()); err != nil {
 			return err
 		}
 	}
@@ -479,7 +481,7 @@ func gatewayCmd(args []string) error {
 
 // serveHook takes Gitea's webhook on listen and registers it with Gitea as
 // target. It returns once listening.
-func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea, onEvent func(event, delivery string, body []byte)) error {
+func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea, onEvent func(event, delivery string, body []byte), metrics http.Handler) error {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return err
@@ -487,6 +489,9 @@ func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *
 	secret := hooks.Secret(g.Password, target)
 	mux := http.NewServeMux()
 	mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake, OnEvent: onEvent})
+	if metrics != nil {
+		mux.Handle("GET /metrics", metrics)
+	}
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(ln)
 	go func() { <-ctx.Done(); server.Close() }()
@@ -585,6 +590,8 @@ func agentsCmd(args []string) error {
 	runtime := fs.String("sandbox-runtime", "runsc", "the runtime sandboxes run under (gVisor), as root; empty: Docker's default, as the image's user")
 	internetListen := fs.String("internet-listen", ":8072", "address to serve the sandboxes' proxy to the internet on")
 	internetProxy := fs.String("internet-proxy", "http://control-plane_agents:8072", "that address, as sandboxes reach it; empty: no internet for any agent")
+	alertsListen := fs.String("alerts-listen", "", "address to take Alertmanager's webhook on (/alerts), which starts routines with on_alert; empty: none")
+	alertsTokenFile := fs.String("alerts-token-file", "/run/secrets/alerts-token", "the bearer token Alertmanager sends")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 	store, err := feed.store()
@@ -683,6 +690,21 @@ func agentsCmd(args []string) error {
 			routines.Store = store
 		}
 		go routines.Run(ctx)
+		if *alertsListen != "" {
+			token, err := os.ReadFile(*alertsTokenFile)
+			if err != nil {
+				return fmt.Errorf("-alerts-token-file: %w", err)
+			}
+			mux := http.NewServeMux()
+			mux.Handle("POST /alerts", routines.AlertHandler(strings.TrimSpace(string(token))))
+			alerts := &http.Server{Addr: *alertsListen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+			go func() {
+				if err := alerts.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					log.Fatalf("agents: alerts: %v", err)
+				}
+			}()
+			log.Printf("agents: Alertmanager's webhook on %s/alerts", *alertsListen)
+		}
 		log.Printf("agents: sandboxes from %s on %s under %q, served on %s, proxy on %s", *image, *network, *runtime, *sandboxListen, *internetListen)
 	}
 	// Turns stream for minutes: no write timeout.

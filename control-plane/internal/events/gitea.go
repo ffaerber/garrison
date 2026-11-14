@@ -26,6 +26,7 @@ const (
 	KindUndeploy      = "undeploy"
 	KindRestore       = "restore"
 	KindRoutine       = "routine"
+	KindAlert         = "alert"
 )
 
 // ApprovalContext is the commit status the gateway's approval check posts.

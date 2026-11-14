@@ -139,7 +139,7 @@ func (s *Server) visibility(ctx context.Context, who string) (events.Visibility,
 var views = []struct{ Name, Label string }{
 	{"", "Everything"},
 	{"changes", "Code and reviews"},
-	{"deploys", "Pipelines and deploys"},
+	{"deploys", "Deploys and alerts"},
 	{"agents", "Agents"},
 	{"problems", "Problems"},
 }
@@ -157,7 +157,7 @@ func query(r *http.Request, v events.Visibility) (events.Query, url.Values) {
 			events.KindPROpened, events.KindPRUpdated, events.KindPRMerged, events.KindPRClosed, events.KindPRReopened, events.KindApproved, events.KindRejected, events.KindApprovalCheck}
 		f.Set("view", view)
 	case "deploys":
-		q.Kinds = []string{events.KindPipeline, events.KindDeploy, events.KindUndeploy, events.KindRestore}
+		q.Kinds = []string{events.KindPipeline, events.KindDeploy, events.KindUndeploy, events.KindRestore, events.KindAlert}
 		f.Set("view", view)
 	case "agents":
 		q.Sources = []string{events.SourceGateway, events.SourceAgents}
@@ -323,7 +323,7 @@ func group(e events.Event) string {
 	case events.KindPROpened, events.KindPRUpdated, events.KindPRMerged, events.KindPRClosed, events.KindPRReopened,
 		events.KindApproved, events.KindRejected, events.KindApprovalCheck:
 		return "review"
-	case events.KindPipeline, events.KindDeploy, events.KindUndeploy, events.KindRestore:
+	case events.KindPipeline, events.KindDeploy, events.KindUndeploy, events.KindRestore, events.KindAlert:
 		return "deploy"
 	}
 	return "agent"
@@ -339,6 +339,8 @@ func sourceName(s string) string {
 		return "gateway"
 	case events.SourceAgents:
 		return "agent service"
+	case events.SourceAlerts:
+		return "Alertmanager"
 	}
 	return s
 }

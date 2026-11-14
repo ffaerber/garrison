@@ -221,7 +221,7 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 
 ## Notifications
 
-- **Sources:** Alertmanager (disk, node, backup, service health), deployer (failed deploys, PRs waiting), agents (task updates), chat (@mentions).
+- **Sources:** Alertmanager (disk, node, backup, service health), deployer (failed deploys, PRs waiting), agents (task updates), chat (@mentions). Built: Alertmanager's alerts go to the dashboard's feed by namespace and start the agents' `on_alert` routines; see [status.md](status.md).
 - **Routing:** by namespace to its members, its channel and its agent; system alerts to root admins and the system agent.
 - **Delivery:** in-app inbox, plus phone push through ntfy.
 - People are notified immediately; agents investigate in parallel with read-only rights and follow up with a cause and a proposed fix for a person to approve.

@@ -6,6 +6,9 @@ services:
             - traefik-public
         deploy:
             labels:
+                homecloud.app: jellyfin
+                homecloud.environment: main
+                homecloud.namespace: media
                 traefik.enable: "true"
                 traefik.http.routers.jellyfin-admin.entrypoints: websecure
                 traefik.http.routers.jellyfin-admin.rule: Host(`jellyfin-admin.example.com`)
@@ -33,6 +36,9 @@ services:
               target: jellyfin-api-key
         deploy:
             labels:
+                homecloud.app: jellyfin
+                homecloud.environment: main
+                homecloud.namespace: media
                 traefik.enable: "true"
                 traefik.http.routers.jellyfin.entrypoints: websecure
                 traefik.http.routers.jellyfin.rule: Host(`jellyfin.example.com`)
@@ -51,6 +57,11 @@ services:
         image: redis:7
         networks:
             - default
+        deploy:
+            labels:
+                homecloud.app: jellyfin
+                homecloud.environment: main
+                homecloud.namespace: media
 networks:
     traefik-public:
         external: true

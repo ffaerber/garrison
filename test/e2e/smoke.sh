@@ -756,6 +756,21 @@ page_lists() { local page; page=$(feed alice "/?ns=todo") && grep -q "deployed t
 check "its page lists them"                page_lists
 check "bob opens it too"                   until_true 60 home_login bob
 check "he sees todo's deploys, as he may read its repos" in_feed bob ns=todo "e['kind'] == 'deploy' and e['commit'] == '$fixed'"
+
+echo "# alerts"
+health() { docker exec "$(docker ps -q -f name=prometheus_prometheus | head -n1)" wget -qO- "http://control-plane_deployer:8090/metrics"; }
+check "the deployer tells Prometheus how each service does" grep -q 'homecloud_service_replicas_running{namespace="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"
+# Postgres without a password exits at once: a service that keeps failing.
+printf 'entrypoint: db\nservices:\n  db: { image: postgres:17-alpine, port: 5432 }\nenvironments:\n  main: {}\n' > "$tmp/crash.yaml"
+check "alice adds an app that cannot start" set_stack todo crash "$tmp/crash.yaml"
+crash_alert() { docker exec "$(docker ps -q -f name=prometheus_alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts | python3 -c '
+import json,sys
+sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("service") == "crash_db" for a in json.load(sys.stdin)) else 1)'; }
+check "it raises an alert"                 until_true 400 crash_alert
+check "in the feed, for todo's people"     until_true 120 in_feed alice ns=todo "e['kind'] == 'alert' and e['status'] == 'failed' and 'crash_db' in e['title'] and e['source'] == 'alerts'"
+check "not for bob, who is not in todo"    not_in_feed bob ns=todo "e['kind'] == 'alert' and 'crash_db' in e['title']"
+check "alice removes it"                   set_stack todo crash -
+check "the alert resolves"                 until_true 300 in_feed alice ns=todo "e['kind'] == 'alert' and e['status'] == 'ok' and 'crash_db' in e['title']"
 }
 
 # talk: the scenarios of docs/scenarios.md, against the real LLM, in the
@@ -1399,12 +1414,38 @@ check "the reader answers"                 test -n "$answer"
 check "it cannot propose a change"         test -z "$(newest_pr app alice "$since")"
 
 echo "# 7. the operator finds out why an app does not run"
+# First the operator learns to look by itself when an app keeps failing.
+{ gitea_api "" "$hp/config/raw/agents/operator/agent.yaml"
+  printf 'routines:\n  - name: on-failure\n    on_alert: { alertname: ServiceFailing }\n    owner: alice\n    task: An app of todo keeps failing. Find out why from its stack'"'"'s tasks and logs, and say what to change, naming the setting.\n'; } > "$tmp/operator.yaml"
+opr=$(propose_config operator "The operator looks when an app keeps failing" "agents/operator/agent.yaml=$tmp/operator.yaml")
+check "carol approves the operator's alert routine" test "$(review config carol "$opr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$opr" success
+check "alice merges it"                    test "$(merge config alice "$opr")" = 200
 check "the quotes app's source goes to todo/quotes" installer/push-repo.sh --update todo/quotes test/e2e/apps/quotes
 check "alice adds its stack, carol approves" set_stack todo quotes test/e2e/apps/stacks/quotes.yaml carol
 quotes_deployed() { homecloud applied | grep -q "^app todo/quotes@main quotes "; }
 check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed
 quotes_crashes() { docker service ps quotes_web --format '{{.Error}}' 2>/dev/null | grep -q 'non-zero exit'; }
 check "it does not start"                  until_true 120 quotes_crashes
+am_alerts() { docker exec "$(docker ps -q -f name=prometheus_alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts; }
+quotes_alert() { am_alerts | python3 -c '
+import json,sys
+sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("app") == "quotes" and a["labels"].get("namespace") == "todo" for a in json.load(sys.stdin)) else 1)'; }
+check "an alert fires: it keeps failing"   until_true 400 quotes_alert
+check "todo's people see it in the feed"   until_true 120 in_feed carol ns=todo "e['kind'] == 'alert' and e['status'] == 'failed' and 'quotes_web' in e['title']"
+check "bob, out of todo, does not"         not_in_feed bob ns=todo "e['kind'] == 'alert' and 'quotes_web' in e['title']"
+alert_post() {
+  chat_api alice "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    c = m.get("content") or ""
+    if c.startswith("**todo/operator**") and "Routine on-failure, for alice (the alert ServiceFailing fired" in c:
+        print(c); sys.exit(0)
+sys.exit(1)'
+}
+check "it starts the operator, which posts in todo's channel" until_true 600 alert_post
+check "naming the missing setting"         grep -q QUOTES_FILE <<<"$(alert_post)"
+check "the feed has its run"               in_feed alice ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/operator' and 'ServiceFailing' in e['title']"
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo alice "The quotes app of the namespace todo, https://quotes.$DOMAIN/, does not work. Find out why and tell me what to change.")
 check "it looks at the stack, as alice"    grep -qE "mcp: alice: (stack_status|service_logs)" <<<"$(mcp_calls "$at" alice)"
@@ -1412,6 +1453,7 @@ check "it names the missing setting"       grep -q QUOTES_FILE <<<"$answer"
 check "alice removes its stack, carol approves" set_stack todo quotes - carol
 quotes_gone() { ! docker service inspect quotes_web >/dev/null 2>&1; }
 check "that takes the app down"            until_true 120 quotes_gone
+check "and the alert resolves"             until_true 300 in_feed carol ns=todo "e['kind'] == 'alert' and e['status'] == 'ok' and 'quotes_web' in e['title']"
 gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
 
 echo "# 8. alice has the operator set up a new app, from nothing"
