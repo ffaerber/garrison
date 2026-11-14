@@ -119,13 +119,13 @@ step_agent() {
 }
 
 # A namespace with an app of its own, built by its pipeline on the user
-# runner and deployed by the deployer: homepage/todo, left running.
+# runner and deployed by the deployer: todo/app, and homepage/app, left running.
 step_deploy() {
   sync_repo
   smoke deploy
 }
 
-# The scenarios of docs/scenarios.md: people ask the agent of homepage to
+# The scenarios of docs/scenarios.md: people ask the agent of todo to
 # add and remove members, bob tries to raise his own rights, bob changes the
 # app through the agent and carol merges. Talks to the real LLM.
 step_talk() {

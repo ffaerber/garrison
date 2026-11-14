@@ -1,16 +1,16 @@
-# homepage/config/stacks/todo.yaml: the todo app of the namespace homepage,
-# a web app and its database. Its code is the repo homepage/todo (source);
+# todo/config/stacks/todo.yaml: the todo app of the namespace todo, a web
+# app and its database. Its code is the repo todo/app (source);
 # the branch main is at https://todo.<domain>, a branch dev at
 # https://dev-todo.<domain>; both behind the installation's sign-in. Each
 # has its own database.
-source: todo
+source: app
 entrypoint: web
 
 services:
   web:
     # Built by the pipeline (.gitea/workflows/pipeline.yaml) for each commit;
     # the deployer deploys a commit once its image exists.
-    image: "{{registry}}/homepage/todo:{{commit}}"
+    image: "{{registry}}/todo/app:{{commit}}"
     port: 8080
     env:
       DATABASE_HOST: db

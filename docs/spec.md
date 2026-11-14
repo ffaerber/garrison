@@ -107,11 +107,11 @@ environments:
 An app with code of its own names its repo as `source`; its branches and pull requests are then its environments, each deployed at its newest commit:
 
 ```yaml
-# homepage/config/stacks/todo.yaml
-source: todo
+# todo/config/stacks/todo.yaml: its code is the repo todo/app
+source: app
 entrypoint: web
 services:
-  web: { image: "{{registry}}/homepage/todo:{{commit}}", port: 8080 }
+  web: { image: "{{registry}}/todo/app:{{commit}}", port: 8080 }
 environments:
   main:    { private: true }
   dev:     { private: true }   # the branch dev

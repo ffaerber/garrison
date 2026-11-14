@@ -1,5 +1,5 @@
 // Todo is a small todo list on Postgres, the example app of the namespace
-// homepage. It runs behind the installation's sign-in, which tells it who is
+// todo. It runs behind the installation's sign-in, which tells it who is
 // signed in; it keeps who added each todo.
 package main
 
