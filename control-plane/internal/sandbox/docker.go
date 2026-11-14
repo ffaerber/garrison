@@ -116,27 +116,54 @@ type Spec struct {
 	Memory  int64  // bytes
 	CPUs    float64
 	Pids    int64
+	// Runtime, if set, e.g. runsc (gVisor). The container's processes then
+	// run as root with Docker's default capabilities, inside gVisor's own
+	// kernel; without it, as the image's user with no capabilities.
+	Runtime string
 }
 
 // Create creates a container whose stdin stays open for attaching.
 func (d *Docker) Create(ctx context.Context, s Spec) (string, error) {
+	host := map[string]any{
+		"NetworkMode": s.Network,
+		"Mounts":      []map[string]any{{"Type": "volume", "Source": s.Volume, "Target": "/data"}},
+		"Memory":      s.Memory,
+		"NanoCpus":    int64(s.CPUs * 1e9),
+		"PidsLimit":   s.Pids,
+		"Init":        true,
+	}
 	body := map[string]any{
 		"Image": s.Image, "Env": s.Env, "Labels": s.Labels,
 		"AttachStdin": true, "AttachStdout": true, "AttachStderr": true,
 		"OpenStdin": true, "StdinOnce": false, "Tty": false,
-		"HostConfig": map[string]any{
-			"NetworkMode": s.Network,
-			"Mounts":      []map[string]any{{"Type": "volume", "Source": s.Volume, "Target": "/data"}},
-			"Memory":      s.Memory,
-			"NanoCpus":    int64(s.CPUs * 1e9),
-			"PidsLimit":   s.Pids,
-			"CapDrop":     []string{"ALL"},
-			"Init":        true,
-		},
+		"HostConfig": host,
+	}
+	if s.Runtime != "" {
+		host["Runtime"] = s.Runtime
+		body["User"] = "0:0"
+	} else {
+		host["CapDrop"] = []string{"ALL"}
 	}
 	var out struct{ Id string }
 	err := d.do(ctx, http.MethodPost, "/containers/create", url.Values{"name": {s.Name}}, nil, body, &out)
 	return out.Id, err
+}
+
+// Subnets are the IP ranges of a network.
+func (d *Docker) Subnets(ctx context.Context, network string) ([]*net.IPNet, error) {
+	var n struct {
+		IPAM struct{ Config []struct{ Subnet string } }
+	}
+	if err := d.do(ctx, http.MethodGet, "/networks/"+url.PathEscape(network), nil, nil, nil, &n); err != nil {
+		return nil, err
+	}
+	var out []*net.IPNet
+	for _, c := range n.IPAM.Config {
+		if _, ipn, err := net.ParseCIDR(c.Subnet); err == nil {
+			out = append(out, ipn)
+		}
+	}
+	return out, nil
 }
 
 // Pull pulls an image; auth is the X-Registry-Auth value, or empty.

@@ -15,7 +15,7 @@
 //     nothing of Swarm, secrets, plugins or the system.
 //
 // For sandboxes the policy is narrower still: only one image, every
-// container labelled and with memory and process limits. Containers are
+// container labelled, with memory and process limits, and under gVisor. Containers are
 // known by that label, so they stay manageable after the guard restarts.
 package guard
 
@@ -43,6 +43,7 @@ type Policy struct {
 	Image          string   // if set, the only image (repository, any tag) containers may run and be pulled
 	Label          string   // if set, containers must carry this label as "true", and are owned by it
 	MaxMemory      int64    // if set, containers must set a memory limit up to this and a process limit
+	Runtime        string   // if set, the runtime containers must run under, e.g. runsc (gVisor); else runc
 }
 
 // Guard proxies the Docker API on a Unix socket under a Policy.
@@ -277,7 +278,11 @@ func (g *Guard) checkCreate(r *http.Request) error {
 		add(mt.Type == "volume" && !g.volumeAllowed(mt.Source), "mount of "+mt.Source)
 	}
 	add(len(h.VolumesFrom) > 0, "volumes from another container")
-	add(h.Runtime != "" && h.Runtime != "runc", "runtime "+h.Runtime)
+	if g.Policy.Runtime != "" {
+		add(h.Runtime != g.Policy.Runtime, fmt.Sprintf("runtime %q, not %s", h.Runtime, g.Policy.Runtime))
+	} else {
+		add(h.Runtime != "" && h.Runtime != "runc", "runtime "+h.Runtime)
+	}
 	add(len(h.Sysctls) > 0, "sysctls")
 	add(len(h.Links) > 0, "links")
 	add(len(h.PortBindings) > 0 || h.PublishAllPorts, "published ports")

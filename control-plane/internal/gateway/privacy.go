@@ -86,7 +86,9 @@ func (g *Gitea) AgentPrivate(ctx context.Context, a *agents.Agent) (bool, error)
 }
 
 // grantProblems are the grants of a namespace's agents that would let
-// people outside it act on a private repo: for everyone on a private repo.
+// people outside it act on a private repo: for everyone on a private repo;
+// and private agents that would reach more of the internet than the
+// package registries.
 func (g *Gitea) grantProblems(ctx context.Context, ns string, list []agents.Agent) ([]string, error) {
 	var out []string
 	for _, a := range list {
@@ -100,6 +102,17 @@ func (g *Gitea) grantProblems(ctx context.Context, ns string, list []agents.Agen
 			}
 			if private {
 				out = append(out, fmt.Sprintf("%s/%s: grants[%d]: %s is private, so only %s's people may ask for changes to it; for: everyone is not possible there", agents.Dir, a.Name, i, gr.Repo, ns))
+			}
+		}
+		// An agent that reads private code and reaches the internet could be
+		// talked into sending the code out: it gets the registries at most.
+		if a.Internet.Wide() {
+			private, err := g.AgentPrivate(ctx, &a)
+			if err != nil {
+				return nil, err
+			}
+			if private {
+				out = append(out, fmt.Sprintf("%s/%s: internet: it works on private repos or for %s's people only, so it may reach the package registries (internet: packages), no more", agents.Dir, a.Name, ns))
 			}
 		}
 	}

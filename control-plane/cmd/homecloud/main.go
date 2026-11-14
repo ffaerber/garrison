@@ -473,9 +473,10 @@ func guardCmd(args []string) error {
 	image := fs.String("image", "", "the only image repository containers may run, if set")
 	label := fs.String("label", "", "the label containers must carry, and are known by, if set")
 	maxMemory := fs.Int64("max-memory", 0, "the largest memory limit a container may ask for; if set, it must ask for one")
+	runtime := fs.String("runtime", "", "the runtime containers must run under, if set, e.g. runsc (gVisor)")
 	fs.Parse(args)
 	g := guard.New(*socket, guard.Policy{Network: *network, VolumePrefixes: strings.Split(*volumes, ","),
-		Image: *image, Label: *label, MaxMemory: *maxMemory})
+		Image: *image, Label: *label, MaxMemory: *maxMemory, Runtime: *runtime})
 	log.Printf("docker guard on %s for %s, containers on %s", *listen, *socket, *network)
 	return (&http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe()
 }
@@ -548,6 +549,9 @@ func agentsCmd(args []string) error {
 	cpus := fs.Float64("sandbox-cpus", 1, "CPU limit of a sandbox")
 	idle := fs.Duration("sandbox-idle", 15*time.Minute, "a sandbox without a message this long is stopped")
 	perPerson := fs.Int("sandbox-per-person", 3, "running sandboxes per person")
+	runtime := fs.String("sandbox-runtime", "runsc", "the runtime sandboxes run under (gVisor), as root; empty: Docker's default, as the image's user")
+	internetListen := fs.String("internet-listen", ":8072", "address to serve the sandboxes' proxy to the internet on")
+	internetProxy := fs.String("internet-proxy", "http://control-plane_agents:8072", "that address, as sandboxes reach it; empty: no internet for any agent")
 	fs.Parse(args)
 
 	_, vars, err := readEnvFile(*config)
@@ -597,6 +601,7 @@ func agentsCmd(args []string) error {
 		auth, _ := json.Marshal(map[string]string{"username": vars["ADMIN_USER"], "password": strings.TrimSpace(string(password)), "serveraddress": "git." + domain})
 		srv.Sandboxes = &sandbox.Manager{
 			Docker: &sandbox.Docker{Addr: *dockerAddr}, Image: *image, Network: *network, API: *sandboxAPI,
+			Proxy: *internetProxy, Runtime: *runtime,
 			Memory: *memory, CPUs: *cpus, Pids: 512, Idle: *idle, PerPerson: *perPerson,
 			RegistryAuth: base64.URLEncoding.EncodeToString(auth),
 		}
@@ -611,19 +616,31 @@ func agentsCmd(args []string) error {
 			}
 			srv.Sandboxes.Run(ctx)
 		}()
-		srv.Git = &agentapi.GitProxy{Gitea: g}
+		srv.Git = &agentapi.GitProxy{Gitea: g, Agents: srv.Agents}
 		sb := &http.Server{Addr: *sandboxListen, Handler: srv.SandboxHandler(), ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			<-ctx.Done()
 			sb.Close()
 		}()
+		if *internetProxy != "" {
+			proxy := &http.Server{Addr: *internetListen, Handler: &agentapi.InternetProxy{Server: srv}, ReadHeaderTimeout: 10 * time.Second}
+			go func() {
+				<-ctx.Done()
+				proxy.Close()
+			}()
+			go func() {
+				if err := proxy.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					log.Fatalf("agents: internet proxy: %v", err)
+				}
+			}()
+		}
 		go func() {
 			if err := sb.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("agents: sandboxes: %v", err)
 			}
 		}()
 		go (&agentapi.Routines{Server: srv, Gitea: g}).Run(ctx)
-		log.Printf("agents: sandboxes from %s on %s, served on %s", *image, *network, *sandboxListen)
+		log.Printf("agents: sandboxes from %s on %s under %q, served on %s, proxy on %s", *image, *network, *runtime, *sandboxListen, *internetListen)
 	}
 	// Turns stream for minutes: no write timeout.
 	server := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}

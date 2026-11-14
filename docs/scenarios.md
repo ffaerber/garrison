@@ -58,7 +58,7 @@ Bob: *Take a screenshot of the todo app and put it into the namespace system, re
 
 The channel's turns with `homepage/media` ran in its sandbox: a container of the sandbox image for that channel and agent. Bob: *In your workspace, use bash to write the line 'pelican 42' into notes.txt.* Then its container is removed, as after 15 idle minutes, and bob asks: *Which line did you write into notes.txt just before?*
 
-- The sandbox holds no LLM key and no Keycloak token; it cannot reach the internet, Gitea or Docker; between turns its own token counts for nothing at the agent service.
+- The sandbox runs under gVisor, as root in gVisor's kernel. It holds no LLM key and no Keycloak token; it cannot reach the internet (the media agent has none), not even around the proxy, nor Gitea or Docker; between turns its own token counts for nothing at the agent service.
 - The file is in the workspace; a new container takes up the chat with the same workspace and conversation, and the agent answers *pelican 42*.
 
 ## 4f. Bob has the developer agent change the app with Git
@@ -100,6 +100,15 @@ Alice's push to `main` (4i) starts the developer's routine `main-moved`.
 
 - It reads with the agent's own account, for bob, started by the routine; the gateway logs it as nobody watching.
 - Its answer is posted in homepage's channel under the agent's name.
+
+## 4k. An agent installs what it needs, from the package registries
+
+Alice adds `homepage/builder` with `internet: packages`; carol approves. Bob: *Install Python in your sandbox with apk add python3, then run python3 -c 'print(6*7)'.* Then: *Run curl https://example.org/.*
+
+- Python is installed in its sandbox, from Alpine's registry, through the agent service's proxy, which logs the request with bob and the agent; the agent answers 42.
+- example.org is not a registry: the proxy refuses it and logs why.
+
+(The crud test checks the other side: an agent on a private repo may reach the registries, and the approval check refuses `internet: all` for it.)
 
 ## 5. Alice removes bob
 

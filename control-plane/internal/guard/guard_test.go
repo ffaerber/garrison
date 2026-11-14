@@ -197,14 +197,14 @@ func TestVolumeListShowsOnlyJobVolumes(t *testing.T) {
 func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
 	sock, seen := fakeDocker(t)
 	g := New(sock, Policy{Network: "homecloud-sandboxes", VolumePrefixes: []string{"homecloud-agent-"},
-		Image: "git.example.com/system/sandbox", Label: "homecloud.sandbox", MaxMemory: 2 << 30})
+		Image: "git.example.com/system/sandbox", Label: "homecloud.sandbox", MaxMemory: 2 << 30, Runtime: "runsc"})
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return srv, seen
 }
 
 func sandboxSpec(change func(c, h map[string]any)) map[string]any {
-	h := map[string]any{"NetworkMode": "homecloud-sandboxes", "Memory": 1 << 30, "PidsLimit": 512,
+	h := map[string]any{"NetworkMode": "homecloud-sandboxes", "Memory": 1 << 30, "PidsLimit": 512, "Runtime": "runsc",
 		"Mounts": []map[string]any{{"Type": "volume", "Source": "homecloud-agent-1", "Target": "/data"}}}
 	c := map[string]any{"Image": "git.example.com/system/sandbox:abc", "Labels": map[string]string{"homecloud.sandbox": "true"}, "HostConfig": h}
 	if change != nil {
@@ -229,8 +229,10 @@ func TestOnlySandboxesAreCreated(t *testing.T) {
 		"other volume": func(c, h map[string]any) {
 			h["Mounts"] = []map[string]any{{"Type": "volume", "Source": "gitea-data", "Target": "/data"}}
 		},
-		"docker socket": func(c, h map[string]any) { h["Binds"] = []string{"/var/run/docker.sock:/var/run/docker.sock"} },
-		"privileged":    func(c, h map[string]any) { h["Privileged"] = true },
+		"docker socket":  func(c, h map[string]any) { h["Binds"] = []string{"/var/run/docker.sock:/var/run/docker.sock"} },
+		"privileged":     func(c, h map[string]any) { h["Privileged"] = true },
+		"without gVisor": func(c, h map[string]any) { delete(h, "Runtime") },
+		"under runc":     func(c, h map[string]any) { h["Runtime"] = "runc" },
 	} {
 		if code := do(t, srv, "POST", "/v1.47/containers/create", sandboxSpec(change)); code != http.StatusForbidden {
 			t.Errorf("%s: %d", name, code)

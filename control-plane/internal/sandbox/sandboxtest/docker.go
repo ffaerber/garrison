@@ -4,12 +4,14 @@ package sandboxtest
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +34,7 @@ type Docker struct {
 // Container is a fake container.
 type Container struct {
 	ID, Name, Image string
+	Runtime, User   string
 	Env             []string
 	Labels          map[string]string
 	Running         bool
@@ -99,9 +102,11 @@ func (d *Docker) serve(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"status":"Pulled"}`)
 	case r.Method == "POST" && p == "/containers/create":
 		var b struct {
-			Image  string
-			Env    []string
-			Labels map[string]string
+			Image      string
+			User       string
+			Env        []string
+			Labels     map[string]string
+			HostConfig struct{ Runtime string }
 		}
 		json.NewDecoder(r.Body).Decode(&b)
 		if d.Missing {
@@ -118,11 +123,15 @@ func (d *Docker) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.Created++
-		c := &Container{ID: fmt.Sprintf("c%d", d.Created), Name: name, Image: b.Image, Env: b.Env, Labels: b.Labels}
+		c := &Container{ID: fmt.Sprintf("c%d", d.Created), Name: name, Image: b.Image, Env: b.Env, Labels: b.Labels, Runtime: b.HostConfig.Runtime, User: b.User}
 		d.Containers[name+"#"+c.ID] = c
 		d.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"Id":%q}`, c.ID)
+	case r.Method == "GET" && strings.HasPrefix(p, "/networks/"):
+		// Every network is on this machine's loopback.
+		d.mu.Unlock()
+		io.WriteString(w, `{"IPAM":{"Config":[{"Subnet":"127.0.0.0/8"}]}}`)
 	case r.Method == "GET" && p == "/containers/json":
 		var out []map[string]any
 		for _, c := range d.Containers {
@@ -220,6 +229,10 @@ func (d *Docker) attach(w http.ResponseWriter, c *Container) {
 				emit(map[string]any{"type": "tool_execution_start", "toolName": name, "args": json.RawMessage(args)})
 				answer = "called: " + d.callTool(c, name, args)
 				emit(map[string]any{"type": "tool_execution_end", "toolName": name, "isError": false})
+			} else if u, ok := strings.CutPrefix(cmd.Message, "fetch "); ok {
+				// "fetch <url>": gets it through the sandbox's proxy, as curl
+				// would, answering with the status and the body.
+				answer = "fetched: " + fetch(c, strings.TrimSpace(u))
 			} else if strings.Contains(cmd.Message, "tools") {
 				emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{map[string]any{"type": "text", "text": "Let me look."}}}})
 				emit(map[string]any{"type": "tool_execution_start", "toolName": "list_repos", "args": map[string]any{"namespace": "homepage"}})
@@ -239,6 +252,24 @@ func (d *Docker) attach(w http.ResponseWriter, c *Container) {
 			d.mu.Unlock()
 		}
 	}
+}
+
+func fetch(c *Container, target string) string {
+	proxy, err := url.Parse(c.env("HTTPS_PROXY"))
+	if err != nil || proxy.Host == "" {
+		return "no proxy"
+	}
+	client := &http.Client{Transport: &http.Transport{
+		Proxy:           http.ProxyURL(proxy),
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}}
+	resp, err := client.Get(target)
+	if err != nil {
+		return "error " + err.Error()
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+	return fmt.Sprintf("%d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
 func (d *Docker) listTools(c *Container) string {

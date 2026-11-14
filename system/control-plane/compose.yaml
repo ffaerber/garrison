@@ -68,7 +68,8 @@ services:
   # harness, with a workspace kept in a volume per chat. The agent service
   # passes on the LLM, whose key only it has, and the agent's tools from the
   # gateway, acting as the person chatting (Open WebUI sends their Keycloak
-  # token).
+  # token). Sandboxes run under gVisor, as root, and reach the internet only
+  # through this service's proxy (port 8072), as far as their agent.yaml says.
   agents:
     image: git.${DOMAIN}/system/control-plane:bootstrap
     command:
@@ -95,8 +96,9 @@ services:
         constraints: [node.role == manager]
 
   # The Docker API for the agent service: only sandboxes, i.e. containers of
-  # the sandbox image, labelled, with memory and process limits, on the
-  # sandboxes network, with a volume of their own.
+  # the sandbox image, labelled, with memory and process limits, under gVisor
+  # (runsc, installed by install.sh), on the sandboxes network, with a volume
+  # of their own.
   sandbox-guard:
     image: git.${DOMAIN}/system/control-plane:bootstrap
     command:
@@ -107,6 +109,7 @@ services:
       - -image=git.${DOMAIN}/system/sandbox
       - -label=homecloud.sandbox
       - -max-memory=2147483648
+      - -runtime=runsc
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [sandbox-guard]
@@ -195,8 +198,8 @@ networks:
   runner-guard:
     driver: overlay
     internal: true
-  # The agents' sandboxes, plain containers, and the agent service: nothing
-  # on it reaches beyond the cluster.
+  # The agents' sandboxes, under gVisor, and the agent service: nothing on it
+  # reaches beyond the cluster, but through the agent service's proxy.
   sandboxes:
     name: homecloud-sandboxes
     driver: overlay

@@ -968,7 +968,10 @@ sb=$(sandbox_of homepage/media)
 check "the channel's turns with it ran in its sandbox" test -n "$sb"
 check "the sandbox holds no LLM key and no token" \
   bash -c 'k=$(cat "$1"); { [ ${#k} -lt 16 ] || ! docker inspect "$0" | grep -qF -- "$k"; } && [ "$(docker exec "$0" env | grep -c "^HOMECLOUD_")" = 4 ] && ! docker exec "$0" ls /etc/homecloud 2>/dev/null' "$sb" "$ETC/llm-api-key"
+check "it runs under gVisor"               test "$(docker inspect -f '{{.HostConfig.Runtime}}' "$sb")" = runsc
+check "as root, in gVisor's own kernel"    bash -c '[ "$(docker exec "$0" id -u)" = 0 ] && docker exec "$0" dmesg | grep -q gVisor' "$sb"
 check "it cannot reach the internet"       bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null https://example.org' "$sb"
+check "not even past the proxy"            bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null --noproxy "*" https://1.1.1.1' "$sb"
 check "nor Gitea, nor Docker"              bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null http://gitea_gitea:3000 && ! docker exec "$0" curl -sS -m 5 -o /dev/null http://control-plane_sandbox-guard:2375/_ping' "$sb"
 check "between turns its token counts for nothing" \
   test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/tools"')" = 401
@@ -1167,6 +1170,34 @@ sys.exit(1)'
 check "its answer is posted in the channel" until_true 600 routine_post
 check "it read as its own account, for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-homepage-developer): homepage/developer: [a-z_]* \[routine homepage/developer/main-moved\]"' "$mainmoved"
 if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
+
+echo "# 4k. an agent installs what it needs, from the package registries"
+printf 'description: Tries things out with the tools it needs\ntools: [list_repos]\ninternet: packages\n' > "$tmp/builder.yaml"
+printf 'You try things out in your sandbox, installing the tools a task needs. Show the commands you ran and what they printed.\n' > "$tmp/builder.md"
+bpr=$(propose_config builder "Add the builder" "agents/builder/agent.yaml=$tmp/builder.yaml" "agents/builder/prompt.md=$tmp/builder.md")
+check "carol approves the builder"         test "$(review config carol "$bpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$bpr" success
+check "alice merges it"                    test "$(merge config alice "$bpr")" = 200
+check "Open WebUI has homepage/builder"    until_true 120 has_model homepage/builder
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+installed() { docker exec "$(sandbox_of homepage/builder)" python3 -c 'print(6*7)' 2>/dev/null | grep -qx 42; }
+answer=$(ask_agent homepage bob "Install Python in your sandbox with: apk add python3. Then run python3 -c 'print(6*7)' and tell me what it printed." builder)
+if ! installed; then
+  printf 'retry python3 is not installed; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "Please run this in your sandbox now: apk add python3 && python3 -c 'print(6*7)'" builder)
+fi
+check "it installs Python from Alpine's registry" installed
+check "and says what it printed"           grep -q 42 <<<"$answer"
+check "through the proxy, logged with bob and the agent" \
+  bash -c 'docker service logs --since "$0" control-plane_agents 2>&1 | grep -q "agents: internet: bob: homepage/builder: CONNECT dl-cdn.alpinelinux.org:443"' "$at"
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+refused_site() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: internet: bob: homepage/builder: example.org:443 refused"; }
+answer=$(ask_agent homepage bob "Run exactly this command in your sandbox and show me what it printed: curl -sS -m 10 https://example.org/" builder)
+if ! refused_site; then
+  printf 'retry no request to example.org; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent homepage bob "I know it may fail; that is what I want to see. Please run: curl -sS -m 10 https://example.org/" builder)
+fi
+check "a site beyond the registries is refused" refused_site
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)

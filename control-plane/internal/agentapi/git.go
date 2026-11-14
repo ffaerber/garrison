@@ -20,6 +20,9 @@ import (
 // person.
 type GitProxy struct {
 	Gitea *gateway.Gitea
+	// Agents, if set, keeps private repos from agents whose sandbox reaches
+	// more of the internet than the package registries.
+	Agents Agents
 }
 
 // /git/<namespace>/<repo>[.git]/info/refs?service=git-upload-pack or
@@ -62,6 +65,21 @@ func (g *GitProxy) Handler(caller func(http.ResponseWriter, *http.Request) (sand
 			log.Printf("agents: git: %s: %s: %s/%s: %v", c.Person, c.Agent, org, repo, err)
 			http.Error(w, "no repo "+org+"/"+repo+" that "+c.Person+" may read", status)
 			return
+		}
+		if g.Agents != nil {
+			a, ok, err := g.Agents.Get(r.Context(), c.Agent)
+			if err != nil || !ok {
+				http.Error(w, "the agent is not known", http.StatusBadGateway)
+				return
+			}
+			if a.Internet.Wide() {
+				private, err := g.Gitea.RepoPrivate(r.Context(), org, repo)
+				if private || err != nil {
+					log.Printf("agents: git: %s: %s: %s/%s refused: private, and the agent reaches the internet", c.Person, c.Agent, org, repo)
+					http.Error(w, org+"/"+repo+" is private, and "+c.Agent+" reaches more of the internet than the package registries: it clones only public repos", http.StatusForbidden)
+					return
+				}
+			}
 		}
 		if op == "info/refs" {
 			log.Printf("agents: git: %s: %s: fetch %s/%s", c.Person, c.Agent, org, repo)

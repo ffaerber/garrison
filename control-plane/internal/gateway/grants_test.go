@@ -285,3 +285,24 @@ func TestPrivateReposAreForTheNamespacesPeople(t *testing.T) {
 		t.Error("an agent with a grant on a private repo is not private")
 	}
 }
+
+func TestPrivateAgentsReachOnlyTheRegistries(t *testing.T) {
+	f := newGrantsGitea()
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	g := &Gitea{URL: srv.URL, User: "admin", Password: "pw"}
+	list := []agents.Agent{
+		{Namespace: "homepage", Name: "wide", Repos: []string{"secret"}, Internet: agents.Internet{All: true}},
+		{Namespace: "homepage", Name: "listed", Visible: agents.VisibleMembers, Internet: agents.Internet{Domains: []string{"example.org"}}},
+		{Namespace: "homepage", Name: "builder", Repos: []string{"secret"}, Internet: agents.Internet{Packages: true}},
+		{Namespace: "homepage", Name: "offline", Repos: []string{"secret"}},
+	}
+	problems, err := g.grantProblems(context.Background(), "homepage", list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 2 || !strings.HasPrefix(problems[0], "agents/wide: internet:") || !strings.HasPrefix(problems[1], "agents/listed: internet:") ||
+		!strings.Contains(problems[0], "internet: packages") {
+		t.Errorf("problems %q", problems)
+	}
+}

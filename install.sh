@@ -51,30 +51,56 @@ command -v curl    >/dev/null || need+=(curl)
 command -v git     >/dev/null || need+=(git)
 command -v rsync   >/dev/null || need+=(rsync)    # copies a dataset back from a snapshot
 command -v sanoid  >/dev/null || need+=(sanoid)   # scheduled snapshots
+command -v python3 >/dev/null || need+=(python3)  # merges Docker's daemon.json
+command -v gpg     >/dev/null || need+=(gnupg)    # gVisor's repository key
 if [ ${#need[@]} -gt 0 ]; then
   apt-get update -qq
   apt-get install -y -qq "${need[@]}" >/dev/null
 fi
 systemctl enable --now docker >/dev/null
 
-# Optional pull-through mirror for Docker Hub images, e.g. to avoid its rate
-# limit on anonymous pulls. Docker rejects unknown keys in daemon.json, so the
-# installer marks the file it owns with a copy kept next to its own state.
-if [ -n "$REGISTRY_MIRROR" ]; then
-  want=$(printf '{\n  "registry-mirrors": ["%s"]\n}' "$REGISTRY_MIRROR")
-  owned=$ETC/daemon.json
-  mkdir -p "$ETC"
-  if [ -e /etc/docker/daemon.json ] && ! cmp -s /etc/docker/daemon.json "$owned"; then
-    fail "/etc/docker/daemon.json was not written by this installer; add the registry mirror to it by hand"
-  fi
-  if [ "$(cat /etc/docker/daemon.json 2>/dev/null)" != "$want" ]; then
-    printf '%s\n' "$want" > /etc/docker/daemon.json
-    cp /etc/docker/daemon.json "$owned"
-    systemctl restart docker
-    # Services of an existing install come back without their secrets and configs.
-    [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ] || "$ROOT/host/repair-services.sh"
-  fi
+# gVisor (runsc): the agents' sandboxes run under its kernel in user space,
+# so code an agent runs as root in its sandbox meets gVisor before Linux.
+# From gVisor's own apt repository; Ubuntu has no package of it.
+if ! command -v runsc >/dev/null; then
+  say "Installing gVisor"
+  arch=$(dpkg --print-architecture)
+  curl -fsSL https://gvisor.dev/archive.key | gpg --batch --yes --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+  echo "deb [arch=$arch signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+    > /etc/apt/sources.list.d/gvisor.list
+  apt-get update -qq
+  apt-get install -y -qq runsc >/dev/null
 fi
+
+# Docker's settings: gVisor as the runtime runsc, and an optional
+# pull-through mirror for Docker Hub images, e.g. to avoid its rate limit on
+# anonymous pulls. Merged into daemon.json, keeping what else it says.
+changed=$(python3 - "$REGISTRY_MIRROR" <<'PYTHON'
+import json, os, sys
+path = "/etc/docker/daemon.json"
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except FileNotFoundError:
+    cfg = {}
+before = json.dumps(cfg, sort_keys=True)
+cfg.setdefault("runtimes", {})["runsc"] = {"path": "/usr/bin/runsc"}
+if sys.argv[1]:
+    cfg["registry-mirrors"] = [sys.argv[1]]
+if json.dumps(cfg, sort_keys=True) != before:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    print("yes")
+PYTHON
+)
+if [ "$changed" = yes ] || ! docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw runsc; then
+  systemctl restart docker
+  # Services of an existing install come back without their secrets and configs.
+  [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ] || "$ROOT/host/repair-services.sh"
+fi
+docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw runsc || fail "Docker does not know the runtime runsc (gVisor)"
 
 # ---------- swarm ----------
 say "Setting up Docker Swarm"

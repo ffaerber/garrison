@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -34,6 +36,8 @@ type Manager struct {
 	Image        string
 	Network      string
 	API          string // the agent service, as sandboxes reach it
+	Proxy        string // its proxy to the internet, as sandboxes reach it; empty: none
+	Runtime      string // e.g. runsc: gVisor, where sandboxes are root; empty: Docker's default
 	Memory       int64
 	CPUs         float64
 	Pids         int64
@@ -45,6 +49,7 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session // by key
 	tokens   map[string]*Session
+	here     string // this service's address on Network, once found
 }
 
 // Session is a chat's sandbox.
@@ -219,15 +224,35 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	if err := m.Docker.CreateVolume(ctx, s.name, labels); err != nil {
 		return err
 	}
+	api, proxy, err := m.addresses(ctx)
+	if err != nil {
+		return err
+	}
 	spec := Spec{
 		Name: s.name, Image: m.Image, Labels: labels, Network: m.Network, Volume: s.name,
-		Memory: m.Memory, CPUs: m.CPUs, Pids: m.Pids,
+		Memory: m.Memory, CPUs: m.CPUs, Pids: m.Pids, Runtime: m.Runtime,
 		Env: []string{
-			"HOMECLOUD_API=" + m.API,
+			"HOMECLOUD_API=" + api,
 			"HOMECLOUD_TOKEN=" + token,
 			"HOMECLOUD_MODEL=" + want.Model,
 			"HOMECLOUD_PROMPT=" + want.Prompt,
 		},
+	}
+	if proxy != "" {
+		// The token names the sandbox to the proxy, as to the API: it counts
+		// only during a turn. What it lets through is the agent's internet.
+		u, err := url.Parse(proxy)
+		if err != nil {
+			return err
+		}
+		u.User = url.UserPassword("sandbox", token)
+		apiURL, _ := url.Parse(api)
+		for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+			spec.Env = append(spec.Env, k+"="+u.String())
+		}
+		for _, k := range []string{"NO_PROXY", "no_proxy"} {
+			spec.Env = append(spec.Env, k+"="+apiURL.Hostname())
+		}
 	}
 	id, err := m.Docker.Create(ctx, spec)
 	if errors.Is(err, ErrNotFound) {
@@ -272,6 +297,71 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	s.mu.Unlock()
 	log.Printf("sandbox %s: started for %s, chat %s, by %s", s.name, want.Agent, want.Chat, want.Person)
 	return nil
+}
+
+// addresses are the API's and the proxy's, as sandboxes reach them. Under
+// gVisor a sandbox has no Docker DNS, so names become this service's own
+// address on the sandboxes' network.
+func (m *Manager) addresses(ctx context.Context) (api, proxy string, err error) {
+	if m.Runtime == "" {
+		return m.API, m.Proxy, nil
+	}
+	m.mu.Lock()
+	here := m.here
+	m.mu.Unlock()
+	if here == "" {
+		subnets, err := m.Docker.Subnets(ctx, m.Network)
+		if err != nil {
+			return "", "", fmt.Errorf("the sandboxes' network: %w", err)
+		}
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			return "", "", err
+		}
+		here = OwnAddress(addrs, subnets)
+		if here == "" {
+			return "", "", fmt.Errorf("this service has no address on the network %s", m.Network)
+		}
+		m.mu.Lock()
+		m.here = here
+		m.mu.Unlock()
+	}
+	withHost := func(raw string) (string, error) {
+		if raw == "" {
+			return "", nil
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			return "", err
+		}
+		port := u.Port()
+		u.Host = here
+		if port != "" {
+			u.Host = net.JoinHostPort(here, port)
+		}
+		return u.String(), nil
+	}
+	if api, err = withHost(m.API); err != nil {
+		return "", "", err
+	}
+	proxy, err = withHost(m.Proxy)
+	return api, proxy, err
+}
+
+// OwnAddress is the first of addrs in one of subnets, or "".
+func OwnAddress(addrs []net.Addr, subnets []*net.IPNet) string {
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		for _, s := range subnets {
+			if s.Contains(ipn.IP) {
+				return ipn.IP.String()
+			}
+		}
+	}
+	return ""
 }
 
 // stop removes the session's container; its volume stays.

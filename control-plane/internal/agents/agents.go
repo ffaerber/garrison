@@ -42,6 +42,7 @@ type Agent struct {
 	Asks        []string // agents it may ask for work, <namespace>/<agent>
 	Grants      []Grant  // rights of its own
 	Routines    []Routine
+	Internet    Internet // what its sandbox reaches through the proxy
 }
 
 // ID is the agent's model id in the chat, and the name people mention:
@@ -87,6 +88,7 @@ type config struct {
 	Agents      []string  `yaml:"agents,omitempty"`
 	Grants      []Grant   `yaml:"grants,omitempty"`
 	Routines    []Routine `yaml:"routines,omitempty"`
+	Internet    Internet  `yaml:"internet,omitempty"`
 	Enabled     *bool     `yaml:"enabled,omitempty"`
 }
 
@@ -238,6 +240,7 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 		Namespace: namespace, Name: name, Description: c.Description, Model: c.Model,
 		Tools: c.Tools, Repos: c.Repos, Prompt: prompt, Skills: skills,
 		Visible: c.Visible, Asks: c.Agents, Grants: grants, Routines: routines,
+		Internet: c.Internet,
 	}, nil, nil
 }
 
@@ -363,8 +366,11 @@ const Platform = `How the home cloud works:
 - Another service with a port can have an address of its own: public: api makes it https://<hostname>-api.<domain>. The entrypoint has the hostname already. Services without a port are reachable only by the others.
 - Data: each environment's datasets are snapshotted before every redeploy (deploy-…) and hourly, daily and monthly (autosnap_…); list_snapshots shows them. To bring an app's data back, propose restores/<name>.yaml in config, three lines: stack: <stack name>, environment: main (or dev), snapshot: <as listed>. Once merged, the app stops, its data is copied back and it starts again; what was written since is lost but kept in a restore-… snapshot, so a restore can itself be undone. Shares are not restored. Tell the person what will be lost before proposing it.
 - Secrets are made by the deployer; never ask anyone to make one by hand. A secret from outside (e.g. an API key) cannot be set yet: say so.
-- You have no internet: you cannot look up images or their versions. Use versions you know, pinned, and tell the person to check them in the review. Each service of the app needs its image: databases, caches (e.g. valkey/valkey:8-alpine for Redis) and workers too.
+- Each service of the app needs its image, with a fixed version: databases, caches (e.g. valkey/valkey:8-alpine for Redis) and workers too.
 `
+
+// offline is said to agents without internet.
+const offline = "- You have no internet: you cannot look up images or their versions. Use versions you know, pinned, and tell the person to check them in the review.\n"
 
 // OperatorFiles are the files of the operator's folder, as written into a
 // new config repo.
@@ -375,7 +381,7 @@ func OperatorFiles(tools []string) map[string]string {
 
 One folder per agent. People mention an agent in the chat as ` + "`@<namespace>/<folder>`" + `.
 
-- ` + "`agent.yaml`" + `: ` + "`description`" + `, ` + "`model`" + ` (empty for the default), ` + "`tools`" + ` (the gateway tools it may use), ` + "`skills`" + ` (shared skills from ` + "`skills/`" + ` at the top of this repo) and ` + "`repos`" + `.
+- ` + "`agent.yaml`" + `: ` + "`description`" + `, ` + "`model`" + ` (empty for the default), ` + "`tools`" + ` (the gateway tools it may use), ` + "`skills`" + ` (shared skills from ` + "`skills/`" + ` at the top of this repo), ` + "`repos`" + ` and ` + "`internet`" + ` (what its sandbox reaches: ` + "`packages`" + `, the package registries; ` + "`all`" + `; or a list of ` + "`packages`" + ` and domains; none without it).
 - ` + "`prompt.md`" + `: its instructions. The platform adds its own rules after them.
 - ` + "`skills/<name>/SKILL.md`" + `: skills of this agent only, in the Agent Skills format.
 
@@ -393,6 +399,11 @@ func System(a Agent, domain string) string {
 	fmt.Fprintf(&b, "You are %s, an agent of the namespace %q of a home cloud at %s. Pass namespace %q to every tool that takes one.\n\n", a.ID(), a.Namespace, domain, a.Namespace)
 	b.WriteString(strings.TrimSpace(a.Prompt))
 	b.WriteString("\n\n" + Platform)
+	if a.Internet.None() {
+		b.WriteString(offline)
+	} else {
+		fmt.Fprintf(&b, "- Your sandbox reaches %s, nothing else. Pin the versions you use, and tell the person to check them in the review.\n", a.Internet)
+	}
 	if len(a.Skills) > 0 {
 		b.WriteString("\nSkills: instructions for particular tasks. Before a task that matches one, call load_skill with its name and follow it; read_skill_file reads the files it refers to.\n")
 		for _, s := range a.Skills {

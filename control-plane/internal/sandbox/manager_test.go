@@ -3,6 +3,8 @@ package sandbox_test
 import (
 	"context"
 	"errors"
+	"net"
+	"strings"
 	"testing"
 
 	"homecloud/control-plane/internal/sandbox"
@@ -99,5 +101,58 @@ func TestCleanRemovesEarlierContainers(t *testing.T) {
 	}
 	if d.Running() != 0 {
 		t.Errorf("running %d", d.Running())
+	}
+}
+
+func TestUnderGVisorASandboxIsRootAndReachedByAddress(t *testing.T) {
+	m, d := manager(t)
+	m.Runtime, m.API, m.Proxy = "runsc", "http://agents:8071", "http://agents:8072"
+	ask(t, m, sandbox.Want{Key: "k", Person: "alice"}, "hi")
+	for _, c := range d.Containers {
+		if c.Runtime != "runsc" || c.User != "0:0" {
+			t.Errorf("runtime %q, user %q", c.Runtime, c.User)
+		}
+		// gVisor has no Docker DNS: the agent service by its address on the
+		// network (the fake's is loopback).
+		if got := c.Env[0]; got != "HOMECLOUD_API=http://127.0.0.1:8071" {
+			t.Errorf("%s", got)
+		}
+		var proxy, noProxy string
+		for _, e := range c.Env {
+			if v, ok := strings.CutPrefix(e, "HTTPS_PROXY="); ok {
+				proxy = v
+			}
+			if v, ok := strings.CutPrefix(e, "NO_PROXY="); ok {
+				noProxy = v
+			}
+		}
+		if !strings.HasPrefix(proxy, "http://sandbox:") || !strings.HasSuffix(proxy, "@127.0.0.1:8072") || noProxy != "127.0.0.1" {
+			t.Errorf("proxy %q, no proxy %q", proxy, noProxy)
+		}
+	}
+}
+
+func TestWithoutARuntimeASandboxHasNoCapabilities(t *testing.T) {
+	m, d := manager(t)
+	ask(t, m, sandbox.Want{Key: "k", Person: "alice"}, "hi")
+	for _, c := range d.Containers {
+		if c.Runtime != "" || c.User != "" || c.Env[0] != "HOMECLOUD_API=http://agents" {
+			t.Errorf("runtime %q, user %q, %s", c.Runtime, c.User, c.Env[0])
+		}
+	}
+}
+
+func TestOwnAddress(t *testing.T) {
+	_, sandboxes, _ := net.ParseCIDR("10.0.7.0/24")
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+		&net.IPNet{IP: net.ParseIP("10.0.1.5"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("10.0.7.3"), Mask: net.CIDRMask(24, 32)},
+	}
+	if got := sandbox.OwnAddress(addrs, []*net.IPNet{sandboxes}); got != "10.0.7.3" {
+		t.Errorf("%q", got)
+	}
+	if got := sandbox.OwnAddress(addrs[:2], []*net.IPNet{sandboxes}); got != "" {
+		t.Errorf("%q", got)
 	}
 }

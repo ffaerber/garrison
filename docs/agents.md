@@ -76,12 +76,14 @@ grants:                      # rights of its own (see Accounts and grants); none
     branch: dev
     level: autonomous        # merges its pull requests once checks pass; dev-todo deploys
     for: members
+internet: [packages, api.example.com]   # what its sandbox reaches; none without it
 ```
 
 - `prompt.md` is the system prompt. The platform appends fixed rules after it (act as the person, propose and never claim a change is merged, give the link); a prompt can add rules but not remove these.
 - The model id, and the name people mention, is `<namespace>/<agent>`, e.g. `homepage/marketing`.
 - A new namespace gets `agents/operator/` written into its `config` repo with today's operator prompt. A namespace without an `agents/` folder still gets that operator.
 - The `homecloud/approval` check on `config` pull requests also checks agent files: known tools and skills, a model the endpoint offers, a prompt that is not empty. Adding or widening an agent needs an admin's approval like a change to `members.yaml`.
+- `internet`: what the agent's sandbox reaches, through the agent service's proxy (see Sandbox). `packages` opens the package registries: Alpine, Debian, Ubuntu, PyPI, npm, Go modules and Rust crates, download hosts only, no GitHub. `all` opens every public address. A list names `packages` and domains, each with its subdomains. Without it, nothing. An agent that works on a private repo, or is `visible: members`, reaches the registries at most: the approval check refuses more, and should a repo turn private later, the proxy holds it to the registries.
 
 ## Accounts and grants
 
@@ -237,7 +239,10 @@ A container belongs to a chat, not to an agent or a person.
 - Mounted: the chat's volume at `/data` (workspace and Pi's session). Skills are still read through the gateway's `load_skill`; mounting the agent's folder and skills for Pi to load natively is to come.
 - Git: the agent service passes fetches (never pushes) on to Gitea with its admin account, after asking Gitea, as the person, whether they may read the repo; Gitea's Git protocol knows no Sudo. Changes leave only as patches through `propose_patch`, which Gitea applies as the person, so branch protection and authorship hold.
 - Network: `homecloud-sandboxes`, internal, shared only with the agent service. On a second port (8071) the agent service passes on the LLM, adding the API key and enforcing the agent's model, and the gateway's tools, adding the Keycloak token of the person whose turn runs. A sandbox names itself with a random token given at its start, which counts only during a turn. The sandbox holds no key, no person's token and no Docker access.
-- Limits per container: 1 GB of memory, one CPU, 512 processes, no capabilities. Containers are started through the sandbox guard, like the user runner's, which allows only the sandbox image, with the label `homecloud.sandbox`, these limits, that network and volumes named `homecloud-agent-*`. It knows its containers by the label, so it still does after a restart.
+- Runtime: gVisor (`runsc`, installed by `install.sh`). A sandbox's processes run as root, with Docker's default capabilities, against gVisor's kernel in user space, which in turn uses few system calls of the host's; code that breaks out of the container meets gVisor before Linux. Root lets agents install what a task needs (`apk add`, `pip install`, `npm install -g`); it lasts until the container stops, and only `/data` is kept. gVisor has no Docker DNS, so the agent service gives sandboxes its own address on the network rather than its name.
+- Internet: on a third port (8072) the agent service is an HTTP proxy, set in the sandbox's `HTTP_PROXY` and `HTTPS_PROXY` with its token, which curl, apk, pip, npm and git follow. It lets a sandbox in a turn reach what its agent's `internet` allows, on ports 80 and 443, and never an address that is not public (the home network, the platform's services, loopback, link-local, shared CGNAT space), checked on the address it connects to, so a name that resolves into the home network is refused too. Each request is logged with the person and the agent. A sandbox has no other way out: its network is internal.
+- Private repos: an agent that reaches more than the registries clones only public repos through the Git proxy, so a page that tricks it cannot get it to send a private repo out.
+- Limits per container: 1 GB of memory, one CPU, 512 processes. Containers are started through the sandbox guard, like the user runner's, which allows only the sandbox image, under gVisor, with the label `homecloud.sandbox`, these limits, that network and volumes named `homecloud-agent-*`. It knows its containers by the label, so it still does after a restart.
 
 ## Lifecycle and updates
 

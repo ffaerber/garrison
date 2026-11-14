@@ -20,7 +20,7 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 | One Let's Encrypt wildcard via DNS challenge | Workaround for Namecheap IP whitelisting |
 | In-app team chat with @agent | Matrix or mobile chat app |
 | ntfy for phone push | — |
-| Coding agents in plain Docker sandboxes | NVIDIA OpenShell as sandbox runtime |
+| Coding agents in gVisor sandboxes, internet per agent through a proxy | NVIDIA OpenShell as sandbox runtime |
 | ZFS snapshots, backup drive, restic to cloud | Storage shared across nodes over NFS |
 
 ## Core concepts
@@ -260,4 +260,4 @@ The MVP acceptance list above becomes the end-to-end test suite.
 - Namecheap DNS challenge with a changing home IP.
 - Build the agent loop in-house or wrap existing agents.
 - Whether agents may provision secrets for sub-agents.
-- When to move from plain Docker sandboxes to OpenShell.
+- When to move from gVisor sandboxes to OpenShell.

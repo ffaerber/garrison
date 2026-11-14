@@ -181,6 +181,7 @@ func (s *Server) turnTimeout() time.Duration {
 // tools as the person, until it answers without a tool call. It returns
 // the number of tool calls.
 func (s *Server) turn(ctx context.Context, token string, a agents.Agent, incoming []Message, out *writer) (int, error) {
+	a.Internet = agents.Internet{} // without a sandbox, there is none
 	messages := []Message{{Role: "system", Content: agents.System(a, s.Domain)}}
 	for _, m := range incoming {
 		switch m.Role {

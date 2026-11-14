@@ -152,6 +152,10 @@ check "alice makes notes private"          test "$(gitea_api alice -o /dev/null 
 hidden() { ! sees_model bob $ns/helper; }
 check "so the agent is private: bob no longer sees it" until_true 120 hidden
 check "alice sees it still"                sees_model alice $ns/helper
+check "a private agent reaching the whole internet fails the check" \
+  refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a6 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\ninternet: all\n')"
+check "it says the registries are the most" grep -q "internet: packages), no more" "$tmp/refused.out"
+check "the package registries it may reach" change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a7 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\ninternet: packages\n')"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"private":false}' "$api/repos/$ns/notes"
 check "public again, bob sees it again"    until_true 120 sees_model bob $ns/helper
 check "alice takes the grant away"         change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a5 'Helps with the notes, now')"
