@@ -1262,7 +1262,9 @@ check "bob leaves the members"             until_true 90 gone_from_members
 check "bob may no longer push"             until_true 60 cannot_push bob
 check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$hp/app")" = 200
 
-check "bob no longer sees todo's channel" test -z "$(channel_of todo bob)"
+# Open WebUI follows the members within the gateway's next sync.
+no_channel() { [ -z "$(channel_of todo bob)" ]; }
+check "bob no longer sees todo's channel" until_true 120 no_channel
 
 echo "# 5b. bob, no longer in todo, asks the desk for a change"
 # ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
