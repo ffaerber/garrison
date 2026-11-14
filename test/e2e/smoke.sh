@@ -752,7 +752,7 @@ check "the reserved hostname"              in_feed alice view=problems "'reserve
 check "dev-todo taken down"                in_feed alice ns=todo "e['kind'] == 'undeploy' and 'dev-todo' in e['title']"
 check "the homepage's deploy"              in_feed alice ns=homepage "e['kind'] == 'deploy' and e['status'] == 'ok'"
 check "the system stacks' deploys, for everyone" in_feed alice "" "e['kind'] == 'deploy' and e['namespace'] == '' and 'traefik' in e['title']"
-page_lists() { feed alice "/?ns=todo" | grep -q "deployed todo/todo@main at ${fixed:0:7}"; }
+page_lists() { local page; page=$(feed alice "/?ns=todo") && grep -q "deployed todo/todo@main at ${fixed:0:7}" <<<"$page"; }
 check "its page lists them"                page_lists
 check "bob opens it too"                   until_true 60 home_login bob
 check "he sees todo's deploys, as he may read its repos" in_feed bob ns=todo "e['kind'] == 'deploy' and e['commit'] == '$fixed'"
