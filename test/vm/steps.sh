@@ -67,7 +67,8 @@ inputs() {
 
 say()   { printf '\n==> [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 in_vm() { multipass exec "$VM" -- "$@"; }
-exists() { multipass info "$VM" >/dev/null 2>&1; }
+# By name in the list: info fails for a VM that is running but unreachable.
+exists() { multipass list --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$VM"; }
 
 # ---------- the steps ----------
 
