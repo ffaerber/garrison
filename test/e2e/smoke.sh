@@ -616,10 +616,22 @@ check "Sanoid snapshots on a schedule"     systemctl is-active sanoid.timer
 systemctl start sanoid.service
 autosnap() { zfs list -H -t snapshot -o name "$todo_ds/todo-db" | grep -q '@autosnap_.*_hourly$'; }
 check "the apps' data too"                 autosnap
-plants() { todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import json,sys; print(" ".join(str(t["id"]) for t in json.load(sys.stdin) if t["title"]=="Water the plants"))'; }
+# plants: the ids of the todo "Water the plants"; fails, saying what came, on
+# an answer that is not the list.
+plants() { todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c '
+import json,sys
+raw = sys.stdin.read()
+try:
+    todos = json.loads(raw)
+    assert isinstance(todos, list)
+except Exception:
+    print("not a list of todos: %r" % raw[:300], file=sys.stderr); sys.exit(1)
+print(" ".join(str(t["id"]) for t in todos if t["title"] == "Water the plants"))'; }
+# The redeploy above may still be rolling out: the app first answers again.
+until_true 180 plants
 for id in $(plants); do todo_api todo -o /dev/null -X POST "https://todo.$DOMAIN/todos/$id/delete"; done
-no_plants() { [ -z "$(plants)" ] && todo_api todo "https://todo.$DOMAIN/api/todos" | grep -q '^\['; }
-check "alice deletes the todo by mistake"  no_plants
+no_plants() { local ids; ids=$(plants) && [ -z "$ids" ]; }
+check "alice deletes the todo by mistake"  until_true 30 no_plants
 printf 'stack: todo\nenvironment: main\nsnapshot: %s\n' "$snap" > "$tmp/restore.yaml"
 check "she asks to restore todo's data, a root admin approves" set_config homepage restores/todo.yaml "$tmp/restore.yaml"
 restored() { [ "$(zfs get -H -o value homecloud:restored "$todo_ds")" != - ]; }
@@ -972,7 +984,10 @@ check "it runs under gVisor"               test "$(docker inspect -f '{{.HostCon
 check "as root, in gVisor's own kernel"    bash -c '[ "$(docker exec "$0" id -u)" = 0 ] && docker exec "$0" dmesg | grep -q gVisor' "$sb"
 check "it cannot reach the internet"       bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null https://example.org' "$sb"
 check "not even past the proxy"            bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null --noproxy "*" https://1.1.1.1' "$sb"
-check "nor Gitea, nor Docker"              bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null http://gitea_gitea:3000 && ! docker exec "$0" curl -sS -m 5 -o /dev/null http://control-plane_sandbox-guard:2375/_ping' "$sb"
+# Through the proxy, which refuses them, and around it; -f: a refusal is an
+# answer too.
+nothing_at() { ! docker exec "$sb" curl -fsS -m 5 -o /dev/null "$1" && ! docker exec "$sb" curl -fsS -m 5 -o /dev/null --noproxy "*" "$1"; }
+check "nor Gitea, nor Docker"              bash -c "$(declare -f nothing_at); sb=$sb; nothing_at http://gitea_gitea:3000 && nothing_at http://control-plane_sandbox-guard:2375/_ping"
 check "between turns its token counts for nothing" \
   test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/tools"')" = 401
 has_notes() { docker exec "$(sandbox_of homepage/media)" grep -q "pelican 42" /data/work/notes.txt; }
