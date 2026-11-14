@@ -1,6 +1,7 @@
-// Todo is a small todo list on Postgres, the example app of the namespace
-// todo. It runs behind the installation's sign-in, which tells it who is
-// signed in; it keeps who added each todo.
+// Todo is a small todo app on Postgres, the example app of the namespace
+// todo. Everyone has a list of their own. It runs behind the installation's
+// sign-in (Keycloak, through the login proxy), which tells it who is signed
+// in: each person sees and changes only their own todos.
 package main
 
 import (
@@ -32,22 +33,31 @@ type App struct {
 
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", a.index)
-	mux.HandleFunc("POST /todos", a.add)
-	mux.HandleFunc("POST /todos/{id}/toggle", a.toggle)
-	mux.HandleFunc("POST /todos/{id}/delete", a.remove)
-	mux.HandleFunc("GET /api/todos", a.apiList)
-	mux.HandleFunc("POST /api/todos", a.apiAdd)
+	mux.Handle("GET /{$}", signedIn(a.index))
+	mux.Handle("POST /todos", signedIn(a.add))
+	mux.Handle("POST /todos/{id}/toggle", signedIn(a.toggle))
+	mux.Handle("POST /todos/{id}/delete", signedIn(a.remove))
+	mux.Handle("GET /api/todos", signedIn(a.apiList))
+	mux.Handle("POST /api/todos", signedIn(a.apiAdd))
 	mux.HandleFunc("GET /healthz", a.health)
 	return sameOrigin(mux)
 }
 
-// who is the signed-in person, as the installation's login check reports it.
-func who(r *http.Request) string {
-	if u := r.Header.Get("X-Auth-Request-Preferred-Username"); u != "" {
-		return u
-	}
-	return "someone"
+// Signed-in person, as the installation's login check reports it. Traefik
+// sets the header from the login proxy's answer, replacing any a client
+// sent, so it names who signed in at Keycloak.
+const userHeader = "X-Auth-Request-Preferred-Username"
+
+// signedIn serves only requests of a signed-in person, passing their name.
+func signedIn(h func(w http.ResponseWriter, r *http.Request, who string)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		who := r.Header.Get(userHeader)
+		if who == "" {
+			http.Error(w, "sign in first", http.StatusUnauthorized)
+			return
+		}
+		h(w, r, who)
+	})
 }
 
 // sameOrigin refuses changes sent from other sites.
@@ -76,8 +86,8 @@ func cleanTitle(s string) (string, error) {
 	return s, nil
 }
 
-func (a *App) index(w http.ResponseWriter, r *http.Request) {
-	todos, err := a.Store.List(r.Context())
+func (a *App) index(w http.ResponseWriter, r *http.Request, who string) {
+	todos, err := a.Store.List(r.Context(), who)
 	if err != nil {
 		log.Printf("list: %v", err)
 		http.Error(w, "the database is not reachable", http.StatusServiceUnavailable)
@@ -90,13 +100,13 @@ func (a *App) index(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page.Execute(w, map[string]any{"Todos": todos, "Open": open, "Who": who(r), "Error": r.URL.Query().Get("error")})
+	page.Execute(w, map[string]any{"Todos": todos, "Open": open, "Who": who, "Error": r.URL.Query().Get("error")})
 }
 
-func (a *App) add(w http.ResponseWriter, r *http.Request) {
+func (a *App) add(w http.ResponseWriter, r *http.Request, who string) {
 	title, err := cleanTitle(r.FormValue("title"))
 	if err == nil {
-		_, err = a.Store.Add(r.Context(), title, who(r))
+		_, err = a.Store.Add(r.Context(), who, title)
 	}
 	target := "/"
 	if err != nil {
@@ -109,10 +119,10 @@ func todoID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(r.PathValue("id"), 10, 64)
 }
 
-func (a *App) toggle(w http.ResponseWriter, r *http.Request) {
+func (a *App) toggle(w http.ResponseWriter, r *http.Request, who string) {
 	id, err := todoID(r)
 	if err == nil {
-		err = a.Store.Toggle(r.Context(), id)
+		err = a.Store.Toggle(r.Context(), who, id)
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		log.Printf("toggle: %v", err)
@@ -120,10 +130,10 @@ func (a *App) toggle(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (a *App) remove(w http.ResponseWriter, r *http.Request) {
+func (a *App) remove(w http.ResponseWriter, r *http.Request, who string) {
 	id, err := todoID(r)
 	if err == nil {
-		err = a.Store.Delete(r.Context(), id)
+		err = a.Store.Delete(r.Context(), who, id)
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		log.Printf("delete: %v", err)
@@ -137,8 +147,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func (a *App) apiList(w http.ResponseWriter, r *http.Request) {
-	todos, err := a.Store.List(r.Context())
+func (a *App) apiList(w http.ResponseWriter, r *http.Request, who string) {
+	todos, err := a.Store.List(r.Context(), who)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the database is not reachable"})
 		return
@@ -149,7 +159,7 @@ func (a *App) apiList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, todos)
 }
 
-func (a *App) apiAdd(w http.ResponseWriter, r *http.Request) {
+func (a *App) apiAdd(w http.ResponseWriter, r *http.Request, who string) {
 	var in struct {
 		Title string `json:"title"`
 	}
@@ -162,7 +172,7 @@ func (a *App) apiAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	t, err := a.Store.Add(r.Context(), title, who(r))
+	t, err := a.Store.Add(r.Context(), who, title)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the database is not reachable"})
 		return

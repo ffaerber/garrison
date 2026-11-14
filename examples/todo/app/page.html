@@ -32,7 +32,7 @@
 <body>
 <main>
   <header>
-    <div><h1>Todo</h1><div class="muted">{{.Open}} open · signed in as {{.Who}}</div></div>
+    <div><h1>Todo</h1><div class="muted">{{.Who}}'s list · {{.Open}} open</div></div>
   </header>
   <form class="add" method="post" action="/todos">
     <input type="text" name="title" maxlength="200" placeholder="What needs doing?" required autofocus>
@@ -45,7 +45,6 @@
     <li class="{{if .Done}}done{{end}}">
       <form method="post" action="/todos/{{.ID}}/toggle"><button class="tick" title="{{if .Done}}Not done{{else}}Done{{end}}">{{if .Done}}✓{{end}}</button></form>
       <span class="title">{{.Title}}</span>
-      <span class="muted">{{.CreatedBy}}</span>
       <form method="post" action="/todos/{{.ID}}/delete"><button class="del" title="Delete">✕</button></form>
     </li>
     {{end}}

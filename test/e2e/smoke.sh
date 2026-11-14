@@ -580,6 +580,19 @@ app_login() {
 check "alice opens todo"                   until_true 120 app_login todo
 todo_api() { web -b "$tmp/$1.jar" -H "Origin: https://$1.$DOMAIN" -H 'Content-Type: application/json' "${@:2}"; }
 check "alice adds a todo"                  grep -q '"created_by":"alice"' <<<"$(todo_api todo -X POST -d '{"title":"Water the plants"}' "https://todo.$DOMAIN/api/todos")"
+# Bob signs in too: everyone has a list of their own.
+bob_api() { web -b "$tmp/todo-bob.jar" -H "Origin: https://todo.$DOMAIN" -H 'Content-Type: application/json' "$@"; }
+bob_login() {
+  sso_login "$tmp/todo-bob.jar" "https://todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/todo-bob.html" bob >/dev/null 2>&1
+  [ "$(bob_api -o /dev/null -w '%{http_code}' "https://todo.$DOMAIN/api/todos")" = 200 ]
+}
+check "bob signs in to todo too"           until_true 120 bob_login
+check "his list is empty: alice's todo is hers" test "$(bob_api "https://todo.$DOMAIN/api/todos")" = "[]"
+check "he adds his own"                    grep -q '"created_by":"bob"' <<<"$(bob_api -X POST -d '{"title":"Fix the bike"}' "https://todo.$DOMAIN/api/todos")"
+check "alice does not see it"              bash -c '! grep -q "Fix the bike" <<<"$0"' "$(todo_api todo "https://todo.$DOMAIN/api/todos")"
+alice_todo=$(todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')
+bob_api -o /dev/null -X POST "https://todo.$DOMAIN/todos/$alice_todo/delete"
+check "he cannot delete hers"              grep -q 'Water the plants' <<<"$(todo_api todo "https://todo.$DOMAIN/api/todos")"
 check "its database has its own dataset"   test "$(zfs get -H -o value quota homecloud/ns/todo/stacks/todo/todo-db)" = 2G
 check "its password is a generated secret" docker secret inspect todo.db-password
 chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
