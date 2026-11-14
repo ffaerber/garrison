@@ -33,6 +33,7 @@ Bob: *@todo/operator In the repo app of todo, change the heading of page.html fr
 
 - The agent opens a pull request on `todo/app`, as bob.
 - Carol merges it. The pipeline tests, builds and pushes the image, and the deployer deploys it: the todo page shows *Our todos*.
+- Carol's dashboard feed has bob's change through the operator; its thread shows how it was handled: carol's merge and the deploy of the merge commit.
 
 ## 4b. Bob asks the media agent for a screenshot
 
@@ -53,6 +54,7 @@ Bob: *Take a screenshot of the todo app and put it into the namespace system, re
 
 - Bob may not change `system/platform`: the gateway refuses before the browser runs, and no pull request appears.
 - The browser loads only the installation's own pages: example.org is refused, and nothing is proposed.
+- Bob's feed lists the refusals among its problems.
 
 ## 4e. The media agent works in a sandbox of its own
 
@@ -99,7 +101,7 @@ Alice adds `preview: { private: true }` to `todo/config/stacks/todo.yaml`; carol
 Alice's push to `main` (4i) starts the developer's routine `main-moved`.
 
 - It reads with the agent's own account, for bob, started by the routine; the gateway logs it as nobody watching.
-- Its answer is posted in todo's channel under the agent's name.
+- Its answer is posted in todo's channel under the agent's name, and the run, with its answer, is in the feed of todo's people.
 
 ## 4k. An agent installs what it needs, from the package registries
 
@@ -127,6 +129,8 @@ Bob no longer sees todo's channel. In a chat of his own: *todo/desk, propose a n
 ## 5c. A private repo has a private agent
 
 Alice makes a private repo `todo/secret` and adds `todo/keeper` with `repos: [secret]`; carol approves.
+
+- Carol's feed shows the new repo; bob's, as he may not read it, does not.
 
 - Carol, in todo, sees the keeper in Open WebUI; bob, no longer in todo, does not, though he still sees the agents of public repos.
 - Carol mentions the keeper in `system`'s channel, which everyone reads: the agent service refuses it there. In todo's channel, which only todo's people read, it answers her from the repo.

@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,9 +31,11 @@ import (
 	"homecloud/control-plane/internal/agentapi"
 	"homecloud/control-plane/internal/apply"
 	"homecloud/control-plane/internal/dashboards"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/gateway"
 	"homecloud/control-plane/internal/gitops"
 	"homecloud/control-plane/internal/guard"
+	"homecloud/control-plane/internal/home"
 	"homecloud/control-plane/internal/hooks"
 	"homecloud/control-plane/internal/hostnames"
 	"homecloud/control-plane/internal/render"
@@ -51,6 +54,7 @@ const usage = `usage:
   homecloud applied [-work DIR]
   homecloud gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
   homecloud agents [-listen ADDR] [-gitea URL] [-gateway URL] ...
+  homecloud home [-listen ADDR] [-gitea URL] [-events-db URL] ...
   homecloud guard [-listen ADDR] [-socket PATH] [-network NAME] [-volumes PREFIXES]
                   [-image REPOSITORY -label LABEL -max-memory BYTES]
 `
@@ -80,6 +84,8 @@ func main() {
 		err = agentsCmd(args)
 	case "guard":
 		err = guardCmd(args)
+	case "home":
+		err = homeCmd(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -263,6 +269,7 @@ func deployCmd(args []string) error {
 	apps := fs.Bool("apps", true, "also deploy the apps of every other namespace (repos with a stack.yaml)")
 	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
+	feed := eventsFlags(fs)
 	fs.Parse(args)
 
 	env, vars, err := readEnvFile(*config)
@@ -286,6 +293,23 @@ func deployCmd(args []string) error {
 	}
 	if *hostExec != "" {
 		c.Run = apply.HostExec(*hostExec)
+	}
+	store, err := feed.store()
+	if err != nil {
+		return err
+	}
+	var onEvent func(event, delivery string, body []byte)
+	if store != nil {
+		c.Events = store
+		// Gitea's deliveries go to the feed too, in the background: Gitea
+		// waits for the answer.
+		onEvent = func(event, delivery string, body []byte) {
+			go func() {
+				for _, e := range events.FromGitea(event, delivery, body) {
+					store.Record(context.Background(), e)
+				}
+			}()
+		}
 	}
 	if *grafana != "" {
 		pw, err := os.ReadFile(*passwordFile)
@@ -315,7 +339,7 @@ func deployCmd(args []string) error {
 		}
 		wake := &hooks.Wake{}
 		c.Wake = wake.Subscribe()
-		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}); err != nil {
+		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent); err != nil {
 			return err
 		}
 	}
@@ -365,9 +389,14 @@ func gatewayCmd(args []string) error {
 	browser := fs.String("browser", "http://control-plane_browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
+	feed := eventsFlags(fs)
 	fs.Parse(args)
 
 	_, vars, err := readEnvFile(*config)
+	if err != nil {
+		return err
+	}
+	store, err := feed.store()
 	if err != nil {
 		return err
 	}
@@ -403,6 +432,9 @@ func gatewayCmd(args []string) error {
 		Verifier:   verifier,
 		Agents:     catalog,
 		ServiceKey: serviceKey,
+	}
+	if store != nil {
+		mcp.Events = store
 	}
 	sync := &gateway.OpenWebUI{
 		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
@@ -446,14 +478,14 @@ func gatewayCmd(args []string) error {
 
 // serveHook takes Gitea's webhook on listen and registers it with Gitea as
 // target. It returns once listening.
-func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea) error {
+func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea, onEvent func(event, delivery string, body []byte)) error {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return err
 	}
 	secret := hooks.Secret(g.Password, target)
 	mux := http.NewServeMux()
-	mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
+	mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake, OnEvent: onEvent})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(ln)
 	go func() { <-ctx.Done(); server.Close() }()
@@ -552,7 +584,12 @@ func agentsCmd(args []string) error {
 	runtime := fs.String("sandbox-runtime", "runsc", "the runtime sandboxes run under (gVisor), as root; empty: Docker's default, as the image's user")
 	internetListen := fs.String("internet-listen", ":8072", "address to serve the sandboxes' proxy to the internet on")
 	internetProxy := fs.String("internet-proxy", "http://control-plane_agents:8072", "that address, as sandboxes reach it; empty: no internet for any agent")
+	feed := eventsFlags(fs)
 	fs.Parse(args)
+	store, err := feed.store()
+	if err != nil {
+		return err
+	}
 
 	_, vars, err := readEnvFile(*config)
 	if err != nil {
@@ -594,6 +631,7 @@ func agentsCmd(args []string) error {
 		DefaultModel: model,
 		Gitea:        g,
 		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
+		Events:       recorder(store),
 	}
 	if *image != "" {
 		// The sandbox image is pulled from Gitea's registry as the admin, if
@@ -651,6 +689,96 @@ func agentsCmd(args []string) error {
 		server.Shutdown(shutdown)
 	}()
 	log.Printf("agents: API on %s/v1, LLM %s at %s", *listen, model, base)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+// feedFlags name the feed's database.
+type feedFlags struct{ url, passwordFile *string }
+
+func eventsFlags(fs *flag.FlagSet) feedFlags {
+	return feedFlags{
+		url:          fs.String("events-db", "", "the feed's Postgres database, e.g. postgres://homecloud@postgres_postgres:5432/homecloud; empty: no feed"),
+		passwordFile: fs.String("events-db-password-file", "/run/secrets/homecloud-db-password", "its password"),
+	}
+}
+
+// store is the feed's store, or nil without -events-db. It connects when
+// first used: Postgres may not answer yet.
+func (f feedFlags) store() (*events.Lazy, error) {
+	if *f.url == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(*f.url)
+	if err != nil || u.User == nil {
+		return nil, fmt.Errorf("-events-db: want postgres://USER@HOST/DATABASE, got %q", *f.url)
+	}
+	pw, err := os.ReadFile(*f.passwordFile)
+	if err != nil {
+		return nil, err
+	}
+	u.User = url.UserPassword(u.User.Username(), strings.TrimSpace(string(pw)))
+	q := u.Query()
+	if q.Get("sslmode") == "" {
+		q.Set("sslmode", "disable") // on the system network only
+	}
+	u.RawQuery = q.Encode()
+	return &events.Lazy{URL: u.String()}, nil
+}
+
+// recorder avoids a non-nil interface holding a nil store.
+func recorder(s *events.Lazy) events.Recorder {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// homeCmd serves the dashboard: the feed of what happens and how it was
+// handled, to each person what they may read. Traefik puts it behind the
+// sign-in, which names the person.
+func homeCmd(args []string) error {
+	fs := flag.NewFlagSet("home", flag.ExitOnError)
+	listen := fs.String("listen", ":8060", "address to serve the dashboard on")
+	config := fs.String("config", etcDir+"/install.env", "installation settings")
+	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL, to ask what each person may read")
+	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
+	feed := eventsFlags(fs)
+	fs.Parse(args)
+
+	_, vars, err := readEnvFile(*config)
+	if err != nil {
+		return err
+	}
+	if vars["DOMAIN"] == "" || vars["ADMIN_USER"] == "" {
+		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
+	}
+	password, err := os.ReadFile(*passwordFile)
+	if err != nil {
+		return err
+	}
+	store, err := feed.store()
+	if err != nil {
+		return err
+	}
+	if store == nil {
+		return fmt.Errorf("-events-db is needed")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go store.Prune(ctx)
+	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
+	s := &home.Server{Events: store, Access: g, Domain: vars["DOMAIN"]}
+	server := &http.Server{Addr: *listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.Shutdown(shutdown)
+	}()
+	log.Printf("home: the dashboard on %s", *listen)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}

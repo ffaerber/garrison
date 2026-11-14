@@ -171,7 +171,7 @@ say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
 has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password homecloud-db-password gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.

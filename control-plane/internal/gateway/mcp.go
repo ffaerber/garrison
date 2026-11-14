@@ -19,6 +19,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 
 	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/events"
 )
 
 // Verifier turns a bearer token into the person it was issued to.
@@ -87,6 +88,9 @@ type MCP struct {
 	// ServiceKey lets the agent service say what started a run and run an
 	// agent without a person (ServiceKey()). Empty: neither.
 	ServiceKey string
+	// Events, if set, gets every call that changes something and every
+	// refusal, for the dashboard's feed.
+	Events events.Recorder
 }
 
 // Headers of the agent service, believed only with its key.
@@ -242,6 +246,7 @@ func (m *MCP) handle(ctx context.Context, p Person, agent *agents.Agent, req rpc
 			return nil, &rpcError{Code: -32602, Message: "unknown tool " + params.Name}
 		}
 		out, err := m.Tools.Call(ctx, p, agent, params.Name, params.Arguments)
+		m.record(ctx, p, agent, params.Name, params.Arguments, out, err)
 		if err != nil {
 			msg := err.Error()
 			if errors.Is(err, ErrForbidden) {

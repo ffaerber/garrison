@@ -34,6 +34,7 @@ status_is() {
 web() {
   local args=() h
   for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo homepage; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  args+=(--resolve "$DOMAIN:443:127.0.0.1") # the dashboard
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
 
@@ -79,6 +80,44 @@ until_true() {
   local deadline=$((SECONDS + $1)); shift
   until "$@" >/dev/null 2>&1; do [ $SECONDS -ge $deadline ] && return 1; sleep 3; done
 }
+# The dashboard's feed, at the bare domain. home_login WHO signs a person in
+# to it; feed WHO PATH calls its API as them.
+feed() { local who=$1; shift; web -b "$tmp/home-$who.jar" "https://$DOMAIN$1"; }
+home_login() {
+  sso_login "$tmp/home-$1.jar" "https://$DOMAIN/" "$TEST_PASSWORD" "$tmp/home-$1.html" "$1" >/dev/null 2>&1
+  [ "$(web -b "$tmp/home-$1.jar" -o /dev/null -w '%{http_code}' "https://$DOMAIN/api/events?limit=1")" = 200 ]
+}
+# in_feed WHO QUERY CONDITION: the newest 500 events WHO sees, filtered by
+# QUERY (e.g. ns=todo), hold one for which the Python CONDITION on e holds.
+# Prints its ID.
+in_feed() {
+  feed "$1" "/api/events?limit=500&$2" | python3 -c '
+import json,sys
+cond = sys.argv[1]
+for e in json.load(sys.stdin):
+    for k in ("commit", "detail", "agent", "actor", "started_by", "link", "repo", "namespace"):
+        e.setdefault(k, ""); e.setdefault("pr", 0)
+    if eval(cond, {}, {"e": e}):
+        print(e["id"]); sys.exit(0)
+sys.exit(1)' "$3"
+}
+# not_in_feed WHO QUERY CONDITION: WHO's feed answers, and holds no such event.
+not_in_feed() {
+  feed "$1" "/api/events?limit=1" | python3 -c 'import json,sys; json.load(sys.stdin)' || return 1
+  ! in_feed "$@" >/dev/null
+}
+# thread_has WHO ID CONDITION: the thread of event ID, as WHO sees it, holds
+# an event for which CONDITION holds.
+thread_has() {
+  feed "$1" "/api/events/$2" | python3 -c '
+import json,sys
+cond = sys.argv[1]
+for e in json.load(sys.stdin)["thread"]:
+    e.setdefault("commit", ""); e.setdefault("pr", 0); e.setdefault("actor", "")
+    if eval(cond, {}, {"e": e}): sys.exit(0)
+sys.exit(1)' "$3"
+}
+
 # set_config NS PATH FILE|- [APPROVER]: alice proposes the file PATH of the
 # namespace NS's config as FILE, or its removal with -; APPROVER (by default
 # the local admin, a root admin) approves it, and alice merges it once the
@@ -695,6 +734,28 @@ check "the deployer takes dev-todo down" until_true 120 gone
 check "its data is kept"                   zfs list homecloud/ns/todo/stacks/dev-todo/todo-db
 # main may have been redeployed just before; Traefik follows within seconds.
 check "todo keeps running"                 until_true 30 up todo
+
+echo "# the dashboard's feed"
+apex() { [ "$(web -o /dev/null -w '%{http_code}' "https://$DOMAIN/")" = 302 ]; }
+check "the dashboard is behind the sign-in" until_true 120 apex
+check "alice opens it"                     until_true 120 home_login alice
+check "it shows the push of the fix"       until_true 60 in_feed alice ns=todo "e['kind'] == 'push' and e['commit'] == '$fixed' and e['actor'] == 'alice'"
+check "its pipeline"                       until_true 60 in_feed alice ns=todo "e['kind'] == 'pipeline' and e['commit'] == '$fixed' and e['status'] == 'ok'"
+check "and its deploy"                     in_feed alice ns=todo "e['kind'] == 'deploy' and e['commit'] == '$fixed' and e['status'] == 'ok'"
+deploy_id=$(in_feed alice ns=todo "e['kind'] == 'deploy' and e['commit'] == '$fixed'")
+deploy_thread() { thread_has alice "$deploy_id" "e['kind'] == 'push'" && thread_has alice "$deploy_id" "e['kind'] == 'pipeline'"; }
+check "the deploy's thread holds its push and pipeline" deploy_thread
+check "the failed pipeline is a problem"   in_feed alice view=problems "e['kind'] == 'pipeline' and e['commit'] == '$bad'"
+check "and the commit waited for its image" in_feed alice ns=todo "e['kind'] == 'deploy' and e['commit'] == '$bad' and e['status'] == 'waiting'"
+check "the restore"                        in_feed alice ns=todo "e['kind'] == 'restore' and e['status'] == 'ok'"
+check "the reserved hostname"              in_feed alice view=problems "'reserved' in e['title'] and e['namespace'] == 'todo'"
+check "dev-todo taken down"                in_feed alice ns=todo "e['kind'] == 'undeploy' and 'dev-todo' in e['title']"
+check "the homepage's deploy"              in_feed alice ns=homepage "e['kind'] == 'deploy' and e['status'] == 'ok'"
+check "the system stacks' deploys, for everyone" in_feed alice "" "e['kind'] == 'deploy' and e['namespace'] == '' and 'traefik' in e['title']"
+page_lists() { feed alice "/?ns=todo" | grep -q "deployed todo/todo@main at ${fixed:0:7}"; }
+check "its page lists them"                page_lists
+check "bob opens it too"                   until_true 60 home_login bob
+check "he sees todo's deploys, as he may read its repos" in_feed bob ns=todo "e['kind'] == 'deploy' and e['commit'] == '$fixed'"
 }
 
 # talk: the scenarios of docs/scenarios.md, against the real LLM, in the
@@ -925,6 +986,11 @@ heading() {
   return 1
 }
 check "the todo page shows the new heading" until_true 120 heading
+check "carol opens the dashboard"          until_true 120 home_login carol
+change=$(in_feed carol ns=todo "e['agent'] == 'todo/operator' and e['actor'] == 'bob' and e['pr'] == $tpr and e['status'] == 'ok'")
+check "its feed has bob's change, through the operator" test -n "$change"
+handled() { thread_has carol "$change" "e['kind'] == 'pr-merged' and e['actor'] == 'carol'" && thread_has carol "$change" "e['kind'] == 'deploy' and e['commit'] == '$merged'"; }
+check "how it was handled: carol merged it, the deployer deployed it" until_true 60 handled
 
 echo "# 4b. bob asks the media agent for a screenshot"
 # The media agent comes with a shared skill for homepage screenshots.
@@ -1001,6 +1067,8 @@ at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo bob "Take a screenshot of https://example.org/ and put it into the repo app as docs/screenshots/example.png." media)
 check "a page outside the home cloud is not shot" test -z "$(newest_pr app bob "$since")"
 check "the gateway refused every try"      refused_only "$at" bob screenshot "only pages at"
+check "the feed shows bob the refusals"    until_true 60 home_login bob
+check "among the problems"                 in_feed bob view=problems "e['kind'] == 'screenshot' and e['status'] == 'refused' and e['agent'] == 'todo/media' and e['actor'] == 'bob'"
 
 echo "# 4e. the media agent works in a sandbox of its own"
 # sandbox AGENT: the running sandbox of AGENT in todo's channel.
@@ -1213,6 +1281,7 @@ sys.exit(1)'
 }
 check "its answer is posted in the channel" until_true 600 routine_post
 check "it read as its own account, for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-developer): todo/developer: [a-z_]* \[routine todo/developer/main-moved\]"' "$mainmoved"
+check "the feed has the run, for todo's people" in_feed carol ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/developer' and e['actor'] == 'bob' and e['status'] == 'ok' and e['detail'] != ''"
 if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
 
 echo "# 4k. an agent installs what it needs, from the package registries"
@@ -1289,6 +1358,10 @@ check "on a branch of the desk's"          grep -q '"ref":"agent/desk/bob-' <<<"
 
 echo "# 5c. a private repo has a private agent"
 check "alice makes a private repo secret"  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"secret","private":true,"auto_init":true,"default_branch":"main"}' "$api/orgs/todo/repos")" = 201
+check "carol's feed shows it"              until_true 60 in_feed carol ns=todo "e['kind'] == 'repo-created' and e['repo'] == 'secret'"
+# The dashboard asks Gitea again after at most 20 seconds.
+sleep 21
+check "bob's, out of todo, does not"       not_in_feed bob ns=todo "e['kind'] == 'repo-created' and e['repo'] == 'secret'"
 printf 'description: Knows the repo secret\ntools: [read_file]\nrepos: [secret]\n' > "$tmp/keeper.yaml"
 printf 'You answer questions about the namespace'"'"'s repo secret, reading its files.\n' > "$tmp/keeper.md"
 kpr=$(propose_config keeper "Add the keeper" "agents/keeper/agent.yaml=$tmp/keeper.yaml" "agents/keeper/prompt.md=$tmp/keeper.md")

@@ -191,6 +191,8 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 
 ## Dashboard
 
+Served at the installation's domain, behind the sign-in. Built so far: the **feed**, Home's first page, one timeline of everything that happens and how it was handled: pushes, reviews and merges, pipeline runs, deploys and restores, what agents change for whom, routines' runs, and every refusal and failure, each person seeing what they may read; an entry opens its thread (its pull request, commits and runs). See [status.md](status.md).
+
 Pages follow the levels: Home (cluster), Namespace, Stack, Service. Every page has the same tabs:
 
 - **Overview:** status, hostnames, warnings (e.g. missing backup drive).

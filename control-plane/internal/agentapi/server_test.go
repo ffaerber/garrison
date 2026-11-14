@@ -159,8 +159,8 @@ func post(t *testing.T, s *Server, token string, headers map[string]string, body
 	return w
 }
 
-// events reads a streamed answer: its reasoning and its content.
-func events(t *testing.T, body string) (reasoning, content string, done bool) {
+// streamed reads a streamed answer: its reasoning and its content.
+func streamed(t *testing.T, body string) (reasoning, content string, done bool) {
 	t.Helper()
 	sc := bufio.NewScanner(strings.NewReader(body))
 	for sc.Scan() {
@@ -221,7 +221,7 @@ func TestATurnUsesTheAgentsToolsAsThePerson(t *testing.T) {
 			map[string]any{"role": "user", "content": "What is in todo's compose.yaml?"},
 		},
 	})
-	reasoning, content, done := events(t, w.Body.String())
+	reasoning, content, done := streamed(t, w.Body.String())
 	if w.Code != 200 || content != "It has no services." || !done {
 		t.Fatalf("answer: %d %q done=%v\n%s", w.Code, content, done, w.Body)
 	}

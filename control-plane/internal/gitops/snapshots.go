@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"homecloud/control-plane/internal/apply"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/render"
 	"homecloud/control-plane/internal/stack"
 )
@@ -132,13 +133,20 @@ func (c *Config) restores(ctx context.Context, ns, cfgDir string, stacks map[str
 		}
 		c.restoreTried[app.Stack+"@"+id] = true
 		log.Printf("apps: restoring %s to %s, as %s asks", app.Stack, r.Snapshot, at)
+		restore := events.Event{Kind: events.KindRestore, Status: events.StatusRunning, Namespace: ns, Commit: id,
+			Title: fmt.Sprintf("restoring %s to the snapshot %s, as %s asks", app.Stack, r.Snapshot, rel), Key: "restore:" + app.Stack + "@" + id}
+		c.record(ctx, restore)
 		err = apply.RestoreEnv(ctx, c.Run, "", s, r.Environment, r.Snapshot, apply.SnapshotStamp(time.Now()), id)
 		c.snapsChanged = true
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: not restored: %w", at, err))
+			restore.Status, restore.Detail = events.StatusFailed, err.Error()
+			restore.Title = fmt.Sprintf("%s was not restored to %s", app.Stack, r.Snapshot)
 		} else {
 			log.Printf("apps: restored %s to %s", app.Stack, r.Snapshot)
+			restore.Status, restore.Title = events.StatusOK, fmt.Sprintf("restored %s to the snapshot %s", app.Stack, r.Snapshot)
 		}
+		c.record(ctx, restore)
 		if err := apply.Stack(ctx, c.Run, s, render.Options{Environment: r.Environment, Domain: c.Domain, Commit: app.Commit}); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %s not started again: %w", at, app.Stack, err))
 		}

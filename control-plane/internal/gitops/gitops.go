@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"homecloud/control-plane/internal/apply"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/hooks"
 	"homecloud/control-plane/internal/system"
 )
@@ -45,10 +46,11 @@ type Config struct {
 	WorkDir      string          // the deployer's own directory: checkouts and state
 	Env          []string        // KEY=VALUE passed to every deploy
 	Run          apply.Runner
-	HTTP         *http.Client // for the Gitea API; built from the fields above if nil
-	Dashboards   Dashboards   // optional: keeps Grafana's dashboards as they are in Git
-	Apps         bool         // also deploy apps: stack.yaml repos of every other namespace
-	ClaimsFile   string       // hostname claims; WorkDir/claims.json if empty
+	HTTP         *http.Client    // for the Gitea API; built from the fields above if nil
+	Dashboards   Dashboards      // optional: keeps Grafana's dashboards as they are in Git
+	Apps         bool            // also deploy apps: stack.yaml repos of every other namespace
+	ClaimsFile   string          // hostname claims; WorkDir/claims.json if empty
+	Events       events.Recorder // optional: the feed, which gets each deploy, removal and failure
 
 	password string
 	home     string            // HOME for git, holding the .netrc
@@ -58,6 +60,14 @@ type Config struct {
 	snapsChanged bool            // the deployer took or restored a snapshot since snapshots.json was written
 	snapsListed  time.Time       // when snapshots.json was last written
 	restoreTried map[string]bool // stack@commit of restore requests carried out or failed
+}
+
+// record adds e, from the deployer, to the feed, if there is one.
+func (c *Config) record(ctx context.Context, e events.Event) {
+	if c.Events != nil {
+		e.Source = events.SourceDeployer
+		c.Events.Record(ctx, e)
+	}
 }
 
 // Dashboards syncs the dashboards/*.json of a namespace's repos, given as
@@ -382,6 +392,9 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 		}
 		if err := system.Deploy(ctx, c.Run, system.Stack{Name: r.Name, Dir: dir}, c.Env); err != nil {
 			errs = append(errs, fmt.Errorf("deploy %s: %w", r.Name, err))
+			c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusFailed, Commit: commit,
+				Title: fmt.Sprintf("the system stack %s at %.7s did not deploy", r.Name, commit), Detail: err.Error(),
+				Key: "deploy-failed:system/" + r.Name + "@" + commit})
 			if old, ok := prev.Stacks[r.Name]; ok {
 				next.Stacks[r.Name] = old // still running, at the old commit
 			}
@@ -389,6 +402,8 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 		}
 		next.Stacks[r.Name] = commit
 		log.Printf("deployed %s at %.12s", r.Name, commit)
+		c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusOK, Repo: "", Commit: commit,
+			Title: fmt.Sprintf("deployed the system stack %s at %.7s", r.Name, commit)})
 	}
 	for _, name := range prev.Names() {
 		if present[name] {
@@ -400,6 +415,8 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 			continue
 		}
 		log.Printf("removed %s: its repo is gone or holds no compose.yaml", name)
+		c.record(ctx, events.Event{Kind: events.KindUndeploy, Status: events.StatusOK,
+			Title: fmt.Sprintf("removed the system stack %s: its repo is gone or holds no compose.yaml", name)})
 	}
 	if c.Apps && !appsDone {
 		apps, appErrs := c.syncApps(ctx, force, prev.Apps)

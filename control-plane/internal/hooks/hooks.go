@@ -72,6 +72,9 @@ func Sleep(ctx context.Context, interval time.Duration, c <-chan struct{}) bool 
 type Handler struct {
 	Secret []byte
 	Wake   *Wake
+	// OnEvent, if set, gets each signed delivery: its X-Gitea-Event, its
+	// X-Gitea-Delivery and its body. It must not block for long.
+	OnEvent func(event, delivery string, body []byte)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +92,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Wake.Poke()
+	if h.OnEvent != nil {
+		h.OnEvent(r.Header.Get("X-Gitea-Event"), r.Header.Get("X-Gitea-Delivery"), body)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

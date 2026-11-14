@@ -19,8 +19,11 @@ services:
       # run, so changes deploy at once; the deployer still checks every 15 s.
       - -listen=:8090
       - -hook-url=http://control-plane_deployer:8090/hook
+      # What it deploys, and Gitea's deliveries, go to the dashboard's feed.
+      - -events-db=postgres://homecloud@postgres_postgres:5432/homecloud
     secrets:
       - admin-password
+      - homecloud-db-password
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
@@ -42,8 +45,11 @@ services:
       - -password-file=/run/secrets/admin-password
       # Wakes the build account, member and agent syncs on Gitea's events.
       - -hook-url=http://control-plane_gateway:8080/hook
+      # Every change an agent makes, and every refusal, goes to the feed.
+      - -events-db=postgres://homecloud@postgres_postgres:5432/homecloud
     secrets:
       - admin-password
+      - homecloud-db-password
       - { source: tls-cert, target: tls.crt }
     volumes:
       # For stacks and logs. Read-only Docker access would need a proxy; the socket gives full access.
@@ -76,8 +82,11 @@ services:
       - agents
       - -password-file=/run/secrets/admin-password
       - -sandbox-image=git.${DOMAIN}/system/sandbox:bootstrap
+      # The routines' runs go to the feed.
+      - -events-db=postgres://homecloud@postgres_postgres:5432/homecloud
     secrets:
       - admin-password
+      - homecloud-db-password
       - { source: tls-cert, target: tls.crt }
     volumes:
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
@@ -116,6 +125,37 @@ services:
     deploy:
       placement:
         constraints: [node.role == manager]
+
+  # The dashboard, at the installation's domain, behind the sign-in: the feed
+  # of what happens and how it was handled, to each person what they may
+  # read (asked of Gitea). Only on the system network, which Traefik shares
+  # and apps do not, so nobody but Traefik sets the header naming the person.
+  home:
+    image: git.${DOMAIN}/system/control-plane:bootstrap
+    command:
+      - home
+      - -password-file=/run/secrets/admin-password
+      - -events-db=postgres://homecloud@postgres_postgres:5432/homecloud
+    secrets:
+      - admin-password
+      - homecloud-db-password
+    volumes:
+      - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
+    networks: [system]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8060/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    deploy:
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: homecloud-system
+        traefik.http.routers.home.rule: Host(`${DOMAIN}`)
+        traefik.http.routers.home.entrypoints: websecure
+        traefik.http.routers.home.tls: "true"
+        traefik.http.routers.home.middlewares: sso@file
+        traefik.http.services.home.loadbalancer.server.port: "8060"
 
   # Headless Chrome for the agents' screenshot tool, driven by the gateway.
   # Its only network reaches the gateway and Traefik, and every name it looks
@@ -180,6 +220,7 @@ secrets:
   admin-password: { external: true }
   tls-cert: { external: true }
   gitea-user-runner-token: { external: true }
+  homecloud-db-password: { external: true }
 
 networks:
   system:

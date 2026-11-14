@@ -18,6 +18,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 - Namespace members: `<namespace>/config/members.yaml`, applied to Gitea teams; changes only by approved pull request, and nobody approves their own role change. The agents can show members and propose changes but never approve or merge (`docs/scenarios.md`).
 - Pipelines: a system runner for `system` and a user runner for every other namespace, whose jobs reach Docker only through the control plane's guard and build images with BuildKit; one build account per namespace for its registry.
 - Reboot: `homecloud-repair.service` replaces Swarm tasks that Docker restarted without their secrets or configs.
+- Dashboard: at `https://<domain>/`, behind the sign-in, served by the control plane's `home` service. For now it is one page, the feed: everything that happens and how it was handled, newest first, updating itself every 5 seconds. Gitea's webhooks give pushes, branches, repos, pull requests, reviews, the approval check's verdicts and finished pipeline runs; the deployer adds each deploy, wait for an image, removal, restore and failure (each failure once, however often it recurs); the gateway adds every change an agent makes for someone (`propose_*`, `merge_change`, `screenshot`, `create_*`) and every refusal; the agent service adds each routine's run with its answer. Filters: namespace, Everything / Code and reviews / Pipelines and deploys / Agents / Problems, and a search. An entry's page shows its thread, "how it was handled": the events of its pull request and its commits, and of a routine's run, followed one step further (a routine's proposal → its pull request → the merge → the pipeline and deploy of the merge commit). Each person sees the events of the repos Gitea lets them read; agents' calls and routine runs only the namespace's people and the person they were for; root admins everything. The events are kept 90 days, in Postgres (`homecloud`). `GET /api/events` and `/api/events/{id}` answer the same as JSON.
 - CLI on the host (`homecloud`): validates a stack file, claims its hostnames, creates its ZFS datasets and Swarm secrets, and deploys it behind Traefik; `applied` shows what the deployer deployed.
 
 ## Differs from the spec for now
@@ -34,7 +35,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-History repos and the rest of the config repo (secrets); SOPS, change records and approvals in the deployer; the backup drive and restic; the dashboard, alerts and ntfy, Playwright tests.
+History repos and the rest of the config repo (secrets); SOPS, change records and approvals in the deployer; the backup drive and restic; the dashboard beyond the feed (namespace, stack and service pages, config forms), alerts and ntfy, Playwright tests.
 
 ## Known limits
 
@@ -51,5 +52,6 @@ Problems the platform cannot close itself, as Gitea, Open WebUI or Docker offer 
 - Posts of routines and background answers come from the gateway's Open WebUI account, with the agent's name in bold, into the channel rather than a thread.
 - Routines keep their schedule in memory: a restart of the agent service misses pushes in between. A background `ask_agent` acts with the person's Keycloak token, which lasts five minutes.
 - Previews' datasets and secrets stay after a preview is taken down.
+- The feed misses what happens while Postgres is down or before it answers (each service logs what it could not record), and Gitea events whose webhook delivery failed. An event's visibility is checked against the repo's rights now, not when it happened: once a repo is made private or deleted, its old events are hidden from those who can no longer read it.
 - Snapshots stay on the pool's own disk: no backup drive or off-site copy yet. A restore copies files back rather than rolling back, which takes as long as the data is large, and needs the pool's free space for the data changed since. Change records and a restore of code and data together, as the spec's History describes, are not built: a restore brings back data only, and the app keeps running its current version.
 - BuildKit runs privileged, outside Swarm. Build steps run in its own sandboxes without privileges; a flaw in BuildKit itself would reach the host. Its build cache is shared between namespaces.

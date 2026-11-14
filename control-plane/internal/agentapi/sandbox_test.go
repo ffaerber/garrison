@@ -27,7 +27,7 @@ func chatIn(t *testing.T, s *Server, chat, model string, msgs ...Message) (reaso
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body)
 	}
-	reasoning, content, done := events(t, w.Body.String())
+	reasoning, content, done := streamed(t, w.Body.String())
 	if !done {
 		t.Fatalf("not finished: %s", w.Body)
 	}
@@ -114,7 +114,7 @@ func TestAChangedAgentRestartsItsSandbox(t *testing.T) {
 func TestWithoutAChatTheTurnRunsHere(t *testing.T) {
 	s, llm, _ := setup(t, Message{Role: "assistant", Content: "in process"})
 	d := withSandboxes(t, s)
-	_, content, _ := events(t, post(t, s, "tok-alice", nil, map[string]any{"model": "homepage/reader", "stream": true, "messages": []Message{{Role: "user", Content: "hi"}}}).Body.String())
+	_, content, _ := streamed(t, post(t, s, "tok-alice", nil, map[string]any{"model": "homepage/reader", "stream": true, "messages": []Message{{Role: "user", Content: "hi"}}}).Body.String())
 	if content != "in process" || d.Created != 0 || len(llm.requests) != 1 {
 		t.Errorf("content %q, %d containers", content, d.Created)
 	}
@@ -153,7 +153,7 @@ func TestTheAnswerStreamsAsItIsWritten(t *testing.T) {
 			chunks++
 		}
 	}
-	if _, content, _ := events(t, w.Body.String()); content != "echo: hello there" || chunks < 2 {
+	if _, content, _ := streamed(t, w.Body.String()); content != "echo: hello there" || chunks < 2 {
 		t.Errorf("content %q in %d chunks; want it in pieces as Pi writes it", content, chunks)
 	}
 }

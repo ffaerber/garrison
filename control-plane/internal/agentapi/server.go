@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/gateway"
 	"homecloud/control-plane/internal/sandbox"
 )
@@ -48,6 +49,7 @@ type Server struct {
 	Git          *GitProxy        // Git for the sandboxes; nil: none
 	Gitea        *gateway.Gitea   // who may use an agent (visible); nil: everyone
 	Poster       Poster           // posts answers no message waits for; nil: none
+	Events       events.Recorder  // the feed, which gets the routines' runs; nil: none
 }
 
 // Headers Open WebUI's connection fills in for each request.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"homecloud/control-plane/internal/agents"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/gateway"
 	"homecloud/control-plane/internal/sandbox"
 )
@@ -126,17 +127,30 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 			log.Printf("routines: %s: post: %v", key, err)
 		}
 	}
+	// The feed gets the run, for the namespace's people, as its channel.
+	ev := events.Event{Source: events.SourceAgents, Kind: events.KindRoutine, Status: events.StatusRunning,
+		Namespace: a.Namespace, Audience: events.AudienceMembers, Actor: rt.Owner, Agent: a.ID(), StartedBy: "routine " + key,
+		Title: fmt.Sprintf("routine %s of %s, for %s: %s", rt.Name, a.ID(), rt.Owner, why), Key: fmt.Sprintf("routine:%s:%d", key, r.now().UnixNano())}
+	record := func(status, detail string) {
+		if s.Events != nil {
+			ev.Status, ev.Detail = status, detail
+			s.Events.Record(ctx, ev)
+		}
+	}
 	role, err := r.Gitea.Role(ctx, a.Namespace, rt.Owner)
 	if err != nil {
 		log.Printf("routines: %s: %v", key, err)
+		record(events.StatusFailed, err.Error())
 		return
 	}
 	if role == "" {
 		log.Printf("routines: %s: not run: its owner %s is not in %s", key, rt.Owner, a.Namespace)
+		record(events.StatusRefused, fmt.Sprintf("Not run: its owner %s is not in %s.", rt.Owner, a.Namespace))
 		post(fmt.Sprintf("The routine %s did not run: its owner %s is not in %s. Change its owner in agents/%s/agent.yaml.", rt.Name, rt.Owner, a.Namespace, a.Name))
 		return
 	}
 	log.Printf("routines: %s for %s: %s", key, rt.Owner, why)
+	record(events.StatusRunning, "")
 	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.
 
 Task: %s`, rt.Name, rt.Owner, why, a.Namespace, strings.TrimSpace(rt.Task))
@@ -150,6 +164,9 @@ Task: %s`, rt.Name, rt.Owner, why, a.Namespace, strings.TrimSpace(rt.Task))
 	if err != nil {
 		log.Printf("routines: %s: %v", key, err)
 		answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())
+		record(events.StatusFailed, answer)
+	} else {
+		record(events.StatusOK, answer)
 	}
 	post(fmt.Sprintf("Routine %s, for %s (%s):\n\n%s", rt.Name, rt.Owner, why, answer))
 }

@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"homecloud/control-plane/internal/apply"
+	"homecloud/control-plane/internal/events"
 	"homecloud/control-plane/internal/hostnames"
 	"homecloud/control-plane/internal/render"
 	"homecloud/control-plane/internal/stack"
@@ -232,10 +233,14 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		return prev, []error{err}
 	}
 	var errs []error
-	fail := func(format string, a ...any) {
+	// Failures come back on every sync until fixed: the feed gets each once.
+	fail := func(ns, repo, commit string, format string, a ...any) {
 		err := fmt.Errorf(format, a...)
 		log.Printf("apps: %v", err)
 		errs = append(errs, err)
+		sum := sha256.Sum256([]byte(err.Error()))
+		c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusFailed, Namespace: ns, Repo: repo, Commit: commit,
+			Title: err.Error(), Key: "deployer-failed:" + hex.EncodeToString(sum[:12])})
 	}
 
 	declared := map[string]bool{} // ns/name of every stack in a config repo
@@ -243,7 +248,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		cfgDir := filepath.Join(c.WorkDir, "apps", ns, "config", "@main")
 		cfgCommit, err := c.checkout(ctx, ns, "config", "main", cfgDir)
 		if err != nil {
-			fail("fetch %s/config: %v", ns, err)
+			fail(ns, "", "", "fetch %s/config: %v", ns, err)
 			keepNamespace(ns)
 			continue
 		}
@@ -258,7 +263,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				s, err = stack.ParseIn(data, ns, name)
 			}
 			if err != nil {
-				fail("%s/config/%s/%s.yaml: %v", ns, stack.Dir, name, err)
+				fail(ns, "", cfgCommit, "%s/config/%s/%s.yaml: %v", ns, stack.Dir, name, err)
 				keepApp(ns, name)
 				continue
 			}
@@ -274,7 +279,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			} else {
 				heads, err := c.heads(ctx, ns, s.Source)
 				if err != nil {
-					fail("%s/%s: its source %s/%s: %v", ns, name, ns, s.Source, err)
+					fail(ns, "", cfgCommit, "%s/%s: its source %s/%s: %v", ns, name, ns, s.Source, err)
 					keepApp(ns, name)
 					continue
 				}
@@ -286,7 +291,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				if _, ok := s.Environments[stack.PreviewEnvironment]; ok {
 					prs, err := c.previews(ctx, ns, s.Source)
 					if err != nil {
-						fail("pull requests of %s/%s: %v", ns, s.Source, err)
+						fail(ns, s.Source, "", "pull requests of %s/%s: %v", ns, s.Source, err)
 						keepApp(ns, name)
 						continue
 					}
@@ -298,7 +303,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			}
 			s.WithPreviews(previews)
 			if err := reg.Claim(s); err != nil {
-				fail("%s/%s: not deployed: %v", ns, name, err)
+				fail(ns, "", cfgCommit, "%s/%s: not deployed: %v", ns, name, err)
 				keepApp(ns, name)
 				continue
 			}
@@ -319,6 +324,9 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					if c.waiting[key] != commit {
 						log.Printf("apps: %s at %.12s waits for %s", key, commit, strings.Join(missing, ", "))
 						c.waiting[key] = commit
+						c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusWaiting, Namespace: ns, Repo: s.Source, Commit: commit,
+							Title: fmt.Sprintf("%s at %.7s waits for its image from the pipeline", key, commit), Detail: strings.Join(missing, "\n"),
+							Key: "deploy:" + key + "@" + commit + ":" + spec})
 					}
 					keep(key)
 					continue
@@ -329,24 +337,34 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					snap := apply.DeploySnapshot + apply.SnapshotStamp(time.Now()) + "-" + commit[:min(7, len(commit))]
 					took, err := apply.SnapshotEnv(ctx, c.Run, "", s, env, snap)
 					if err != nil {
-						fail("deploy %s: no snapshot before it, so not deployed: %v", key, err)
+						fail(ns, s.Source, commit, "deploy %s: no snapshot before it, so not deployed: %v", key, err)
 						keep(key)
 						continue
 					}
 					c.snapsChanged = c.snapsChanged || took
 				}
 				if err := apply.Stack(ctx, c.Run, s, render.Options{Environment: env, Domain: c.Domain, Commit: commit}); err != nil {
-					fail("deploy %s: %v", key, err)
+					fail(ns, s.Source, commit, "deploy %s: %v", key, err)
 					keep(key)
 					continue
 				}
 				next[key] = app
 				log.Printf("apps: deployed %s at %.12s as %s", key, commit, app.Stack)
+				how := "deployed"
+				if old, ok := prev[key]; ok {
+					how = "redeployed"
+					if old.Spec != spec {
+						how += " with a changed stack file"
+					}
+				}
+				c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusOK, Namespace: ns, Repo: s.Source, Commit: commit,
+					Title: fmt.Sprintf("%s %s at %.7s as %s", how, key, commit, app.Stack), Link: "https://" + app.Stack + "." + c.Domain,
+					Key: "deploy:" + key + "@" + commit + ":" + spec})
 			}
 			parsed[name] = s
 		}
 		for _, err := range c.restores(ctx, ns, cfgDir, parsed, next) {
-			fail("%v", err)
+			fail(ns, "", cfgCommit, "%v", err)
 		}
 	}
 
@@ -357,11 +375,13 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			continue
 		}
 		if _, err := c.Run(ctx, nil, nil, "docker", "stack", "rm", a.Stack); err != nil {
-			fail("remove %s: %v", key, err)
+			fail(a.Namespace, a.Source, "", "remove %s: %v", key, err)
 			next[key] = a
 			continue
 		}
 		log.Printf("apps: removed %s (%s)", key, a.Stack)
+		c.record(ctx, events.Event{Kind: events.KindUndeploy, Status: events.StatusOK, Namespace: a.Namespace, Repo: a.Source,
+			Title: fmt.Sprintf("took %s down (%s): its branch, environment or stack is gone", key, a.Stack)})
 	}
 	for _, a := range prev {
 		still := false

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"homecloud/control-plane/internal/events"
 )
 
 const todoStack = `source: todo
@@ -444,5 +446,37 @@ func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
 	_, errs = c.syncApps(ctx, false, apps)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "restores/todo.yaml: todo is not deployed in dev") {
 		t.Errorf("errs = %v", errs)
+	}
+}
+
+func TestTheFeedGetsDeploysWaitsAndRemovals(t *testing.T) {
+	c, f := setupApps(t)
+	feed := &events.Memory{}
+	c.Events = feed
+	ctx := context.Background()
+	apps, _ := c.syncApps(ctx, false, map[string]App{})
+	// A second sync changes nothing: the wait is in the feed once.
+	apps, _ = c.syncApps(ctx, false, apps)
+	f.packages["homepage/todo/bbbbbbbbbbbb"] = true
+	apps, _ = c.syncApps(ctx, false, apps)
+	delete(f.commits, "homepage/todo@dev")
+	c.syncApps(ctx, false, apps)
+
+	var got []string
+	for _, e := range feed.All() {
+		if e.Source != events.SourceDeployer || e.Namespace != "homepage" {
+			t.Errorf("%+v", e)
+		}
+		got = append(got, e.Kind+" "+e.Status+" "+e.Repo+"@"+e.Commit[:min(4, len(e.Commit))])
+	}
+	want := "deploy ok todo@bbbb|deploy ok todo@aaaa|undeploy ok todo@" // dev waited first
+	if strings.Join(got, "|") != want {
+		t.Errorf("feed:\n%s\nwant\n%s", strings.Join(got, "|"), want)
+	}
+	// dev's wait became its deploy: the same entry, by its key.
+	for _, e := range feed.All() {
+		if e.Commit == "bbbbbbbbbbbb2222" && !strings.HasPrefix(e.Title, "deployed homepage/todo@dev") {
+			t.Errorf("dev's entry: %+v", e)
+		}
 	}
 }
