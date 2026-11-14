@@ -39,9 +39,14 @@ jobs:
           cache="$REGISTRY/$REPO:buildcache"
           mkdir -p "$HOME/.docker"
           printf '{"auths":{"%s":{"auth":"%s"}}}' "$REGISTRY" "$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 | tr -d '\n')" > "$HOME/.docker/config.json"
-          buildctl --addr tcp://homecloud-buildkit:1234 build \
-            --frontend dockerfile.v0 --local context=src --local dockerfile=src \
-            --import-cache "type=registry,ref=$cache" \
-            --export-cache "type=registry,ref=$cache,mode=max,image-manifest=true,oci-mediatypes=true" \
-            --output "type=image,name=$image,push=true"
+          # The image and its cache go up at once, and Gitea's registry can fail
+          # one of two uploads of the same layer: a second try finds it there.
+          build() {
+            buildctl --addr tcp://homecloud-buildkit:1234 build \
+              --frontend dockerfile.v0 --local context=src --local dockerfile=src \
+              --import-cache "type=registry,ref=$cache" \
+              --export-cache "type=registry,ref=$cache,mode=max,image-manifest=true,oci-mediatypes=true" \
+              --output "type=image,name=$image,push=true"
+          }
+          build || { echo "trying again"; sleep 5; build; } || { echo "trying again"; sleep 15; build; }
           echo "pushed $image"
