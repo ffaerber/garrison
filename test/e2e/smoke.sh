@@ -1445,7 +1445,7 @@ sys.exit(1)'
 }
 check "it starts the operator, which posts in todo's channel" until_true 600 alert_post
 check "naming the missing setting"         grep -q QUOTES_FILE <<<"$(alert_post)"
-check "the feed has its run"               in_feed alice ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/operator' and 'ServiceFailing' in e['title']"
+check "the feed has its run"               in_feed carol ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/operator' and 'ServiceFailing' in e['title']"
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo alice "The quotes app of the namespace todo, https://quotes.$DOMAIN/, does not work. Find out why and tell me what to change.")
 check "it looks at the stack, as alice"    grep -qE "mcp: alice: (stack_status|service_logs)" <<<"$(mcp_calls "$at" alice)"
