@@ -27,6 +27,15 @@ const (
 	LabelApp         = "homecloud.app"
 	LabelEnvironment = "homecloud.environment"
 	GPUResource      = "GPU" // generic resource the installer advertises per GPU
+
+	// A private environment's proof that a request came through the
+	// sign-in. Every routed service is on TraefikNetwork, so one app can
+	// call another directly, past Traefik, and name any person in the
+	// sign-in's headers. Traefik adds the environment's ingress key to what
+	// it passes on, in IngressHeader; the app has the key in IngressKeyEnv
+	// and believes the sign-in's headers only with it.
+	IngressHeader = "X-Homecloud-Ingress"
+	IngressKeyEnv = "HOMECLOUD_INGRESS_KEY"
 )
 
 type Options struct {
@@ -34,6 +43,9 @@ type Options struct {
 	Domain      string // installation domain, e.g. example.com
 	DataRoot    string // where the ZFS pool is mounted; defaults to DefaultDataRoot
 	Commit      string // the environment's commit, for {{commit}} in images
+	// IngressKey, if set, is the ingress key of a private environment (see
+	// IngressHeader): letters and digits only. Empty: none.
+	IngressKey string
 }
 
 // Registry is the installation's image registry: Gitea's, at git.<domain>.
@@ -173,7 +185,17 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 				file.Networks = map[string]external{}
 			}
 			file.Networks[TraefikNetwork] = external{External: true}
-			maps.Copy(deploy.Labels, routeLabels(host, o.Domain, svc.Port, env.Private))
+			key := ""
+			if env.Private {
+				key = o.IngressKey
+			}
+			maps.Copy(deploy.Labels, routeLabels(host, o.Domain, svc.Port, env.Private, key))
+			if key != "" {
+				if out.Environment == nil {
+					out.Environment = map[string]string{}
+				}
+				out.Environment[IngressKeyEnv] = key
+			}
 		}
 
 		for _, vol := range sortedKeys(svc.Volumes) {
@@ -217,8 +239,10 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 
 // routeLabels are the Traefik labels that route https://<host>.<domain> to a
 // service. The router and service are named after the hostname, which is
-// unique across the installation.
-func routeLabels(host, domain string, port int, private bool) map[string]string {
+// unique across the installation. With an ingress key, a middleware of the
+// same name puts it into IngressHeader after the sign-in, in place of
+// whatever a client sent there.
+func routeLabels(host, domain string, port int, private bool, ingressKey string) map[string]string {
 	router := "traefik.http.routers." + host
 	labels := map[string]string{
 		"traefik.enable":        "true",
@@ -230,6 +254,11 @@ func routeLabels(host, domain string, port int, private bool) map[string]string 
 	}
 	if private {
 		labels[router+".middlewares"] = SSOMiddleware
+	}
+	if private && ingressKey != "" {
+		name := host + "-ingress"
+		labels["traefik.http.middlewares."+name+".headers.customrequestheaders."+IngressHeader] = ingressKey
+		labels[router+".middlewares"] = SSOMiddleware + "," + name + "@swarm"
 	}
 	return labels
 }

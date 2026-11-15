@@ -37,6 +37,7 @@ type fakeApps struct {
 	packages map[string]bool              // owner/name/tag
 	pulls    map[string]string            // org/repo -> its open pull requests, as JSON
 	props    map[string]string            // ZFS dataset -> homecloud:restored
+	composes map[string]string            // Swarm stack -> the compose file it was last deployed with
 	calls    []string
 }
 
@@ -118,11 +119,17 @@ func branchOf(dir string) string {
 	return org + "/" + repo + "@" + branch
 }
 
-func (f *fakeApps) run(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
+func (f *fakeApps) run(_ context.Context, _ []string, stdin []byte, name string, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
+	if strings.HasPrefix(call, "docker stack deploy") {
+		if f.composes == nil {
+			f.composes = map[string]string{}
+		}
+		f.composes[args[len(args)-1]] = string(stdin)
+	}
 	dirArg := func() string {
 		if i := slices.Index(args, "-C"); i >= 0 {
 			return args[i+1]
@@ -518,5 +525,27 @@ func TestEnvironmentsSurviveManyBranches(t *testing.T) {
 	}
 	if rm := f.called("docker stack rm"); len(rm) != 0 {
 		t.Errorf("took down %v", rm)
+	}
+}
+
+// A private environment is deployed with its ingress key: the same on every
+// deploy, and each environment's its own.
+func TestPrivateEnvironmentsGetTheirIngressKey(t *testing.T) {
+	c, f := setupApps(t)
+	f.packages["homepage/todo/bbbbbbbbbbbb"] = true
+	if _, errs := c.syncApps(context.Background(), false, map[string]App{}); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	main, dev := c.ingressKey("todo"), c.ingressKey("dev-todo")
+	if len(main) != 32 || main == dev || main != c.ingressKey("todo") {
+		t.Fatalf("keys %q and %q", main, dev)
+	}
+	for stack, key := range map[string]string{"todo": main, "dev-todo": dev} {
+		if got := f.composes[stack]; !strings.Contains(got, "HOMECLOUD_INGRESS_KEY: "+key) || !strings.Contains(got, "X-Homecloud-Ingress: "+key) {
+			t.Errorf("%s deployed without its key:\n%s", stack, got)
+		}
+	}
+	if strings.Contains(f.composes["dev-todo"], main) {
+		t.Error("dev was given main's key")
 	}
 }

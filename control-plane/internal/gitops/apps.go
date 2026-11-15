@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -41,6 +42,24 @@ type App struct {
 }
 
 func appKey(ns, repo, env string) string { return ns + "/" + repo + "@" + env }
+
+// ingressKey is the ingress key of the environment deployed as stack (see
+// render.IngressHeader): derived from the admin password, so it is the same
+// on every deploy and nothing has to keep it. One key tells nothing about
+// another's.
+func (c *Config) ingressKey(stack string) string {
+	if c.password == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, []byte(c.password))
+	m.Write([]byte("homecloud ingress v1 " + stack))
+	return hex.EncodeToString(m.Sum(nil))[:32]
+}
+
+// options are how an environment of s is rendered at commit.
+func (c *Config) options(s *stack.Stack, env, commit string) render.Options {
+	return render.Options{Environment: env, Domain: c.Domain, Commit: commit, IngressKey: c.ingressKey(render.StackName(s, env))}
+}
 
 func (c *Config) claimsFile() string {
 	if c.ClaimsFile != "" {
@@ -364,7 +383,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					}
 					c.snapsChanged = c.snapsChanged || took
 				}
-				if err := apply.Stack(ctx, c.Run, s, render.Options{Environment: env, Domain: c.Domain, Commit: commit}); err != nil {
+				if err := apply.Stack(ctx, c.Run, s, c.options(s, env, commit)); err != nil {
 					fail(ns, s.Source, commit, "deploy %s: %v", key, err)
 					keep(key)
 					continue

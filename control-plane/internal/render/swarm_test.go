@@ -3,7 +3,10 @@ package render
 import (
 	"flag"
 	"os"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"homecloud/control-plane/internal/stack"
 )
@@ -65,6 +68,65 @@ func TestImagePlaceholders(t *testing.T) {
 	} {
 		if got := Image(image, "example.com", "aaaaaaaaaaaa1111"); got != want {
 			t.Errorf("Image(%q) = %q, want %q", image, got, want)
+		}
+	}
+}
+
+// A private environment's routed services get the ingress key, and Traefik
+// puts it into every request it passes on after the sign-in; a public
+// environment and an internal service get neither.
+func TestTheIngressKeyOfPrivateEnvironments(t *testing.T) {
+	s, err := stack.Parse([]byte(`stack: todo
+namespace: homepage
+entrypoint: web
+services:
+  web: { image: "todo:1", port: 8080, env: { MODE: "x" } }
+  api: { image: "todo:1", port: 8081, public: api }
+  db: { image: "postgres:17-alpine" }
+environments:
+  main: { private: true }
+  dev: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := func(env string) map[string]composeService {
+		t.Helper()
+		out, err := Swarm(s, Options{Environment: env, Domain: "example.com", IngressKey: "abc123"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var file composeFile
+		if err := yaml.Unmarshal(out, &file); err != nil {
+			t.Fatal(err)
+		}
+		return file.Services
+	}
+	private := render("main")
+	for svc, host := range map[string]string{"web": "todo", "api": "todo-api"} {
+		c := private[svc]
+		l := c.Deploy.Labels
+		if c.Environment[IngressKeyEnv] != "abc123" ||
+			l["traefik.http.middlewares."+host+"-ingress.headers.customrequestheaders.X-Homecloud-Ingress"] != "abc123" ||
+			l["traefik.http.routers."+host+".middlewares"] != "sso@file,"+host+"-ingress@swarm" {
+			t.Errorf("%s: env %v, labels %v", svc, c.Environment, l)
+		}
+	}
+	if private["web"].Environment["MODE"] != "x" {
+		t.Errorf("web lost its own environment: %v", private["web"].Environment)
+	}
+	if _, has := private["db"].Environment[IngressKeyEnv]; has {
+		t.Error("an internal service got the key")
+	}
+	public := render("dev")
+	for name, c := range public {
+		if _, has := c.Environment[IngressKeyEnv]; has {
+			t.Errorf("%s of a public environment got the key", name)
+		}
+		for k := range c.Deploy.Labels {
+			if strings.Contains(k, "ingress") || strings.Contains(c.Deploy.Labels[k], "ingress") {
+				t.Errorf("%s of a public environment: label %s", name, k)
+			}
 		}
 	}
 }

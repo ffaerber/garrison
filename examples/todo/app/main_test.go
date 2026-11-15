@@ -158,3 +158,29 @@ func TestHealth(t *testing.T) {
 		t.Errorf("healthz: %d", w.Code)
 	}
 }
+
+// With an ingress key, the sign-in's header counts only with it: another
+// app on Traefik's network, calling this one directly, cannot be anyone.
+func TestTheSignInIsBelievedOnlyThroughTraefik(t *testing.T) {
+	a := &App{Store: &Memory{}, IngressKey: "k3y"}
+	h := a.Routes()
+	a.Store.Add(ctx, "alice", "buy milk")
+	for name, header := range map[string]map[string]string{
+		"no key":    as("alice"),
+		"wrong key": {userHeader: "alice", ingressHeader: "guess"},
+	} {
+		if w := do(h, "GET", "/api/todos", "", "", header); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "buy milk") {
+			t.Errorf("%s: %d %s", name, w.Code, w.Body)
+		}
+		if w := do(h, "POST", "/api/todos", `{"title":"x"}`, "application/json", header); w.Code != http.StatusForbidden {
+			t.Errorf("%s: added a todo: %d", name, w.Code)
+		}
+	}
+	if w := do(h, "GET", "/api/todos", "", "", map[string]string{userHeader: "alice", ingressHeader: "k3y"}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "buy milk") {
+		t.Errorf("through Traefik: %d %s", w.Code, w.Body)
+	}
+	// The health check needs neither.
+	if w := do(h, "GET", "/healthz", "", "", nil); w.Code != http.StatusOK {
+		t.Errorf("healthz: %d", w.Code)
+	}
+}

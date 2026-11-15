@@ -124,7 +124,7 @@ environments:
 - The deployer rejects a deploy whose claimed hostnames are already held by another stack or reserved by root. Claims are first come, first served across all namespaces.
 - `dataset` is a ZFS dataset owned by the stack; `share` is a library other stacks in the namespace can read.
 - A volume is mounted at `/<volume name>` in the container, so `config` appears at `/config`; `path` overrides this.
-- Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login.
+- Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login. Apps share Traefik's network, so one could call another directly and name any person in the login's headers: a private environment's services get an ingress key (`HOMECLOUD_INGRESS_KEY`), which Traefik adds to every request it passes on (`X-Homecloud-Ingress`), and an app believes the login's headers only with it.
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
 - The stack file carries no policy, and lives in the namespace's config repo, so changing how an app runs needs an admin's approval, like `members.yaml`; nobody who can only write an app repo can change it. The deployer and the approval check reject any key the schema does not know.
 - `env` sets environment variables; `{{url}}` and `{{host}}` in a value become the environment's address. An image may say `{{registry}}/<namespace>/<name>:{{commit}}`: the deployer then deploys a commit only once the namespace's pipeline has pushed that image, so a failing pipeline leaves the app at its last good commit.
@@ -161,7 +161,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 - Rights to change flow downward only: root, then namespace, then repository. No scope can change the one above it.
 - Agents propose; the deployer enforces. Approvals are checked by the deployer, never by the agent.
 - Nobody approves their own role change. Namespace config changes always need a human merge.
-- A namespace's `config/members.yaml` names its admins and members; the gateway keeps the Gitea teams `admins` and `members` in line with it. Its `main` branch takes changes only by pull request, approved by an admin of the namespace or a root admin who neither wrote it nor has their role changed by it; the gateway checks this and posts the required status `homecloud/approval`. The scenarios in `docs/scenarios.md` play this out through the agents.
+- A namespace's `config/members.yaml` names its admins and members; the gateway keeps the Gitea teams `admins` and `members` in line with it. Its `main` branch takes changes only by pull request, approved by an admin of the namespace or a root admin who neither wrote it (opened it or pushed to its branch, as Gitea's activity feed of the repo tells) nor has their role changed by it; the gateway checks this and posts the required status `homecloud/approval`. The scenarios in `docs/scenarios.md` play this out through the agents.
 - Per repo and branch, an autonomy level decides how far agents go:
 
 | Level | Agent may | Human does |

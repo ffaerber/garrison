@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -29,16 +30,19 @@ const maxTitle = 200
 // App serves the todo list over a Store.
 type App struct {
 	Store Store
+	// IngressKey, if set, must come with every request of a person: see
+	// ingressHeader.
+	IngressKey string
 }
 
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /{$}", signedIn(a.index))
-	mux.Handle("POST /todos", signedIn(a.add))
-	mux.Handle("POST /todos/{id}/toggle", signedIn(a.toggle))
-	mux.Handle("POST /todos/{id}/delete", signedIn(a.remove))
-	mux.Handle("GET /api/todos", signedIn(a.apiList))
-	mux.Handle("POST /api/todos", signedIn(a.apiAdd))
+	mux.Handle("GET /{$}", a.signedIn(a.index))
+	mux.Handle("POST /todos", a.signedIn(a.add))
+	mux.Handle("POST /todos/{id}/toggle", a.signedIn(a.toggle))
+	mux.Handle("POST /todos/{id}/delete", a.signedIn(a.remove))
+	mux.Handle("GET /api/todos", a.signedIn(a.apiList))
+	mux.Handle("POST /api/todos", a.signedIn(a.apiAdd))
 	mux.HandleFunc("GET /healthz", a.health)
 	return sameOrigin(mux)
 }
@@ -48,9 +52,21 @@ func (a *App) Routes() http.Handler {
 // sent, so it names who signed in at Keycloak.
 const userHeader = "X-Auth-Request-Preferred-Username"
 
-// signedIn serves only requests of a signed-in person, passing their name.
-func signedIn(h func(w http.ResponseWriter, r *http.Request, who string)) http.Handler {
+// The environment's ingress key, which Traefik adds to every request it
+// passes on after the sign-in. Other apps share Traefik's network and can
+// call this one directly, naming anyone in userHeader; they do not know
+// the key, which the platform gives this app as HOMECLOUD_INGRESS_KEY. So
+// userHeader is believed only together with it.
+const ingressHeader = "X-Homecloud-Ingress"
+
+// signedIn serves only requests of a signed-in person that came through
+// the sign-in, passing their name.
+func (a *App) signedIn(h func(w http.ResponseWriter, r *http.Request, who string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.IngressKey != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get(ingressHeader)), []byte(a.IngressKey)) != 1 {
+			http.Error(w, "reach this app at its address, through the sign-in", http.StatusForbidden)
+			return
+		}
 		who := r.Header.Get(userHeader)
 		if who == "" {
 			http.Error(w, "sign in first", http.StatusUnauthorized)
@@ -212,6 +228,10 @@ func main() {
 		addr = ":8080"
 	}
 	log.Printf("todo on %s", addr)
-	srv := &http.Server{Addr: addr, Handler: (&App{Store: store}).Routes(), ReadHeaderTimeout: 10 * time.Second}
+	app := &App{Store: store, IngressKey: os.Getenv("HOMECLOUD_INGRESS_KEY")}
+	if app.IngressKey == "" {
+		log.Printf("no HOMECLOUD_INGRESS_KEY: the sign-in's headers are believed from anyone who reaches this port")
+	}
+	srv := &http.Server{Addr: addr, Handler: app.Routes(), ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
 }
