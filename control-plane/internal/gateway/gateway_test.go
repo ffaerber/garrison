@@ -877,3 +877,33 @@ func TestNamespacesBeyondTheFirstPage(t *testing.T) {
 		t.Fatalf("%d namespaces, %v", len(nss), err)
 	}
 }
+
+// The person's token goes only where the sign-in in front takes it away
+// again: the dashboard and private environments. Any other app would get
+// it as it is.
+func TestTheTokenGoesOnlyToPrivatePages(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"apps":{
+		"homepage/todo@main":{"namespace":"homepage","stack":"todo","private":true,"hosts":["todo","todo-api"]},
+		"homepage/blog@main":{"namespace":"homepage","stack":"blog","hosts":["blog"]}}}`), 0o644)
+	tools := &Tools{WorkDir: dir}
+	b := &Browser{Domain: "example.com", Private: tools.PrivateHost}
+	for u, want := range map[string]bool{
+		"https://example.com/":              true, // the dashboard
+		"https://todo.example.com/x":        true,
+		"https://todo-api.example.com/":     true,
+		"https://blog.example.com/":         false, // public: the app would see the token
+		"https://unknown.example.com/":      false,
+		"https://git.example.com/":          false,
+		"https://x.todo.example.com/":       false,
+		"https://todo.example.com.evil.org": false,
+		"http://todo.example.com/":          false,
+	} {
+		if got := b.SendsToken(u); got != want {
+			t.Errorf("SendsToken(%q) = %v, want %v", u, got, want)
+		}
+	}
+	if (&Browser{Domain: "example.com"}).SendsToken("https://todo.example.com/") {
+		t.Error("the token went out without knowing what is private")
+	}
+}

@@ -36,8 +36,10 @@ services:
         # Containers reach Keycloak at its public name through Traefik, so
         # tokens and discovery use one URL inside and outside the cluster.
         aliases: ["keycloak.${DOMAIN}"]
-      # Prometheus scrapes the metrics entry point here.
-      system: {}
+      # Prometheus scrapes the metrics entry point here. The control plane
+      # finds Keycloak here too, so it need not share a network with apps.
+      system:
+        aliases: ["keycloak.${DOMAIN}"]
       # The agents' browser reaches the installation's names only here.
       browser: {}
     healthcheck:

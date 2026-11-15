@@ -124,13 +124,7 @@ func (b *Browser) tab(ctx context.Context, key, token string) (*tab, error) {
 				fetch.FailRequest(e.RequestID, network.ErrorReasonBlockedByClient).Do(exec)
 				return
 			}
-			headers := []*fetch.HeaderEntry{{Name: "Authorization", Value: "Bearer " + t.token.Load().(string)}}
-			for k, v := range e.Request.Headers {
-				if !strings.EqualFold(k, "Authorization") {
-					headers = append(headers, &fetch.HeaderEntry{Name: k, Value: fmt.Sprint(v)})
-				}
-			}
-			fetch.ContinueRequest(e.RequestID).WithHeaders(headers).Do(exec)
+			b.continueAs(e, t.token.Load().(string)).Do(exec)
 		}()
 	})
 	if err := chromedp.Run(tctx, fetch.Enable(), chromedp.EmulateViewport(1280, 900)); err != nil {

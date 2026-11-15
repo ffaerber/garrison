@@ -427,7 +427,7 @@ func gatewayCmd(args []string) error {
 	catalog := &gateway.Catalog{Gitea: g}
 	tools := &gateway.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus}
 	if *browser != "" {
-		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain}
+		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain, Private: tools.PrivateHost}
 	}
 	serviceKey := gateway.ServiceKey(g.Password)
 	mcp := &gateway.MCP{

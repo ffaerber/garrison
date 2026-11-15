@@ -204,6 +204,10 @@ func TestAppsDeployOnceTheirImageExists(t *testing.T) {
 	if a := apps["homepage/todo@main"]; a.Stack != "todo" || a.Commit != "aaaaaaaaaaaa1111" {
 		t.Errorf("apps = %+v", apps)
 	}
+	// The state says where the sign-in stands in front, for the gateway's browser.
+	if a := apps["homepage/todo@main"]; !a.Private || !slices.Equal(a.Hosts, []string{"todo"}) {
+		t.Errorf("private %v, hosts %v", a.Private, a.Hosts)
+	}
 	if _, ok := apps["homepage/todo@dev"]; ok {
 		t.Error("dev deployed without its image")
 	}

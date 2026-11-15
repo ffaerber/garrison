@@ -58,8 +58,10 @@ services:
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
       - /var/lib/homecloud/deployer:/var/lib/homecloud/deployer:ro
     # Gitea, Prometheus and Open WebUI on the system network; Keycloak's keys at
-    # its public name through Traefik; the browser on its own network.
-    networks: [system, traefik-public, browser]
+    # its public name through Traefik, there too; the browser on its own
+    # network. Not on traefik-public, which every app is on: no app reaches
+    # the gateway.
+    networks: [system, browser]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8080/healthz"]
       interval: 5s
@@ -96,9 +98,10 @@ services:
       - /etc/homecloud/install.env:/etc/homecloud/install.env:ro
       - /etc/homecloud/llm-api-key:/etc/homecloud/llm-api-key:ro
     # Gitea, the gateway and Open WebUI on the system network; Keycloak's keys
-    # at its public name through Traefik; the LLM outside; the sandboxes, and
-    # Docker for them through their guard.
-    networks: [system, traefik-public, sandboxes, sandbox-guard]
+    # at its public name through Traefik, there too; the LLM outside; the
+    # sandboxes, and Docker for them through their guard. Not on
+    # traefik-public, which every app is on: no app reaches this API.
+    networks: [system, sandboxes, sandbox-guard]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://localhost:8070/healthz"]
       interval: 5s
@@ -231,8 +234,6 @@ networks:
   system:
     external: true
     name: homecloud-system
-  traefik-public:
-    external: true
   builds:
     external: true
     name: homecloud-builds

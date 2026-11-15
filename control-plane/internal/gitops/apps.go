@@ -34,6 +34,10 @@ type App struct {
 	Commit      string `json:"commit"` // of the source repo's branch; of config without a source
 	Source      string `json:"source,omitempty"`
 	Spec        string `json:"spec,omitempty"` // a hash of the stack file, which redeploys when it changes
+	// Private: the environment is behind the sign-in, at Hosts, its
+	// hostnames: the entry point's and those of its public services.
+	Private bool     `json:"private,omitempty"`
+	Hosts   []string `json:"hosts,omitempty"`
 }
 
 func appKey(ns, repo, env string) string { return ns + "/" + repo + "@" + env }
@@ -322,8 +326,16 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				if !ok {
 					continue // no branch, no environment
 				}
-				app := App{Namespace: ns, Repo: name, Environment: env, Stack: render.StackName(s, env), Commit: commit, Source: s.Source, Spec: spec}
+				app := App{Namespace: ns, Repo: name, Environment: env, Stack: render.StackName(s, env), Commit: commit, Source: s.Source, Spec: spec,
+					Private: s.Environments[env].Private}
+				for _, svc := range s.ServiceNames() {
+					if h := s.ServiceHostname(env, svc); h != "" {
+						app.Hosts = append(app.Hosts, h)
+					}
+				}
 				if old, ok := prev[key]; ok && !force && old.Spec == spec && (s.Source == "" || old.Commit == commit) {
+					// State written before these were kept gets them here.
+					old.Private, old.Hosts = app.Private, app.Hosts
 					next[key] = old
 					continue
 				}

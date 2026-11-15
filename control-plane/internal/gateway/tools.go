@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"homecloud/control-plane/internal/agents"
@@ -48,6 +49,10 @@ type Tools struct {
 	Prometheus string       // e.g. http://prometheus_prometheus:9090
 	Browser    *Browser     // for screenshot; nil: none
 	HTTP       *http.Client
+
+	privateMu sync.Mutex
+	private   map[string]bool // hostnames of private environments, read a few seconds ago
+	privateAt time.Time
 }
 
 const maxToolOutput = 12000
@@ -595,6 +600,27 @@ func (t *Tools) promQuery(ctx context.Context, q string) (string, error) {
 		fmt.Fprintf(&b, "{%s} %s\n", strings.Join(labels, ", "), val)
 	}
 	return b.String(), nil
+}
+
+// PrivateHost tells whether host, the first label of a name of the
+// installation, is a hostname of a deployed private environment, as the
+// deployer last wrote: for the browser, which sends the person's token
+// only there.
+func (t *Tools) PrivateHost(host string) bool {
+	t.privateMu.Lock()
+	defer t.privateMu.Unlock()
+	if time.Since(t.privateAt) > 5*time.Second {
+		hosts := map[string]bool{}
+		if state, err := gitops.ReadState(t.WorkDir); err == nil {
+			for _, a := range state.Apps {
+				for _, h := range a.Hosts {
+					hosts[h] = a.Private
+				}
+			}
+		}
+		t.private, t.privateAt = hosts, time.Now()
+	}
+	return t.private[host]
 }
 
 // Stack is one deployed stack.

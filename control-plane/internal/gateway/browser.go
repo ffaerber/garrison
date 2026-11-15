@@ -18,12 +18,19 @@ import (
 
 // Browser takes screenshots with the control plane's headless Chrome, as a
 // person. Chrome sends every name to Traefik; this lets through only
-// requests to the installation's own names, each with the person's Keycloak
-// token, which the sign-in in front of the apps accepts. Each screenshot
+// requests to the installation's own names, those to private environments
+// with the person's Keycloak token, which the sign-in in front of them
+// accepts and removes. Each screenshot
 // gets a fresh browser context, so nothing of one person stays for the next.
 type Browser struct {
 	URL    string // Chrome's DevTools, e.g. http://control-plane_browser:9222
 	Domain string
+	// Private tells whether a hostname (todo, of todo.<domain>) is behind
+	// the sign-in, which takes the person's token and removes it before the
+	// request reaches the app. Only those, and the dashboard, get the token:
+	// any other page would receive it as it is, and could use it elsewhere
+	// as the person. nil: only the dashboard.
+	Private func(host string) bool
 
 	browsing browsing // tabs of browse, by person and agent
 }
@@ -47,6 +54,37 @@ func (b *Browser) Allowed(u string) bool {
 	}
 	host := strings.ToLower(p.Hostname())
 	return host == b.Domain || strings.HasSuffix(host, "."+b.Domain)
+}
+
+// SendsToken tells whether a request to u carries the person's token: to
+// the dashboard and to private environments, where the sign-in in front
+// consumes it.
+func (b *Browser) SendsToken(u string) bool {
+	if !b.Allowed(u) {
+		return false
+	}
+	p, _ := url.Parse(u)
+	host := strings.ToLower(p.Hostname())
+	if host == b.Domain {
+		return true
+	}
+	name := strings.TrimSuffix(host, "."+b.Domain)
+	return b.Private != nil && b.Private(name)
+}
+
+// continueAs lets a paused request go on: with the person's token where
+// SendsToken says so, as the page made it elsewhere.
+func (b *Browser) continueAs(e *fetch.EventRequestPaused, token string) *fetch.ContinueRequestParams {
+	if !b.SendsToken(e.Request.URL) {
+		return fetch.ContinueRequest(e.RequestID)
+	}
+	headers := []*fetch.HeaderEntry{{Name: "Authorization", Value: "Bearer " + token}}
+	for k, v := range e.Request.Headers {
+		if !strings.EqualFold(k, "Authorization") {
+			headers = append(headers, &fetch.HeaderEntry{Name: k, Value: fmt.Sprint(v)})
+		}
+	}
+	return fetch.ContinueRequest(e.RequestID).WithHeaders(headers)
 }
 
 // devtools is Chrome's DevTools URL with the host as an IP: Chrome refuses
@@ -98,13 +136,7 @@ func (b *Browser) Shoot(ctx context.Context, token, page string, width, height i
 				fetch.FailRequest(e.RequestID, network.ErrorReasonBlockedByClient).Do(exec)
 				return
 			}
-			headers := []*fetch.HeaderEntry{{Name: "Authorization", Value: "Bearer " + token}}
-			for k, v := range e.Request.Headers {
-				if !strings.EqualFold(k, "Authorization") {
-					headers = append(headers, &fetch.HeaderEntry{Name: k, Value: fmt.Sprint(v)})
-				}
-			}
-			fetch.ContinueRequest(e.RequestID).WithHeaders(headers).Do(exec)
+			b.continueAs(e, token).Do(exec)
 		}()
 	})
 
