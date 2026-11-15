@@ -280,8 +280,18 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	// named by an "Asked by" line. Someone else's work needs an approval by
 	// someone who did not ask for it, so nobody puts another's unreviewed
 	// work live through an agent.
+	// An agent's account is known by being one of this namespace's, not by
+	// its name: a person may be called agent-something too.
+	accounts := []string{AgentAccount(agent)}
+	list, _, err := g.Agents(ctx, org, "main")
+	if err != nil {
+		return "", err
+	}
+	for _, a := range list {
+		accounts = append(accounts, AgentAccount(&a))
+	}
 	askers := []string{}
-	if !strings.HasPrefix(pr.User.Login, "agent-") {
+	if !slices.Contains(accounts, pr.User.Login) {
 		askers = append(askers, pr.User.Login)
 	}
 	texts := []string{pr.Body}

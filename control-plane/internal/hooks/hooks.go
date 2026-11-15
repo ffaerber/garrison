@@ -168,12 +168,21 @@ func (g *Gitea) Register(ctx context.Context, org, target string, secret []byte)
 func (g *Gitea) Keep(ctx context.Context, target string, secret []byte, interval time.Duration) {
 	done := map[string]bool{}
 	for {
-		var orgs []struct {
+		type org struct {
 			Name string `json:"username"`
 		}
-		err := g.do(ctx, http.MethodGet, "/api/v1/admin/orgs?limit=50", nil, &orgs)
-		if err != nil {
-			log.Printf("webhook: %v", err)
+		// Every organisation, page by page: Gitea lists 50 at once.
+		var orgs []org
+		for page := 1; page <= 100; page++ {
+			var batch []org
+			if err := g.do(ctx, http.MethodGet, fmt.Sprintf("/api/v1/admin/orgs?limit=50&page=%d", page), nil, &batch); err != nil {
+				log.Printf("webhook: %v", err)
+				break
+			}
+			orgs = append(orgs, batch...)
+			if len(batch) < 50 {
+				break
+			}
 		}
 		for _, o := range orgs {
 			if done[o.Name] {

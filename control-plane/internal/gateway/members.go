@@ -401,16 +401,23 @@ func teamDescription(name string) string {
 	return "Kept from config/members.yaml; change it there."
 }
 
+// teamMembers lists a team's members: all of them, page by page, as
+// syncTeam removes only the ones it sees. Gitea lists 50 at once.
 func (m *Members) teamMembers(ctx context.Context, id int64) ([]string, error) {
-	var users []struct {
-		Login string `json:"login"`
-	}
-	if _, err := m.Gitea.do(ctx, "", http.MethodGet, fmt.Sprintf("/teams/%d/members?limit=100", id), nil, &users); err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(users))
-	for _, u := range users {
-		out = append(out, u.Login)
+	out := []string{}
+	for page := 1; page <= 100; page++ {
+		var users []struct {
+			Login string `json:"login"`
+		}
+		if _, err := m.Gitea.do(ctx, "", http.MethodGet, fmt.Sprintf("/teams/%d/members?limit=50&page=%d", id, page), nil, &users); err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			out = append(out, u.Login)
+		}
+		if len(users) < 50 {
+			break
+		}
 	}
 	return out, nil
 }

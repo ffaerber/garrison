@@ -202,6 +202,18 @@ func TestGrants(t *testing.T) {
 		t.Errorf("merged: %v", f.merged)
 	}
 
+	// A person may be called agent-something. Their own pull request, made
+	// in Gitea, is theirs all the same: bob does not put it live unreviewed.
+	f.prs[9] = map[string]any{
+		"number": 9, "state": "open", "body": "", "html_url": "https://git/homepage/todo/pulls/9",
+		"user": map[string]any{"login": "agent-smith"}, "base": map[string]any{"ref": "dev"},
+		"head": map[string]any{"ref": "change/agent-smith-1", "sha": "sha9", "repo": map[string]any{"full_name": "homepage/todo"}},
+	}
+	if _, err := merge(bob, 9); err == nil || !strings.Contains(err.Error(), "asked for by agent-smith") {
+		t.Errorf("bob merged agent-smith's work unreviewed: %v", err)
+	}
+	delete(f.prs, 9)
+
 	// Without a person: the grant must allow it, for the routine's owner.
 	night := Person{Name: AgentAccount(dev), Unattended: true, Owner: "bob", StartedBy: "routine homepage/dev/nightly"}
 	if _, err := propose(night, dev, "dev", ""); err == nil || !strings.Contains(err.Error(), "unattended: true") {

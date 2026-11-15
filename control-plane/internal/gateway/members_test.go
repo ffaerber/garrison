@@ -1,7 +1,11 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -90,5 +94,45 @@ func TestSameRule(t *testing.T) {
 	delete(have, "merge_whitelist_teams")
 	if sameRule(want, have) {
 		t.Fatal("missing setting not seen")
+	}
+}
+
+// A team's members are read page by page: someone taken out of
+// members.yaml is removed from the team wherever Gitea lists them.
+func TestTeamMembersBeyondTheFirstPage(t *testing.T) {
+	var removed []string
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		switch {
+		case p == "/teams/7/members" && r.Method == http.MethodGet:
+			var page []map[string]string
+			switch r.URL.Query().Get("page") {
+			case "1", "":
+				for i := range 50 {
+					page = append(page, map[string]string{"login": fmt.Sprintf("p%02d", i)})
+				}
+			case "2":
+				page = append(page, map[string]string{"login": "zoe"})
+			}
+			json.NewEncoder(w).Encode(page)
+		case strings.HasPrefix(p, "/teams/7/members/") && r.Method == http.MethodDelete:
+			removed = append(removed, strings.TrimPrefix(p, "/teams/7/members/"))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	m := &Members{Gitea: &Gitea{URL: gitea.URL, User: "admin", Password: "pw"}}
+	var want []string
+	for i := range 50 {
+		want = append(want, fmt.Sprintf("p%02d", i))
+	}
+	// zoe is no longer in members.yaml.
+	if err := m.syncTeam(context.Background(), "homepage", "members", 7, want); err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0] != "zoe" {
+		t.Errorf("removed %v, want zoe", removed)
 	}
 }

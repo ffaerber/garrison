@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -126,4 +128,50 @@ func TestSecretIsStablePerTarget(t *testing.T) {
 		string(a) == string(Secret("other", "http://control-plane_deployer:8090/hook")) {
 		t.Fatal("secret does not depend on target and password")
 	}
+}
+
+// The webhook goes onto every organisation, also those beyond Gitea's
+// first page of 50.
+func TestKeepRegistersOrganisationsOnLaterPages(t *testing.T) {
+	var mu sync.Mutex
+	hooked := map[string]bool{}
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/api/v1/admin/orgs":
+			var page []map[string]string
+			switch r.URL.Query().Get("page") {
+			case "1", "":
+				for i := range 50 {
+					page = append(page, map[string]string{"username": fmt.Sprintf("ns-%02d", i)})
+				}
+			case "2":
+				page = append(page, map[string]string{"username": "photos"})
+			}
+			json.NewEncoder(w).Encode(page)
+		case r.Method == http.MethodGet:
+			w.Write([]byte("[]"))
+		default:
+			hooked[strings.Split(r.URL.Path, "/")[4]] = true
+			w.Write([]byte("{}"))
+		}
+	}))
+	defer gitea.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go (&Gitea{URL: gitea.URL, User: "admin", Password: "pw"}).Keep(ctx, "http://deployer/hook", []byte("s"), time.Hour)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n, last := len(hooked), hooked["photos"]
+		mu.Unlock()
+		if n == 51 && last {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	t.Errorf("%d organisations got the webhook; photos: %v", len(hooked), hooked["photos"])
 }
