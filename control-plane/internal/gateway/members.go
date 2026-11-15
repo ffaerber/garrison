@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -488,7 +489,9 @@ func (m *Members) system(ctx context.Context, roots []string) error {
 		return err
 	}
 	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
-		if err := m.createConfig(ctx, ns, "The agents of the system namespace; root admins approve changes", "The operator agent", agents.OperatorFiles(ToolNames())); err != nil {
+		files := agents.OperatorFiles(ToolNames())
+		maps.Copy(files, agents.CommanderFiles())
+		if err := m.createConfig(ctx, ns, "The agents of the system namespace; root admins approve changes", "The operator and the commander", files); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made", ns)

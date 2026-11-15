@@ -68,12 +68,72 @@ func TestAnAgentAsksAnother(t *testing.T) {
 	}
 	// The lead lists ask_agent among its tools; an agent that asks nobody does not.
 	_, content = chatIn(t, s, "chat-1", "homepage/lead", Message{Role: "user", Content: "which tools?"})
-	if content != "tools: 2" { // read_file from the gateway, and ask_agent
+	if content != "tools: 3" { // read_file from the gateway, ask_agent and find_agents
 		t.Errorf("lead's tools: %q", content)
 	}
 	_, content = chatIn(t, s, "chat-2", "homepage/loner", Message{Role: "user", Content: `call ask_agent {"agent":"homepage/tester","task":"x","done_when":"y"}`})
 	if !strings.Contains(content, "error: not allowed: you may ask only") {
 		t.Errorf("loner asked: %q", content)
+	}
+}
+
+func TestTheCommanderFindsAndHandsOver(t *testing.T) {
+	s, _, _ := setup(t)
+	s.Agents = fakeAgents{
+		{Namespace: "system", Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}},
+		{Namespace: "homepage", Name: "media", Description: "Makes screenshots", Prompt: "Shoot.", Tools: []string{"screenshot"}, Repos: []string{"site"},
+			Skills: []agents.Skill{{Name: "thumbs", Description: "thumbnails"}},
+			Grants: []agents.Grant{{Repo: "site", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers}}},
+		{Namespace: "todo", Name: "operator", Description: "Runs todo", Prompt: "Run."},
+	}
+	feed := &events.Memory{}
+	s.Events = feed
+	withSandboxes(t, s)
+	find := func(c sandbox.Caller, args string) string {
+		text, _ := s.findAgents(context.Background(), c, json.RawMessage(args))
+		return text
+	}
+	c := sandbox.Caller{Agent: "system/commander", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"system/commander"}}}
+	got := find(c, `{}`)
+	for _, want := range []string{"- homepage/media: Makes screenshots", "tools: screenshot", "skills: thumbs (thumbnails)", "works on: site", "may autonomous on site into dev, for members", "- todo/operator: Runs todo"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("find_agents lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "system/commander") {
+		t.Errorf("the commander lists itself:\n%s", got)
+	}
+	if got := find(c, `{"namespace":"todo"}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
+		t.Errorf("by namespace:\n%s", got)
+	}
+	if got := find(c, `{"namespace":"nope"}`); !strings.Contains(got, "no agent you may ask") {
+		t.Errorf("none: %q", got)
+	}
+	// An agent with a list finds only those on it.
+	lead := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice"}
+	s.Agents = append(s.Agents.(fakeAgents), agents.Agent{Namespace: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"todo/operator"}})
+	if got := find(lead, `{}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
+		t.Errorf("the lead finds:\n%s", got)
+	}
+
+	// It asks any agent, and the feed has the hand-off and its end.
+	_, content := chatIn(t, s, "chat-1", "system/commander", Message{Role: "user",
+		Content: `call ask_agent {"agent":"homepage/media","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
+	if !strings.Contains(content, "homepage/media answers:") {
+		t.Fatalf("content %q", content)
+	}
+	var ask *events.Event
+	for _, e := range feed.All() {
+		if e.Kind == events.KindAsk {
+			ask = &e
+		}
+	}
+	if ask == nil || ask.Status != events.StatusOK || ask.Namespace != "homepage" || ask.Agent != "homepage/media" || ask.Actor != "alice" ||
+		ask.StartedBy != "agent system/commander" || !strings.Contains(ask.Title, "system/commander asked homepage/media, for alice: Screenshot the homepage.") {
+		t.Errorf("feed: %+v", ask)
+	}
+	if _, content = chatIn(t, s, "chat-1", "system/commander", Message{Role: "user", Content: `call ask_agent {"agent":"system/commander","task":"x","done_when":"y"}`}); !strings.Contains(content, "you do not ask yourself") {
+		t.Errorf("asked itself: %q", content)
 	}
 }
 

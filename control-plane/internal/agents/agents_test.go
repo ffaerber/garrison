@@ -72,6 +72,60 @@ func TestTheWrittenOperatorLoads(t *testing.T) {
 	}
 }
 
+func TestTheCommanderLoadsInSystem(t *testing.T) {
+	files := mapFiles{}
+	for p, c := range OperatorFiles(tools) {
+		files[p] = c
+	}
+	for p, c := range CommanderFiles() {
+		files[p] = c
+	}
+	got, problems, err := Load(context.Background(), files, SystemNamespace, tools)
+	if err != nil || len(problems) > 0 || len(got) != 2 {
+		t.Fatalf("got %v %v %v", got, problems, err)
+	}
+	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == CommanderName })
+	if i < 0 {
+		t.Fatalf("no commander in %+v", got)
+	}
+	c := got[i]
+	if !c.AsksAny() || len(c.Tools) != 0 || c.Prompt != CommanderPrompt || c.Description == "" {
+		t.Errorf("commander = %+v", c)
+	}
+	if !c.MayAsk("todo/developer") || c.MayAsk("system/commander") {
+		t.Errorf("the commander may ask others, never itself")
+	}
+	if !strings.Contains(files["agents/commander/agent.yaml"], "agents: any") {
+		t.Errorf("agent.yaml: %s", files["agents/commander/agent.yaml"])
+	}
+}
+
+func TestAnyIsForSystemOnly(t *testing.T) {
+	for _, c := range []struct {
+		ns, yaml, want string
+	}{
+		{"todo", "agents: any\n", "only for the agents of system"},
+		{"todo", "agents: [any]\n", "only for the agents of system"},
+		{SystemNamespace, "agents: [any, todo/developer]\n", "stands alone"},
+		{SystemNamespace, "agents: any\n", ""},
+	} {
+		files := mapFiles{"agents/x/agent.yaml": c.yaml, "agents/x/prompt.md": "p"}
+		got, problems, err := Load(context.Background(), files, c.ns, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.want == "" {
+			if len(problems) > 0 || len(got) != 1 || !got[0].AsksAny() {
+				t.Errorf("%s %q: %v %+v", c.ns, c.yaml, problems, got)
+			}
+			continue
+		}
+		if len(got) != 0 || !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, c.want) }) {
+			t.Errorf("%s %q: problems %q, want %q", c.ns, c.yaml, problems, c.want)
+		}
+	}
+}
+
 func TestAgentsAndSkills(t *testing.T) {
 	files := mapFiles{
 		"skills/homepage-screenshots/SKILL.md":        skill("homepage-screenshots", "Take screenshots for the homepage."),

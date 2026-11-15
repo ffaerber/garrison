@@ -215,6 +215,12 @@ func checkAsks(self string, ids []string) []string {
 	var why []string
 	for _, id := range ids {
 		switch {
+		case id == AnyAgent:
+			if ns, _, _ := strings.Cut(self, "/"); ns != SystemNamespace {
+				why = append(why, "agents: any is only for the agents of system, which root admins approve; name the agents this one may ask")
+			} else if len(ids) > 1 {
+				why = append(why, "agents: any stands alone, without other agents")
+			}
 		case !agentID.MatchString(id):
 			why = append(why, fmt.Sprintf("agents: %q is not an agent, <namespace>/<agent>", id))
 		case id == self:

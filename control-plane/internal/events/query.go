@@ -83,7 +83,8 @@ func prKey(e Event) string     { return e.Namespace + "/" + repoOf(e) + "#" + st
 func threadOf(e Event) thread {
 	t := thread{id: e.ID, commits: map[string]bool{}, prs: map[string]bool{}}
 	t.add(e)
-	if e.Kind == KindRoutine && e.StartedBy != "" {
+	// A routine's run, or an agent's hand-off: what was done for it.
+	if (e.Kind == KindRoutine || e.Kind == KindAsk) && e.StartedBy != "" {
 		t.startedBy = e.StartedBy
 		t.from = e.At.Add(-time.Second)
 		t.to = e.Updated.Add(time.Minute)

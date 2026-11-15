@@ -26,6 +26,7 @@ const (
 	KindUndeploy      = "undeploy"
 	KindRestore       = "restore"
 	KindRoutine       = "routine"
+	KindAsk           = "ask" // an agent handed work to another
 	KindAlert         = "alert"
 )
 

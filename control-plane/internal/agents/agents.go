@@ -25,7 +25,14 @@ const (
 	// OperatorName is the agent every namespace has unless its config repo
 	// says otherwise.
 	OperatorName = "operator"
-	maxPrompt    = 32000
+	// CommanderName is the agent of system that finds the agent for a task.
+	CommanderName = "commander"
+	// SystemNamespace is the platform's own namespace.
+	SystemNamespace = "system"
+	// AnyAgent, as agents: any, lets an agent ask every agent the person may
+	// use. Only system's agents, which root admins approve, may.
+	AnyAgent  = "any"
+	maxPrompt = 32000
 )
 
 // Agent is one agent of a namespace.
@@ -48,6 +55,16 @@ type Agent struct {
 // ID is the agent's model id in the chat, and the name people mention:
 // <namespace>/<agent>.
 func (a Agent) ID() string { return a.Namespace + "/" + a.Name }
+
+// AsksAny tells whether a may ask every agent the person may use.
+func (a Agent) AsksAny() bool { return slices.Contains(a.Asks, AnyAgent) }
+
+// MayAsk tells whether a may hand work to the agent id: one of its agents,
+// or any but itself with agents: any. Whether the person may use it is the
+// agent service's to check.
+func (a Agent) MayAsk(id string) bool {
+	return id != a.ID() && (a.AsksAny() || slices.Contains(a.Asks, id))
+}
 
 // Skill is a skill an agent may load.
 type Skill struct {
@@ -85,11 +102,34 @@ type config struct {
 	Skills      []string  `yaml:"skills"`
 	Repos       []string  `yaml:"repos"`
 	Visible     string    `yaml:"visible,omitempty"` // only "members"
-	Agents      []string  `yaml:"agents,omitempty"`
+	Agents      askList   `yaml:"agents,omitempty"`
 	Grants      []Grant   `yaml:"grants,omitempty"`
 	Routines    []Routine `yaml:"routines,omitempty"`
 	Internet    Internet  `yaml:"internet,omitempty"`
 	Enabled     *bool     `yaml:"enabled,omitempty"`
+}
+
+// askList is agents in agent.yaml: a list of agents, or any.
+type askList []string
+
+func (l *askList) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*l = askList{n.Value}
+		return nil
+	}
+	var ids []string
+	if err := n.Decode(&ids); err != nil {
+		return err
+	}
+	*l = ids
+	return nil
+}
+
+func (l askList) MarshalYAML() (any, error) {
+	if len(l) == 1 && l[0] == AnyAgent {
+		return AnyAgent, nil
+	}
+	return []string(l), nil
 }
 
 // Load reads every agent of namespace. tools are the names agents may list.
@@ -133,6 +173,9 @@ func Load(ctx context.Context, f Files, namespace string, tools []string) (out [
 	for _, a := range out {
 		var why []string
 		for _, id := range a.Asks {
+			if id == AnyAgent {
+				continue
+			}
 			ns, name, _ := strings.Cut(id, "/")
 			if ns == namespace && !slices.ContainsFunc(out, func(b Agent) bool { return b.Name == name }) {
 				why = append(why, fmt.Sprintf("agents: there is no agent %s", id))
@@ -239,7 +282,7 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 	return Agent{
 		Namespace: namespace, Name: name, Description: c.Description, Model: c.Model,
 		Tools: c.Tools, Repos: c.Repos, Prompt: prompt, Skills: skills,
-		Visible: c.Visible, Asks: c.Agents, Grants: grants, Routines: routines,
+		Visible: c.Visible, Asks: []string(c.Agents), Grants: grants, Routines: routines,
 		Internet: c.Internet,
 	}, nil, nil
 }
@@ -390,6 +433,31 @@ An agent acts with the rights of the person talking to it. Changes here need an 
 `,
 		Dir + "/" + OperatorName + "/" + ConfigFile: "# The operator: answers questions about the namespace and proposes changes.\n" + string(cfg),
 		Dir + "/" + OperatorName + "/" + PromptFile: OperatorPrompt,
+	}
+}
+
+// CommanderPrompt is the commander's prompt.md: it finds the agent for what
+// a person wants, and hands the work over or sends the person there.
+const CommanderPrompt = `You are the commander. People come to you when they do not know which agent to ask. You do not do the work yourself: you find the agent for it, then hand the work over or tell the person whom to talk to.
+
+1. Call find_agents. It lists the agents this person may use here: what each does, its tools, skills, repos and rights, and which namespace this channel belongs to.
+2. Pick the agent whose description, tools and repos fit. Prefer the namespace the person names, then this channel's namespace. Each namespace has an operator, which sets up namespaces, repos and apps and reads logs and metrics.
+3. Then one of these:
+   - A clear task one agent can finish in one go (a screenshot, a new repo, why an app does not start): hand it over with ask_agent. Put everything it needs into task (namespace, repo, branch, what exactly), what it must not do into limits, and what a good answer is into done_when. In a channel, set background: the agent posts its answer here itself. Tell the person whom you asked and for what.
+   - Work with back and forth (building a feature, setting up a new app, anything the person decides along the way): do not hand it over. Tell the person which agent to talk to, as @<namespace>/<agent>, and in one sentence why it fits.
+   - If you cannot tell what the person wants, or which of two agents fits, ask one short question first.
+4. If no agent fits, say so, and what an agent for it would need (tools, repos): the namespace's operator can propose one.
+
+Pass on what an agent answered as it is; never say it did something it did not say it did.
+`
+
+// CommanderFiles are the files of the commander's folder in system's config
+// repo: it may ask any agent the person may use, and needs no tools.
+func CommanderFiles() map[string]string {
+	cfg, _ := yaml.Marshal(config{Description: "Finds the agent for what you want, and hands the work to it or tells you whom to ask", Tools: []string{}, Agents: askList{AnyAgent}})
+	return map[string]string{
+		Dir + "/" + CommanderName + "/" + ConfigFile: "# The commander: finds the agent for a task. It acts only through other agents, as the person.\n" + string(cfg),
+		Dir + "/" + CommanderName + "/" + PromptFile: CommanderPrompt,
 	}
 }
 

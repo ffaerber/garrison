@@ -170,7 +170,20 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 - **Limits:** at most three agents in one run, and never one twice, so A asking B asking A ends at once. The agent service keeps the chain in the turn's state, not in anything the model writes.
 - **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and its progress shows in the reasoning, each line under its name.
 - **Private agents** are asked only where they may answer: an agent in the namespace's public channel cannot ask a private one.
+- **Finding them:** `find_agents(namespace)`, for the same agents, lists those it may ask for this person here: what each does (`description`), its tools, skills, repos and grants, and which namespace the channel belongs to. Agents it may not ask, the person may not use, or that may not answer here are left out.
+- **Anyone:** `agents: any` lets an agent ask every agent the person may use. Only agents of `system` may have it, which root admins approve; it adds no rights, as the asked agent still acts as the person.
+- **The feed** has each hand-off, for the person and the asked agent's namespace, with its answer; the asked agent's calls are threaded under it.
 - **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
+
+## The commander
+
+`system/commander` is for when someone does not know which agent to ask. It is written into `system/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI, and every channel's pinned message names it. It does no work itself: it calls `find_agents`, then
+
+- hands a clear, one-off task (a screenshot, a new repo, why an app does not start) to the agent that fits, with `ask_agent`; in a channel in the background, so that agent posts its answer there itself;
+- for work with back and forth (a feature, a new app), tells the person which agent to talk to, `@<namespace>/<agent>`, and why;
+- asks one question when it cannot tell, and says when no agent fits and what one would need.
+
+Root admins change it like any agent of `system`, by a pull request to its folder.
 
 ## Runs without a person
 

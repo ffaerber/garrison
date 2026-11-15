@@ -907,3 +907,16 @@ func TestTheTokenGoesOnlyToPrivatePages(t *testing.T) {
 		t.Error("the token went out without knowing what is private")
 	}
 }
+
+func TestTheHowToNamesTheCommander(t *testing.T) {
+	o := &OpenWebUI{}
+	list := []agents.Agent{{Namespace: "todo", Name: "operator", Description: "Runs todo"}}
+	for _, l := range [][]agents.Agent{list, nil} {
+		if got := o.howTo(Namespace{Name: "todo"}, l, "system/commander"); !strings.Contains(got, "Not sure which agent fits? Ask `@system/commander`") {
+			t.Errorf("how-to with a commander:\n%s", got)
+		}
+	}
+	if got := o.howTo(Namespace{Name: "todo"}, list, ""); strings.Contains(got, "commander") {
+		t.Errorf("how-to without one:\n%s", got)
+	}
+}

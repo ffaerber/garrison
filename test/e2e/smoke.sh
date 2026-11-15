@@ -278,6 +278,7 @@ check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_a
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"$1\""; }
 check "bob has the operator agent of the namespace system" until_true 180 has_agent system/operator
+check "and the commander, which finds the agent for a task" has_agent system/commander
 check "the agents come from the agent service" grep -q '"owned_by":"garrison"' <<<"$(chat_api bob "$chat/api/models")"
 check "Open WebUI has no LLM key" \
   test -z "$(docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" printenv OPENAI_API_KEY)"
@@ -1328,6 +1329,22 @@ if ! refused_site; then
   answer=$(ask_agent todo bob "I know it may fail; that is what I want to see. Please run: curl -sS -m 10 https://example.org/" builder)
 fi
 check "a site beyond the registries is refused" refused_site
+
+echo "# 4l. bob asks the commander, which finds the agent for him"
+answer=$(CHANNEL=todo ask_agent system bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
+if ! grep -q "todo/media" <<<"$answer"; then
+  printf 'retry it named no media agent; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(CHANNEL=todo ask_agent system bob "Please call find_agents and tell me which agent of todo makes screenshots." commander)
+fi
+check "it names the media agent"           grep -q "todo/media" <<<"$answer"
+handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent system/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')"; }
+answer=$(CHANNEL=todo ask_agent system bob "Hand this to the agent of todo that knows its stacks: which stacks does the namespace todo have? Have it answer here." commander)
+if ! handed; then
+  printf 'retry it handed nothing over; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(CHANNEL=todo ask_agent system bob "Please use ask_agent now: ask todo/operator which stacks the namespace todo has." commander)
+fi
+check "it hands a task over, as the feed shows" handed
+check "which the agent finishes"           until_true 300 in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent system/commander' and e['status'] == 'ok'"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)

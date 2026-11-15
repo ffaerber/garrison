@@ -42,7 +42,7 @@ const WorkspaceChanges = ` To change a repo, clone it, edit the files in your ch
 // AskOthers is added for agents that may ask others.
 const AskOthers = `## Other agents
 
-You may hand work to these agents with ask_agent: say what to do (task), what bounds it (limits) and what a good answer looks like (done_when). They work for the same person, in workspaces of their own; share work through Git, e.g. a branch you proposed. Their answer comes back to you word for word; pass on what matters.`
+You may hand work to other agents with ask_agent; find_agents lists those you may ask here, with what each does. Say what to do (task), what bounds it (limits) and what a good answer looks like (done_when). They work for the same person, in workspaces of their own; share work through Git, e.g. a branch you proposed. Their answer comes back to you word for word; pass on what matters.`
 
 // definition changes whenever what the sandbox was started with does.
 func definition(model, prompt string, a agents.Agent) string {
@@ -313,7 +313,7 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 		specs = append(specs, toolSpec{t.Function.Name, t.Function.Description, t.Function.Parameters})
 	}
 	if a, ok, err := s.Agents.Get(r.Context(), c.Agent); err == nil && ok && len(a.Asks) > 0 {
-		specs = append(specs, askSpec(a))
+		specs = append(specs, askSpec(a), findSpec)
 	}
 	writeJSON(w, specs)
 }
@@ -331,8 +331,13 @@ func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "not a tool call")
 		return
 	}
-	if req.Name == "ask_agent" {
+	switch req.Name {
+	case "ask_agent":
 		text, isErr := s.askAgent(r.Context(), c, req.Arguments)
+		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
+		return
+	case "find_agents":
+		text, isErr := s.findAgents(r.Context(), c, req.Arguments)
 		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
 		return
 	}

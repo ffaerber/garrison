@@ -60,7 +60,8 @@ services:
       OPENAI_API_CONFIGS: >-
         {"0": {"enable": true, "auth_type": "system_oauth",
           "headers": {"X-Garrison-Chat": "{{`{{CHAT_ID}}`}}", "X-Garrison-Task": "{{`{{TASK}}`}}"}}}
-      DEFAULT_MODELS: system/operator
+      # New chats start with the commander, which finds the agent for a task.
+      DEFAULT_MODELS: system/commander
       # One channel per namespace, kept by the gateway: the team chat
       # where people mention the namespace's agents.
       ENABLE_CHANNELS: "True"

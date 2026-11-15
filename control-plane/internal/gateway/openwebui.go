@@ -288,9 +288,15 @@ func (o *OpenWebUI) syncProfile(ctx context.Context, token string) error {
 // HowToMarker starts the pinned message that explains a channel.
 const HowToMarker = "**How to ask the agent of this namespace**"
 
-func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent) string {
+// howTo is a channel's pinned message. commander is system's commander, if
+// there is one: it finds the agent for what someone wants.
+func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent, commander string) string {
+	ask := ""
+	if commander != "" {
+		ask = "\n\nNot sure which agent fits? Ask `@" + commander + "`: it finds the agent for what you want, and hands the work over or tells you whom to ask."
+	}
 	if len(list) == 0 {
-		return HowToMarker + "\n\nThis namespace has no agents. Add one as a folder under agents/ in its repo config."
+		return HowToMarker + "\n\nThis namespace has no agents. Add one as a folder under agents/ in its repo config." + ask
 	}
 	var b strings.Builder
 	b.WriteString(HowToMarker + "\n\nType `@` and pick an agent from the list, then your question. The agents of this namespace:\n\n")
@@ -311,9 +317,9 @@ For example:
 `+"`@%[1]s which stacks are not healthy?`"+`
 `+"`@%[1]s show the last 50 log lines of grafana_grafana`"+`
 
-It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention an agent are for the people here.
+It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention an agent are for the people here.%[2]s
 
-An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are folders under agents/ in the repo config.`, example.ID())
+An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are folders under agents/ in the repo config.`, example.ID(), ask)
 	if ns.Name != SystemNamespace {
 		b.WriteString("\n\nOnly the people of " + ns.Name + " read this channel. Others can talk to its agents that work on public repos in a private chat.")
 	}
@@ -329,7 +335,7 @@ type owuiMessage struct {
 
 // syncHowTo keeps the how-to pinned at the top of a namespace's channel. A
 // how-to someone unpinned is pinned again; a deleted one is posted again.
-func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns Namespace, list []agents.Agent) error {
+func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns Namespace, list []agents.Agent, commander string) error {
 	ours := func(m owuiMessage) bool { return m.UserID == o.accountID && strings.HasPrefix(m.Content, HowToMarker) }
 	var pinned []owuiMessage
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/"+channelID+"/messages/pinned", nil, &pinned); err != nil {
@@ -337,8 +343,8 @@ func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns N
 	}
 	for _, m := range pinned {
 		if ours(m) {
-			if m.Content != o.howTo(ns, list) {
-				return o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/"+m.ID+"/update", map[string]string{"content": o.howTo(ns, list)}, nil)
+			if m.Content != o.howTo(ns, list, commander) {
+				return o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/"+m.ID+"/update", map[string]string{"content": o.howTo(ns, list, commander)}, nil)
 			}
 			return nil
 		}
@@ -356,7 +362,7 @@ func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns N
 	}
 	if id == "" {
 		var posted owuiMessage
-		if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/post", map[string]string{"content": o.howTo(ns, list)}, &posted); err != nil {
+		if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/post", map[string]string{"content": o.howTo(ns, list, commander)}, &posted); err != nil {
 			return err
 		}
 		id = posted.ID
@@ -416,6 +422,10 @@ const legacyTeamMarker = "garrison_team"
 // syncChannels keeps one channel per namespace, as it was made, for the
 // namespace's people.
 func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces []Namespace, byNS map[string][]agents.Agent, groups map[string]string) error {
+	commander := ""
+	if slices.ContainsFunc(byNS[SystemNamespace], func(a agents.Agent) bool { return a.Name == agents.CommanderName }) {
+		commander = SystemNamespace + "/" + agents.CommanderName
+	}
 	var all []owuiChannel
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
 		return err
@@ -457,7 +467,7 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 			o.channelAccess[cur.ID] = string(key)
 			log.Printf("open webui: set the channel of namespace %s", ns.Name)
 		}
-		if err := o.syncHowTo(ctx, token, cur.ID, ns, byNS[ns.Name]); err != nil {
+		if err := o.syncHowTo(ctx, token, cur.ID, ns, byNS[ns.Name], commander); err != nil {
 			return err
 		}
 	}
