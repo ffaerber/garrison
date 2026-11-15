@@ -1337,7 +1337,7 @@ if ! grep -q "todo/media" <<<"$answer"; then
   answer=$(CHANNEL=todo ask_agent system bob "Please call find_agents and tell me which agent of todo makes screenshots." commander)
 fi
 check "it names the media agent"           grep -q "todo/media" <<<"$answer"
-handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent system/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')"; }
+handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent system/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
 answer=$(CHANNEL=todo ask_agent system bob "Hand this to the agent of todo that knows its stacks: which stacks does the namespace todo have? Have it answer here." commander)
 if ! handed; then
   printf 'retry it handed nothing over; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
