@@ -130,22 +130,31 @@ func (c *Config) previews(ctx context.Context, org, repo string) (map[int]string
 	return out, nil
 }
 
-// heads are a repo's branches with their newest commits.
+// heads are a repo's branches with their newest commits: all of them, page
+// by page. A branch missing here is an environment taken down, and Gitea
+// lists at most 50 at once, so a repo with many open proposals would
+// otherwise lose whichever of main and dev is not among the first 50.
 func (c *Config) heads(ctx context.Context, org, repo string) (map[string]string, error) {
-	var batch []struct {
-		Name   string `json:"name"`
-		Commit struct {
-			ID string `json:"id"`
-		} `json:"commit"`
+	out := map[string]string{}
+	for page := 1; page <= 200; page++ {
+		var batch []struct {
+			Name   string `json:"name"`
+			Commit struct {
+				ID string `json:"id"`
+			} `json:"commit"`
+		}
+		if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/branches?limit=50&page=%d", url.PathEscape(org), url.PathEscape(repo), page), &batch); err != nil {
+			return nil, err
+		}
+		for _, b := range batch {
+			out[b.Name] = b.Commit.ID
+		}
+		if len(batch) < 50 {
+			return out, nil
+		}
 	}
-	if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/branches?limit=50", url.PathEscape(org), url.PathEscape(repo)), &batch); err != nil {
-		return nil, err
-	}
-	out := make(map[string]string, len(batch))
-	for _, b := range batch {
-		out[b.Name] = b.Commit.ID
-	}
-	return out, nil
+	// Not all of them were read: better no change than environments taken down.
+	return nil, fmt.Errorf("%s/%s has more than 10000 branches", org, repo)
 }
 
 // checkout brings a branch of a repo to its tip in dir and returns the commit.

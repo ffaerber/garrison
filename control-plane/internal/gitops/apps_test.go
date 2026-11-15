@@ -3,11 +3,13 @@ package gitops
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,11 +76,19 @@ func (f *fakeApps) api(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		var out []map[string]any
-		for k, sha := range f.commits {
+		// In pages of 50, by name, as Gitea caps them.
+		var names []string
+		for k := range f.commits {
 			if strings.HasPrefix(k, parts[2]+"/"+parts[3]+"@") {
-				out = append(out, map[string]any{"name": strings.SplitN(k, "@", 2)[1], "commit": map[string]string{"id": sha}})
+				names = append(names, k)
 			}
+		}
+		slices.Sort(names)
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		from := min(max(page-1, 0)*50, len(names))
+		out := []map[string]any{}
+		for _, k := range names[from:min(from+50, len(names))] {
+			out = append(out, map[string]any{"name": strings.SplitN(k, "@", 2)[1], "commit": map[string]string{"id": f.commits[k]}})
 		}
 		json.NewEncoder(w).Encode(out)
 	case strings.HasPrefix(p, "/packages/"):
@@ -478,5 +488,31 @@ func TestTheFeedGetsDeploysWaitsAndRemovals(t *testing.T) {
 		if e.Commit == "bbbbbbbbbbbb2222" && !strings.HasPrefix(e.Title, "deployed homepage/todo@dev") {
 			t.Errorf("dev's entry: %+v", e)
 		}
+	}
+}
+
+// A repo with more branches than Gitea lists at once, say many open
+// proposals, keeps its environments: their branches are found on later pages.
+func TestEnvironmentsSurviveManyBranches(t *testing.T) {
+	c, f := setupApps(t)
+	ctx := context.Background()
+	apps, errs := c.syncApps(ctx, false, map[string]App{})
+	if len(errs) != 0 || apps["homepage/todo@main"].Stack != "todo" {
+		t.Fatalf("apps %+v, errs %v", apps, errs)
+	}
+	f.mu.Lock()
+	for i := range 60 {
+		f.commits[fmt.Sprintf("homepage/todo@change/alice-%02d", i)] = fmt.Sprintf("%012d", i)
+	}
+	f.mu.Unlock()
+	apps, errs = c.syncApps(ctx, false, apps)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if _, ok := apps["homepage/todo@main"]; !ok {
+		t.Errorf("main is gone: %+v", apps)
+	}
+	if rm := f.called("docker stack rm"); len(rm) != 0 {
+		t.Errorf("took down %v", rm)
 	}
 }
