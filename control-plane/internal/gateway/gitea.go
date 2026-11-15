@@ -25,7 +25,8 @@ type Gitea struct {
 	Password string
 	HTTP     *http.Client
 
-	privacy privacy // which repos are private, for a few seconds
+	privacy privacy  // which repos are private, for a few seconds
+	pushes  pushLogs // who pushed to which branch, from the repos' feeds
 }
 
 // ErrForbidden means Gitea refused the person.

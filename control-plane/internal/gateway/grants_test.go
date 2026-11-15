@@ -24,7 +24,8 @@ type grantsGitea struct {
 	reviews  map[int][]map[string]any
 	status   string // of the check ci
 	merged   []string
-	patched  []string // as whom
+	patched  []string         // as whom
+	feed     []map[string]any // the repo's activity, newest first
 }
 
 func newGrantsGitea() *grantsGitea {
@@ -95,6 +96,12 @@ func (f *grantsGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out := []map[string]string{}
 		for _, c := range f.comments[n] {
 			out = append(out, map[string]string{"body": c})
+		}
+		json.NewEncoder(w).Encode(out)
+	case p == "/repos/homepage/todo/activities/feeds":
+		out := []map[string]any{}
+		if r.URL.Query().Get("page") == "1" {
+			out = append(out, f.feed...)
 		}
 		json.NewEncoder(w).Encode(out)
 	case strings.HasPrefix(p, "/repos/homepage/todo/commits/"):
@@ -201,6 +208,19 @@ func TestGrants(t *testing.T) {
 	if strings.Join(f.merged, ",") != "2 by agent-homepage-dev,3 by agent-homepage-dev" {
 		t.Errorf("merged: %v", f.merged)
 	}
+
+	// bob pushes onto alice's next change himself, in Gitea, past the
+	// gateway: it holds his work now, and alice does not put it live alone.
+	out, err = propose(alice, dev, "main", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hers := f.prs[len(f.prs)]
+	f.feed = []map[string]any{{"id": 1, "op_type": "commit_repo", "ref_name": "refs/heads/" + hers["head"].(map[string]any)["ref"].(string), "act_user": map[string]any{"login": "bob"}}}
+	if _, err := merge(alice, hers["number"].(int)); err == nil || !strings.Contains(err.Error(), "asked for by bob") {
+		t.Errorf("alice merged what bob pushed onto her change: %v", err)
+	}
+	delete(f.prs, hers["number"].(int))
 
 	// A person may be called agent-something. Their own pull request, made
 	// in Gitea, is theirs all the same: bob does not put it live unreviewed.

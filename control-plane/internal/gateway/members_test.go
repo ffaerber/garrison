@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -50,22 +52,26 @@ func TestApproval(t *testing.T) {
 		author    string
 		approvers []string
 		ok        bool
+		pushers   []string
 	}{
-		{"nobody approved", makeBobAdmin, "bob", nil, false},
-		{"bob approves his own promotion", makeBobAdmin, "bob", []string{"bob"}, false},
-		{"another admin approves bob's promotion", makeBobAdmin, "bob", []string{"carol"}, true},
-		{"the author approves", demoteCarol, "alice", []string{"alice"}, false},
-		{"carol approves her own demotion", demoteCarol, "alice", []string{"carol"}, false},
-		{"a member approves", demoteCarol, "alice", []string{"bob"}, false},
-		{"a root admin approves", demoteCarol, "alice", []string{"admin"}, true},
-		{"one good approval among bad ones", demoteCarol, "alice", []string{"carol", "bob", "admin"}, true},
+		{"nobody approved", makeBobAdmin, "bob", nil, false, nil},
+		{"bob approves his own promotion", makeBobAdmin, "bob", []string{"bob"}, false, nil},
+		{"another admin approves bob's promotion", makeBobAdmin, "bob", []string{"carol"}, true, nil},
+		{"the author approves", demoteCarol, "alice", []string{"alice"}, false, nil},
+		{"carol approves her own demotion", demoteCarol, "alice", []string{"carol"}, false, nil},
+		{"a member approves", demoteCarol, "alice", []string{"bob"}, false, nil},
+		{"a root admin approves", demoteCarol, "alice", []string{"admin"}, true, nil},
+		{"one good approval among bad ones", demoteCarol, "alice", []string{"carol", "bob", "admin"}, true, nil},
+		// carol pushed onto bob's pull request: her approval is of her own work.
+		{"an admin who pushed to it approves", makeBobAdmin, "bob", []string{"carol"}, false, []string{"carol"}},
+		{"another admin approves what carol pushed to", makeBobAdmin, "bob", []string{"carol", "alice"}, true, []string{"bob", "carol"}},
 	} {
-		ok, why := Approval(base, c.head, c.author, c.approvers, roots)
+		ok, why := Approval(base, c.head, append([]string{c.author}, c.pushers...), c.approvers, roots)
 		if ok != c.ok {
 			t.Errorf("%s: %v (%s)", c.name, ok, why)
 		}
 	}
-	_, why := Approval(base, demoteCarol, "alice", []string{"carol"}, roots)
+	_, why := Approval(base, demoteCarol, []string{"alice"}, []string{"carol"}, roots)
 	if !strings.Contains(why, "carol's own role changes") || !strings.Contains(why, "changes: carol") {
 		t.Errorf("reason = %q", why)
 	}
@@ -134,5 +140,78 @@ func TestTeamMembersBeyondTheFirstPage(t *testing.T) {
 	}
 	if len(removed) != 1 || removed[0] != "zoe" {
 		t.Errorf("removed %v, want zoe", removed)
+	}
+}
+
+// An admin who pushes onto someone else's pull request on config cannot be
+// the one who approves it: the approval would be of their own work.
+func TestWhoPushedToAConfigChangeDoesNotApproveIt(t *testing.T) {
+	var mu sync.Mutex
+	approvers := []string{"bob"}
+	feed := []map[string]any{
+		// Newest first. An earlier branch of the same name, by dave, was deleted.
+		{"id": 4, "op_type": "commit_repo", "ref_name": "refs/heads/change/alice-1", "act_user": map[string]any{"login": "bob"}},
+		{"id": 3, "op_type": "commit_repo", "ref_name": "refs/heads/change/alice-1", "act_user": map[string]any{"login": "alice"}},
+		{"id": 2, "op_type": "delete_branch", "ref_name": "refs/heads/change/alice-1", "act_user": map[string]any{"login": "dave"}},
+		{"id": 1, "op_type": "commit_repo", "ref_name": "refs/heads/change/alice-1", "act_user": map[string]any{"login": "dave"}},
+	}
+	var statuses []string
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		switch {
+		case p == "/orgs/homepage":
+			io.WriteString(w, "{}")
+		case p == "/repos/homepage/config/pulls" && r.Method == http.MethodGet:
+			io.WriteString(w, `[{"number":5,"user":{"login":"alice"},"head":{"ref":"change/alice-1","sha":"abc","repo":{"full_name":"homepage/config"}}}]`)
+		case p == "/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [bob, carol, dave]\nmembers: [alice]\n")
+		case p == "/repos/homepage/config/pulls/5/reviews":
+			var out []map[string]any
+			for _, a := range approvers {
+				out = append(out, map[string]any{"user": map[string]any{"login": a}, "state": "APPROVED"})
+			}
+			json.NewEncoder(w).Encode(out)
+		case p == "/repos/homepage/config/activities/feeds":
+			out := []map[string]any{}
+			if r.URL.Query().Get("page") == "1" {
+				out = feed
+			}
+			json.NewEncoder(w).Encode(out)
+		case p == "/repos/homepage/config/statuses/abc" && r.Method == http.MethodPost:
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			statuses = append(statuses, body["state"]+": "+body["description"])
+			io.WriteString(w, "{}")
+		default:
+			http.NotFound(w, r) // no agents, stacks or restores
+		}
+	}))
+	defer gitea.Close()
+	m := &Members{Gitea: &Gitea{URL: gitea.URL, User: "admin", Password: "pw"}, posted: map[string]string{}}
+	base := Roster{Admins: []string{"bob", "carol", "dave"}, Members: []string{"alice"}}
+	last := func() string {
+		t.Helper()
+		if err := m.approvals(context.Background(), "homepage", &base, nil); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(statuses) == 0 {
+			return ""
+		}
+		return statuses[len(statuses)-1]
+	}
+	// bob pushed to alice's change, then approved it.
+	if got := last(); !strings.HasPrefix(got, "pending: ") || !strings.Contains(got, "bob pushed to it") {
+		t.Fatalf("bob's approval of what he pushed: %q", got)
+	}
+	// dave pushed only to an earlier branch of that name: his approval counts.
+	mu.Lock()
+	approvers = []string{"bob", "dave"}
+	mu.Unlock()
+	if got := last(); got != "success: approved by dave" {
+		t.Errorf("dave's approval: %q", got)
 	}
 }

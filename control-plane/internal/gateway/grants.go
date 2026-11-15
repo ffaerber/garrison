@@ -276,8 +276,8 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 			}
 		}
 	}
-	// Whose work it is: the pull request's author, if a person, and everyone
-	// named by an "Asked by" line. Someone else's work needs an approval by
+	// Whose work it is: the pull request's author, if a person, everyone
+	// named by an "Asked by" line, and everyone who pushed to its branch. Someone else's work needs an approval by
 	// someone who did not ask for it, so nobody puts another's unreviewed
 	// work live through an agent.
 	// An agent's account is known by being one of this namespace's, not by
@@ -293,6 +293,16 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	askers := []string{}
 	if !slices.Contains(accounts, pr.User.Login) {
 		askers = append(askers, pr.User.Login)
+	}
+	// And whoever pushed to its branch themselves, past the gateway.
+	pushed, err := g.Pushers(ctx, org, repo)
+	if err != nil {
+		return "", err
+	}
+	for _, who := range pushed[pr.Head.Ref] {
+		if !slices.Contains(accounts, who) && !slices.Contains(askers, who) {
+			askers = append(askers, who)
+		}
 	}
 	texts := []string{pr.Body}
 	var comments []struct {

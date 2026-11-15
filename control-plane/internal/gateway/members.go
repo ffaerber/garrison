@@ -31,9 +31,10 @@ import (
 // Everyone signed in may read everything. The file is the truth: Gitea's teams
 // "admins" and "members" are kept in line with it. It changes only through
 // pull requests, which need the approval of an admin of the namespace or a
-// root admin who neither wrote the pull request nor has their role changed by
-// it. Gitea cannot check the last part, so this posts a required status,
-// homecloud/approval, on every open pull request of config.
+// root admin who neither wrote the pull request (opened it or pushed to its
+// branch) nor has their role changed by it. Gitea cannot check that, so
+// this posts a required status, homecloud/approval, on every open pull
+// request of config.
 type Members struct {
 	// Wake, when set, starts a sync before the interval is over.
 	Wake  <-chan struct{}
@@ -111,14 +112,18 @@ func Changed(before, after Roster) []string {
 
 // Approval decides a pull request on members.yaml: it may be merged once an
 // admin of the namespace (by the roster on main) or a root admin approves it
-// who neither wrote it nor has their role changed by it.
-func Approval(base, head Roster, author string, approvers, rootAdmins []string) (bool, string) {
+// who neither wrote it nor has their role changed by it. authors wrote it:
+// who opened it, first, and everyone who pushed to its branch, as an admin
+// could otherwise add to someone else's pull request and approve the result.
+func Approval(base, head Roster, authors []string, approvers, rootAdmins []string) (bool, string) {
 	changed := Changed(base, head)
 	var refused []string
 	for _, a := range approvers {
 		switch {
-		case a == author:
+		case len(authors) > 0 && a == authors[0]:
 			refused = append(refused, a+" wrote it")
+		case slices.Contains(authors, a):
+			refused = append(refused, a+" pushed to it")
 		case slices.Contains(changed, a):
 			refused = append(refused, a+"'s own role changes")
 		case base.Role(a) != "admin" && !slices.Contains(rootAdmins, a):
@@ -629,11 +634,22 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 			Login string `json:"login"`
 		} `json:"user"`
 		Head struct {
-			SHA string `json:"sha"`
+			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
 		} `json:"head"`
 	}
 	if _, err := g.do(ctx, "", http.MethodGet, repo+"/pulls?state=open&limit=50", nil, &prs); err != nil {
 		return err
+	}
+	var pushed map[string][]string
+	if len(prs) > 0 {
+		var err error
+		if pushed, err = g.Pushers(ctx, ns, ConfigRepo); err != nil {
+			return err
+		}
 	}
 	for _, pr := range prs {
 		state, desc := "pending", ""
@@ -685,7 +701,16 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 					approvers = append(approvers, r.User.Login)
 				}
 			}
-			ok, why := Approval(before, head, pr.User.Login, approvers, roots)
+			// Who wrote it: who opened it, and who pushed to its branch.
+			authors := []string{pr.User.Login}
+			if pr.Head.Repo.FullName == ns+"/"+ConfigRepo {
+				for _, who := range pushed[pr.Head.Ref] {
+					if !slices.Contains(authors, who) {
+						authors = append(authors, who)
+					}
+				}
+			}
+			ok, why := Approval(before, head, authors, approvers, roots)
 			desc = why
 			if ok {
 				state = "success"
