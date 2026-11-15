@@ -436,3 +436,96 @@ func TestAlertsStartRoutines(t *testing.T) {
 		t.Errorf("the run is not in the feed: %+v", feed.All())
 	}
 }
+
+// A push that comes while the routine still runs for an earlier one is not
+// lost: it starts the routine once that run is over.
+func TestAPushDuringARunStartsTheRoutineAfterIt(t *testing.T) {
+	s, _, _ := setup(t)
+	head := "c1"
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+		case "/api/v1/repos/homepage/todo/branches/main":
+			io.WriteString(w, `{"commit":{"id":"`+head+`"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+		{Name: "on-main", OnPush: &agents.Push{Repo: "todo", Branch: "main"}, Owner: "bob", Task: "Look at main."},
+	}}}
+	withSandboxes(t, s)
+	poster := &fakePoster{}
+	s.Poster = poster
+	state := &memState{}
+	r := &Routines{Server: s, Gitea: &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}, Store: state}
+	const key = "homepage/dev/on-main"
+	busy := func(yes bool) {
+		r.mu.Lock()
+		r.running[key] = yes
+		r.mu.Unlock()
+	}
+	ctx := context.Background()
+	r.Check(ctx) // first seen, at c1
+	busy(true)   // a run for an earlier push is still going
+	head = "c2"
+	r.Check(ctx)
+	if got := state.m[key].Head; got != "c1" {
+		t.Errorf("the push was marked as seen (%s) though nothing ran for it", got)
+	}
+	busy(false)
+	r.Check(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	posts := poster.all()
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "moved to c2") {
+		t.Fatalf("the push during the run started nothing: %+v", posts)
+	}
+	if got := state.m[key].Head; got != "c2" {
+		t.Errorf("kept head %s, want c2", got)
+	}
+}
+
+// ctxPoster posts only while its context lasts, as the real one does.
+type ctxPoster struct{ fakePoster }
+
+func (f *ctxPoster) Post(ctx context.Context, p gateway.Post) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.fakePoster.Post(ctx, p)
+}
+
+// A background answer is posted even when the asked agent ran out of time:
+// the person was told it would come.
+func TestABackgroundAnswerIsPostedWhenTheTurnTimesOut(t *testing.T) {
+	s, _, _ := setup(t)
+	withTeam(s)
+	withSandboxes(t, s)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(700 * time.Millisecond)
+		io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"late"}]}}`)
+	}))
+	defer slow.Close()
+	s.Gateway = &Gateway{URL: slow.URL}
+	s.TurnTimeout = 200 * time.Millisecond
+	poster := &ctxPoster{}
+	s.Poster = poster
+	c := sandbox.Caller{Agent: "homepage/lead", Chat: "channel:c1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}}}
+	text, isErr := s.askAgent(context.Background(), c, json.RawMessage(`{"agent":"homepage/tester","task":"call list_repos {}","done_when":"y","background":true}`))
+	if isErr || !strings.Contains(text, "will post its answer in this channel") {
+		t.Fatalf("asked: %q", text)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	posts := poster.all()
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "It stopped: ") {
+		t.Fatalf("nothing was posted after the turn timed out: %+v", posts)
+	}
+}

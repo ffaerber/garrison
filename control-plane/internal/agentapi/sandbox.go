@@ -281,7 +281,8 @@ func (s *Server) sandboxLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<20)).Decode(&body); err != nil {
+	// A body of null decodes without error into no map at all.
+	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<20)).Decode(&body); err != nil || body == nil {
 		apiError(w, http.StatusBadRequest, "not a chat completion request")
 		return
 	}

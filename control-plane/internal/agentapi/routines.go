@@ -181,13 +181,19 @@ func (r *Routines) Check(ctx context.Context) {
 					continue
 				}
 				prev, seen := r.heads[key]
-				r.heads[key] = head
-				if head != prev {
-					r.save(ctx, key)
-				}
 				if !seen || head == prev || head == "" {
+					if !seen || head != prev {
+						r.heads[key] = head
+						r.save(ctx, key)
+					}
 					continue
 				}
+				if r.running[key] {
+					// Still at it for an earlier push. The head stays as it
+					// was, so this push starts the routine once it is done.
+					continue
+				}
+				r.heads[key] = head
 				why = fmt.Sprintf("%s of %s/%s moved to %.12s", rt.OnPush.Branch, a.Namespace, rt.OnPush.Repo, head)
 			} else {
 				continue // on_alert: started by alerts, not by the clock

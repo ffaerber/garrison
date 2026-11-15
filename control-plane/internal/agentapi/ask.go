@@ -242,7 +242,11 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 			if err != nil {
 				answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())
 			}
-			if err := s.Poster.Post(ctx, gateway.Post{Agent: target.ID(), Channel: channel,
+			// Posted on its own time: a turn that ran out of its own has
+			// used ctx up, and what it got done is still to be said.
+			pctx, done := context.WithTimeout(context.Background(), time.Minute)
+			defer done()
+			if err := s.Poster.Post(pctx, gateway.Post{Agent: target.ID(), Channel: channel,
 				Text: fmt.Sprintf("For %s, asked by %s:\n\n%s", who, c.Agent, answer)}); err != nil {
 				log.Printf("agents: %s: %s's answer for %s: %v", who, target.ID(), c.Agent, err)
 			}
