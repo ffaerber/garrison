@@ -147,18 +147,24 @@ type Namespace struct {
 	Description string `json:"description"`
 }
 
-// Namespaces lists the organisations person can see.
+// Namespaces lists the organisations person can see: all of them, page by
+// page, as the syncs treat a namespace that is not listed as gone.
 func (g *Gitea) Namespaces(ctx context.Context, as string) ([]Namespace, error) {
-	var raw []struct {
-		Name        string `json:"username"`
-		Description string `json:"description"`
-	}
-	if _, err := g.do(ctx, as, http.MethodGet, "/orgs?limit=50", nil, &raw); err != nil {
-		return nil, err
-	}
-	out := make([]Namespace, 0, len(raw))
-	for _, o := range raw {
-		out = append(out, Namespace{Name: o.Name, Description: o.Description})
+	out := []Namespace{}
+	for page := 1; page <= 100; page++ {
+		var raw []struct {
+			Name        string `json:"username"`
+			Description string `json:"description"`
+		}
+		if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/orgs?limit=50&page=%d", page), nil, &raw); err != nil {
+			return nil, err
+		}
+		for _, o := range raw {
+			out = append(out, Namespace{Name: o.Name, Description: o.Description})
+		}
+		if len(raw) < 50 {
+			break
+		}
 	}
 	return out, nil
 }

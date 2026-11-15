@@ -833,3 +833,47 @@ func TestTheTokenIsNeverShown(t *testing.T) {
 		t.Errorf("person as JSON: %s", b)
 	}
 }
+
+// A patch well below MaxPatch gets through the MCP endpoint: its request
+// limit leaves room for the largest patch.
+func TestALargePatchGetsThrough(t *testing.T) {
+	m, fg := setup(t)
+	patch := "diff --git a/x b/x\n" + strings.Repeat("+a line of the file\n", 100000) // about 2 MB
+	code, out := rpc(t, m, "tok-alice", "tools/call", map[string]any{"name": "propose_patch",
+		"arguments": map[string]any{"namespace": "system", "repo": "grafana", "patch": patch, "title": "Add x"}})
+	if code != http.StatusOK || out["error"] != nil || len(fg.patches) != 1 {
+		t.Fatalf("%d %v, %d patches reached Gitea", code, out["error"], len(fg.patches))
+	}
+	// Beyond the limit the tool says so itself.
+	patch = strings.Repeat("+", MaxPatch+1)
+	text, isErr := callText(t, m, "tok-alice", "propose_patch", map[string]any{"namespace": "system", "repo": "grafana", "patch": patch, "title": "Add x"})
+	if !isErr || !strings.Contains(text, "larger than 8 MB") {
+		t.Errorf("a patch beyond the limit: %.200q", text)
+	}
+}
+
+// Every namespace is listed, not only Gitea's first page of them.
+func TestNamespacesBeyondTheFirstPage(t *testing.T) {
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/orgs" {
+			http.NotFound(w, r)
+			return
+		}
+		var page []map[string]string
+		switch r.URL.Query().Get("page") {
+		case "1", "":
+			for i := range 50 {
+				page = append(page, map[string]string{"username": fmt.Sprintf("ns-%02d", i)})
+			}
+		case "2":
+			page = append(page, map[string]string{"username": "photos"})
+		}
+		json.NewEncoder(w).Encode(page)
+	}))
+	defer gitea.Close()
+	g := &Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	nss, err := g.Namespaces(context.Background(), "")
+	if err != nil || len(nss) != 51 || nss[50].Name != "photos" {
+		t.Fatalf("%d namespaces, %v", len(nss), err)
+	}
+}

@@ -122,6 +122,11 @@ func (m *MCP) agentFor(r *http.Request) (*agents.Agent, bool) {
 
 var supportedVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
 
+// maxRequest is the largest request: room for the largest patch
+// propose_patch takes, as JSON, which escapes some of it. The agent service
+// lets a sandbox send as much.
+const maxRequest = 2 * MaxPatch
+
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -158,7 +163,7 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req rpcRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.JSONRPC != "2.0" || req.Method == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequest)).Decode(&req); err != nil || req.JSONRPC != "2.0" || req.Method == "" {
 		writeRPC(w, nil, nil, &rpcError{Code: -32700, Message: "parse error"})
 		return
 	}
