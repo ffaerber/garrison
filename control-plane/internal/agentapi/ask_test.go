@@ -103,10 +103,10 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	if strings.Contains(got, "system/commander") {
 		t.Errorf("the commander lists itself:\n%s", got)
 	}
-	if got := find(c, `{"namespace":"todo"}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
+	if got := find(c, `{"in_namespace":"todo"}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
 		t.Errorf("by namespace:\n%s", got)
 	}
-	if got := find(c, `{"namespace":"nope"}`); !strings.Contains(got, "no agent you may ask") {
+	if got := find(c, `{"in_namespace":"nope"}`); !strings.Contains(got, "no agent you may ask") {
 		t.Errorf("none: %q", got)
 	}
 	// An agent with a list finds only those on it.

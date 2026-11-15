@@ -19,7 +19,9 @@ var findSpec = toolSpec{
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"namespace": map[string]any{"type": "string", "description": "only the agents of this namespace"},
+			// Not "namespace": agents are told to pass their own to every
+			// tool that takes one, which would hide all the others.
+			"in_namespace": map[string]any{"type": "string", "description": "only the agents of this namespace; leave it out to see all, which is what you usually want"},
 		},
 		"additionalProperties": false,
 	},
@@ -29,11 +31,11 @@ var findSpec = toolSpec{
 // ask that its person may use and that may answer in this chat.
 func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawMessage) (string, bool) {
 	var in struct {
-		Namespace string `json:"namespace"`
+		Namespace string `json:"in_namespace"`
 	}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
-			return "error: find_agents takes only namespace", true
+			return "error: find_agents takes only in_namespace", true
 		}
 	}
 	asker, ok, err := s.Agents.Get(ctx, c.Agent)
@@ -66,7 +68,7 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 	if n == 0 {
 		b.WriteString("There is no agent you may ask for this person here.")
 		if in.Namespace != "" {
-			b.WriteString(" Try without namespace.")
+			b.WriteString(" Try without in_namespace.")
 		}
 	}
 	return strings.TrimSpace(b.String()), false
