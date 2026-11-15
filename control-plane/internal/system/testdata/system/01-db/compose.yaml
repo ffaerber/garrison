@@ -3,9 +3,9 @@ services:
     image: postgres:17-alpine
     volumes:
       - type: bind
-        source: /homecloud/system/db
+        source: /garrison/system/db
         target: /var/lib/postgresql/data
-      - /homecloud/system/db-backup:/backup:ro
+      - /garrison/system/db-backup:/backup:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - type: volume
         source: cache

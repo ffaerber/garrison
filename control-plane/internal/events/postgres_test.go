@@ -7,11 +7,11 @@ import (
 )
 
 // TestPostgres runs the store against a real database, if
-// HOMECLOUD_TEST_POSTGRES names one (a postgres:// URL of an empty database).
+// GARRISON_TEST_POSTGRES names one (a postgres:// URL of an empty database).
 func TestPostgres(t *testing.T) {
-	url := os.Getenv("HOMECLOUD_TEST_POSTGRES")
+	url := os.Getenv("GARRISON_TEST_POSTGRES")
 	if url == "" {
-		t.Skip("HOMECLOUD_TEST_POSTGRES is not set")
+		t.Skip("GARRISON_TEST_POSTGRES is not set")
 	}
 	pg, err := Open(ctx, url, 30*time.Second)
 	if err != nil {

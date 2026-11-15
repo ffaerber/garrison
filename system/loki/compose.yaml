@@ -8,7 +8,7 @@ services:
     command: [-config.file=/etc/loki/local-config.yaml]
     volumes:
       - type: bind
-        source: /homecloud/system/loki
+        source: /garrison/system/loki
         target: /loki
     networks: [default, system]
 
@@ -31,4 +31,4 @@ configs:
 networks:
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system

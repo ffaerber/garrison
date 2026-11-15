@@ -44,5 +44,5 @@ gitea_api() {
 gitea_git() {
   HOME=$GITEA_WORK GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
     git -c http.sslCAInfo="$ETC/tls.crt" -c "http.curloptResolve=git.$DOMAIN:443:127.0.0.1" \
-        -c user.name="Home Cloud installer" -c user.email="$ADMIN_EMAIL" "$@"
+        -c user.name="Garrison installer" -c user.email="$ADMIN_EMAIL" "$@"
 }

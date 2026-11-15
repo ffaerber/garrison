@@ -19,5 +19,5 @@ scrape_configs:
     static_configs: [{ targets: ["traefik_traefik:8082"] }]
   # The deployer: each Swarm service's desired, running and failed tasks,
   # labelled with its namespace, app and environment.
-  - job_name: homecloud
+  - job_name: garrison
     static_configs: [{ targets: ["control-plane_deployer:8090"] }]

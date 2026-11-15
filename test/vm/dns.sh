@@ -10,7 +10,7 @@
 # the next reboot or until the VM is recreated; run the script again then.
 set -euo pipefail
 
-VM=${VM:-homecloud-test}
+VM=${VM:-garrison-test}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck disable=SC1090
 DOMAIN=$(. "$ROOT/${ANSWERS:-test/answers/selfsigned.env}" && echo "$DOMAIN")
@@ -32,8 +32,8 @@ set -euo pipefail
 domain=$1 ip=$2
 # dnsmasq-base is the bare program; this script supplies its own service.
 command -v dnsmasq >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dnsmasq-base >/dev/null
-rm -f /etc/dnsmasq.d/homecloud-test.conf
-cat > /etc/homecloud-test-dns.conf <<CONF
+rm -f /etc/dnsmasq.d/garrison-test.conf
+cat > /etc/garrison-test-dns.conf <<CONF
 # Answers only for the test domain, only on the VM's own address.
 listen-address=$ip
 bind-interfaces
@@ -41,22 +41,22 @@ no-resolv
 no-hosts
 address=/$domain/$ip
 CONF
-cat > /etc/systemd/system/homecloud-test-dns.service <<UNIT
+cat > /etc/systemd/system/garrison-test-dns.service <<UNIT
 [Unit]
-Description=Wildcard DNS for the Home Cloud test domain
+Description=Wildcard DNS for the Garrison test domain
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/homecloud-test-dns.conf
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/garrison-test-dns.conf
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable homecloud-test-dns >/dev/null 2>&1
-systemctl restart homecloud-test-dns
+systemctl enable garrison-test-dns >/dev/null 2>&1
+systemctl restart garrison-test-dns
 VMSCRIPT
 )
 multipass exec "$VM" -- sudo bash -c "$vm_script" setup "$DOMAIN" "$ip"

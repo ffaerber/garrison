@@ -10,9 +10,9 @@ runner:
   capacity: 2
   timeout: 1h
   labels:
-    - homecloud-user:docker://alpine:3.22
+    - garrison-user:docker://alpine:3.22
 container:
-  network: homecloud-builds
+  network: garrison-builds
   privileged: false
   valid_volumes: []
   # Docker comes from DOCKER_HOST (the guard) and is never handed to jobs.

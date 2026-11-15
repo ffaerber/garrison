@@ -1,9 +1,9 @@
 {
-  "uid": "homecloud-overview",
+  "uid": "garrison-overview",
   "title": "Overview",
   "description": "The machine and every stack at a glance.",
   "tags": [
-    "homecloud",
+    "garrison",
     "overview"
   ],
   "timezone": "browser",
@@ -244,7 +244,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - sum(node_filesystem_avail_bytes{mountpoint=\"/homecloud\"}) / sum(node_filesystem_size_bytes{mountpoint=\"/homecloud\"}))",
+          "expr": "100 * (1 - sum(node_filesystem_avail_bytes{mountpoint=\"/garrison\"}) / sum(node_filesystem_size_bytes{mountpoint=\"/garrison\"}))",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -776,10 +776,10 @@
   },
   "links": [
     {
-      "title": "Home Cloud",
+      "title": "Garrison",
       "type": "dashboards",
       "tags": [
-        "homecloud"
+        "garrison"
       ],
       "asDropdown": true,
       "includeVars": true,

@@ -2,10 +2,10 @@
 # Smoke test for an installed machine. Run on the machine, as root, from the repo root.
 set -uo pipefail
 
-. /etc/homecloud/install.env
-ETC=/etc/homecloud
+. /etc/garrison/install.env
+ETC=/etc/garrison
 STACKS=test/e2e/stacks
-CTL="homecloud"
+CTL="garrison"
 failed=0
 
 ok()   { printf 'ok    %s\n' "$1"; }
@@ -143,7 +143,7 @@ print(json.dumps({"branch":"main","new_branch":branch,"message":("Remove " if fi
     st=$(gitea_api "" "$cfg/commits/$(gitea_api "" "$cfg/pulls/$pr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
 import json,sys
 for s in json.load(sys.stdin).get("statuses") or []:
-    if s["context"] == "homecloud/approval": print(s["status"], s["description"]); break' 2>/dev/null)
+    if s["context"] == "garrison/approval": print(s["status"], s["description"]); break' 2>/dev/null)
     case $st in success*) break ;; failure*) echo "approval: $st"; return 1 ;; esac
     sleep 2
   done
@@ -214,7 +214,7 @@ agents_api() {
 # system: the stacks the installer deploys are up and safe.
 section_system() {
 echo "# system stack"
-check "ZFS pool is online"                 test "$(zpool list -H -o health homecloud)" = ONLINE
+check "ZFS pool is online"                 test "$(zpool list -H -o health garrison)" = ONLINE
 check "Keycloak serves OIDC discovery over valid TLS" status_is 200 keycloak /realms/master/.well-known/openid-configuration 300
 check "Keycloak issuer uses the public hostname" \
   bash -c "$(declare -f req); ETC=$ETC DOMAIN=$DOMAIN; req keycloak https://keycloak.$DOMAIN/realms/master/.well-known/openid-configuration | grep -q '\"issuer\":\"https://keycloak.$DOMAIN/realms/master\"'"
@@ -231,7 +231,7 @@ check "Postgres is not published on the host" bash -c '! (ss -ltn | grep -q ":54
 # login: people sign in through Keycloak and get exactly their rights.
 section_login() {
 echo "# signing in"
-check "the homecloud realm serves OIDC discovery" status_is 200 keycloak /realms/homecloud/.well-known/openid-configuration
+check "the garrison realm serves OIDC discovery" status_is 200 keycloak /realms/garrison/.well-known/openid-configuration
 check "Gitea settings need a login"        bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/user/settings)\" != 200 ]"
 sso_login "$tmp/git.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$PASSWORD" "$tmp/git.html" >/dev/null 2>&1
 check "the admin signs in to Gitea through Keycloak" test "$(web -b "$tmp/git.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/user/settings")" = 200
@@ -267,7 +267,7 @@ check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gite
 echo "# Open WebUI"
 check "Open WebUI is healthy over valid TLS" status_is 200 chat /health 300
 check "it sends visitors to the Keycloak login" \
-  grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$(web -o /dev/null -w '%{redirect_url}' "$chat/oauth/oidc/login")"
+  grep -q "^https://keycloak.$DOMAIN/realms/garrison/protocol/openid-connect/auth" <<<"$(web -o /dev/null -w '%{redirect_url}' "$chat/oauth/oidc/login")"
 check "it shows nothing without signing in" test "$(web -o /dev/null -w '%{http_code}' "$chat/api/models")" = 401
 for u in alice bob; do
   chat_login $u
@@ -278,7 +278,7 @@ check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_a
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"$1\""; }
 check "bob has the operator agent of the namespace system" until_true 180 has_agent system/operator
-check "the agents come from the agent service" grep -q '"owned_by":"homecloud"' <<<"$(chat_api bob "$chat/api/models")"
+check "the agents come from the agent service" grep -q '"owned_by":"garrison"' <<<"$(chat_api bob "$chat/api/models")"
 check "Open WebUI has no LLM key" \
   test -z "$(docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" printenv OPENAI_API_KEY)"
 check "the agent service wants a token" \
@@ -306,7 +306,7 @@ check "it refuses identity headers"        test "$(mcp -o /dev/null -w '%{http_c
 echo "# roles in Grafana"
 check "Grafana is healthy over valid TLS"  status_is 200 grafana /api/health 300
 check "Grafana sends visitors to the Keycloak login" \
-  grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$(web -o /dev/null -w '%{redirect_url}' $g/login/generic_oauth)"
+  grep -q "^https://keycloak.$DOMAIN/realms/garrison/protocol/openid-connect/auth" <<<"$(web -o /dev/null -w '%{redirect_url}' $g/login/generic_oauth)"
 check "Grafana shows nothing without signing in" test "$(web -o /dev/null -w '%{http_code}' $g/api/search)" = 401
 for u in alice bob; do
   sso_login "$tmp/grafana-$u.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-$u.html" $u >/dev/null 2>&1
@@ -340,9 +340,9 @@ check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_
 check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/system/control-plane/actions/tasks?limit=1")"
 check "the runner is up"                 test "$(docker service ls --filter name=runner_runner --format '{{.Replicas}}')" = 1/1
 check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/system/actions/secrets")" = 403
-check "the deployer no longer runs on the host" bash -c '! systemctl is-active --quiet homecloud-controller'
+check "the deployer no longer runs on the host" bash -c '! systemctl is-active --quiet garrison-controller'
 check "the deployer deployed grafana, prometheus and loki" \
-  bash -c 'a=$(homecloud applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
+  bash -c 'a=$(garrison applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
 
 docker stack rm smoke >/dev/null 2>&1 || true
 gitea_api "" -o /dev/null -X DELETE "$api/repos/system/smoke" 2>/dev/null || true
@@ -371,9 +371,9 @@ folder_count() { grafana_api "" "$g/api/search?type=dash-db&folderUIDs=ns-system
 six_dashboards() { [ "$(folder_count)" -ge 6 ]; }
 check "the system folder holds the dashboards from Git" until_true 180 six_dashboards
 sso_login "$tmp/grafana-bob.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-bob.html" bob >/dev/null 2>&1
-check "bob can open the overview"          test "$(grafana_api bob -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/homecloud-overview")" = 200
+check "bob can open the overview"          test "$(grafana_api bob -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/garrison-overview")" = 200
 check "bob cannot change it" \
-  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"dashboard":{"uid":"homecloud-overview","title":"bob"},"overwrite":true}' "$g/api/dashboards/db")" = 403
+  test "$(grafana_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"dashboard":{"uid":"garrison-overview","title":"bob"},"overwrite":true}' "$g/api/dashboards/db")" = 403
 # Every query of every panel must run. Variables get example values.
 queries_run() {
   python3 - "$@" <<'PY'
@@ -419,26 +419,26 @@ sha=$(gitea_api alice "$api/repos/system/platform/contents/dashboards/smoke.json
 gitea_api alice -o /dev/null -X DELETE -H 'Content-Type: application/json' -d '{"message":"Remove a dashboard","branch":"main","sha":"'$sha'"}' "$api/repos/system/platform/contents/dashboards/smoke.json"
 check "deleting it in Git removes it"      until_true 120 dash_gone
 # An edit made in Grafana is put back.
-overview=$(grafana_api "" "$g/api/dashboards/uid/homecloud-overview" | python3 -c 'import json,sys; d=json.load(sys.stdin)["dashboard"]; d["title"]="Edited in Grafana"; print(json.dumps({"dashboard": d, "overwrite": True}))')
+overview=$(grafana_api "" "$g/api/dashboards/uid/garrison-overview" | python3 -c 'import json,sys; d=json.load(sys.stdin)["dashboard"]; d["title"]="Edited in Grafana"; print(json.dumps({"dashboard": d, "overwrite": True}))')
 grafana_api "" -o /dev/null -X POST -H 'Content-Type: application/json' -d "$overview" "$g/api/dashboards/db"
-title_back() { grafana_api "" "$g/api/dashboards/uid/homecloud-overview" | grep -q '"title":"Overview"'; }
+title_back() { grafana_api "" "$g/api/dashboards/uid/garrison-overview" | grep -q '"title":"Overview"'; }
 check "an edit made in Grafana is put back" until_true 120 title_back
 
 echo "# deploying a stack"
 check "the CLI deploys hello (main)"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "hello is reachable at its hostname" status_is 200 hello /
-check "hello got its dataset with a quota" test "$(zfs get -H -o value quota homecloud/ns/demo/stacks/hello/hello-data)" = 1G
+check "hello got its dataset with a quota" test "$(zfs get -H -o value quota garrison/ns/demo/stacks/hello/hello-data)" = 1G
 check "hello's dataset is mounted in the container" \
-  bash -c 'c=$(docker ps -q --filter label=com.docker.swarm.service.name=hello_web | head -n1); docker inspect "$c" --format "{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}" | grep -q "/homecloud/ns/demo/stacks/hello/hello-data:/data"'
+  bash -c 'c=$(docker ps -q --filter label=com.docker.swarm.service.name=hello_web | head -n1); docker inspect "$c" --format "{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}" | grep -q "/garrison/ns/demo/stacks/hello/hello-data:/data"'
 check "hello got a generated secret"       docker secret inspect hello.hello-token
 check "the CLI deploys hello (dev)"       $CTL apply -domain "$DOMAIN" -env dev -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
-check "dev has its own dataset"            zfs list homecloud/ns/demo/stacks/dev-hello/hello-data
+check "dev has its own dataset"            zfs list garrison/ns/demo/stacks/dev-hello/hello-data
 check "redeploying hello is accepted"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 
 echo "# private environments"
 check "a private environment answers visitors with a redirect" status_is 302 dev-hello /
 target=$(web -o /dev/null -w '%{redirect_url}' "https://dev-hello.$DOMAIN/")
-check "the redirect goes to the Keycloak login" grep -q "^https://keycloak.$DOMAIN/realms/homecloud/protocol/openid-connect/auth" <<<"$target"
+check "the redirect goes to the Keycloak login" grep -q "^https://keycloak.$DOMAIN/realms/garrison/protocol/openid-connect/auth" <<<"$target"
 check "a forged identity header does not get in" \
   test "$(web -o /dev/null -w '%{http_code}' -H "X-Auth-Request-Email: $ADMIN_EMAIL" "https://dev-hello.$DOMAIN/")" = 302
 sso_login "$tmp/bad.jar" "https://dev-hello.$DOMAIN/" "wrong-password" "$tmp/bad.html" >/dev/null 2>&1
@@ -605,7 +605,7 @@ until_true 900 pipeline_done "$good"
 [ "$(pipeline "$good")" = success ] || pipeline_logs "$good"
 check "the pipeline tests, builds and pushes the image" pipeline_is "$good" success
 check "the image is in todo's registry" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/todo/container/app/${good:0:12}")" = 200
-deployed() { homecloud applied | grep -q "^app todo/todo@$1 [a-z-]* $2"; }
+deployed() { garrison applied | grep -q "^app todo/todo@$1 [a-z-]* $2"; }
 check "the deployer deploys main as todo" until_true 300 deployed main "$good"
 check "todo is behind the sign-in"         status_is 302 todo / 120
 up() { [ "$(web -b "$tmp/$1.jar" -o /dev/null -w '%{http_code}' "https://$1.$DOMAIN/healthz")" = 200 ]; }
@@ -632,7 +632,7 @@ check "alice does not see it"              bash -c '! grep -q "Fix the bike" <<<
 alice_todo=$(todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')
 bob_api -o /dev/null -X POST "https://todo.$DOMAIN/todos/$alice_todo/delete"
 check "he cannot delete hers"              grep -q 'Water the plants' <<<"$(todo_api todo "https://todo.$DOMAIN/api/todos")"
-check "its database has its own dataset"   test "$(zfs get -H -o value quota homecloud/ns/todo/stacks/todo/todo-db)" = 2G
+check "its database has its own dataset"   test "$(zfs get -H -o value quota garrison/ns/todo/stacks/todo/todo-db)" = 2G
 check "its password is a generated secret" docker secret inspect todo.db-password
 chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
@@ -640,7 +640,7 @@ ns_agent() { web -H "Authorization: Bearer $chat_admin" "$chat/api/models" | gre
 check "todo has its agent and channel in Open WebUI" until_true 120 ns_agent
 
 echo "# the homepage"
-hp_deployed() { homecloud applied | grep -q "^app homepage/homepage@main homepage "; }
+hp_deployed() { garrison applied | grep -q "^app homepage/homepage@main homepage "; }
 check "the deployer deploys it as homepage" until_true 900 hp_deployed
 hello() { web "https://homepage.$DOMAIN/" | grep -q "Hello, world"; }
 check "everyone sees it, without signing in" until_true 120 hello
@@ -673,11 +673,11 @@ check "the deployer deploys it"          until_true 300 deployed main "$fixed"
 check "the todo survived the redeploy"     until_true 120 bash -c "$(declare -f web todo_api); ETC=$ETC DOMAIN=$DOMAIN tmp=$tmp; todo_api todo https://todo.$DOMAIN/api/todos | grep -q 'Water the plants'"
 
 echo "# snapshots and restore"
-todo_ds=homecloud/ns/todo/stacks/todo
+todo_ds=garrison/ns/todo/stacks/todo
 snap=$(zfs list -H -t snapshot -o name -s creation -d 1 "$todo_ds" | grep "@deploy-.*-${fixed:0:7}$" | tail -n1 | cut -d@ -f2)
 check "the deployer snapshots todo before redeploying it" test -n "$snap"
 check "with its database"                  zfs list "$todo_ds/todo-db@$snap"
-listed() { grep -q "\"$snap\"" /var/lib/homecloud/deployer/snapshots.json; }
+listed() { grep -q "\"$snap\"" /var/lib/garrison/deployer/snapshots.json; }
 check "and lists it for the agents"        until_true 60 listed
 check "Sanoid snapshots on a schedule"     systemctl is-active sanoid.timer
 # As its timer does every 15 minutes.
@@ -702,7 +702,7 @@ no_plants() { local ids; ids=$(plants) && [ -z "$ids" ]; }
 check "alice deletes the todo by mistake"  until_true 30 no_plants
 printf 'stack: todo\nenvironment: main\nsnapshot: %s\n' "$snap" > "$tmp/restore.yaml"
 check "she asks to restore todo's data, a root admin approves" set_config todo restores/todo.yaml "$tmp/restore.yaml"
-restored() { [ "$(zfs get -H -o value homecloud:restored "$todo_ds")" != - ]; }
+restored() { [ "$(zfs get -H -o value garrison:restored "$todo_ds")" != - ]; }
 check "the deployer restores it"           until_true 300 restored
 has_plants() { [ -n "$(plants)" ]; }
 check "the todo is back"                   until_true 180 has_plants
@@ -712,7 +712,7 @@ check "the state before is kept, to undo it" before
 echo "# the user runner's limits"
 gitea_api "" -o /dev/null -X DELETE "$api/repos/todo/escape"
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"name":"escape","auto_init":true,"default_branch":"main"}' "$api/orgs/todo/repos"
-escape=$(printf 'on: push\njobs:\n  out:\n    runs-on: homecloud-user\n    container:\n      image: alpine:3.22\n      options: --pid=host --cap-add SYS_PTRACE --security-opt apparmor=unconfined\n    steps:\n      - run: cat /proc/1/cmdline\n' | base64 -w0)
+escape=$(printf 'on: push\njobs:\n  out:\n    runs-on: garrison-user\n    container:\n      image: alpine:3.22\n      options: --pid=host --cap-add SYS_PTRACE --security-opt apparmor=unconfined\n    steps:\n      - run: cat /proc/1/cmdline\n' | base64 -w0)
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Try to get out","branch":"main","content":"'$escape'"}' "$api/repos/todo/escape/contents/.gitea/workflows/out.yaml"
 escape_failed() { gitea_api "" "$api/repos/todo/escape/actions/tasks?limit=5" | grep -q '"status":"failure"'; }
 check "a job asking for the host's processes fails" until_true 300 escape_failed
@@ -724,14 +724,14 @@ printf 'entrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 
 check "a stack named grafana passes review" set_stack todo grafana "$tmp/grafana.yaml"
 refused() { docker service logs --since 5m control-plane_deployer 2>&1 | grep -q "todo/grafana: not deployed: hostname \"grafana\" is reserved"; }
 check "but cannot take the reserved hostname" until_true 120 refused
-check "it is not deployed"                 bash -c '! homecloud applied | grep -q "app todo/grafana"'
+check "it is not deployed"                 bash -c '! garrison applied | grep -q "app todo/grafana"'
 check "alice removes it"                   set_stack todo grafana -
 
 echo "# taking an environment down"
 check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$repo/branches/dev")" = 204
 gone() { ! docker stack ls --format '{{.Name}}' | grep -qx dev-todo; }
 check "the deployer takes dev-todo down" until_true 120 gone
-check "its data is kept"                   zfs list homecloud/ns/todo/stacks/dev-todo/todo-db
+check "its data is kept"                   zfs list garrison/ns/todo/stacks/dev-todo/todo-db
 # main may have been redeployed just before; Traefik follows within seconds.
 check "todo keeps running"                 until_true 30 up todo
 
@@ -759,7 +759,7 @@ check "he sees todo's deploys, as he may read its repos" in_feed bob ns=todo "e[
 
 echo "# alerts"
 health() { docker exec "$(docker ps -q -f name=prometheus_prometheus | head -n1)" wget -qO- "http://control-plane_deployer:8090/metrics"; }
-check "the deployer tells Prometheus how each service does" grep -q 'homecloud_service_replicas_running{namespace="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"
+check "the deployer tells Prometheus how each service does" grep -q 'garrison_service_replicas_running{namespace="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"
 # Postgres without a password exits at once: a service that keeps failing.
 printf 'entrypoint: db\nservices:\n  db: { image: postgres:17-alpine, port: 5432 }\nenvironments:\n  main: {}\n' > "$tmp/crash.yaml"
 check "alice adds an app that cannot start" set_stack todo crash "$tmp/crash.yaml"
@@ -848,7 +848,7 @@ print("admins=" + ",".join(sorted(d.get("admins") or [])) + " members=" + ",".jo
 approval() { gitea_api "" "$hp/config/commits/$(head_sha config "$1")/status" | python3 -c '
 import json,sys
 for s in json.load(sys.stdin).get("statuses") or []:
-    if s["context"] == "homecloud/approval": print(s["status"], s["description"]); break'; }
+    if s["context"] == "garrison/approval": print(s["status"], s["description"]); break'; }
 approval_is() { approval "$1" | grep -q "^$2"; }
 review() { gitea_api "$2" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$hp/$1/pulls/$3/reviews"; }
 merge() { gitea_api "$2" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$3/merge"; }
@@ -990,7 +990,7 @@ check "the agent proposes it, as bob"      test -n "$tpr"
 check "it changes the heading"             grep -q '^+.*Our todos' <<<"$(gitea_api "" "$hp/app/pulls/$tpr.diff")"
 check "carol merges it"                    test "$(merge app carol "$tpr")" = 200
 merged=$(gitea_api "" "$hp/app/pulls/$tpr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["merge_commit_sha"])')
-deployed_at() { homecloud applied | grep -q "^app todo/todo@main todo $1"; }
+deployed_at() { garrison applied | grep -q "^app todo/todo@main todo $1"; }
 check "its pipeline builds it and the deployer deploys it" until_true 1200 deployed_at "$merged"
 sso_login "$tmp/todo.jar" "https://todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/todo.html" alice >/dev/null 2>&1
 # Signs in again if the page is not there: after a snapshot boot the login
@@ -1087,11 +1087,11 @@ check "among the problems"                 in_feed bob view=problems "e['kind'] 
 
 echo "# 4e. the media agent works in a sandbox of its own"
 # sandbox AGENT: the running sandbox of AGENT in todo's channel.
-sandbox_of() { docker ps -q --filter label=homecloud.sandbox=true --filter "label=homecloud.agent=$1" --filter "label=homecloud.chat=channel:$(channel_of todo)" | head -n1; }
+sandbox_of() { docker ps -q --filter label=garrison.sandbox=true --filter "label=garrison.agent=$1" --filter "label=garrison.chat=channel:$(channel_of todo)" | head -n1; }
 sb=$(sandbox_of todo/media)
 check "the channel's turns with it ran in its sandbox" test -n "$sb"
 check "the sandbox holds no LLM key and no token" \
-  bash -c 'k=$(cat "$1"); { [ ${#k} -lt 16 ] || ! docker inspect "$0" | grep -qF -- "$k"; } && [ "$(docker exec "$0" env | grep -c "^HOMECLOUD_")" = 4 ] && ! docker exec "$0" ls /etc/homecloud 2>/dev/null' "$sb" "$ETC/llm-api-key"
+  bash -c 'k=$(cat "$1"); { [ ${#k} -lt 16 ] || ! docker inspect "$0" | grep -qF -- "$k"; } && [ "$(docker exec "$0" env | grep -c "^GARRISON_")" = 4 ] && ! docker exec "$0" ls /etc/garrison 2>/dev/null' "$sb" "$ETC/llm-api-key"
 check "it runs under gVisor"               test "$(docker inspect -f '{{.HostConfig.Runtime}}' "$sb")" = runsc
 check "as root, in gVisor's own kernel"    bash -c '[ "$(docker exec "$0" id -u)" = 0 ] && docker exec "$0" dmesg | grep -q gVisor' "$sb"
 check "it cannot reach the internet"       bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null https://example.org' "$sb"
@@ -1101,7 +1101,7 @@ check "not even past the proxy"            bash -c '! docker exec "$0" curl -sS 
 nothing_at() { ! docker exec "$sb" curl -fsS -m 5 -o /dev/null "$1" && ! docker exec "$sb" curl -fsS -m 5 -o /dev/null --noproxy "*" "$1"; }
 check "nor Gitea, nor Docker"              bash -c "$(declare -f nothing_at); sb=$sb; nothing_at http://gitea_gitea:3000 && nothing_at http://control-plane_sandbox-guard:2375/_ping"
 check "between turns its token counts for nothing" \
-  test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/tools"')" = 401
+  test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/tools"')" = 401
 has_notes() { docker exec "$(sandbox_of todo/media)" grep -q "pelican 42" /data/work/notes.txt; }
 answer=$(ask_agent todo bob "Please keep a note for our next screenshots in your workspace: use bash to write the line 'pelican 42' (the name of the next release) into notes.txt, then say done." media)
 if ! has_notes; then
@@ -1117,9 +1117,9 @@ check "it still has the file"              grep -q "pelican 42" <<<"$answer"
 # Grafana's Agents dashboard: the sandbox's metrics carry its agent and
 # person; its output, the conversation, stays out of Loki.
 prom_value() { grafana_api "" "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1")" | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)'; }
-media_measured() { [ "$(prom_value 'count(container_memory_working_set_bytes{container_label_homecloud_sandbox="true", container_label_homecloud_agent="todo/media", container_label_homecloud_person="bob"})')" != 0 ]; }
+media_measured() { [ "$(prom_value 'count(container_memory_working_set_bytes{container_label_garrison_sandbox="true", container_label_garrison_agent="todo/media", container_label_garrison_person="bob"})')" != 0 ]; }
 check "Prometheus measures the sandbox, by agent and person" until_true 120 media_measured
-sandbox_logs() { grafana_api "" "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=5&since=2h&query=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("{container=~\"homecloud-agent-.*\"}"))')"; }
+sandbox_logs() { grafana_api "" "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=5&since=2h&query=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("{container=~\"garrison-agent-.*\"}"))')"; }
 check "Loki holds nothing a sandbox printed" bash -c 'grep -q "\"result\":\[\]" <<<"$0"' "$(sandbox_logs)"
 
 echo "# 4f. bob has the developer agent change the app with Git"
@@ -1154,7 +1154,7 @@ check "the follow-up goes into the same pull request" grep -qw CHANGELOG.md <<<"
 commits=$(gitea_api "" "$hp/app/pulls/$gpr/commits" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
 check "as another commit, with no new pull request" test "$commits" -ge 2 -a -z "$(newest_pr app bob "$gpr")"
 sb=$(sandbox_of todo/developer)
-check "the sandbox cannot push"            test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HOMECLOUD_TOKEN" "$HOMECLOUD_API/git/todo/app.git/info/refs?service=git-receive-pack"')" = 403
+check "the sandbox cannot push"            test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/git/todo/app.git/info/refs?service=git-receive-pack"')" = 403
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/$gpr"
 
 echo "# 4g. agents get rights of their own"
@@ -1272,7 +1272,7 @@ since=$(last_pr app)
 answer=$(ask_agent todo bob "Clone the repo app of the namespace todo, add a file PREVIEW.md with the line: Preview test. Propose it with propose_workspace_changes, titled: Preview test. Do not merge it." developer)
 ppr=$(newest_pr app bob "$since")
 check "it proposes it"                     test -n "$ppr"
-previewed() { homecloud applied | grep -q "^app todo/todo@pr-$ppr pr-$ppr-todo "; }
+previewed() { garrison applied | grep -q "^app todo/todo@pr-$ppr pr-$ppr-todo "; }
 check "the pull request gets a preview"    until_true 1200 previewed
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo bob "Ask todo/tester to open https://pr-$ppr-todo.$DOMAIN/ in the browser and tell you the page's main heading. Tell me what it says." developer)
@@ -1280,7 +1280,7 @@ check "the tester browses it, for bob, asked by the developer" \
   bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob: todo/tester: browse \[agent todo/developer\]$"' "$at"
 check "the answer names the heading"       grep -q "Our todos" <<<"$answer"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/$ppr"
-unpreviewed() { ! homecloud applied | grep -q "^app todo/todo@pr-$ppr "; }
+unpreviewed() { ! garrison applied | grep -q "^app todo/todo@pr-$ppr "; }
 check "closing it takes the preview down"  until_true 300 unpreviewed
 
 echo "# 4j. a routine runs when main moves, with nobody watching"
@@ -1296,7 +1296,7 @@ sys.exit(1)'
 }
 check "its answer is posted in the channel" until_true 600 routine_post
 check "it read as its own account, for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-developer): todo/developer: [a-z_]* \[routine todo/developer/main-moved\]"' "$mainmoved"
-head_kept() { [ "$(docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d homecloud -tAc "SELECT head FROM routine_state WHERE key = 'todo/developer/main-moved'")" = "$(gitea_api "" "$hp/app/branches/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])')" ]; }
+head_kept() { [ "$(docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/developer/main-moved'")" = "$(gitea_api "" "$hp/app/branches/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])')" ]; }
 check "the commit it saw is kept, for after a restart" head_kept
 check "the feed has the run, for todo's people" in_feed carol ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/developer' and e['actor'] == 'bob' and e['status'] == 'ok' and e['detail'] != ''"
 if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
@@ -1423,7 +1423,7 @@ check "the approval check passes"          until_true 90 approval_is "$opr" succ
 check "alice merges it"                    test "$(merge config alice "$opr")" = 200
 check "the quotes app's source goes to todo/quotes" installer/push-repo.sh --update todo/quotes test/e2e/apps/quotes
 check "alice adds its stack, carol approves" set_stack todo quotes test/e2e/apps/stacks/quotes.yaml carol
-quotes_deployed() { homecloud applied | grep -q "^app todo/quotes@main quotes "; }
+quotes_deployed() { garrison applied | grep -q "^app todo/quotes@main quotes "; }
 check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed
 quotes_crashes() { docker service ps quotes_web --format '{{.Error}}' 2>/dev/null | grep -q 'non-zero exit'; }
 check "it does not start"                  until_true 120 quotes_crashes
@@ -1478,16 +1478,16 @@ gpr=$(stack_pr)
 check "it proposes stacks/gallery.yaml in photos' config, as alice" test -n "$gpr"
 check "no repo for it, and nothing in system" bash -c '[ "$0" = 404 ] && [ "$1" = 404 ]' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/gallery")"
 gitea_api "" "$api/repos/photos/config/raw/stacks/gallery.yaml?ref=$(gitea_api "" "$api/repos/photos/config/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/gallery.yaml"
-check "one the deployer takes"             homecloud validate --in photos "$tmp/gallery.yaml"
+check "one the deployer takes"             garrison validate --in photos "$tmp/gallery.yaml"
 check "a root admin who did not write it approves" test "$(gitea_api "" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$api/repos/photos/config/pulls/${gpr:-0}/reviews")" = 200
 photos_approved() {
   gitea_api "" "$api/repos/photos/config/commits/$(gitea_api "" "$api/repos/photos/config/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
 import json,sys
-sys.exit(0 if any(s["context"] == "homecloud/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
+sys.exit(0 if any(s["context"] == "garrison/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
 }
 check "the approval check passes"          until_true 120 photos_approved
 check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$api/repos/photos/config/pulls/${gpr:-0}/merge")" = 200
-gallery_deployed() { homecloud applied | grep -q "^app photos/gallery@main gallery "; }
+gallery_deployed() { garrison applied | grep -q "^app photos/gallery@main gallery "; }
 check "the deployer deploys it"            until_true 300 gallery_deployed
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent system bob "Make me a namespace bobs for my own apps.")
@@ -1496,8 +1496,8 @@ refused_ns() { refused_only "$since" bob create_namespace "only root admins may"
 check "the gateway refused every try"      refused_ns
 
 echo "# 9. alice has the operator bring todo's data back"
-todo_ds=homecloud/ns/todo/stacks/todo
-was=$(zfs get -H -o value homecloud:restored "$todo_ds")
+todo_ds=garrison/ns/todo/stacks/todo
+was=$(zfs get -H -o value garrison:restored "$todo_ds")
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo alice "I deleted todos in the todo app by mistake. Bring todo's data on main back to the newest snapshot taken before a deploy. Propose it; I know newer data gets lost. Do not ask back.")
 # restore_pr: the open pull request of todo/config by alice that changes restores/.
@@ -1524,11 +1524,11 @@ check "carol approves it"                  test "$(gitea_api carol -o /dev/null 
 restore_approved() {
   gitea_api "" "$hp/config/commits/$rhead/status" | python3 -c '
 import json,sys
-sys.exit(0 if any(s["context"] == "homecloud/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
+sys.exit(0 if any(s["context"] == "garrison/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
 }
 check "the approval check passes"          until_true 120 restore_approved
 check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/config/pulls/${rpr:-0}/merge")" = 200
-restored_again() { v=$(zfs get -H -o value homecloud:restored "$todo_ds"); [ "$v" != - ] && [ "$v" != "$was" ]; }
+restored_again() { v=$(zfs get -H -o value garrison:restored "$todo_ds"); [ "$v" != - ] && [ "$v" != "$was" ]; }
 check "the deployer restores it"           until_true 300 restored_again
 todo_back() { status_is 302 todo / 5; }
 check "todo answers again"                 until_true 180 todo_back

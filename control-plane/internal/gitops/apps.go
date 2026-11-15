@@ -17,11 +17,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"homecloud/control-plane/internal/apply"
-	"homecloud/control-plane/internal/events"
-	"homecloud/control-plane/internal/hostnames"
-	"homecloud/control-plane/internal/render"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/apply"
+	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/hostnames"
+	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/stack"
 )
 
 // App is one deployed environment of an app: a stack of a namespace other
@@ -52,7 +52,7 @@ func (c *Config) ingressKey(stack string) string {
 		return ""
 	}
 	m := hmac.New(sha256.New, []byte(c.password))
-	m.Write([]byte("homecloud ingress v1 " + stack))
+	m.Write([]byte("garrison ingress v1 " + stack))
 	return hex.EncodeToString(m.Sum(nil))[:32]
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "homecloud-sandbox",
+  "name": "garrison-sandbox",
   "private": true,
   "description": "The agents' harness, installed into the sandbox image",
   "dependencies": {

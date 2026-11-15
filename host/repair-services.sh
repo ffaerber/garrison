@@ -4,17 +4,17 @@
 # When the Docker daemon restarts (a reboot, a package upgrade, a daemon.json
 # change), Docker 29 restarts Swarm containers without mounting their secrets
 # and configs: Traefik comes back without its certificate, Gitea without its
-# passwords. A fresh task gets them again. Runs at boot (homecloud-repair.service)
+# passwords. A fresh task gets them again. Runs at boot (garrison-repair.service)
 # and on every install. Healthy services are left alone.
 set -euo pipefail
 
 # The installer points the registry's name at this machine in /etc/hosts, so
 # Docker pulls app images through Traefik here. cloud-init, where present,
 # rewrites /etc/hosts at boot; put the entry back.
-if [ -s /etc/homecloud/install.env ]; then
-  domain=$(. /etc/homecloud/install.env && echo "$DOMAIN")
-  if [ -n "$domain" ] && ! grep -q "# homecloud registry$" /etc/hosts; then
-    echo "127.0.0.1 git.$domain # homecloud registry" >> /etc/hosts
+if [ -s /etc/garrison/install.env ]; then
+  domain=$(. /etc/garrison/install.env && echo "$DOMAIN")
+  if [ -n "$domain" ] && ! grep -q "# garrison registry$" /etc/hosts; then
+    echo "127.0.0.1 git.$domain # garrison registry" >> /etc/hosts
     echo "put back the hosts entry of git.$domain"
   fi
 fi

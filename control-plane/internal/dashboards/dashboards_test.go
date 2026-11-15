@@ -92,10 +92,10 @@ func TestSync(t *testing.T) {
 	g := &Grafana{URL: srv.URL, User: "installer", Password: "pw"}
 
 	grafana, app := t.TempDir(), t.TempDir()
-	write(t, grafana, "overview.json", `{"uid":"homecloud-overview","title":"Overview","panels":[],"tags":["homecloud"]}`)
+	write(t, grafana, "overview.json", `{"uid":"garrison-overview","title":"Overview","panels":[],"tags":["garrison"]}`)
 	write(t, grafana, "noid.json", `{"title":"No uid","panels":[]}`)
 	write(t, grafana, "broken.json", `{not json`)
-	write(t, app, "dupe.json", `{"uid":"homecloud-overview","title":"Dupe","panels":[]}`)
+	write(t, app, "dupe.json", `{"uid":"garrison-overview","title":"Dupe","panels":[]}`)
 	write(t, app, "notadash.json", `{"title":"no panels"}`)
 	repos := map[string]string{"grafana": grafana, "zapp": app, "empty": t.TempDir()}
 
@@ -108,7 +108,7 @@ func TestSync(t *testing.T) {
 	if len(fg.boards) != 3 {
 		t.Fatalf("boards = %v", fg.boards)
 	}
-	ov := fg.boards["homecloud-overview"]["dashboard"].(map[string]any)
+	ov := fg.boards["garrison-overview"]["dashboard"].(map[string]any)
 	if ov["title"] != "Overview" {
 		t.Errorf("the first repo by name should keep a uid, got %v", ov["title"])
 	}
@@ -127,10 +127,10 @@ func TestSync(t *testing.T) {
 	}
 
 	// Someone edits a Git dashboard in Grafana: the next sync puts it back.
-	fg.boards["homecloud-overview"]["dashboard"].(map[string]any)["title"] = "Edited in Grafana"
-	fg.version["homecloud-overview"]++
+	fg.boards["garrison-overview"]["dashboard"].(map[string]any)["title"] = "Edited in Grafana"
+	fg.version["garrison-overview"]++
 	g.Sync(context.Background(), "system", repos)
-	if fg.boards["homecloud-overview"]["dashboard"].(map[string]any)["title"] != "Overview" {
+	if fg.boards["garrison-overview"]["dashboard"].(map[string]any)["title"] != "Overview" {
 		t.Error("an edit made in Grafana was not put back")
 	}
 
@@ -145,9 +145,9 @@ func TestSync(t *testing.T) {
 	}
 
 	// A changed file is sent again.
-	write(t, grafana, "overview.json", `{"uid":"homecloud-overview","title":"Overview 2","panels":[]}`)
+	write(t, grafana, "overview.json", `{"uid":"garrison-overview","title":"Overview 2","panels":[]}`)
 	g.Sync(context.Background(), "system", repos)
-	if fg.boards["homecloud-overview"]["dashboard"].(map[string]any)["title"] != "Overview 2" {
+	if fg.boards["garrison-overview"]["dashboard"].(map[string]any)["title"] != "Overview 2" {
 		t.Error("a changed dashboard was not updated")
 	}
 }

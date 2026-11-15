@@ -1,5 +1,5 @@
 # Shared database for Keycloak, Gitea, Grafana and the dashboard's feed
-# (homecloud, made by configure.sh).
+# (garrison, made by configure.sh).
 services:
   postgres:
     image: postgres:17-alpine
@@ -10,14 +10,14 @@ services:
       - keycloak-db-password
       - gitea-db-password
       - grafana-db-password
-      - homecloud-db-password
+      - garrison-db-password
     configs:
       - source: init-databases
         target: /docker-entrypoint-initdb.d/10-databases.sh
         mode: 0555
     volumes:
       - type: bind
-        source: /homecloud/system/postgres
+        source: /garrison/system/postgres
         target: /var/lib/postgresql/data
     networks: [system]
     healthcheck:
@@ -38,9 +38,9 @@ secrets:
   keycloak-db-password: { external: true }
   gitea-db-password: { external: true }
   grafana-db-password: { external: true }
-  homecloud-db-password: { external: true }
+  garrison-db-password: { external: true }
 
 networks:
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system

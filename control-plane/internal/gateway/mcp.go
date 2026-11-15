@@ -18,8 +18,8 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/events"
 )
 
 // Verifier turns a bearer token into the person it was issued to.
@@ -79,7 +79,7 @@ func (k *KeycloakVerifier) Verify(ctx context.Context, raw string) (Person, erro
 // JSON-RPC request with a JSON response. It keeps no sessions.
 //
 // Each agent gets only the tools its agent.yaml lists. Open WebUI names the
-// agent in the header X-Homecloud-Agent (its model id); /mcp/<namespace>/<agent>
+// agent in the header X-Garrison-Agent (its model id); /mcp/<namespace>/<agent>
 // names it in the path. /mcp without the header serves every base tool.
 type MCP struct {
 	Tools    *Tools
@@ -95,13 +95,13 @@ type MCP struct {
 
 // Headers of the agent service, believed only with its key.
 const (
-	ServiceHeader   = "X-Homecloud-Service"
-	StartedByHeader = "X-Homecloud-Started-By"
-	OwnerHeader     = "X-Homecloud-Owner" // a run without a person: the routine's owner
+	ServiceHeader   = "X-Garrison-Service"
+	StartedByHeader = "X-Garrison-Started-By"
+	OwnerHeader     = "X-Garrison-Owner" // a run without a person: the routine's owner
 )
 
 // AgentHeader names the agent a request is for.
-const AgentHeader = "X-Homecloud-Agent"
+const AgentHeader = "X-Garrison-Agent"
 
 // agentFor finds the agent a request names; nil for every base tool. An
 // agent nobody defined, e.g. a model an admin made by hand, gets nothing.
@@ -190,14 +190,14 @@ func (m *MCP) person(w http.ResponseWriter, r *http.Request, agent *agents.Agent
 		return Person{Name: AgentAccount(agent), Unattended: true, Owner: owner, StartedBy: startedBy(r)}, true
 	}
 	if !hasToken || raw == "" {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="homecloud"`)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="garrison"`)
 		http.Error(w, "a Keycloak access token is required", http.StatusUnauthorized)
 		return Person{}, false
 	}
 	p, err := m.Verifier.Verify(r.Context(), raw)
 	if err != nil {
 		log.Printf("mcp: refused token: %v", err)
-		w.Header().Set("WWW-Authenticate", `Bearer realm="homecloud", error="invalid_token"`)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="garrison", error="invalid_token"`)
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return Person{}, false
 	}
@@ -232,7 +232,7 @@ func (m *MCP) handle(ctx context.Context, p Person, agent *agents.Agent, req rpc
 		return map[string]any{
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-			"serverInfo":      map[string]any{"name": "homecloud-gateway", "version": "1"},
+			"serverInfo":      map[string]any{"name": "garrison-gateway", "version": "1"},
 			"instructions":    "Tools to look at the home cloud and to propose changes as the person asking. Nothing here merges or deploys: a person merges proposed changes in Gitea.",
 		}, nil
 	case "ping":

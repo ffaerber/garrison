@@ -1,11 +1,11 @@
 # Runs inside the Keycloak container, after kcadm has been logged in.
 set -euo pipefail
-realm=homecloud
+realm=garrison
 kc() { /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm.config; }
 id_of() { kc get "$1" -r "$realm" "${@:2}" --fields id --format csv --noquotes; }
 
 kc get "realms/$realm" >/dev/null 2>&1 ||
-  kc create realms -s "realm=$realm" -s enabled=true -s "displayName=Home Cloud" >/dev/null
+  kc create realms -s "realm=$realm" -s enabled=true -s "displayName=Garrison" >/dev/null
 
 # Root admins: the people who may change the platform itself.
 [ -n "$(id_of groups -q search=root-admins -q exact=true)" ] ||

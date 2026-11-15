@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/render"
+	"garrison/control-plane/internal/render"
 )
 
 // Docker reads services and tasks from Docker's API.
@@ -145,15 +145,15 @@ func (d *Docker) Handler() http.Handler {
 			up = 0
 			fmt.Fprintf(&b, "# %s\n", strings.ReplaceAll(err.Error(), "\n", " "))
 		}
-		b.WriteString("# HELP homecloud_docker_up Whether Docker's API answered.\n# TYPE homecloud_docker_up gauge\n")
-		fmt.Fprintf(&b, "homecloud_docker_up %d\n", up)
+		b.WriteString("# HELP garrison_docker_up Whether Docker's API answered.\n# TYPE garrison_docker_up gauge\n")
+		fmt.Fprintf(&b, "garrison_docker_up %d\n", up)
 		for _, m := range []struct {
 			name, help string
 			v          func(Service) int
 		}{
-			{"homecloud_service_replicas_desired", "Tasks Swarm wants running.", func(s Service) int { return s.Desired }},
-			{"homecloud_service_replicas_running", "Tasks that are running.", func(s Service) int { return s.Running }},
-			{"homecloud_service_failed_tasks", fmt.Sprintf("Tasks that failed in the last %s.", Window), func(s Service) int { return s.Failed }},
+			{"garrison_service_replicas_desired", "Tasks Swarm wants running.", func(s Service) int { return s.Desired }},
+			{"garrison_service_replicas_running", "Tasks that are running.", func(s Service) int { return s.Running }},
+			{"garrison_service_failed_tasks", fmt.Sprintf("Tasks that failed in the last %s.", Window), func(s Service) int { return s.Failed }},
 		} {
 			fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", m.name, m.help, m.name)
 			for _, s := range svcs {

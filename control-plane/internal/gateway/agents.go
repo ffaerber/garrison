@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"homecloud/control-plane/internal/agents"
+	"garrison/control-plane/internal/agents"
 )
 
 // ToolNames are the tools an agent's agent.yaml may list. load_skill and

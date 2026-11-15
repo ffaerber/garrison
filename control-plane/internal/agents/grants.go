@@ -2,7 +2,7 @@ package agents
 
 import (
 	"fmt"
-	"homecloud/control-plane/internal/cron"
+	"garrison/control-plane/internal/cron"
 	"regexp"
 	"slices"
 	"strings"

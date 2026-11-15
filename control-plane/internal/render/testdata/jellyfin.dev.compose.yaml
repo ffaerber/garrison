@@ -6,9 +6,9 @@ services:
             - traefik-public
         deploy:
             labels:
-                homecloud.app: jellyfin
-                homecloud.environment: dev
-                homecloud.namespace: media
+                garrison.app: jellyfin
+                garrison.environment: dev
+                garrison.namespace: media
                 traefik.enable: "true"
                 traefik.http.routers.dev-jellyfin-admin.entrypoints: websecure
                 traefik.http.routers.dev-jellyfin-admin.middlewares: sso@file
@@ -37,9 +37,9 @@ services:
               target: jellyfin-api-key
         deploy:
             labels:
-                homecloud.app: jellyfin
-                homecloud.environment: dev
-                homecloud.namespace: media
+                garrison.app: jellyfin
+                garrison.environment: dev
+                garrison.namespace: media
                 traefik.enable: "true"
                 traefik.http.routers.dev-jellyfin.entrypoints: websecure
                 traefik.http.routers.dev-jellyfin.middlewares: sso@file
@@ -61,9 +61,9 @@ services:
             - default
         deploy:
             labels:
-                homecloud.app: jellyfin
-                homecloud.environment: dev
-                homecloud.namespace: media
+                garrison.app: jellyfin
+                garrison.environment: dev
+                garrison.namespace: media
 networks:
     traefik-public:
         external: true

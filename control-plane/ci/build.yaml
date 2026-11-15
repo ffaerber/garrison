@@ -16,7 +16,7 @@ defaults:
 
 jobs:
   image:
-    runs-on: homecloud
+    runs-on: garrison
     steps:
       - name: Build, push and deploy
         env:

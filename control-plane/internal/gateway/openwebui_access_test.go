@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/agents"
+	"garrison/control-plane/internal/agents"
 )
 
 // An agent whose repo went private must lose its access for everyone: Open

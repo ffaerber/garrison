@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/events"
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // Routines runs the agents' routines: work an agent starts by itself, every

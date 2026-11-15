@@ -5,10 +5,10 @@ runner:
   capacity: 1
   timeout: 1h
   labels:
-    - homecloud:docker://docker:29-cli
+    - garrison:docker://docker:29-cli
 container:
   # Jobs reach Gitea at http://gitea_gitea:3000 on the system network.
-  network: homecloud-system
+  network: garrison-system
   privileged: false
   # Empty: the Docker socket is mounted into job containers, so they can build images.
   docker_host: ""

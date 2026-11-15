@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/events"
 )
 
 type access map[string]events.Visibility

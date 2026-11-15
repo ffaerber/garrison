@@ -46,6 +46,6 @@ secrets:
 networks:
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system
   traefik-public:
     external: true

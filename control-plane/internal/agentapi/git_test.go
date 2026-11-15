@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 func TestGitFetchesOnlyWhatThePersonMayRead(t *testing.T) {

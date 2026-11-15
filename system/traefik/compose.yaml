@@ -65,10 +65,10 @@ networks:
     external: true
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system
   # Made here, as Traefik is deployed before the control plane, which joins it.
   # Internal: nothing on it reaches beyond the cluster.
   browser:
-    name: homecloud-browser
+    name: garrison-browser
     driver: overlay
     internal: true

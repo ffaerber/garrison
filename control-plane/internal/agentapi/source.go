@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/gateway"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/gateway"
 )
 
 // GiteaAgents reads the agents from each namespace's config repo on main.

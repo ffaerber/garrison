@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/gateway"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/gateway"
 )
 
 type fakeAgents []agents.Agent

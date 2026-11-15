@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/events"
 )
 
 const todoStack = `source: todo
@@ -36,7 +36,7 @@ type fakeApps struct {
 	commits  map[string]string            // org/repo@branch -> commit
 	packages map[string]bool              // owner/name/tag
 	pulls    map[string]string            // org/repo -> its open pull requests, as JSON
-	props    map[string]string            // ZFS dataset -> homecloud:restored
+	props    map[string]string            // ZFS dataset -> garrison:restored
 	composes map[string]string            // Swarm stack -> the compose file it was last deployed with
 	calls    []string
 }
@@ -433,7 +433,7 @@ func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
 	f.packages["homepage/todo/eeeeeeeeeeee"] = true
 	f.calls = nil
 	apps, _ = c.syncApps(ctx, false, apps)
-	snap := f.called("zfs snapshot -r homecloud/ns/homepage/stacks/todo@deploy-")
+	snap := f.called("zfs snapshot -r garrison/ns/homepage/stacks/todo@deploy-")
 	deploy := slices.IndexFunc(f.calls, func(s string) bool { return strings.HasPrefix(s, "docker stack deploy") })
 	if len(snap) != 1 || !strings.HasSuffix(snap[0], "-eeeeeee") || deploy < slices.Index(f.calls, snap[0]) {
 		t.Errorf("calls = %v", f.calls)
@@ -447,7 +447,7 @@ func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	if got := f.called("zfs set homecloud:restored=c0c0c0c0c0c04444 homecloud/ns/homepage/stacks/todo"); len(got) != 1 {
+	if got := f.called("zfs set garrison:restored=c0c0c0c0c0c04444 garrison/ns/homepage/stacks/todo"); len(got) != 1 {
 		t.Errorf("not restored: %v", f.calls)
 	}
 	if got := strings.Join(f.deployed(), " "); got != "todo" {
@@ -541,7 +541,7 @@ func TestPrivateEnvironmentsGetTheirIngressKey(t *testing.T) {
 		t.Fatalf("keys %q and %q", main, dev)
 	}
 	for stack, key := range map[string]string{"todo": main, "dev-todo": dev} {
-		if got := f.composes[stack]; !strings.Contains(got, "HOMECLOUD_INGRESS_KEY: "+key) || !strings.Contains(got, "X-Homecloud-Ingress: "+key) {
+		if got := f.composes[stack]; !strings.Contains(got, "GARRISON_INGRESS_KEY: "+key) || !strings.Contains(got, "X-Garrison-Ingress: "+key) {
 			t.Errorf("%s deployed without its key:\n%s", stack, got)
 		}
 	}

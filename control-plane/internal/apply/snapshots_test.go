@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/stack"
 )
 
 // zfsFake keeps datasets and their snapshots, and the containers of stacks.
@@ -86,7 +86,7 @@ environments:
 	return s
 }
 
-const env = "homecloud/ns/homepage/stacks/todo"
+const env = "garrison/ns/homepage/stacks/todo"
 
 func newZFS() *zfsFake {
 	return &zfsFake{
@@ -140,7 +140,7 @@ func TestRestoreEnv(t *testing.T) {
 		t.Errorf("no snapshot of the state before: %v", f.snaps)
 	}
 	scale := slices.Index(f.calls, "docker service scale --detach svc1=0 svc2=0")
-	copy := slices.Index(f.calls, "rsync -aH --numeric-ids --delete /homecloud/ns/homepage/stacks/todo/todo-db/.zfs/snapshot/deploy-1/ /homecloud/ns/homepage/stacks/todo/todo-db/")
+	copy := slices.Index(f.calls, "rsync -aH --numeric-ids --delete /garrison/ns/homepage/stacks/todo/todo-db/.zfs/snapshot/deploy-1/ /garrison/ns/homepage/stacks/todo/todo-db/")
 	if scale < 0 || copy < scale {
 		t.Errorf("calls = %v", f.calls)
 	}

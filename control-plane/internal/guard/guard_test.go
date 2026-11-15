@@ -27,7 +27,7 @@ func fakeDocker(t *testing.T) (string, *[]string) {
 		seen = append(seen, r.Method+" "+r.URL.Path)
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/volumes"):
-			io.WriteString(w, `{"Volumes":[{"Name":"GITEA-ACTIONS-TASK-1"},{"Name":"homecloud-buildkit"}],"Warnings":null}`)
+			io.WriteString(w, `{"Volumes":[{"Name":"GITEA-ACTIONS-TASK-1"},{"Name":"garrison-buildkit"}],"Warnings":null}`)
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			io.WriteString(w, `[{"Id":"job1","Names":["/GITEA-ACTIONS-TASK-1_job"]},{"Id":"gitea1","Names":["/gitea_gitea.1"]}]`)
 		case strings.HasSuffix(r.URL.Path, "/containers/create"):
@@ -51,7 +51,7 @@ func fakeDocker(t *testing.T) (string, *[]string) {
 
 func setup(t *testing.T) (*httptest.Server, *[]string) {
 	sock, seen := fakeDocker(t)
-	g := New(sock, Policy{Network: "homecloud-builds", VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}})
+	g := New(sock, Policy{Network: "garrison-builds", VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}})
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return srv, seen
@@ -74,7 +74,7 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body any) int {
 }
 
 func job(host map[string]any) map[string]any {
-	h := map[string]any{"NetworkMode": "homecloud-builds", "Binds": []string{"GITEA-ACTIONS-TASK-1:/workspace", "act-toolcache:/toolcache"}}
+	h := map[string]any{"NetworkMode": "garrison-builds", "Binds": []string{"GITEA-ACTIONS-TASK-1:/workspace", "act-toolcache:/toolcache"}}
 	for k, v := range host {
 		h[k] = v
 	}
@@ -120,7 +120,7 @@ func TestEscapesAreRefused(t *testing.T) {
 		"host userns":         {"UsernsMode": "host"},
 		"other container pid": {"PidMode": "container:gitea"},
 		"host network":        {"NetworkMode": "host"},
-		"system network":      {"NetworkMode": "homecloud-system"},
+		"system network":      {"NetworkMode": "garrison-system"},
 		"host bind":           {"Binds": []string{"/:/host"}},
 		"docker socket":       {"Binds": []string{"/var/run/docker.sock:/var/run/docker.sock"}},
 		"foreign volume":      {"Binds": []string{"gitea-data:/data"}},
@@ -159,7 +159,7 @@ func TestEscapesAreRefused(t *testing.T) {
 		{"POST", "/v1.47/plugins/pull", nil},
 		{"POST", "/v1.47/volumes/create", map[string]any{"Name": "GITEA-ACTIONS-x", "DriverOpts": map[string]string{"type": "none", "o": "bind", "device": "/"}}},
 		{"POST", "/v1.47/volumes/create", map[string]any{"Name": "anything"}},
-		{"DELETE", "/v1.47/volumes/homecloud-data", nil},
+		{"DELETE", "/v1.47/volumes/garrison-data", nil},
 		{"POST", "/v1.47/networks/create", map[string]any{"Name": "x"}},
 	} {
 		if got := do(t, srv, c.method, c.path, c.body); got != 403 {
@@ -211,17 +211,17 @@ func TestVolumeListShowsOnlyJobVolumes(t *testing.T) {
 
 func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
 	sock, seen := fakeDocker(t)
-	g := New(sock, Policy{Network: "homecloud-sandboxes", VolumePrefixes: []string{"homecloud-agent-"},
-		Image: "git.example.com/system/sandbox", Label: "homecloud.sandbox", MaxMemory: 2 << 30, Runtime: "runsc"})
+	g := New(sock, Policy{Network: "garrison-sandboxes", VolumePrefixes: []string{"garrison-agent-"},
+		Image: "git.example.com/system/sandbox", Label: "garrison.sandbox", MaxMemory: 2 << 30, Runtime: "runsc"})
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return srv, seen
 }
 
 func sandboxSpec(change func(c, h map[string]any)) map[string]any {
-	h := map[string]any{"NetworkMode": "homecloud-sandboxes", "Memory": 1 << 30, "PidsLimit": 512, "Runtime": "runsc",
-		"Mounts": []map[string]any{{"Type": "volume", "Source": "homecloud-agent-1", "Target": "/data"}}}
-	c := map[string]any{"Image": "git.example.com/system/sandbox:abc", "Labels": map[string]string{"homecloud.sandbox": "true"}, "HostConfig": h}
+	h := map[string]any{"NetworkMode": "garrison-sandboxes", "Memory": 1 << 30, "PidsLimit": 512, "Runtime": "runsc",
+		"Mounts": []map[string]any{{"Type": "volume", "Source": "garrison-agent-1", "Target": "/data"}}}
+	c := map[string]any{"Image": "git.example.com/system/sandbox:abc", "Labels": map[string]string{"garrison.sandbox": "true"}, "HostConfig": h}
 	if change != nil {
 		change(c, h)
 	}
@@ -230,7 +230,7 @@ func sandboxSpec(change func(c, h map[string]any)) map[string]any {
 
 func TestOnlySandboxesAreCreated(t *testing.T) {
 	srv, _ := sandboxGuard(t)
-	if code := do(t, srv, "POST", "/v1.47/containers/create?name=homecloud-agent-1", sandboxSpec(nil)); code != http.StatusCreated {
+	if code := do(t, srv, "POST", "/v1.47/containers/create?name=garrison-agent-1", sandboxSpec(nil)); code != http.StatusCreated {
 		t.Fatalf("a sandbox: %d", code)
 	}
 	for name, change := range map[string]func(c, h map[string]any){
@@ -240,7 +240,7 @@ func TestOnlySandboxesAreCreated(t *testing.T) {
 		"no memory limit": func(c, h map[string]any) { delete(h, "Memory") },
 		"too much memory": func(c, h map[string]any) { h["Memory"] = 8 << 30 },
 		"no pids limit":   func(c, h map[string]any) { delete(h, "PidsLimit") },
-		"other network":   func(c, h map[string]any) { h["NetworkMode"] = "homecloud-system" },
+		"other network":   func(c, h map[string]any) { h["NetworkMode"] = "garrison-system" },
 		"other volume": func(c, h map[string]any) {
 			h["Mounts"] = []map[string]any{{"Type": "volume", "Source": "gitea-data", "Target": "/data"}}
 		},
@@ -270,9 +270,9 @@ func TestSandboxesAreKnownByTheirLabel(t *testing.T) {
 	srv0 := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
-			io.WriteString(w, `[{"Id":"sb1","Labels":{"homecloud.sandbox":"true"}},{"Id":"gitea1","Labels":{}}]`)
+			io.WriteString(w, `[{"Id":"sb1","Labels":{"garrison.sandbox":"true"}},{"Id":"gitea1","Labels":{}}]`)
 		case strings.HasSuffix(r.URL.Path, "/containers/sb1/json"):
-			io.WriteString(w, `{"Id":"sb1","Config":{"Labels":{"homecloud.sandbox":"true"}}}`)
+			io.WriteString(w, `{"Id":"sb1","Config":{"Labels":{"garrison.sandbox":"true"}}}`)
 		case strings.HasSuffix(r.URL.Path, "/containers/gitea1/json"):
 			io.WriteString(w, `{"Id":"gitea1","Config":{"Labels":{}}}`)
 		case strings.HasSuffix(r.URL.Path, "/containers/gone/json"), strings.HasSuffix(r.URL.Path, "/containers/gone"):
@@ -284,7 +284,7 @@ func TestSandboxesAreKnownByTheirLabel(t *testing.T) {
 	go srv0.Serve(l)
 	t.Cleanup(func() { srv0.Close() })
 	// A guard that has just started, and created nothing yet.
-	srv := httptest.NewServer(New(sock, Policy{Network: "n", Image: "img", Label: "homecloud.sandbox", MaxMemory: 1}))
+	srv := httptest.NewServer(New(sock, Policy{Network: "n", Image: "img", Label: "garrison.sandbox", MaxMemory: 1}))
 	t.Cleanup(srv.Close)
 	if code := do(t, srv, "DELETE", "/v1.47/containers/sb1?force=1", nil); code != http.StatusNoContent {
 		t.Errorf("removing a sandbox: %d", code)
@@ -344,7 +344,7 @@ func TestANameIsNotRememberedAfterItsContainer(t *testing.T) {
 	})}
 	go srv0.Serve(l)
 	t.Cleanup(func() { srv0.Close() })
-	srv := httptest.NewServer(New(sock, Policy{Network: "homecloud-builds", VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}}))
+	srv := httptest.NewServer(New(sock, Policy{Network: "garrison-builds", VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}}))
 	t.Cleanup(srv.Close)
 
 	if code := do(t, srv, "POST", "/v1.47/containers/create?name=ab", job(nil)); code != http.StatusCreated {

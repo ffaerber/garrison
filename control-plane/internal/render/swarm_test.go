@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/stack"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -107,7 +107,7 @@ environments:
 		c := private[svc]
 		l := c.Deploy.Labels
 		if c.Environment[IngressKeyEnv] != "abc123" ||
-			l["traefik.http.middlewares."+host+"-ingress.headers.customrequestheaders.X-Homecloud-Ingress"] != "abc123" ||
+			l["traefik.http.middlewares."+host+"-ingress.headers.customrequestheaders.X-Garrison-Ingress"] != "abc123" ||
 			l["traefik.http.routers."+host+".middlewares"] != "sso@file,"+host+"-ingress@swarm" {
 			t.Errorf("%s: env %v, labels %v", svc, c.Environment, l)
 		}

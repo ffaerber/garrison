@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/apply"
-	"homecloud/control-plane/internal/events"
-	"homecloud/control-plane/internal/render"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/apply"
+	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/stack"
 )
 
 // SnapshotsEvery is how often the deployer lists the snapshots again when it

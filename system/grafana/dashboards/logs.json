@@ -1,9 +1,9 @@
 {
-  "uid": "homecloud-logs",
+  "uid": "garrison-logs",
   "title": "Logs",
   "description": "Every container's logs, by stack and service, with search.",
   "tags": [
-    "homecloud",
+    "garrison",
     "logs"
   ],
   "timezone": "browser",
@@ -174,10 +174,10 @@
   },
   "links": [
     {
-      "title": "Home Cloud",
+      "title": "Garrison",
       "type": "dashboards",
       "tags": [
-        "homecloud"
+        "garrison"
       ],
       "asDropdown": true,
       "includeVars": true,

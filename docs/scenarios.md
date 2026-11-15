@@ -2,7 +2,7 @@
 
 What people can and cannot get done by talking to a namespace's agent. Each scenario is played against the real model by the `talk` step of `test/vm/steps.sh` (`test/e2e/smoke.sh talk`), in the channel of the namespace `todo`, which holds the todo app (its code in the repo `todo/app`, its stack in `todo/config/stacks/todo.yaml`). The deploy step also deploys the namespace `homepage`: a hello-world page from `homepage/app`, at `https://homepage.<domain>`, open to everyone. The checks look at what happened (pull requests, their author, the approval check, team membership, push rights, deployments), not at what the agent said.
 
-People: **alice** is a root admin and created `todo`; **bob** and **carol** are regular users. Who may change `todo` is in `todo/config/members.yaml`: admins approve and merge changes, members push to its repos. A change to `members.yaml` goes in only by pull request, approved by an admin of the namespace or a root admin who neither wrote it nor has their role changed by it. The gateway checks that rule and posts it as the required status `homecloud/approval`.
+People: **alice** is a root admin and created `todo`; **bob** and **carol** are regular users. Who may change `todo` is in `todo/config/members.yaml`: admins approve and merge changes, members push to its repos. A change to `members.yaml` goes in only by pull request, approved by an admin of the namespace or a root admin who neither wrote it nor has their role changed by it. The gateway checks that rule and posts it as the required status `garrison/approval`.
 
 ## 1. Alice adds carol as admin and bob as member
 

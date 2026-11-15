@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/stack"
 )
 
 func mk(t *testing.T, namespace, name string, envs ...string) *stack.Stack {

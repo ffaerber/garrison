@@ -26,7 +26,7 @@
 # Keycloak opens in the browser. OPEN=0 skips that.
 set -euo pipefail
 
-VM=${VM:-homecloud-test}
+VM=${VM:-garrison-test}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
 cd "$ROOT"
@@ -92,10 +92,10 @@ step_install() {
   # cloud with OLLAMA_API_KEY from .env.
   if [ "$LLM" = local ]; then
     in_vm sudo bash -c "gw=\$(ip route | awk '/^default/ { print \$3; exit }')
-      { echo LLM_BASE_URL=http://\$gw:11434/v1; echo LLM_MODEL=$LOCAL_MODEL; } >> homecloud/$ANSWERS"
+      { echo LLM_BASE_URL=http://\$gw:11434/v1; echo LLM_MODEL=$LOCAL_MODEL; } >> garrison/$ANSWERS"
   fi
-  in_vm sudo homecloud/install.sh --answers "homecloud/$ANSWERS"
-  in_vm sudo bash -c 'cd homecloud && test/e2e/add-test-users.sh'
+  in_vm sudo garrison/install.sh --answers "garrison/$ANSWERS"
+  in_vm sudo bash -c 'cd garrison && test/e2e/add-test-users.sh'
   smoke system
 }
 
@@ -144,7 +144,7 @@ step_crud() {
 
 # ---------- helpers ----------
 
-# Puts the LLM's key in /etc/homecloud/llm-api-key in the VM, as a file: never
+# Puts the LLM's key in /etc/garrison/llm-api-key in the VM, as a file: never
 # on a command line, never in Git. A local Ollama needs none, so it gets a
 # placeholder; the cloud gets OLLAMA_API_KEY from this checkout's .env.
 put_llm_key() {
@@ -159,27 +159,27 @@ put_llm_key() {
   (umask 077; printf '%s' "$key" > "$file")
   multipass transfer "$file" "$VM:llm-api-key"
   rm -f "$file"
-  in_vm sudo bash -c 'mkdir -p -m 700 /etc/homecloud && touch /etc/homecloud/llm-api-key && chmod 600 /etc/homecloud/llm-api-key && cat ~ubuntu/llm-api-key > /etc/homecloud/llm-api-key && rm ~ubuntu/llm-api-key'
+  in_vm sudo bash -c 'mkdir -p -m 700 /etc/garrison && touch /etc/garrison/llm-api-key && chmod 600 /etc/garrison/llm-api-key && cat ~ubuntu/llm-api-key > /etc/garrison/llm-api-key && rm ~ubuntu/llm-api-key'
 }
 
 smoke() {
-  in_vm sudo bash -c "cd homecloud && WAIT_READY=600 test/e2e/smoke.sh $*"
+  in_vm sudo bash -c "cd garrison && WAIT_READY=600 test/e2e/smoke.sh $*"
 }
 
-# Puts this checkout into the VM at ~/homecloud: tracked and new files, never
-# ignored ones such as .env, plus the homecloud binary for the host.
+# Puts this checkout into the VM at ~/garrison: tracked and new files, never
+# ignored ones such as .env, plus the garrison binary for the host.
 sync_repo() {
   # Built once before parallel branches start (BUILT=1), never by two at once.
   [ -n "${BUILT:-}" ] || make --no-print-directory build >/dev/null
-  local archive=$ROOT/bin/homecloud-$VM.tar   # the Multipass snap cannot read /tmp; one per VM
-  { git ls-files -co --exclude-standard | while read -r f; do [ -e "$f" ] && echo "$f"; done; echo bin/homecloud; } \
+  local archive=$ROOT/bin/garrison-$VM.tar   # the Multipass snap cannot read /tmp; one per VM
+  { git ls-files -co --exclude-standard | while read -r f; do [ -e "$f" ] && echo "$f"; done; echo bin/garrison; } \
     | tar -c -f "$archive" -T -
-  in_vm rm -rf homecloud homecloud.tar
-  multipass transfer "$archive" "$VM:homecloud.tar"
+  in_vm rm -rf garrison garrison.tar
+  multipass transfer "$archive" "$VM:garrison.tar"
   rm -f "$archive"
-  in_vm mkdir homecloud
-  in_vm tar -x -f homecloud.tar -C homecloud
-  in_vm rm homecloud.tar
+  in_vm mkdir garrison
+  in_vm tar -x -f garrison.tar -C garrison
+  in_vm rm garrison.tar
 }
 
 # path STEP: the steps from base to STEP.
@@ -292,7 +292,7 @@ readdress() {
   in_vm sudo bash -c '
     ip=$(ip -4 route get 1.1.1.1 | sed -n "s/.* src \([0-9.]*\).*/\1/p")
     docker swarm init --force-new-cluster --advertise-addr "$ip" >/dev/null
-    /usr/local/lib/homecloud/repair-services.sh >/dev/null'
+    /usr/local/lib/garrison/repair-services.sh >/dev/null'
 }
 
 # settle: on a clone's first boot, some tasks start before the re-formed swarm

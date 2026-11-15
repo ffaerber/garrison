@@ -38,7 +38,7 @@ services:
       - { source: tls-cert, target: tls.crt }
     volumes:
       - type: bind
-        source: /homecloud/system/gitea
+        source: /garrison/system/gitea
         target: /data
     # The builds network: the user runner and its jobs reach Gitea there.
     networks: [system, traefik-public, builds]
@@ -64,9 +64,9 @@ secrets:
 networks:
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system
   traefik-public:
     external: true
   builds:
     external: true
-    name: homecloud-builds
+    name: garrison-builds

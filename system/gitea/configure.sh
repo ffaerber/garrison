@@ -24,10 +24,10 @@ fi
 auth=$(docker exec -u git "$(container gitea_gitea)" sh -c '
   set -- --name keycloak --provider openidConnect --key gitea \
     --secret "$(cat /run/secrets/gitea-oidc-secret)" --scopes "openid email profile" \
-    --auto-discover-url "https://keycloak.$0/realms/homecloud/.well-known/openid-configuration" \
+    --auto-discover-url "https://keycloak.$0/realms/garrison/.well-known/openid-configuration" \
     --group-claim-name groups --admin-group root-admins
   want=$(printf "%s\n" "$@" | sha256sum)
-  mark=/data/gitea/homecloud-login-source
+  mark=/data/gitea/garrison-login-source
   id=$(gitea admin auth list | awk "NR > 1 && \$2 == \"keycloak\" { print \$1 }")
   if [ -z "$id" ]; then
     gitea admin auth add-oauth "$@" >/dev/null && echo added
@@ -61,7 +61,7 @@ if ! docker secret inspect gitea-runner-token >/dev/null 2>&1; then
   gitea actions generate-runner-token --scope system | tr -d '\r\n' | docker secret create gitea-runner-token - >/dev/null
 fi
 # The user runner registers for the whole instance; jobs pick it with
-# runs-on: homecloud-user. Only the system runner can reach Docker directly.
+# runs-on: garrison-user. Only the system runner can reach Docker directly.
 if ! docker secret inspect gitea-user-runner-token >/dev/null 2>&1; then
   gitea actions generate-runner-token | tr -d '\r\n' | docker secret create gitea-user-runner-token - >/dev/null
 fi

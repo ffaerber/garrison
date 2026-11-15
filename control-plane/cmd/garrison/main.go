@@ -1,4 +1,4 @@
-// Command homecloud applies Git to the cluster. For now it offers the
+// Command garrison applies Git to the cluster. For now it offers the
 // offline parts: validating stack files, checking hostname claims and
 // rendering a stack for Swarm.
 package main
@@ -29,35 +29,35 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"homecloud/control-plane/internal/agentapi"
-	"homecloud/control-plane/internal/apply"
-	"homecloud/control-plane/internal/dashboards"
-	"homecloud/control-plane/internal/events"
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/gitops"
-	"homecloud/control-plane/internal/guard"
-	"homecloud/control-plane/internal/health"
-	"homecloud/control-plane/internal/home"
-	"homecloud/control-plane/internal/hooks"
-	"homecloud/control-plane/internal/hostnames"
-	"homecloud/control-plane/internal/render"
-	"homecloud/control-plane/internal/sandbox"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/agentapi"
+	"garrison/control-plane/internal/apply"
+	"garrison/control-plane/internal/dashboards"
+	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/gitops"
+	"garrison/control-plane/internal/guard"
+	"garrison/control-plane/internal/health"
+	"garrison/control-plane/internal/home"
+	"garrison/control-plane/internal/hooks"
+	"garrison/control-plane/internal/hostnames"
+	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/stack"
 )
 
 const usage = `usage:
-  homecloud validate STACK.yaml...
-  homecloud validate --in NAMESPACE NAME.yaml...   (as config/stacks/NAME.yaml of NAMESPACE)
-  homecloud claims [-reserved FILE] STACK.yaml...
-  homecloud render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
-  homecloud apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
-  homecloud deploy [-once] [-interval DURATION] [-config FILE] [-work DIR]
+  garrison validate STACK.yaml...
+  garrison validate --in NAMESPACE NAME.yaml...   (as config/stacks/NAME.yaml of NAMESPACE)
+  garrison claims [-reserved FILE] STACK.yaml...
+  garrison render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
+  garrison apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
+  garrison deploy [-once] [-interval DURATION] [-config FILE] [-work DIR]
                    [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
-  homecloud applied [-work DIR]
-  homecloud gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
-  homecloud agents [-listen ADDR] [-gitea URL] [-gateway URL] ...
-  homecloud home [-listen ADDR] [-gitea URL] [-events-db URL] ...
-  homecloud guard [-listen ADDR] [-socket PATH] [-network NAME] [-volumes PREFIXES]
+  garrison applied [-work DIR]
+  garrison gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
+  garrison agents [-listen ADDR] [-gitea URL] [-gateway URL] ...
+  garrison home [-listen ADDR] [-gitea URL] [-events-db URL] ...
+  garrison guard [-listen ADDR] [-socket PATH] [-network NAME] [-volumes PREFIXES]
                   [-image REPOSITORY -label LABEL -max-memory BYTES]
 `
 
@@ -196,7 +196,7 @@ func applyCmd(args []string) error {
 	fs.StringVar(&o.Environment, "env", stack.MainEnvironment, "environment to deploy")
 	fs.StringVar(&o.Domain, "domain", "", "installation domain, e.g. example.com")
 	fs.StringVar(&o.DataRoot, "data-root", "", "dataset mount that holds all namespaces (default "+render.DefaultDataRoot+")")
-	state := fs.String("state", "/var/lib/homecloud/control-plane/claims.json", "file that records held hostnames; shared with the deployer")
+	state := fs.String("state", "/var/lib/garrison/control-plane/claims.json", "file that records held hostnames; shared with the deployer")
 	reservedFile := fs.String("reserved", "", "YAML file with a `reserved` list of hostnames")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
@@ -228,8 +228,8 @@ func applyCmd(args []string) error {
 }
 
 const (
-	etcDir  = "/etc/homecloud"
-	workDir = "/var/lib/homecloud/deployer"
+	etcDir  = "/etc/garrison"
+	workDir = "/var/lib/garrison/deployer"
 )
 
 // readEnvFile reads KEY=VALUE lines, as the installer writes install.env.
@@ -506,7 +506,7 @@ func guardCmd(args []string) error {
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	listen := fs.String("listen", ":2375", "address to serve the guarded Docker API on")
 	socket := fs.String("socket", "/var/run/docker.sock", "the Docker daemon's socket")
-	network := fs.String("network", "homecloud-builds", "the only network containers may join")
+	network := fs.String("network", "garrison-builds", "the only network containers may join")
 	volumes := fs.String("volumes", "GITEA-ACTIONS-,act-toolcache", "prefixes of the volumes containers may use, comma-separated")
 	image := fs.String("image", "", "the only image repository containers may run, if set")
 	label := fs.String("label", "", "the label containers must carry, and are known by, if set")
@@ -524,7 +524,7 @@ func renderCmd(args []string) error {
 	var o render.Options
 	fs.StringVar(&o.Environment, "env", stack.MainEnvironment, "environment to render")
 	fs.StringVar(&o.Domain, "domain", "", "installation domain, e.g. example.com")
-	fs.StringVar(&o.DataRoot, "data-root", "", "where the ZFS pool is mounted (default /homecloud)")
+	fs.StringVar(&o.DataRoot, "data-root", "", "where the ZFS pool is mounted (default /garrison)")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		return fmt.Errorf("render needs exactly one stack file")
@@ -549,7 +549,7 @@ func keycloakVerifier(ctx context.Context, domain string, pem []byte, caFile str
 		return nil, fmt.Errorf("%s: no certificate", caFile)
 	}
 	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
-	issuer := "https://keycloak." + domain + "/realms/homecloud"
+	issuer := "https://keycloak." + domain + "/realms/garrison"
 	for {
 		verifier, err := gateway.NewKeycloakVerifier(oidc.ClientContext(ctx, httpClient), issuer, clients)
 		if err == nil {
@@ -580,7 +580,7 @@ func agentsCmd(args []string) error {
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	image := fs.String("sandbox-image", "", "the sandbox image; if empty, turns run in this process")
 	dockerAddr := fs.String("sandbox-docker", "control-plane_sandbox-guard:2375", "the Docker API sandboxes are started through")
-	network := fs.String("sandbox-network", "homecloud-sandboxes", "the network of the sandboxes")
+	network := fs.String("sandbox-network", "garrison-sandboxes", "the network of the sandboxes")
 	sandboxListen := fs.String("sandbox-listen", ":8071", "address to serve the sandboxes on: the LLM and the tools")
 	sandboxAPI := fs.String("sandbox-api", "http://control-plane_agents:8071", "that address, as sandboxes reach it")
 	memory := fs.Int64("sandbox-memory", 1<<30, "memory limit of a sandbox, in bytes")
@@ -727,8 +727,8 @@ type feedFlags struct{ url, passwordFile *string }
 
 func eventsFlags(fs *flag.FlagSet) feedFlags {
 	return feedFlags{
-		url:          fs.String("events-db", "", "the feed's Postgres database, e.g. postgres://homecloud@postgres_postgres:5432/homecloud; empty: no feed"),
-		passwordFile: fs.String("events-db-password-file", "/run/secrets/homecloud-db-password", "its password"),
+		url:          fs.String("events-db", "", "the feed's Postgres database, e.g. postgres://garrison@postgres_postgres:5432/garrison; empty: no feed"),
+		passwordFile: fs.String("events-db-password-file", "/run/secrets/garrison-db-password", "its password"),
 	}
 }
 

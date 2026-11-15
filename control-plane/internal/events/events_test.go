@@ -30,7 +30,7 @@ func TestFromGitea(t *testing.T) {
 		{"workflow_run", `{"action":"completed","repository":{"full_name":"todo/app"},"workflow_run":{"id":9,"name":"pipeline","head_branch":"main","head_sha":"m1","conclusion":"failure"}}`,
 			KindPipeline, "pipeline on main: failure (pipeline)", StatusFailed, "m1", 0},
 		{"workflow_run", `{"action":"in_progress","repository":{"full_name":"todo/app"},"workflow_run":{"id":9}}`, "", "", "", "", 0},
-		{"status", `{"sha":"h2","context":"homecloud/approval","state":"failure","description":"needs an admin","repository":{"full_name":"todo/config"}}`,
+		{"status", `{"sha":"h2","context":"garrison/approval","state":"failure","description":"needs an admin","repository":{"full_name":"todo/config"}}`,
 			KindApprovalCheck, "approval check: needs an admin", StatusRefused, "h2", 0},
 		{"status", `{"sha":"h2","context":"ci","state":"success","repository":{"full_name":"todo/config"}}`, "", "", "", "", 0},
 		{"repository", `{"action":"created","repository":{"full_name":"todo/secret"},"sender":{"login":"alice"}}`,

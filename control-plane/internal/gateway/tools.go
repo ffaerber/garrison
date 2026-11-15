@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/apply"
-	"homecloud/control-plane/internal/gitops"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/apply"
+	"garrison/control-plane/internal/gitops"
 )
 
 // Person is who is asking: the signed-in user behind a tool call.

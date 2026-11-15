@@ -1,4 +1,4 @@
-module homecloud
+module garrison
 
 go 1.26.0
 

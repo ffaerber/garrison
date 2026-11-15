@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/events"
 )
 
 // UserHeader names the person; the sign-in in front sets it, replacing

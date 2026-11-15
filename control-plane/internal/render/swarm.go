@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/stack"
 )
 
 // Names the system stack provides. They are part of the platform's public
@@ -23,9 +23,9 @@ const (
 
 	// Labels of every app service: its namespace, app (the stack file's
 	// name) and environment.
-	LabelNamespace   = "homecloud.namespace"
-	LabelApp         = "homecloud.app"
-	LabelEnvironment = "homecloud.environment"
+	LabelNamespace   = "garrison.namespace"
+	LabelApp         = "garrison.app"
+	LabelEnvironment = "garrison.environment"
 	GPUResource      = "GPU" // generic resource the installer advertises per GPU
 
 	// A private environment's proof that a request came through the
@@ -34,8 +34,8 @@ const (
 	// sign-in's headers. Traefik adds the environment's ingress key to what
 	// it passes on, in IngressHeader; the app has the key in IngressKeyEnv
 	// and believes the sign-in's headers only with it.
-	IngressHeader = "X-Homecloud-Ingress"
-	IngressKeyEnv = "HOMECLOUD_INGRESS_KEY"
+	IngressHeader = "X-Garrison-Ingress"
+	IngressKeyEnv = "GARRISON_INGRESS_KEY"
 )
 
 type Options struct {
@@ -64,7 +64,7 @@ func Image(image, domain, commit string) string {
 
 // DefaultDataRoot is where the installer mounts the dataset that holds all
 // namespaces. The ZFS dataset name is this path without the leading slash.
-const DefaultDataRoot = "/homecloud/ns"
+const DefaultDataRoot = "/garrison/ns"
 
 // StackName is the Swarm stack name of an environment. Hostnames are unique
 // across the installation, so the environment's hostname is used.

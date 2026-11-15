@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"regexp"
 
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // GitProxy lets sandboxes clone and fetch repos over Git's HTTP protocol,

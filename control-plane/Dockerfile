@@ -9,11 +9,11 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY schemas ./schemas
 COPY control-plane ./control-plane
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -o /homecloud ./control-plane/cmd/homecloud
+    CGO_ENABLED=0 go build -trimpath -o /garrison ./control-plane/cmd/garrison
 
 # The Docker CLI deploys stacks; git follows the platform repo; nsenter runs
 # ZFS commands on the host.
 FROM docker:29-cli
 RUN apk add --no-cache git util-linux-misc
-COPY --from=build /homecloud /usr/local/bin/homecloud
-ENTRYPOINT ["/usr/local/bin/homecloud"]
+COPY --from=build /garrison /usr/local/bin/garrison
+ENTRYPOINT ["/usr/local/bin/garrison"]

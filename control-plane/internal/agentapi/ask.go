@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // MaxChain is how many agents one run may hold: the one a person asked,

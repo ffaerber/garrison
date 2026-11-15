@@ -8,7 +8,7 @@
 # and the deployer, like every other change.
 set -euo pipefail
 
-ETC=/etc/homecloud
+ETC=/etc/garrison
 [ -s $ETC/install.env ] || exit 0
 . $ETC/install.env
 export DOMAIN ADMIN_USER ADMIN_EMAIL ETC
@@ -54,7 +54,7 @@ while :; do
     [ -f "$dir/compose.yaml" ] || continue
     [ "$(gitea_api GET "/repos/system/$name/branches/main")" = 200 ] || { behind+=" $name"; continue; }
     head=$(grep -o '"id":"[0-9a-f]*"' "$work/body" | head -n1 | cut -d'"' -f4)
-    homecloud applied 2>/dev/null | grep -qx "$name $head" || behind+=" $name"
+    garrison applied 2>/dev/null | grep -qx "$name $head" || behind+=" $name"
   done
   [ -z "$behind" ] && break
   if [ $SECONDS -ge $deadline ]; then

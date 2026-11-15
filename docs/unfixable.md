@@ -59,4 +59,4 @@ Whoever is root on the machine, or can use its Docker daemon, can read every sec
 The LLM sometimes refuses a harmless request or writes a sloppy change (seen in the tests: an agent took a request for a test note as a prompt injection, and another listed bob under both roles in `members.yaml`).
 
 - **Why:** a language model's judgement; better prompts and models reduce it but never remove it.
-- **Instead:** nothing an agent does takes effect without a person: changes are pull requests, checked by `homecloud/approval` and merged by someone allowed to. The tests retry where a model may need a second ask.
+- **Instead:** nothing an agent does takes effect without a person: changes are pull requests, checked by `garrison/approval` and merged by someone allowed to. The tests retry where a model may need a second ask.

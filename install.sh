@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Home Cloud Platform installer. See docs/spec.md, "Installation".
+# Garrison installer. See docs/spec.md, "Installation".
 #
 #   sudo ./install.sh --answers FILE
 #
@@ -7,8 +7,8 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ETC=/etc/homecloud
-POOL=homecloud
+ETC=/etc/garrison
+POOL=garrison
 
 say()  { printf '\n==> [%dm%02ds] %s\n' $((SECONDS / 60)) $((SECONDS % 60)) "$*"; }
 fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
@@ -114,7 +114,7 @@ if [ "$state" = inactive ]; then
 elif [ "$(docker info --format '{{.Swarm.ControlAvailable}}')" != true ]; then
   fail "this machine is already a worker in another swarm"
 fi
-for net in traefik-public homecloud-system homecloud-builds; do
+for net in traefik-public garrison-system garrison-builds; do
   docker network inspect "$net" >/dev/null 2>&1 || docker network create --driver overlay --attachable "$net" >/dev/null
 done
 
@@ -125,8 +125,8 @@ if ! zpool list "$POOL" >/dev/null 2>&1; then
     vdev=$POOL_DEVICE
   else
     # No dedicated device: back the pool with a sparse file on the root disk.
-    vdev=/var/lib/homecloud/pool.img
-    mkdir -p /var/lib/homecloud
+    vdev=/var/lib/garrison/pool.img
+    mkdir -p /var/lib/garrison
     [ -e "$vdev" ] || truncate -s "$POOL_SIZE" "$vdev"
   fi
   zpool create -o ashift=12 -O compression=lz4 -O atime=off -m "/$POOL" "$POOL" "$vdev"
@@ -140,16 +140,16 @@ done
 # an app before each redeploy, and keeps its own; restores use either.
 mkdir -p /etc/sanoid
 cat > /etc/sanoid/sanoid.conf <<SANOID
-# Written by the homecloud installer; changes are overwritten.
+# Written by the garrison installer; changes are overwritten.
 [$POOL/system]
-  use_template = homecloud
+  use_template = garrison
   recursive = yes
 
 [$POOL/ns]
-  use_template = homecloud
+  use_template = garrison
   recursive = yes
 
-[template_homecloud]
+[template_garrison]
   frequently = 0
   hourly = 24
   daily = 30
@@ -161,7 +161,7 @@ SANOID
 # Sanoid caches its list of datasets; without --force-update a new app's
 # datasets would wait for the cache to expire before their first snapshot.
 mkdir -p /etc/systemd/system/sanoid.service.d
-cat > /etc/systemd/system/sanoid.service.d/homecloud.conf <<UNIT
+cat > /etc/systemd/system/sanoid.service.d/garrison.conf <<UNIT
 [Service]
 ExecStart=
 ExecStart=/usr/sbin/sanoid --take-snapshots --force-update --verbose
@@ -174,7 +174,7 @@ say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
 has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password homecloud-db-password alerts-token gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password garrison-db-password alerts-token gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.
@@ -216,18 +216,18 @@ install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-ho
 # Gitea's registry, at git.<domain>, is used by this machine's Docker daemon:
 # builds push to it and Swarm pulls from it. The daemon reaches it through
 # Traefik here and trusts the installation's certificate.
-sed -i '/# homecloud registry$/d' /etc/hosts
-echo "127.0.0.1 git.$DOMAIN # homecloud registry" >> /etc/hosts
+sed -i '/# garrison registry$/d' /etc/hosts
+echo "127.0.0.1 git.$DOMAIN # garrison registry" >> /etc/hosts
 # cloud-init, where present, rewrites /etc/hosts at every boot; keep the entry.
 if [ -d /etc/cloud/cloud.cfg.d ]; then
-  printf '# Written by the Home Cloud installer: keep its /etc/hosts entry.\nmanage_etc_hosts: false\n' > /etc/cloud/cloud.cfg.d/99-homecloud.cfg
+  printf '# Written by the Garrison installer: keep its /etc/hosts entry.\nmanage_etc_hosts: false\n' > /etc/cloud/cloud.cfg.d/99-garrison.cfg
 fi
 install -D -m 644 "$ETC/tls.crt" "/etc/docker/certs.d/git.$DOMAIN/ca.crt"
 # With the containerd image store, Docker fetches registry tokens without
 # certs.d, so a self-signed certificate must also be in the system's trust
 # store. Docker reads that store when it starts.
-if [ "$TLS_MODE" = selfsigned ] && ! cmp -s "$ETC/tls.crt" /usr/local/share/ca-certificates/homecloud.crt; then
-  install -D -m 644 "$ETC/tls.crt" /usr/local/share/ca-certificates/homecloud.crt
+if [ "$TLS_MODE" = selfsigned ] && ! cmp -s "$ETC/tls.crt" /usr/local/share/ca-certificates/garrison.crt; then
+  install -D -m 644 "$ETC/tls.crt" /usr/local/share/ca-certificates/garrison.crt
   update-ca-certificates >/dev/null 2>&1
   systemctl restart docker
   # Services of an existing install come back without their secrets and configs.
@@ -283,33 +283,33 @@ for name in $BOOTSTRAP; do
 done
 
 # ---------- boot repair ----------
-install -D -m 755 "$ROOT/host/repair-services.sh" /usr/local/lib/homecloud/repair-services.sh
-cat > /etc/systemd/system/homecloud-repair.service <<UNIT
+install -D -m 755 "$ROOT/host/repair-services.sh" /usr/local/lib/garrison/repair-services.sh
+cat > /etc/systemd/system/garrison-repair.service <<UNIT
 [Unit]
-Description=Home Cloud: give Swarm services back their secrets and configs after Docker starts
+Description=Garrison: give Swarm services back their secrets and configs after Docker starts
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/lib/homecloud/repair-services.sh
+ExecStart=/usr/local/lib/garrison/repair-services.sh
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable homecloud-repair >/dev/null 2>&1
+systemctl enable garrison-repair >/dev/null 2>&1
 # Also now: a container left without its secrets by an earlier Docker restart
 # is replaced instead of being taken for healthy.
-/usr/local/lib/homecloud/repair-services.sh
+/usr/local/lib/garrison/repair-services.sh
 
 # ---------- BuildKit, for the user namespaces' pipelines ----------
 # It pushes to Gitea's registry at its public name, which it reaches on the
 # host through Traefik and trusts with the installation's certificate.
 {
-  echo "# Written by the Home Cloud installer."
+  echo "# Written by the Garrison installer."
   echo "[registry.\"git.$DOMAIN\"]"
-  echo "  ca = [\"/etc/homecloud/ca.crt\"]"
+  echo "  ca = [\"/etc/garrison/ca.crt\"]"
   if [ -n "$REGISTRY_MIRROR" ]; then
     echo "[registry.\"docker.io\"]"
     echo "  mirrors = [\"${REGISTRY_MIRROR#https://}\"]"
@@ -317,17 +317,17 @@ systemctl enable homecloud-repair >/dev/null 2>&1
   echo "[worker.oci]"
   echo "  max-parallelism = 2"
 } > "$ETC/buildkitd.toml"
-install -D -m 755 "$ROOT/host/buildkit.sh" /usr/local/lib/homecloud/buildkit.sh
-cat > /etc/systemd/system/homecloud-buildkit.service <<UNIT
+install -D -m 755 "$ROOT/host/buildkit.sh" /usr/local/lib/garrison/buildkit.sh
+cat > /etc/systemd/system/garrison-buildkit.service <<UNIT
 [Unit]
-Description=Home Cloud: BuildKit for the user namespaces' pipelines
+Description=Garrison: BuildKit for the user namespaces' pipelines
 After=docker.service
 Requires=docker.service
 
 [Service]
-ExecStartPre=-/usr/bin/docker rm -f homecloud-buildkit
-ExecStart=/usr/local/lib/homecloud/buildkit.sh
-ExecStop=/usr/bin/docker stop homecloud-buildkit
+ExecStartPre=-/usr/bin/docker rm -f garrison-buildkit
+ExecStart=/usr/local/lib/garrison/buildkit.sh
+ExecStop=/usr/bin/docker stop garrison-buildkit
 Restart=always
 RestartSec=5
 
@@ -335,8 +335,8 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable homecloud-buildkit >/dev/null 2>&1
-systemctl restart homecloud-buildkit
+systemctl enable garrison-buildkit >/dev/null 2>&1
+systemctl restart garrison-buildkit
 
 # ---------- control plane ----------
 say "Building the control plane in Gitea"
@@ -369,21 +369,21 @@ echo "  built $(grep -oE 'system/control-plane:[A-Za-z0-9._-]+' "$work/body" | h
 
 say "Handing over to the deployer"
 # The host has the CLI too: it deploys once here, so that failures stop
-# the install, and stays for admins (homecloud applied, apply, ...).
+# the install, and stays for admins (garrison applied, apply, ...).
 # Interim: it is built into bin/ before installing; it will ship as a release binary.
-if [ -x "$ROOT/bin/homecloud" ]; then
-  install -m 755 "$ROOT/bin/homecloud" /usr/local/bin/homecloud
+if [ -x "$ROOT/bin/garrison" ]; then
+  install -m 755 "$ROOT/bin/garrison" /usr/local/bin/garrison
 fi
-command -v homecloud >/dev/null || fail "homecloud binary missing: run 'make build' first"
+command -v garrison >/dev/null || fail "garrison binary missing: run 'make build' first"
 # Earlier versions ran the deployer as a host service; it now runs in Swarm.
-if [ -e /etc/systemd/system/homecloud-controller.service ]; then
-  systemctl disable --now homecloud-controller >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/homecloud-controller.service
+if [ -e /etc/systemd/system/garrison-controller.service ]; then
+  systemctl disable --now garrison-controller >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/garrison-controller.service
   systemctl daemon-reload
 fi
-mkdir -p -m 700 /var/lib/homecloud/deployer
-homecloud deploy -once
-for name in $(homecloud applied | awk '{ print $1 }'); do
+mkdir -p -m 700 /var/lib/garrison/deployer
+garrison deploy -once
+for name in $(garrison applied | awk '{ print $1 }'); do
   wait_stack "$name"
 done
 image=$(docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
@@ -392,7 +392,7 @@ echo "  the deployer runs $image"
 
 say "Done"
 cat <<MSG
-  Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "homecloud")
+  Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "garrison")
   Gitea     https://git.$DOMAIN
   Chat      https://chat.$DOMAIN  (one agent per namespace)
   Grafana   https://grafana.$DOMAIN

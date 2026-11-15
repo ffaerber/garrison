@@ -10,7 +10,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../../installer/lib.sh"
-. /etc/homecloud/install.env
+. /etc/garrison/install.env
 
 [ $# -ge 2 ] || { echo "usage: add-user.sh NAME EMAIL [--admin]" >&2; exit 2; }
 export NAME=$1 EMAIL=$2 ADMIN=0
@@ -26,7 +26,7 @@ keycloak_login >/dev/null
 # `-e VAR` without a value hands the variable over without putting it on a command line.
 docker exec -i -e NAME -e EMAIL -e ADMIN -e USER_PASSWORD "$(container keycloak_keycloak)" bash -s <<'IN_CONTAINER'
 set -euo pipefail
-realm=homecloud
+realm=garrison
 kc() { /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm.config; }
 id_of() { kc get "$1" -r "$realm" "${@:2}" --fields id --format csv --noquotes; }
 

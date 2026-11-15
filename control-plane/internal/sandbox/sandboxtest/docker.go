@@ -273,8 +273,8 @@ func fetch(c *Container, target string) string {
 }
 
 func (d *Docker) listTools(c *Container) string {
-	req, _ := http.NewRequest("GET", c.env("HOMECLOUD_API")+"/tools", nil)
-	req.Header.Set("Authorization", "Bearer "+c.env("HOMECLOUD_TOKEN"))
+	req, _ := http.NewRequest("GET", c.env("GARRISON_API")+"/tools", nil)
+	req.Header.Set("Authorization", "Bearer "+c.env("GARRISON_TOKEN"))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "tools: " + err.Error()
@@ -289,8 +289,8 @@ func (d *Docker) listTools(c *Container) string {
 
 func (d *Docker) callTool(c *Container, name, args string) string {
 	body, _ := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(args)})
-	req, _ := http.NewRequest("POST", c.env("HOMECLOUD_API")+"/tools/call", strings.NewReader(string(body)))
-	req.Header.Set("Authorization", "Bearer "+c.env("HOMECLOUD_TOKEN"))
+	req, _ := http.NewRequest("POST", c.env("GARRISON_API")+"/tools/call", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+c.env("GARRISON_TOKEN"))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err.Error()

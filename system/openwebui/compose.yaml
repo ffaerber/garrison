@@ -19,12 +19,12 @@ services:
         export WEBUI_ADMIN_PASSWORD="$$(</run/secrets/admin-password)"
         cat /etc/ssl/certs/ca-certificates.crt /run/secrets/tls.crt > /tmp/ca.pem
         certifi=$$(python -c 'import certifi; print(certifi.where())')
-        grep -q 'homecloud' "$$certifi" || { echo '# homecloud'; cat /run/secrets/tls.crt; } >> "$$certifi"
+        grep -q 'garrison' "$$certifi" || { echo '# garrison'; cat /run/secrets/tls.crt; } >> "$$certifi"
         export SSL_CERT_FILE=/tmp/ca.pem REQUESTS_CA_BUNDLE=/tmp/ca.pem
         exec bash start.sh
     environment:
       WEBUI_URL: https://chat.${DOMAIN}
-      WEBUI_NAME: Home Cloud
+      WEBUI_NAME: Garrison
       # Configuration comes from here, i.e. from Git, on every start.
       ENABLE_PERSISTENT_CONFIG: "False"
       # Local admin for the gateway's sync. People never use it.
@@ -35,7 +35,7 @@ services:
       # Sign-in through Keycloak.
       ENABLE_OAUTH_SIGNUP: "True"
       OAUTH_CLIENT_ID: openwebui
-      OPENID_PROVIDER_URL: https://keycloak.${DOMAIN}/realms/homecloud/.well-known/openid-configuration
+      OPENID_PROVIDER_URL: https://keycloak.${DOMAIN}/realms/garrison/.well-known/openid-configuration
       OPENID_REDIRECT_URI: https://chat.${DOMAIN}/oauth/oidc/callback
       OAUTH_PROVIDER_NAME: Keycloak
       OAUTH_SCOPES: openid email profile
@@ -59,7 +59,7 @@ services:
       OPENAI_API_BASE_URL: http://control-plane_agents:8070/v1
       OPENAI_API_CONFIGS: >-
         {"0": {"enable": true, "auth_type": "system_oauth",
-          "headers": {"X-Homecloud-Chat": "{{`{{CHAT_ID}}`}}", "X-Homecloud-Task": "{{`{{TASK}}`}}"}}}
+          "headers": {"X-Garrison-Chat": "{{`{{CHAT_ID}}`}}", "X-Garrison-Task": "{{`{{TASK}}`}}"}}}
       DEFAULT_MODELS: system/operator
       # One channel per namespace, kept by the gateway: the team chat
       # where people mention the namespace's agents.
@@ -77,7 +77,7 @@ services:
       - { source: tls-cert, target: tls.crt }
     volumes:
       - type: bind
-        source: /homecloud/system/openwebui
+        source: /garrison/system/openwebui
         target: /app/backend/data
     # The agent service on the system network; Keycloak at its public name through Traefik.
     networks: [system, traefik-public]
@@ -104,6 +104,6 @@ secrets:
 networks:
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system
   traefik-public:
     external: true

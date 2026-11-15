@@ -22,10 +22,10 @@ import (
 	"syscall"
 	"time"
 
-	"homecloud/control-plane/internal/apply"
-	"homecloud/control-plane/internal/events"
-	"homecloud/control-plane/internal/hooks"
-	"homecloud/control-plane/internal/system"
+	"garrison/control-plane/internal/apply"
+	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/hooks"
+	"garrison/control-plane/internal/system"
 )
 
 // LastStack is deployed after every other stack, because deploying it

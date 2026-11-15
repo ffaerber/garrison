@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // withInternet gives s's sandboxes the proxy. everywhere lets it dial this

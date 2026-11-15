@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // InternetProxy is the sandboxes' only way out: an HTTP proxy (CONNECT for
@@ -40,7 +40,7 @@ type InternetProxy struct {
 func (p *InternetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c, ok := p.caller(r)
 	if !ok {
-		w.Header().Set("Proxy-Authenticate", `Basic realm="homecloud sandbox"`)
+		w.Header().Set("Proxy-Authenticate", `Basic realm="garrison sandbox"`)
 		http.Error(w, "not a sandbox in a turn", http.StatusProxyAuthRequired)
 		return
 	}

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"homecloud/control-plane/internal/agents"
+	"garrison/control-plane/internal/agents"
 )
 
 // grantsGitea is homepage/todo: alice is an admin, bob a member, carol is

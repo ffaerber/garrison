@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/events"
 )
 
 // Alert is one alert of Alertmanager's webhook.

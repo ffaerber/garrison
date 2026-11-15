@@ -19,7 +19,7 @@ The agents run on Ollama on this computer by default (`qwen3.8-64k`), reached fr
 
 | Step | Does | Starts from |
 | --- | --- | --- |
-| `base` | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/homecloud` | nothing |
+| `base` | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` | nothing |
 | `install` | Runs the installer, adds the test people, checks the system stack (`smoke.sh system`) | `base` |
 | `login` | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do (`smoke.sh login`) | `install` |
 | `platform` | The deployer deploying from Gitea, monitoring data, dashboards from Git (every panel's query runs, a committed dashboard appears, an edit in Grafana is put back), app stacks, private environments, hostname claims (`smoke.sh platform`) | `login` |
@@ -41,12 +41,12 @@ Each step copies this checkout into the VM first: tracked and new files, never i
 A green run points this computer's DNS at the VM and opens Keycloak (`OPEN=0` skips that). By hand:
 
 ```
-test/vm/dns.sh          # *.homecloud.test resolves to the VM from this computer
+test/vm/dns.sh          # *.garrison.test resolves to the VM from this computer
 test/vm/dns.sh --off    # undo
-multipass exec homecloud-test -- sudo cat /etc/homecloud/admin-password
+multipass exec garrison-test -- sudo cat /etc/garrison/admin-password
 ```
 
-Then open `https://chat.homecloud.test`, `https://git.homecloud.test`, `https://grafana.homecloud.test`, `https://keycloak.homecloud.test` or any deployed stack. The certificate is self-signed, so the browser asks once per hostname. The DNS setting lasts until a reboot or until the VM is recreated. It needs systemd-resolved on this computer.
+Then open `https://chat.garrison.test`, `https://git.garrison.test`, `https://grafana.garrison.test`, `https://keycloak.garrison.test` or any deployed stack. The certificate is self-signed, so the browser asks once per hostname. The DNS setting lasts until a reboot or until the VM is recreated. It needs systemd-resolved on this computer.
 
 ## Getting changes onto an installed machine
 

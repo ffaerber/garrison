@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"homecloud/control-plane/internal/agents"
+	"garrison/control-plane/internal/agents"
 )
 
 // fakeGitea answers like Gitea: alice may write to system, bob may only read.

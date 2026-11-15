@@ -1,12 +1,12 @@
 // The platform's tools in Pi. The agent service lists the agent's gateway
 // tools (repos, stacks, logs, changes, screenshots, skills) and runs each call
 // at the gateway, as the person whose message started the turn. The sandbox
-// holds no token of its own: HOMECLOUD_TOKEN only names this chat to the agent
+// holds no token of its own: GARRISON_TOKEN only names this chat to the agent
 // service, and counts only while a turn runs.
 //
 // With the gateway's propose_patch, the agent gets propose_workspace_changes
 // instead: it turns the changes in a checkout of a platform repo (cloned from
-// HOMECLOUD_GIT) into a pull request, by the person or, where only its grants
+// GARRISON_GIT) into a pull request, by the person or, where only its grants
 // allow it, by the agent's own account, and adds later changes of the same
 // checkout to it. ask_agent and merge_change come from the agent service and
 // the gateway like any other tool.
@@ -16,8 +16,8 @@ import { execFile } from "node:child_process";
 import { request } from "node:http";
 import { resolve } from "node:path";
 
-const api = process.env.HOMECLOUD_API ?? "";
-const token = process.env.HOMECLOUD_TOKEN ?? "";
+const api = process.env.GARRISON_API ?? "";
+const token = process.env.GARRISON_TOKEN ?? "";
 
 type Spec = { name: string; description: string; input_schema: Record<string, unknown> };
 type Result = { text: string; is_error?: boolean };
@@ -83,8 +83,8 @@ async function proposeWorkspace(p: Proposal, signal?: AbortSignal) {
     throw new Error(`${top} is not a clone of a platform repo: clone it from ${api}/git/<namespace>/<repo>.git`);
   }
   const [, namespace, repo] = m;
-  const branch = await config(top, "homecloud.branch");
-  let base = await config(top, "homecloud.base");
+  const branch = await config(top, "garrison.branch");
+  let base = await config(top, "garrison.base");
   if (!branch && p.base) base = p.base;
   if (!base) {
     base = (await git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").catch(() => "origin/main")).trim().replace(/^origin\//, "");
@@ -93,7 +93,7 @@ async function proposeWorkspace(p: Proposal, signal?: AbortSignal) {
   let since: string;
   if (branch) {
     // What was proposed last time is on the branch already.
-    since = await config(top, "homecloud.proposed");
+    since = await config(top, "garrison.proposed");
   } else {
     await git(top, "fetch", "-q", "origin", base);
     since = (await git(top, "merge-base", "HEAD", "FETCH_HEAD")).trim();
@@ -107,16 +107,16 @@ async function proposeWorkspace(p: Proposal, signal?: AbortSignal) {
   );
   const proposed = (await git(top, "write-tree")).trim();
   const onto = text.match(/^Branch: (\S+)$/m)?.[1] ?? branch;
-  await git(top, "config", "homecloud.branch", onto);
-  await git(top, "config", "homecloud.base", base);
-  await git(top, "config", "homecloud.proposed", proposed);
+  await git(top, "config", "garrison.branch", onto);
+  await git(top, "config", "garrison.base", base);
+  await git(top, "config", "garrison.proposed", proposed);
   return text;
 }
 
 export default async function (pi: ExtensionAPI) {
   if (!api) return;
   const res = await call("/tools");
-  if (res.status !== 200) throw new Error(`homecloud: cannot list the tools: ${res.status} ${res.text}`);
+  if (res.status !== 200) throw new Error(`garrison: cannot list the tools: ${res.status} ${res.text}`);
   const specs = JSON.parse(res.text) as Spec[];
   for (const spec of specs) {
     if (spec.name === "propose_patch") {
@@ -124,7 +124,7 @@ export default async function (pi: ExtensionAPI) {
         name: "propose_workspace_changes",
         label: "propose_workspace_changes",
         description:
-          "Proposes the changes in a checkout of a platform repo in your workspace (cloned from $HOMECLOUD_GIT/<namespace>/<repo>.git) as a pull request: by the person you talk to, or by your own account where only your grants allow it. Every file added, changed or deleted since it was cloned goes in. Called again on the same checkout, it adds what changed since to the same pull request. Give the person the link.",
+          "Proposes the changes in a checkout of a platform repo in your workspace (cloned from $GARRISON_GIT/<namespace>/<repo>.git) as a pull request: by the person you talk to, or by your own account where only your grants allow it. Every file added, changed or deleted since it was cloned goes in. Called again on the same checkout, it adds what changed since to the same pull request. Give the person the link.",
         parameters: Type.Object({
           path: Type.String({ description: "the checkout, relative to /data/work, e.g. todo" }),
           title: Type.String({ description: "short title of the change" }),

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // Gateway calls the gateway's MCP tools as a person, for one agent: the
@@ -24,7 +24,7 @@ type Gateway struct {
 }
 
 // AgentHeader names the agent to the gateway.
-const AgentHeader = "X-Homecloud-Agent"
+const AgentHeader = "X-Garrison-Agent"
 
 // As is whom a call to the gateway acts for: the person whose token it is,
 // or, without one, a routine's owner, with the agent's own account.

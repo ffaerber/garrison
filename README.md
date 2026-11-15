@@ -1,4 +1,4 @@
-# Home Cloud Platform
+# Garrison
 
 A home cloud you run by talking to it, with Git underneath. See [docs/spec.md](docs/spec.md) for the design and [docs/status.md](docs/status.md) for what is built.
 

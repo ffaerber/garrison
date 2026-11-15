@@ -12,8 +12,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"homecloud/control-plane/internal/render"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/stack"
 )
 
 // Runner runs a command with optional extra environment (KEY=VALUE, on top

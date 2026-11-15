@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/sandbox"
-	"homecloud/control-plane/internal/sandbox/sandboxtest"
+	"garrison/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/sandbox/sandboxtest"
 )
 
 // withSandboxes gives s sandboxes on a fake Docker, whose fake Pi calls back
@@ -64,7 +64,7 @@ func TestAChatRunsInItsOwnSandbox(t *testing.T) {
 		t.Errorf("created %d, running %d", d.Created, d.Running())
 	}
 	for _, c := range d.Containers {
-		if c.Image != "registry/system/sandbox:1" || c.Labels[sandbox.Label] != "true" || c.Labels["homecloud.person"] != "alice" {
+		if c.Image != "registry/system/sandbox:1" || c.Labels[sandbox.Label] != "true" || c.Labels["garrison.person"] != "alice" {
 			t.Errorf("container %+v", c)
 		}
 		for _, e := range c.Env {
@@ -82,7 +82,7 @@ func TestTheSandboxActsOnlyDuringATurn(t *testing.T) {
 	var token string
 	for _, c := range d.Containers {
 		for _, e := range c.Env {
-			if v, ok := strings.CutPrefix(e, "HOMECLOUD_TOKEN="); ok {
+			if v, ok := strings.CutPrefix(e, "GARRISON_TOKEN="); ok {
 				token = v
 			}
 		}

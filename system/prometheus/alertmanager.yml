@@ -2,14 +2,14 @@
 # feed and starts the routines waiting for it. It sends the token of the
 # secret alerts-token: the agents' sandboxes can reach that service too.
 route:
-  receiver: homecloud
+  receiver: garrison
   group_by: [alertname, namespace, app, environment, service]
   group_wait: 10s
   group_interval: 1m
   repeat_interval: 4h
 
 receivers:
-  - name: homecloud
+  - name: garrison
     webhook_configs:
       - url: http://control-plane_agents:8073/alerts
         send_resolved: true

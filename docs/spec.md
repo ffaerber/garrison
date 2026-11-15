@@ -1,4 +1,4 @@
-# Home Cloud Platform — MVP Spec
+# Garrison — MVP Spec
 
 A home cloud you run by talking to it, with Git underneath. This spec defines the first buildable version: a single Ubuntu machine running Docker Swarm, set up by one command, managed through a dashboard with a team chat where agents propose changes as pull requests.
 
@@ -40,7 +40,7 @@ Each component is a repo of the `system` organisation in Gitea, named after its 
 | --- | --- | --- | --- |
 | 1 | `postgres` | Postgres | Shared database for Keycloak, Gitea, Grafana |
 | 2 | `traefik` | Traefik | Routing, wildcard TLS, login check for tools without their own |
-| 3 | `keycloak` | Keycloak | Single sign-on for all people, in the realm `homecloud` |
+| 3 | `keycloak` | Keycloak | Single sign-on for all people, in the realm `garrison` |
 | 4 | `sso` | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
 | 5 | `gitea` | Gitea + registry | Code, config, history, images |
 | 6 | `runner` | Gitea Actions runner | Builds the platform's own images; serves the `system` organisation only, because its jobs reach the Docker daemon |
@@ -124,7 +124,7 @@ environments:
 - The deployer rejects a deploy whose claimed hostnames are already held by another stack or reserved by root. Claims are first come, first served across all namespaces.
 - `dataset` is a ZFS dataset owned by the stack; `share` is a library other stacks in the namespace can read.
 - A volume is mounted at `/<volume name>` in the container, so `config` appears at `/config`; `path` overrides this.
-- Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login. Apps share Traefik's network, so one could call another directly and name any person in the login's headers: a private environment's services get an ingress key (`HOMECLOUD_INGRESS_KEY`), which Traefik adds to every request it passes on (`X-Homecloud-Ingress`), and an app believes the login's headers only with it.
+- Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login. Apps share Traefik's network, so one could call another directly and name any person in the login's headers: a private environment's services get an ingress key (`GARRISON_INGRESS_KEY`), which Traefik adds to every request it passes on (`X-Garrison-Ingress`), and an app believes the login's headers only with it.
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
 - The stack file carries no policy, and lives in the namespace's config repo, so changing how an app runs needs an admin's approval, like `members.yaml`; nobody who can only write an app repo can change it. The deployer and the approval check reject any key the schema does not know.
 - `env` sets environment variables; `{{url}}` and `{{host}}` in a value become the environment's address. An image may say `{{registry}}/<namespace>/<name>:{{commit}}`: the deployer then deploys a commit only once the namespace's pipeline has pushed that image, so a failing pipeline leaves the app at its last good commit.
@@ -161,7 +161,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 - Rights to change flow downward only: root, then namespace, then repository. No scope can change the one above it.
 - Agents propose; the deployer enforces. Approvals are checked by the deployer, never by the agent.
 - Nobody approves their own role change. Namespace config changes always need a human merge.
-- A namespace's `config/members.yaml` names its admins and members; the gateway keeps the Gitea teams `admins` and `members` in line with it. Its `main` branch takes changes only by pull request, approved by an admin of the namespace or a root admin who neither wrote it (opened it or pushed to its branch, as Gitea's activity feed of the repo tells) nor has their role changed by it; the gateway checks this and posts the required status `homecloud/approval`. The scenarios in `docs/scenarios.md` play this out through the agents.
+- A namespace's `config/members.yaml` names its admins and members; the gateway keeps the Gitea teams `admins` and `members` in line with it. Its `main` branch takes changes only by pull request, approved by an admin of the namespace or a root admin who neither wrote it (opened it or pushed to its branch, as Gitea's activity feed of the repo tells) nor has their role changed by it; the gateway checks this and posts the required status `garrison/approval`. The scenarios in `docs/scenarios.md` play this out through the agents.
 - Per repo and branch, an autonomy level decides how far agents go:
 
 | Level | Agent may | Human does |
@@ -211,7 +211,7 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 - A namespace's agents are folders under `agents/` in its repo config: `agent.yaml` (description, model, tools, skills) and `prompt.md`, with skills in the Agent Skills format (`SKILL.md`) under `skills/`. A new config repo gets the operator; a namespace without an `agents/` folder has it too. `system/config` holds the system namespace's agents, and only root admins approve changes to it. See [agents.md](agents.md).
 - Open WebUI's one model connection is the agent service, an OpenAI-compatible API in the control plane whose models are the agents, `<namespace>/<agent>`. Open WebUI sends it the person's Keycloak token and the chat's id; it has no LLM key and no tools itself. The agent service runs each turn: the LLM, whose key only it holds, with the agent's prompt and the platform's rules after it, calling the agent's tools at the gateway as the person. Tool calls show as the answer's reasoning. Open WebUI's own tasks (titles, tags) go straight to the LLM.
 - The gateway serves an agent only the tools its `agent.yaml` lists (plus `load_skill` and `read_skill_file` if it has skills); a call that names no agent of a namespace gets none. It keeps an entry per agent in Open WebUI, for everyone, or only for the namespace's people if the agent works on a private repo, and one channel per namespace, for its people, adding and removing them as folders and organisations come and go. People can also chat with an agent privately.
-- The `homecloud/approval` check on config pull requests also checks the agent files: an agent with an unknown tool or skill, or without a prompt, fails it.
+- The `garrison/approval` check on config pull requests also checks the agent files: an agent with an unknown tool or skill, or without a prompt, fails it.
 - The gateway is an MCP server. The agent service calls it with the signed-in person's Keycloak access token, so every tool acts with that person's rights: reads and proposals go to Gitea as them. Neither is reachable from outside.
 - Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, propose a change to a file, and take a screenshot of a page. As the person, they make namespaces (root admins only, as Gitea allows) and empty repos (a namespace's admins); everything in a repo still comes as a pull request. Every agent's system prompt says how the home cloud works: namespaces, `system` only for the platform, apps as files in `config/stacks/`, secrets made by the deployer.
 - `screenshot` loads a page of the installation in the control plane's headless Chrome, signed in as the person: to private environments and the dashboard the browser sends their Keycloak token, which the sign-in in front of them accepts (Open WebUI's tokens name `sso` as an audience), and Traefik removes it before the request reaches the app. Other pages, which have no sign-in in front to remove it, get no token. The browser's only network reaches Traefik and the gateway, every name it looks up goes to Traefik, and the gateway refuses its requests to other names. Each screenshot gets a fresh browser context. The PNG becomes a pull request, as with `propose_change`.

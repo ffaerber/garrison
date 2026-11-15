@@ -13,7 +13,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 
-	"homecloud/schemas"
+	"garrison/schemas"
 )
 
 // MainEnvironment is the environment whose hostname is the stack name.
@@ -63,7 +63,7 @@ var (
 )
 
 // schemaURL only names the embedded schema in error messages.
-const schemaURL = "homecloud:///schemas/stack.schema.json"
+const schemaURL = "garrison:///schemas/stack.schema.json"
 
 // maxLabel is the longest DNS label; every hostname is one label.
 const maxLabel = 63

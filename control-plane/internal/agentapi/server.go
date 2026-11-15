@@ -22,10 +22,10 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/events"
-	"homecloud/control-plane/internal/gateway"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // Agents finds the agents defined in the namespaces' config repos.
@@ -54,8 +54,8 @@ type Server struct {
 
 // Headers Open WebUI's connection fills in for each request.
 const (
-	ChatHeader = "X-Homecloud-Chat" // {{CHAT_ID}}
-	TaskHeader = "X-Homecloud-Task" // {{TASK}}: title, tags, follow-ups...
+	ChatHeader = "X-Garrison-Chat" // {{CHAT_ID}}
+	TaskHeader = "X-Garrison-Task" // {{TASK}}: title, tags, follow-ups...
 )
 
 func (s *Server) Handler() http.Handler {
@@ -77,7 +77,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]any, 0, len(list))
 	for _, a := range list {
-		data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "homecloud", "name": a.ID()})
+		data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "garrison", "name": a.ID()})
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})
 }
@@ -332,5 +332,5 @@ func writeJSON(w http.ResponseWriter, v any) {
 func apiError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg, "type": "homecloud"}})
+	json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg, "type": "garrison"}})
 }

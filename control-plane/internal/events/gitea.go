@@ -30,7 +30,7 @@ const (
 )
 
 // ApprovalContext is the commit status the gateway's approval check posts.
-const ApprovalContext = "homecloud/approval"
+const ApprovalContext = "garrison/approval"
 
 type giteaRepo struct {
 	Name     string `json:"name"`

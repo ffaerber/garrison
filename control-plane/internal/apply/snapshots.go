@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/render"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/stack"
 )
 
 // Snapshot prefixes. Sanoid's own snapshots start with autosnap_.
@@ -27,7 +27,7 @@ const (
 
 // RestoredProperty is the ZFS user property on an environment's dataset that
 // names the last restore request carried out, so each runs once.
-const RestoredProperty = "homecloud:restored"
+const RestoredProperty = "garrison:restored"
 
 // EnvDataset is the ZFS dataset holding all datasets of an environment:
 // <pool>/ns/<namespace>/stacks/<hostname>.

@@ -13,11 +13,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"homecloud/control-plane/internal/apply"
+	"garrison/control-plane/internal/apply"
 )
 
 // PoolRoot is where the ZFS pool is mounted. Bind mounts below it are datasets.
-const PoolRoot = "/homecloud/"
+const PoolRoot = "/garrison/"
 
 type Stack struct {
 	Name string // Swarm stack name

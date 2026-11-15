@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/stack"
 )
 
 // privacyTTL is how long a repo's privacy is remembered: it is asked on

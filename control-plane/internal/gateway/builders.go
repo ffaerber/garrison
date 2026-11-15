@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/hooks"
+	"garrison/control-plane/internal/hooks"
 )
 
 // Builders gives every namespace other than system the credentials its

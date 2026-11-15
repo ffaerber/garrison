@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/events"
 )
 
 func TestToolEvents(t *testing.T) {

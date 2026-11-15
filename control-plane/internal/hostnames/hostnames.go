@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/stack"
 )
 
 type Claim struct {

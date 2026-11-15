@@ -17,7 +17,7 @@ import (
 
 // Label marks the containers and volumes of sandboxes; the sandbox guard
 // lets the agent service touch nothing else.
-const Label = "homecloud.sandbox"
+const Label = "garrison.sandbox"
 
 // Want is the sandbox a turn needs.
 type Want struct {
@@ -81,7 +81,7 @@ func (s *Session) Name() string { return s.name }
 // Name of the container and volume of a key.
 func Name(key string) string {
 	sum := sha256.Sum256([]byte(key))
-	return "homecloud-agent-" + hex.EncodeToString(sum[:10])
+	return "garrison-agent-" + hex.EncodeToString(sum[:10])
 }
 
 func (m *Manager) init() {
@@ -227,7 +227,7 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	if err != nil {
 		return err
 	}
-	labels := map[string]string{Label: "true", "homecloud.chat": want.Chat, "homecloud.agent": want.Agent, "homecloud.person": want.Person}
+	labels := map[string]string{Label: "true", "garrison.chat": want.Chat, "garrison.agent": want.Agent, "garrison.person": want.Person}
 	// A container left from before (this service restarted) is replaced; the
 	// volume, with the workspace and Pi's session, stays.
 	if err := m.Docker.Remove(ctx, s.name); err != nil {
@@ -244,10 +244,10 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 		Name: s.name, Image: m.Image, Labels: labels, Network: m.Network, Volume: s.name,
 		Memory: m.Memory, CPUs: m.CPUs, Pids: m.Pids, Runtime: m.Runtime,
 		Env: []string{
-			"HOMECLOUD_API=" + api,
-			"HOMECLOUD_TOKEN=" + token,
-			"HOMECLOUD_MODEL=" + want.Model,
-			"HOMECLOUD_PROMPT=" + want.Prompt,
+			"GARRISON_API=" + api,
+			"GARRISON_TOKEN=" + token,
+			"GARRISON_MODEL=" + want.Model,
+			"GARRISON_PROMPT=" + want.Prompt,
 		},
 	}
 	if proxy != "" {

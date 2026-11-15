@@ -1,9 +1,9 @@
 {
-  "uid": "homecloud-node",
+  "uid": "garrison-node",
   "title": "Machine",
   "description": "The host: CPU, memory, disks, ZFS, network, temperatures.",
   "tags": [
-    "homecloud",
+    "garrison",
     "machine"
   ],
   "timezone": "browser",
@@ -863,10 +863,10 @@
   },
   "links": [
     {
-      "title": "Home Cloud",
+      "title": "Garrison",
       "type": "dashboards",
       "tags": [
-        "homecloud"
+        "garrison"
       ],
       "asDropdown": true,
       "includeVars": true,

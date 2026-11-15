@@ -13,7 +13,7 @@ defaults:
 
 jobs:
   image:
-    runs-on: homecloud-user
+    runs-on: garrison-user
     container:
       image: moby/buildkit:v0.34.1
     steps:
@@ -42,7 +42,7 @@ jobs:
           # The image and its cache go up at once, and Gitea's registry can fail
           # one of two uploads of the same layer: a second try finds it there.
           build() {
-            buildctl --addr tcp://homecloud-buildkit:1234 build \
+            buildctl --addr tcp://garrison-buildkit:1234 build \
               --frontend dockerfile.v0 --local context=src --local dockerfile=src \
               --import-cache "type=registry,ref=$cache" \
               --export-cache "type=registry,ref=$cache,mode=max,image-manifest=true,oci-mediatypes=true" \

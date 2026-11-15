@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
+	"garrison/control-plane/internal/agents"
 )
 
 // AgentAccount is the Gitea account of an agent: agent-<namespace>-<name>,
@@ -41,7 +41,7 @@ const AccountPrefix = "Agent "
 // from the admin password they hold, so no further secret is needed.
 func ServiceKey(adminPassword string) string {
 	m := hmac.New(sha256.New, []byte(adminPassword))
-	m.Write([]byte("homecloud agent service v1"))
+	m.Write([]byte("garrison agent service v1"))
 	return hex.EncodeToString(m.Sum(nil))
 }
 

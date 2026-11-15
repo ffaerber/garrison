@@ -36,7 +36,7 @@ print(json.dumps({"branch":"main","new_branch":branch,"message":"Change "+", ".j
     st=$(gitea_api "" "$cfg/commits/$(gitea_api "" "$cfg/pulls/$cfg_pr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
 import json,sys
 for s in json.load(sys.stdin).get("statuses") or []:
-    if s["context"] == "homecloud/approval": print(s["status"], s["description"]); break' 2>/dev/null)
+    if s["context"] == "garrison/approval": print(s["status"], s["description"]); break' 2>/dev/null)
     case $st in success*) break ;; failure*) echo "approval: $st"; return 1 ;; esac
     sleep 2
   done
@@ -68,12 +68,12 @@ collaborator() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/$1
 # Open WebUI
 sees_model() { chat_api "$1" "$chat/api/models" | grep -q "\"id\":\"$2\""; }          # PERSON ID
 sees_channel() { chat_api "$1" "$chat/api/v1/channels/" | python3 -c 'import json,sys; sys.exit(0 if any(c["name"]==sys.argv[1] for c in json.load(sys.stdin)) else 1)' "$2"; }
-has_group() { chat_api alice "$chat/api/v1/groups/" | grep -q "\"name\":\"homecloud $1\""; }
+has_group() { chat_api alice "$chat/api/v1/groups/" | grep -q "\"name\":\"garrison $1\""; }
 model_says() { chat_api alice "$chat/api/v1/models/model?id=$1" | grep -q "$2"; }   # ID TEXT
 # the deployer
-applied_app() { homecloud applied | grep -q "^app $1 "; }                          # NS/NAME@ENV
+applied_app() { garrison applied | grep -q "^app $1 "; }                          # NS/NAME@ENV
 stack_up() { docker stack ls --format '{{.Name}}' | grep -qx "$1"; }
-claimed() { python3 -c 'import json,sys; sys.exit(0 if any(c["Hostname"]==sys.argv[2] for c in json.load(open(sys.argv[1]))) else 1)' /var/lib/homecloud/deployer/claims.json "$1"; }
+claimed() { python3 -c 'import json,sys; sys.exit(0 if any(c["Hostname"]==sys.argv[2] for c in json.load(open(sys.argv[1]))) else 1)' /var/lib/garrison/deployer/claims.json "$1"; }
 says() { req "$1" "https://$1.$DOMAIN/" | grep -q "$2"; }                            # HOST TEXT
 
 section_crud() {
@@ -162,7 +162,7 @@ check "it says how often it may run"       grep -q "runs more often than every 1
 check "a routine at 6:30 every morning passes" change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a9 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\nroutines:\n  - { name: morning, schedule: "30 6 * * *", owner: alice, task: Sum up the notes. }\n')"
 # The agent service keeps when it saw it in Postgres, so a restart does not
 # forget a run that is due.
-kept() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d homecloud -tAc "SELECT last IS NOT NULL FROM routine_state WHERE key = '$ns/helper/morning'" | grep -qx t; }
+kept() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT last IS NOT NULL FROM routine_state WHERE key = '$ns/helper/morning'" | grep -qx t; }
 check "the agent service keeps its state"  until_true 150 kept
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"private":false}' "$api/repos/$ns/notes"
 check "public again, bob sees it again"    until_true 120 sees_model bob $ns/helper
@@ -177,7 +177,7 @@ check "the operator stays"                 sees_model bob $ns/operator
 
 echo "# an app"
 stack_yaml() { put_file "$1" "entrypoint: web\nservices:\n  web:\n    image: traefik/whoami:v1.11\n    port: 80\n    env: { WHOAMI_NAME: $2 }\n    secrets: [token]\n    volumes: { data: { dataset: data, size: $3, path: /data } }\nenvironments:\n  main: {}\n"; }
-ds=homecloud/ns/$ns/stacks/crud
+ds=garrison/ns/$ns/stacks/crud
 check "a stack that does not parse fails the check" refused_by_check $ns "" stacks/crud.yaml="$(put_file s0 'entrypoint: web\n')"
 check "alice adds the app crud"            change_config $ns "" stacks/crud.yaml="$(stack_yaml s1 first 1Gi)"
 check "the deployer deploys it"            until_true 300 applied_app $ns/crud@main
@@ -213,7 +213,7 @@ keep_down() { ! stack_up keep; }
 check "the deployer takes its app down"    until_true 180 keep_down
 keep_free() { ! claimed keep; }
 check "and frees its hostname"             until_true 60 keep_free
-check "its data is kept"                   zfs list homecloud/ns/$ns/stacks/keep/data
+check "its data is kept"                   zfs list garrison/ns/$ns/stacks/keep/data
 no_ch() { ! sees_channel alice $ns; }
 check "its channel is removed"             until_true 120 no_ch
 no_group() { ! has_group $ns; }

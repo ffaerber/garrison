@@ -14,7 +14,7 @@ func TestMetrics(t *testing.T) {
 		switch r.URL.Path {
 		case "/services":
 			w.Write([]byte(`[
- {"ID":"s1","Spec":{"Name":"quotes_web","Labels":{"com.docker.stack.namespace":"quotes","homecloud.namespace":"todo","homecloud.app":"quotes","homecloud.environment":"main"}}},
+ {"ID":"s1","Spec":{"Name":"quotes_web","Labels":{"com.docker.stack.namespace":"quotes","garrison.namespace":"todo","garrison.app":"quotes","garrison.environment":"main"}}},
  {"ID":"s2","Spec":{"Name":"gitea_gitea","Labels":{"com.docker.stack.namespace":"gitea"}}}
 ]`))
 		case "/tasks":
@@ -35,11 +35,11 @@ func TestMetrics(t *testing.T) {
 	d.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
 	body := w.Body.String()
 	for _, want := range []string{
-		"homecloud_docker_up 1",
-		`homecloud_service_replicas_desired{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 1`,
-		`homecloud_service_replicas_running{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 0`,
-		`homecloud_service_failed_tasks{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 2`,
-		`homecloud_service_replicas_running{namespace="system",app="gitea",environment="main",stack="gitea",service="gitea_gitea"} 1`,
+		"garrison_docker_up 1",
+		`garrison_service_replicas_desired{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 1`,
+		`garrison_service_replicas_running{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 0`,
+		`garrison_service_failed_tasks{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 2`,
+		`garrison_service_replicas_running{namespace="system",app="gitea",environment="main",stack="gitea",service="gitea_gitea"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s in\n%s", want, body)

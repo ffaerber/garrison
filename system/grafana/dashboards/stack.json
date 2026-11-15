@@ -1,9 +1,9 @@
 {
-  "uid": "homecloud-stack",
+  "uid": "garrison-stack",
   "title": "Stack",
   "description": "One stack: its services' CPU, memory, network, restarts and logs.",
   "tags": [
-    "homecloud",
+    "garrison",
     "stack"
   ],
   "timezone": "browser",
@@ -656,10 +656,10 @@
   },
   "links": [
     {
-      "title": "Home Cloud",
+      "title": "Garrison",
       "type": "dashboards",
       "tags": [
-        "homecloud"
+        "garrison"
       ],
       "asDropdown": true,
       "includeVars": true,

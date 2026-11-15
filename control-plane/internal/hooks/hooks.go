@@ -117,7 +117,7 @@ func Valid(secret, body []byte, signature string) bool {
 // old and the new task side by side, and whichever registers last wins.
 func Secret(password, target string) []byte {
 	m := hmac.New(sha256.New, []byte(password))
-	m.Write([]byte("homecloud webhook " + target))
+	m.Write([]byte("garrison webhook " + target))
 	return []byte(hex.EncodeToString(m.Sum(nil)))
 }
 

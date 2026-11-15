@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // TestRealSandbox runs a real sandbox image through a real Docker API (e.g.
-// the guard), when HOMECLOUD_SANDBOX_TEST is "ADDR IMAGE NETWORK API": API
+// the guard), when GARRISON_SANDBOX_TEST is "ADDR IMAGE NETWORK API": API
 // must answer as the agent service does, the LLM included.
 func TestRealSandbox(t *testing.T) {
-	f := strings.Fields(os.Getenv("HOMECLOUD_SANDBOX_TEST"))
+	f := strings.Fields(os.Getenv("GARRISON_SANDBOX_TEST"))
 	if len(f) != 4 {
-		t.Skip("HOMECLOUD_SANDBOX_TEST is not set")
+		t.Skip("GARRISON_SANDBOX_TEST is not set")
 	}
 	m := &sandbox.Manager{Docker: &sandbox.Docker{Addr: f[0]}, Image: f[1], Network: f[2], API: f[3], Memory: 1 << 30, CPUs: 1, Pids: 256}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

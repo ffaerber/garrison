@@ -4,19 +4,19 @@
 # namespace's people, and starts the routines that wait for it (on_alert in
 # agents/<name>/agent.yaml).
 groups:
-  - name: homecloud
+  - name: garrison
     rules:
       # From the deployer's metrics, which read Swarm: cAdvisor sees only
       # running containers, so an app that exits at start hardly shows there.
       - alert: ServiceFailing
-        expr: homecloud_service_failed_tasks >= 3
+        expr: garrison_service_failed_tasks >= 3
         for: 1m
         labels: { severity: critical }
         annotations:
           summary: "{{ $labels.service }} keeps failing: {{ $value }} tasks failed in 10 minutes"
           description: "The service {{ $labels.service }} of the app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.namespace }} starts and fails again. Its tasks (stack_status) and logs (service_logs) say why."
       - alert: ServiceDown
-        expr: homecloud_service_replicas_running < homecloud_service_replicas_desired
+        expr: garrison_service_replicas_running < garrison_service_replicas_desired
         for: 5m
         labels: { severity: critical }
         annotations:
@@ -34,7 +34,7 @@ groups:
             )
             and on (stack) (sum by (stack) (label_replace(rate(traefik_service_requests_total[5m]), "stack", "$1", "service", "(.+)@swarm")) > 0.05)
           )
-          * on (stack) group_left (namespace, app, environment) group by (stack, namespace, app, environment) (homecloud_service_replicas_desired{namespace!="system"})
+          * on (stack) group_left (namespace, app, environment) group by (stack, namespace, app, environment) (garrison_service_replicas_desired{namespace!="system"})
         for: 5m
         labels: { severity: warning }
         annotations:

@@ -55,9 +55,9 @@ const userHeader = "X-Auth-Request-Preferred-Username"
 // The environment's ingress key, which Traefik adds to every request it
 // passes on after the sign-in. Other apps share Traefik's network and can
 // call this one directly, naming anyone in userHeader; they do not know
-// the key, which the platform gives this app as HOMECLOUD_INGRESS_KEY. So
+// the key, which the platform gives this app as GARRISON_INGRESS_KEY. So
 // userHeader is believed only together with it.
-const ingressHeader = "X-Homecloud-Ingress"
+const ingressHeader = "X-Garrison-Ingress"
 
 // signedIn serves only requests of a signed-in person that came through
 // the sign-in, passing their name.
@@ -228,9 +228,9 @@ func main() {
 		addr = ":8080"
 	}
 	log.Printf("todo on %s", addr)
-	app := &App{Store: store, IngressKey: os.Getenv("HOMECLOUD_INGRESS_KEY")}
+	app := &App{Store: store, IngressKey: os.Getenv("GARRISON_INGRESS_KEY")}
 	if app.IngressKey == "" {
-		log.Printf("no HOMECLOUD_INGRESS_KEY: the sign-in's headers are believed from anyone who reaches this port")
+		log.Printf("no GARRISON_INGRESS_KEY: the sign-in's headers are believed from anyone who reaches this port")
 	}
 	srv := &http.Server{Addr: addr, Handler: app.Routes(), ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())

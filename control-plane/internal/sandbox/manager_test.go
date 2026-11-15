@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"homecloud/control-plane/internal/sandbox"
-	"homecloud/control-plane/internal/sandbox/sandboxtest"
+	"garrison/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/sandbox/sandboxtest"
 )
 
 func manager(t *testing.T) (*sandbox.Manager, *sandboxtest.Docker) {
@@ -141,7 +141,7 @@ func TestUnderGVisorASandboxIsRootAndReachedByAddress(t *testing.T) {
 		}
 		// gVisor has no Docker DNS: the agent service by its address on the
 		// network (the fake's is loopback).
-		if got := c.Env[0]; got != "HOMECLOUD_API=http://127.0.0.1:8071" {
+		if got := c.Env[0]; got != "GARRISON_API=http://127.0.0.1:8071" {
 			t.Errorf("%s", got)
 		}
 		var proxy, noProxy string
@@ -163,7 +163,7 @@ func TestWithoutARuntimeASandboxHasNoCapabilities(t *testing.T) {
 	m, d := manager(t)
 	ask(t, m, sandbox.Want{Key: "k", Person: "alice"}, "hi")
 	for _, c := range d.Containers {
-		if c.Runtime != "" || c.User != "" || c.Env[0] != "HOMECLOUD_API=http://agents" {
+		if c.Runtime != "" || c.User != "" || c.Env[0] != "GARRISON_API=http://agents" {
 			t.Errorf("runtime %q, user %q, %s", c.Runtime, c.User, c.Env[0])
 		}
 	}

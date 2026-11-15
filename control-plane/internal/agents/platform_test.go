@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/stack"
 )
 
 // The stack.yaml the agents are shown must be one the deployer takes, or

@@ -19,10 +19,10 @@ Answers file keys (shell `KEY=value`):
 | `POOL_DEVICE` | Device for the ZFS pool | a sparse file on the root disk |
 | `POOL_SIZE` | Size of that sparse file | `20G` |
 | `LLM_BASE_URL`, `LLM_MODEL` | OpenAI-compatible API and default model of the agents; only the agent service talks to it | `https://ollama.com/v1`, `gpt-oss:120b` |
-| `LLM_API_KEY` | Its key; stored root-only in `/etc/homecloud/llm-api-key`, which may also be filled by hand | none: the agents cannot answer |
+| `LLM_API_KEY` | Its key; stored root-only in `/etc/garrison/llm-api-key`, which may also be filled by hand | none: the agents cannot answer |
 | `REGISTRY_MIRROR` | Pull-through mirror for Docker Hub images, e.g. `https://mirror.gcr.io` | none |
 
-The installer keeps its state in `/etc/homecloud` (root only): the admin password, the TLS certificate and key, the build token, and `install.env`.
+The installer keeps its state in `/etc/garrison` (root only): the admin password, the TLS certificate and key, the build token, and `install.env`.
 
 | Script | Does |
 | --- | --- |

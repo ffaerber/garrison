@@ -9,8 +9,8 @@ services:
       CONFIG_FILE: /etc/act_runner/config.yaml
       GITEA_INSTANCE_URL: http://gitea_gitea:3000
       GITEA_RUNNER_REGISTRATION_TOKEN_FILE: /run/secrets/gitea-runner-token
-      GITEA_RUNNER_NAME: homecloud
-      GITEA_RUNNER_LABELS: homecloud:docker://docker:29-cli
+      GITEA_RUNNER_NAME: garrison
+      GITEA_RUNNER_LABELS: garrison:docker://docker:29-cli
     configs:
       - source: config
         target: /etc/act_runner/config.yaml
@@ -18,7 +18,7 @@ services:
       - gitea-runner-token
     volumes:
       - type: bind
-        source: /homecloud/system/gitea-runner
+        source: /garrison/system/gitea-runner
         target: /data
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [system]
@@ -37,4 +37,4 @@ secrets:
 networks:
   system:
     external: true
-    name: homecloud-system
+    name: garrison-system

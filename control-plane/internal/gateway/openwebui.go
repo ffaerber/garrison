@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/hooks"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/hooks"
 )
 
 // OpenWebUI keeps, for every agent of every namespace, a model entry in
@@ -47,7 +47,7 @@ type OpenWebUI struct {
 
 // AgentMarker in a model's meta names the agent it is; the sync owns such
 // models.
-const AgentMarker = "homecloud_agent"
+const AgentMarker = "garrison_agent"
 
 // legacyPrefixes mark agents of earlier versions, which the sync removes.
 var legacyPrefixes = []string{"agent-", "ns-"}
@@ -64,7 +64,7 @@ type owuiModel struct {
 
 // AccessMarker in a model's meta records whom the sync let use it, as Open
 // WebUI returns access grants in its own shape.
-const AccessMarker = "homecloud_access"
+const AccessMarker = "garrison_access"
 
 // want is the model entry of an agent. A private agent (AgentPrivate) goes
 // only to its namespace's group (groups); root admins are Open WebUI's
@@ -369,7 +369,7 @@ func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns N
 }
 
 // ChannelMarker in a channel's meta names the namespace it belongs to.
-const ChannelMarker = "homecloud_namespace"
+const ChannelMarker = "garrison_namespace"
 
 type owuiChannel struct {
 	ID           string         `json:"id"`
@@ -411,7 +411,7 @@ func channelAccess(ns, group string) []any {
 
 // legacyTeamMarker marked the team channels of an earlier version, which
 // the sync removes: a namespace's channel is for its people now.
-const legacyTeamMarker = "homecloud_team"
+const legacyTeamMarker = "garrison_team"
 
 // syncChannels keeps one channel per namespace, as it was made, for the
 // namespace's people.
@@ -496,8 +496,8 @@ func (o *OpenWebUI) Run(ctx context.Context, interval time.Duration) {
 }
 
 // GroupPrefix names the Open WebUI group of a namespace's people:
-// "homecloud <namespace>".
-const GroupPrefix = "homecloud "
+// "garrison <namespace>".
+const GroupPrefix = "garrison "
 
 type owuiGroup struct {
 	ID   string `json:"id"`

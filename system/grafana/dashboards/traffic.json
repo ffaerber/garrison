@@ -1,9 +1,9 @@
 {
-  "uid": "homecloud-traffic",
+  "uid": "garrison-traffic",
   "title": "Traffic",
   "description": "Requests through Traefik, by hostname and status.",
   "tags": [
-    "homecloud",
+    "garrison",
     "traffic"
   ],
   "timezone": "browser",
@@ -456,10 +456,10 @@
   },
   "links": [
     {
-      "title": "Home Cloud",
+      "title": "Garrison",
       "type": "dashboards",
       "tags": [
-        "homecloud"
+        "garrison"
       ],
       "asDropdown": true,
       "includeVars": true,

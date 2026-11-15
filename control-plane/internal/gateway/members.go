@@ -16,8 +16,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/hooks"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/hooks"
 )
 
 // Members keeps each namespace's config repo: who may change the namespace,
@@ -33,7 +33,7 @@ import (
 // pull requests, which need the approval of an admin of the namespace or a
 // root admin who neither wrote the pull request (opened it or pushed to its
 // branch) nor has their role changed by it. Gitea cannot check that, so
-// this posts a required status, homecloud/approval, on every open pull
+// this posts a required status, garrison/approval, on every open pull
 // request of config.
 type Members struct {
 	// Wake, when set, starts a sync before the interval is over.
@@ -52,7 +52,7 @@ const (
 	RootTeam        = "root-admins"
 	ConfigRepo      = "config"
 	MembersFile     = "members.yaml"
-	ApprovalContext = "homecloud/approval"
+	ApprovalContext = "garrison/approval"
 )
 
 // Roster is the content of members.yaml.
@@ -621,7 +621,7 @@ func sameRule(want, have map[string]any) bool {
 	return true
 }
 
-// approvals posts homecloud/approval on every open pull request of config:
+// approvals posts garrison/approval on every open pull request of config:
 // its agents must be valid, and it needs an approval by Approval. base is
 // members.yaml on main; nil for system, which has none and whose changes
 // root admins approve.

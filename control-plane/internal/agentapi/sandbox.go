@@ -13,8 +13,8 @@ import (
 	"slices"
 	"strings"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/sandbox"
 )
 
 // Workspace is added to an agent's prompt when it runs in a sandbox.
@@ -24,7 +24,7 @@ You run in a sandbox of your own for this conversation: a Linux container (Alpin
 
 The sandbox cannot reach the platform's services directly: use your platform tools for repos, apps and changes; they act as the person you talk to. Files in your workspace reach a repo only through a proposed change.
 
-Git: clone any repo the person may read with ` + "`git clone $HOMECLOUD_GIT/<namespace>/<repo>.git`" + ` (read-only; ` + "`git fetch`" + ` and ` + "`git pull`" + ` work too, pushing does not).`
+Git: clone any repo the person may read with ` + "`git clone $GARRISON_GIT/<namespace>/<repo>.git`" + ` (read-only; ` + "`git fetch`" + ` and ` + "`git pull`" + ` work too, pushing does not).`
 
 // Offline is added for agents without internet.
 const Offline = `

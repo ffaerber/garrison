@@ -1,9 +1,9 @@
 {
-  "uid": "homecloud-agents",
+  "uid": "garrison-agents",
   "title": "Agents",
   "description": "The agents' sandboxes: how many, whose, what they use; and what agents did, from the agent service and the gateway.",
   "tags": [
-    "homecloud",
+    "garrison",
     "agents"
   ],
   "timezone": "browser",
@@ -26,10 +26,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\"}, container_label_homecloud_agent)",
+          "query": "label_values(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\"}, container_label_garrison_agent)",
           "refId": "v"
         },
-        "definition": "label_values(container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\"}, container_label_homecloud_agent)",
+        "definition": "label_values(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\"}, container_label_garrison_agent)",
         "refresh": 2,
         "sort": 1,
         "multi": false,
@@ -73,7 +73,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"}) or vector(0)",
+          "expr": "count(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -118,7 +118,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"}) or vector(0)",
+          "expr": "sum(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -162,7 +162,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"}[5m])) or vector(0)",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}[5m])) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -207,12 +207,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count by (container_label_homecloud_agent) (container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"})",
+          "expr": "count by (container_label_garrison_agent) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_homecloud_agent}}",
+          "legendFormat": "{{container_label_garrison_agent}}",
           "range": true
         }
       ],
@@ -249,12 +249,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count by (container_label_homecloud_person) (container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"})",
+          "expr": "count by (container_label_garrison_person) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_homecloud_person}}",
+          "legendFormat": "{{container_label_garrison_person}}",
           "range": true
         }
       ],
@@ -292,12 +292,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_homecloud_agent) (container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"})",
+          "expr": "sum by (container_label_garrison_agent) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_homecloud_agent}}",
+          "legendFormat": "{{container_label_garrison_agent}}",
           "range": true
         }
       ],
@@ -334,12 +334,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_homecloud_agent) (rate(container_cpu_usage_seconds_total{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"}[5m]))",
+          "expr": "sum by (container_label_garrison_agent) (rate(container_cpu_usage_seconds_total{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}[5m]))",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_homecloud_agent}}",
+          "legendFormat": "{{container_label_garrison_agent}}",
           "range": true
         }
       ],
@@ -377,7 +377,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_homecloud_agent, container_label_homecloud_person, container_label_homecloud_chat, name) (container_memory_working_set_bytes{container_label_homecloud_sandbox=\"true\", container_label_homecloud_agent=~\"$agent\"})",
+          "expr": "sum by (container_label_garrison_agent, container_label_garrison_person, container_label_garrison_chat, name) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -416,9 +416,9 @@
               "Time": true
             },
             "renameByName": {
-              "container_label_homecloud_agent": "Agent",
-              "container_label_homecloud_person": "Person",
-              "container_label_homecloud_chat": "Chat",
+              "container_label_garrison_agent": "Agent",
+              "container_label_garrison_person": "Person",
+              "container_label_garrison_chat": "Chat",
               "name": "Container"
             }
           }

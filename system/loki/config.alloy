@@ -12,7 +12,7 @@ discovery.relabel "containers" {
   targets = discovery.docker.containers.targets
 
   rule {
-    source_labels = ["__meta_docker_container_label_homecloud_sandbox"]
+    source_labels = ["__meta_docker_container_label_garrison_sandbox"]
     regex         = "true"
     action        = "drop"
   }

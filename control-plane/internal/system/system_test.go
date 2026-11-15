@@ -14,7 +14,7 @@ func TestDatasets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, " ") != "/homecloud/system/db /homecloud/system/db-backup" {
+	if strings.Join(got, " ") != "/garrison/system/db /garrison/system/db-backup" {
 		t.Errorf("datasets = %v", got)
 	}
 }
@@ -46,8 +46,8 @@ func TestDeploy(t *testing.T) {
 	}
 	got := strings.Join(calls, "\n")
 	for _, want := range []string{
-		"zfs list -H -o name homecloud/system/db",
-		"zfs list -H -o name homecloud/system/db-backup",
+		"zfs list -H -o name garrison/system/db",
+		"zfs list -H -o name garrison/system/db-backup",
 		"docker stack deploy --detach=true --resolve-image never --compose-file testdata/system/01-db/compose.yaml db",
 	} {
 		if !strings.Contains(got, want) {

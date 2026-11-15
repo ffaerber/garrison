@@ -12,7 +12,7 @@ Go. One image, run in Swarm as the stack `control-plane` from the repo `system/c
 | `guard` | The Docker API for the user runner, letting through only what pipeline jobs need. |
 | `user-runner` | Gitea Actions runner of every namespace other than `system`. |
 
-The same binary is installed on the host as `homecloud`: the installer uses it to deploy once before the services exist, and admins use it for `applied`, `validate`, `render` and `apply`.
+The same binary is installed on the host as `garrison`: the installer uses it to deploy once before the services exist, and admins use it for `applied`, `validate`, `render` and `apply`.
 
 | Package | Does |
 | --- | --- |
@@ -29,15 +29,15 @@ The same binary is installed on the host as `homecloud`: the installer uses it t
 | `internal/agents` | Agent folders: reads and checks `agents/` and `skills/` of a config repo, with grants and routines; the operator; the system prompt |
 | `internal/gateway` | The gateway: MCP tools, Open WebUI agents, groups and channels, members and approvals, agents' accounts and grants, private repos, keeping proposals current, build accounts |
 | `internal/guard` | The guarded Docker API, for the user runner and, more narrowly, for the sandboxes |
-| `cmd/homecloud` | CLI over these: `deploy` runs the deployer, `gateway` the gateway, `agents` the agent service, `guard` the guards |
+| `cmd/garrison` | CLI over these: `deploy` runs the deployer, `gateway` the gateway, `agents` the agent service, `guard` the guards |
 
 ```
 make test
 make build
-bin/homecloud validate control-plane/internal/stack/testdata/jellyfin.yaml
-bin/homecloud claims -reserved system/platform/reserved-hostnames.yaml STACK.yaml...
-bin/homecloud render -domain example.com -env dev STACK.yaml
-bin/homecloud apply -domain example.com -reserved /etc/homecloud/reserved-hostnames.yaml STACK.yaml   # on an installed machine, as root
+bin/garrison validate control-plane/internal/stack/testdata/jellyfin.yaml
+bin/garrison claims -reserved system/platform/reserved-hostnames.yaml STACK.yaml...
+bin/garrison render -domain example.com -env dev STACK.yaml
+bin/garrison apply -domain example.com -reserved /etc/garrison/reserved-hostnames.yaml STACK.yaml   # on an installed machine, as root
 ```
 
 Go runs in a container, so only Docker is needed. `make golden` rewrites the expected render output after an intended change.
@@ -47,7 +47,7 @@ Go runs in a container, so only Docker is needed. `make golden` rewrites the exp
 | Thing | Name |
 | --- | --- |
 | Swarm stack | the environment's hostname, e.g. `dev-jellyfin` (unique across the installation) |
-| Dataset on the host (data root `/homecloud/ns`) | `<data root>/<namespace>/stacks/<environment hostname>/<dataset>` |
+| Dataset on the host (data root `/garrison/ns`) | `<data root>/<namespace>/stacks/<environment hostname>/<dataset>` |
 | Share on the host | `<data root>/<namespace>/shares/<share>` |
 | Swarm secret | `<environment hostname>.<secret>` |
 

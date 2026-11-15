@@ -97,7 +97,7 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("guard: refused %s %s: %v", r.Method, r.URL.Path, err)
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]string{"message": "refused by the homecloud Docker guard: " + err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"message": "refused by the garrison Docker guard: " + err.Error()})
 		return
 	}
 	g.proxy.ServeHTTP(w, r)

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"homecloud/control-plane/internal/render"
-	"homecloud/control-plane/internal/stack"
+	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/stack"
 )
 
 // fake records commands and pretends datasets and secrets in `have` exist.
@@ -42,15 +42,15 @@ func TestStack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fake{have: map[string]bool{"homecloud/ns/media/shares/media-library": true}, stdin: map[string]string{}}
+	f := &fake{have: map[string]bool{"garrison/ns/media/shares/media-library": true}, stdin: map[string]string{}}
 	if err := Stack(context.Background(), f.run, s, render.Options{Environment: "dev", Domain: "example.com"}); err != nil {
 		t.Fatal(err)
 	}
 
 	got := strings.Join(f.calls, "\n")
 	for _, want := range []string{
-		"zfs create -p homecloud/ns/media/stacks/dev-jellyfin/jellyfin-config",
-		"zfs set quota=5G homecloud/ns/media/stacks/dev-jellyfin/jellyfin-config",
+		"zfs create -p garrison/ns/media/stacks/dev-jellyfin/jellyfin-config",
+		"zfs set quota=5G garrison/ns/media/stacks/dev-jellyfin/jellyfin-config",
 		"docker secret create dev-jellyfin.jellyfin-api-key -",
 		"docker stack deploy --detach=true --resolve-image never --with-registry-auth --compose-file - dev-jellyfin",
 	} {
@@ -58,7 +58,7 @@ func TestStack(t *testing.T) {
 			t.Errorf("missing command %q in:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "zfs create -p homecloud/ns/media/shares/media-library") {
+	if strings.Contains(got, "zfs create -p garrison/ns/media/shares/media-library") {
 		t.Error("existing share was created again")
 	}
 	if !strings.HasSuffix(got, "dev-jellyfin") {

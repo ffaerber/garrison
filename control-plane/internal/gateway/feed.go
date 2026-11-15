@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"homecloud/control-plane/internal/agents"
-	"homecloud/control-plane/internal/events"
+	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/events"
 )
 
 // changing are the tools whose calls the feed gets: those that change
