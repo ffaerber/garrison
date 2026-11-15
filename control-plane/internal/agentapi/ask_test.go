@@ -263,6 +263,13 @@ func (s *memState) RoutineStates(context.Context) (map[string]RoutineState, erro
 	return out, nil
 }
 
+func (s *memState) DeleteRoutineState(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, key)
+	return nil
+}
+
 func (s *memState) SaveRoutineState(_ context.Context, key string, v RoutineState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -527,5 +534,67 @@ func TestABackgroundAnswerIsPostedWhenTheTurnTimesOut(t *testing.T) {
 	posts := poster.all()
 	if len(posts) != 1 || !strings.Contains(posts[0].Text, "It stopped: ") {
 		t.Fatalf("nothing was posted after the turn timed out: %+v", posts)
+	}
+}
+
+// A firing's mark, which keeps it from starting its routine twice, is kept
+// while Alertmanager still sends the alert, and forgotten a week after.
+func TestAFiringIsForgottenAWeekAfterItWasLastSent(t *testing.T) {
+	s, _, _ := setup(t)
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/homepage/config/raw/members.yaml" {
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer gitea.Close()
+	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+		{Name: "down", OnAlert: map[string]string{"alertname": "ServiceDown"}, Owner: "bob", Task: "Find out why."},
+	}}}
+	withSandboxes(t, s)
+	poster := &fakePoster{}
+	s.Poster = poster
+	state := &memState{}
+	var clock sync.Mutex
+	now := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	later := func(d time.Duration) {
+		clock.Lock()
+		now = now.Add(d)
+		clock.Unlock()
+	}
+	r := &Routines{Server: s, Gitea: &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}, Store: state,
+		Now: func() time.Time { clock.Lock(); defer clock.Unlock(); return now }}
+	firing := Alert{Status: "firing", Fingerprint: "f1", StartsAt: now, Labels: map[string]string{"alertname": "ServiceDown", "namespace": "homepage"}}
+	const mark = "homepage/dev/down#alert:f1:1794650400"
+	kept := func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		_, ok := state.m[mark]
+		return ok
+	}
+	ctx := context.Background()
+	r.Alert(ctx, firing)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !kept() {
+		t.Fatal("the firing was not marked")
+	}
+	// Still firing five days on: sent again, it starts nothing, and stays.
+	later(5 * 24 * time.Hour)
+	r.Alert(ctx, firing)
+	later(5 * 24 * time.Hour)
+	r.Check(ctx)
+	time.Sleep(100 * time.Millisecond)
+	if !kept() || len(poster.all()) != 1 {
+		t.Fatalf("ten days on, sent five days ago: kept %v, %d posts", kept(), len(poster.all()))
+	}
+	// Not heard of for more than a week: forgotten.
+	later(3 * 24 * time.Hour)
+	r.Check(ctx)
+	if kept() {
+		t.Error("the mark of a firing long over is still kept")
 	}
 }

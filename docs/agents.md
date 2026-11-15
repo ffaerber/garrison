@@ -83,7 +83,7 @@ internet: [packages, api.example.com]   # what its sandbox reaches; none without
 - The model id, and the name people mention, is `<namespace>/<agent>`, e.g. `homepage/marketing`.
 - A new namespace gets `agents/operator/` written into its `config` repo with today's operator prompt. A namespace without an `agents/` folder still gets that operator.
 - The `homecloud/approval` check on `config` pull requests also checks agent files: known tools and skills, a model the endpoint offers, a prompt that is not empty. Adding or widening an agent needs an admin's approval like a change to `members.yaml`.
-- `internet`: what the agent's sandbox reaches, through the agent service's proxy (see Sandbox). `packages` opens the package registries: Alpine, Debian, Ubuntu, PyPI, npm, Go modules and Rust crates, download hosts only, no GitHub. `all` opens every public address. A list names `packages` and domains, each with its subdomains. Without it, nothing. An agent that works on a private repo, or is `visible: members`, reaches the registries at most: the approval check refuses more, and should a repo turn private later, the proxy holds it to the registries.
+- `internet`: what the agent's sandbox reaches, through the agent service's proxy (see Sandbox). `packages` opens the package registries: Alpine, Debian, Ubuntu, PyPI, npm, Go modules and Rust crates, download hosts only, no GitHub. `all` opens every public address. A list names `packages` and domains, each with its subdomains. Without it, nothing. An agent that works on a private repo, or is `visible: members`, reaches the registries at most: the approval check refuses more, and should a repo turn private later, the proxy holds it to the registries, if it had them.
 
 ## Accounts and grants
 

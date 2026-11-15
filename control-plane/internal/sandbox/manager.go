@@ -112,17 +112,29 @@ type Run struct {
 // sandbox whose agent definition or image has changed is restarted before
 // the turn, never during one.
 func (m *Manager) Turn(ctx context.Context, want Want, run Run, fn func(*Session) error) error {
-	m.mu.Lock()
-	m.init()
-	s := m.sessions[want.Key]
-	if s == nil {
-		s = &Session{name: Name(want.Key)}
-		m.sessions[want.Key] = s
-	}
-	m.mu.Unlock()
+	var s *Session
+	for {
+		m.mu.Lock()
+		m.init()
+		s = m.sessions[want.Key]
+		if s == nil {
+			s = &Session{name: Name(want.Key)}
+			m.sessions[want.Key] = s
+		}
+		m.mu.Unlock()
 
-	if err := lock(ctx, &s.turn); err != nil {
-		return err
+		if err := lock(ctx, &s.turn); err != nil {
+			return err
+		}
+		// Sweep may have forgotten the session while this waited for it:
+		// then the turn takes the key's session of now.
+		m.mu.Lock()
+		current := m.sessions[want.Key] == s
+		m.mu.Unlock()
+		if current {
+			break
+		}
+		s.turn.Unlock()
 	}
 	defer s.turn.Unlock()
 
@@ -434,10 +446,6 @@ func (m *Manager) Clean(ctx context.Context) error {
 
 // Run stops idle sandboxes until ctx ends.
 func (m *Manager) Run(ctx context.Context) {
-	idle := m.Idle
-	if idle <= 0 {
-		idle = 15 * time.Minute
-	}
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for {
@@ -446,26 +454,54 @@ func (m *Manager) Run(ctx context.Context) {
 			return
 		case <-tick.C:
 		}
-		m.mu.Lock()
-		var all []*Session
-		for _, s := range m.sessions {
-			all = append(all, s)
-		}
-		m.mu.Unlock()
-		for _, s := range all {
-			if !s.turn.TryLock() {
-				continue // a turn runs
-			}
-			s.mu.Lock()
-			old := s.pi != nil && time.Since(s.lastUsed) > idle
-			s.mu.Unlock()
-			if old {
-				log.Printf("sandbox %s: stopped after %s without a message", s.name, idle)
-				m.stop(ctx, s)
-			}
-			s.turn.Unlock()
-		}
+		m.Sweep(ctx)
 	}
+}
+
+// Sweep stops the sandboxes without a message for Idle, and forgets the
+// sessions without a sandbox: a chat's next message makes a new one, and
+// its workspace is in its volume.
+func (m *Manager) Sweep(ctx context.Context) {
+	idle := m.Idle
+	if idle <= 0 {
+		idle = 15 * time.Minute
+	}
+	m.mu.Lock()
+	all := make(map[string]*Session, len(m.sessions))
+	for key, s := range m.sessions {
+		all[key] = s
+	}
+	m.mu.Unlock()
+	for key, s := range all {
+		if !s.turn.TryLock() {
+			continue // a turn runs
+		}
+		s.mu.Lock()
+		running := s.pi != nil
+		old := running && time.Since(s.lastUsed) > idle
+		s.mu.Unlock()
+		if old {
+			log.Printf("sandbox %s: stopped after %s without a message", s.name, idle)
+			m.stop(ctx, s)
+		}
+		if old || !running {
+			// Under the session's turn lock: a turn waiting for it looks
+			// again once it has the lock (Turn).
+			m.mu.Lock()
+			if m.sessions[key] == s {
+				delete(m.sessions, key)
+			}
+			m.mu.Unlock()
+		}
+		s.turn.Unlock()
+	}
+}
+
+// Sessions is how many chats the manager remembers, with a sandbox or not.
+func (m *Manager) Sessions() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.sessions)
 }
 
 // Running lists the running sandboxes.

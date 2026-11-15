@@ -278,6 +278,14 @@ func (p *Postgres) RoutineStates(ctx context.Context) (map[string]RoutineState, 
 	return out, rows.Err()
 }
 
+// DeleteRoutineState forgets key.
+func (p *Postgres) DeleteRoutineState(ctx context.Context, key string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, err := p.Pool.Exec(ctx, "DELETE FROM routine_state WHERE key = $1", key)
+	return err
+}
+
 func (p *Postgres) SaveRoutineState(ctx context.Context, key string, s RoutineState) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()

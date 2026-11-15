@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"homecloud/control-plane/internal/sandbox"
 	"homecloud/control-plane/internal/sandbox/sandboxtest"
@@ -41,6 +42,32 @@ func TestASandboxIsReused(t *testing.T) {
 	ask(t, m, w, "two")
 	if d.Created != 1 || !d.Volumes[sandbox.Name(w.Key)] {
 		t.Errorf("created %d, volumes %v", d.Created, d.Volumes)
+	}
+}
+
+// An idle sandbox is stopped and its session forgotten; the chat's next
+// message starts a new one on the same volume.
+func TestIdleSessionsAreForgotten(t *testing.T) {
+	m, d := manager(t)
+	for _, chat := range []string{"one", "two", "three"} {
+		ask(t, m, sandbox.Want{Key: chat + "\x00a/b", Agent: "a/b", Person: chat, Definition: "1"}, "hello")
+	}
+	if m.Sessions() != 3 || d.Running() != 3 {
+		t.Fatalf("%d sessions, %d running", m.Sessions(), d.Running())
+	}
+	m.Sweep(context.Background()) // none is idle yet
+	if m.Sessions() != 3 || d.Running() != 3 {
+		t.Fatalf("swept too early: %d sessions, %d running", m.Sessions(), d.Running())
+	}
+	m.Idle = time.Nanosecond
+	m.Sweep(context.Background())
+	if m.Sessions() != 0 || d.Running() != 0 {
+		t.Fatalf("after the sweep: %d sessions, %d running", m.Sessions(), d.Running())
+	}
+	m.Idle = 0
+	w := sandbox.Want{Key: "one\x00a/b", Agent: "a/b", Person: "one", Definition: "1"}
+	if got := ask(t, m, w, "again"); got != "echo: again" || m.Sessions() != 1 || len(d.Volumes) != 3 {
+		t.Errorf("%q, %d sessions, volumes %v", got, m.Sessions(), d.Volumes)
 	}
 }
 

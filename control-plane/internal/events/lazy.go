@@ -110,6 +110,14 @@ func (l *Lazy) RoutineStates(ctx context.Context) (map[string]RoutineState, erro
 	return pg.RoutineStates(ctx)
 }
 
+func (l *Lazy) DeleteRoutineState(ctx context.Context, key string) error {
+	pg, err := l.get(ctx)
+	if err != nil {
+		return err
+	}
+	return pg.DeleteRoutineState(ctx, key)
+}
+
 func (l *Lazy) SaveRoutineState(ctx context.Context, key string, s RoutineState) error {
 	pg, err := l.get(ctx)
 	if err != nil {

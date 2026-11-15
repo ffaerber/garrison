@@ -46,6 +46,32 @@ type RoutineState = events.RoutineState
 type RoutineStore interface {
 	RoutineStates(ctx context.Context) (map[string]RoutineState, error)
 	SaveRoutineState(ctx context.Context, key string, s RoutineState) error
+	DeleteRoutineState(ctx context.Context, key string) error
+}
+
+// AlertMemory is how long a firing that started a routine is remembered
+// after Alertmanager last sent it, so it starts the routine once. While
+// the alert fires, Alertmanager sends it again every few hours.
+const AlertMemory = 7 * 24 * time.Hour
+
+// alertMark is in the key of a firing's mark: <routine>#alert:<firing>.
+const alertMark = "#alert:"
+
+// forget drops the marks of firings not heard of for AlertMemory, here and
+// in the store. Called with r.mu held.
+func (r *Routines) forget(ctx context.Context, now time.Time) {
+	for key, at := range r.last {
+		if !strings.Contains(key, alertMark) || now.Sub(at) < AlertMemory {
+			continue
+		}
+		if r.Store != nil {
+			if err := r.Store.DeleteRoutineState(ctx, key); err != nil {
+				log.Printf("routines: %s: forget it: %v", key, err)
+				continue // kept, to be tried again
+			}
+		}
+		delete(r.last, key)
+	}
 }
 
 func (r *Routines) loc() *time.Location {
@@ -147,6 +173,7 @@ func (r *Routines) Check(ctx context.Context) {
 		return
 	}
 	now := r.now()
+	r.forget(ctx, now)
 	for _, a := range list {
 		for _, rt := range a.Routines {
 			key := a.ID() + "/" + rt.Name

@@ -84,6 +84,7 @@ func (r *Routines) Alert(ctx context.Context, a Alert) {
 	}
 	firing := a.Status == "firing"
 	firingKey := fmt.Sprintf("alert:%s:%d", a.Fingerprint, a.StartsAt.Unix())
+	// once, below, is <routine>#<firingKey>: alertMark is how forget knows it.
 
 	if firing {
 		list, err := r.Server.Agents.All(ctx)
@@ -102,8 +103,14 @@ func (r *Routines) Alert(ctx context.Context, a Alert) {
 					}
 					key := ag.ID() + "/" + rt.Name
 					once := key + "#" + firingKey
-					if _, done := r.last[once]; done {
-						continue // this firing started it before
+					if at, done := r.last[once]; done {
+						// This firing started it before. It still fires: its
+						// mark is kept from being forgotten, noted once a day.
+						if r.now().Sub(at) > 24*time.Hour {
+							r.last[once] = r.now()
+							r.save(ctx, once)
+						}
+						continue
 					}
 					why := fmt.Sprintf("the alert %s fired at %s: %s%s", name, a.StartsAt.In(r.loc()).Format("Mon 2 Jan 15:04"), summary, alertFacts(a))
 					if !r.start(ctx, ag, rt, key, why) {

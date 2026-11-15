@@ -108,12 +108,10 @@ func (n Internet) None() bool { return !n.All && !n.Packages && len(n.Domains) =
 // Wide: more than the registries.
 func (n Internet) Wide() bool { return n.All || len(n.Domains) > 0 }
 
-// Narrowed is what an agent on private repos keeps: the registries at most.
+// Narrowed is what an agent on private repos keeps: the registries at
+// most, and only if it had them, which all includes.
 func (n Internet) Narrowed() Internet {
-	if n.None() {
-		return n
-	}
-	return Internet{Packages: true}
+	return Internet{Packages: n.Packages || n.All}
 }
 
 // Allows tells whether host (a name, lower case, without port) may be

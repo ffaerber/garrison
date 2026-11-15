@@ -74,6 +74,10 @@ func TestPostgres(t *testing.T) {
 	}
 	pg.SaveRoutineState(ctx, "todo/dev/on-main", RoutineState{Head: "c1"})
 	pg.SaveRoutineState(ctx, "todo/dev/on-main", RoutineState{Head: "c2"})
+	pg.SaveRoutineState(ctx, "todo/dev/on-alert#alert:f1:1", RoutineState{Last: at})
+	if err := pg.DeleteRoutineState(ctx, "todo/dev/on-alert#alert:f1:1"); err != nil {
+		t.Fatal(err)
+	}
 	st, err := pg.RoutineStates(ctx)
 	if err != nil || len(st) != 2 || !st["todo/dev/morning"].Last.Equal(at) || st["todo/dev/on-main"].Head != "c2" || !st["todo/dev/on-main"].Last.IsZero() {
 		t.Errorf("routine state: %v %+v", err, st)

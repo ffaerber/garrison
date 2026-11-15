@@ -78,6 +78,13 @@ func TestInternetAllows(t *testing.T) {
 	if n := (Internet{All: true}).Narrowed(); n.All || !n.Packages || n.Wide() {
 		t.Errorf("all narrowed: %+v", n)
 	}
+	if n := (Internet{Packages: true, Domains: []string{"api.example.com"}}).Narrowed(); !n.Packages || n.Wide() {
+		t.Errorf("packages and a domain narrowed to %+v", n)
+	}
+	// Domains without the registries: narrowing gives none it never had.
+	if n := (Internet{Domains: []string{"api.example.com"}}).Narrowed(); !n.None() {
+		t.Errorf("a domain alone narrowed to %+v", n)
+	}
 	if n := (Internet{}).Narrowed(); !n.None() {
 		t.Errorf("none narrowed: %+v", n)
 	}
