@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -31,6 +33,10 @@ func fakeDocker(t *testing.T) (string, *[]string) {
 		case strings.HasSuffix(r.URL.Path, "/containers/create"):
 			w.WriteHeader(http.StatusCreated)
 			io.WriteString(w, `{"Id":"job1"}`)
+		case strings.HasSuffix(r.URL.Path, "/containers/GITEA-ACTIONS-TASK-1_job/json"):
+			io.WriteString(w, `{"Id":"job1"}`)
+		case strings.HasSuffix(r.URL.Path, "/containers/gitea_gitea.1/json"), strings.HasSuffix(r.URL.Path, "/containers/control-plane_deployer.1/json"):
+			io.WriteString(w, `{"Id":"gitea1"}`)
 		case strings.HasSuffix(r.URL.Path, "/exec"):
 			w.WriteHeader(http.StatusCreated)
 			io.WriteString(w, `{"Id":"exec1"}`)
@@ -124,6 +130,11 @@ func TestEscapesAreRefused(t *testing.T) {
 		"sysctl":              {"Sysctls": map[string]string{"kernel.core_pattern": "|/x"}},
 		"published port":      {"PortBindings": map[string]any{"80/tcp": []any{}}},
 		"cgroup parent":       {"CgroupParent": "/"},
+		"host files as a job volume": {"Mounts": []any{map[string]any{"Type": "volume", "Source": "GITEA-ACTIONS-x", "Target": "/host",
+			"VolumeOptions": map[string]any{"DriverConfig": map[string]any{"Name": "local", "Options": map[string]string{"type": "none", "o": "bind", "device": "/"}}}}}},
+		"volume driver":      {"VolumeDriver": "sshfs"},
+		"unmasked /proc":     {"MaskedPaths": []string{}, "ReadonlyPaths": []string{}},
+		"writable /proc/sys": {"ReadonlyPaths": []string{"/proc/bus"}},
 	} {
 		if got := do(t, srv, "POST", "/v1.47/containers/create", job(host)); got != 403 {
 			t.Errorf("%s: %d, want 403", name, got)
@@ -155,8 +166,12 @@ func TestEscapesAreRefused(t *testing.T) {
 			t.Errorf("%s %s: %d, want 403", c.method, c.path, got)
 		}
 	}
-	if len(*seen) != before {
-		t.Errorf("refused requests reached Docker: %v", (*seen)[before:])
+	// Nothing but the guard's own question, which container a name means.
+	reached := slices.DeleteFunc((*seen)[before:], func(s string) bool {
+		return strings.HasPrefix(s, "GET /containers/") && strings.HasSuffix(s, "/json")
+	})
+	if len(reached) != 0 {
+		t.Errorf("refused requests reached Docker: %v", reached)
 	}
 	// A privileged exec, even into the job's own container, is refused.
 	do(t, srv, "POST", "/v1.47/containers/create", job(nil))
@@ -257,9 +272,9 @@ func TestSandboxesAreKnownByTheirLabel(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			io.WriteString(w, `[{"Id":"sb1","Labels":{"homecloud.sandbox":"true"}},{"Id":"gitea1","Labels":{}}]`)
 		case strings.HasSuffix(r.URL.Path, "/containers/sb1/json"):
-			io.WriteString(w, `{"Config":{"Labels":{"homecloud.sandbox":"true"}}}`)
+			io.WriteString(w, `{"Id":"sb1","Config":{"Labels":{"homecloud.sandbox":"true"}}}`)
 		case strings.HasSuffix(r.URL.Path, "/containers/gitea1/json"):
-			io.WriteString(w, `{"Config":{"Labels":{}}}`)
+			io.WriteString(w, `{"Id":"gitea1","Config":{"Labels":{}}}`)
 		case strings.HasSuffix(r.URL.Path, "/containers/gone/json"), strings.HasSuffix(r.URL.Path, "/containers/gone"):
 			w.WriteHeader(http.StatusNotFound)
 		default:
@@ -289,5 +304,71 @@ func TestSandboxesAreKnownByTheirLabel(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&list)
 	if len(list) != 1 || list[0]["Id"] != "sb1" {
 		t.Errorf("list %v", list)
+	}
+}
+
+// Docker finds a container by name before it tries the start of an id. A
+// name the guard once let through must not reach another container whose id
+// starts with it, once the job's own container of that name is gone; and
+// what the guard lets through goes to Docker under the full id it checked.
+func TestANameIsNotRememberedAfterItsContainer(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "docker.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var seen []string
+	gone := false // the job's container, named ab, was removed
+	srv0 := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"Id":"1111job"}`)
+		case r.Method == "DELETE" && strings.HasSuffix(r.URL.Path, "/containers/1111job"):
+			gone = true
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/containers/ab/json") && !gone:
+			io.WriteString(w, `{"Id":"1111job"}`) // by name
+		case strings.HasSuffix(r.URL.Path, "/containers/ab/json"):
+			io.WriteString(w, `{"Id":"ab99gitea"}`) // by the start of Gitea's id
+		case strings.HasSuffix(r.URL.Path, "/exec"):
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"Id":"exec1"}`)
+		default:
+			io.WriteString(w, "{}")
+		}
+	})}
+	go srv0.Serve(l)
+	t.Cleanup(func() { srv0.Close() })
+	srv := httptest.NewServer(New(sock, Policy{Network: "homecloud-builds", VolumePrefixes: []string{"GITEA-ACTIONS-", "act-toolcache"}}))
+	t.Cleanup(srv.Close)
+
+	if code := do(t, srv, "POST", "/v1.47/containers/create?name=ab", job(nil)); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	if code := do(t, srv, "POST", "/v1.47/containers/ab/exec", map[string]any{"Cmd": []string{"true"}}); code != http.StatusCreated {
+		t.Errorf("exec in the job by its name: %d", code)
+	}
+	mu.Lock()
+	if last := seen[len(seen)-1]; last != "POST /v1.47/containers/1111job/exec" {
+		t.Errorf("Docker got %q, not the id the guard checked", last)
+	}
+	mu.Unlock()
+	if code := do(t, srv, "DELETE", "/v1.47/containers/1111job?force=1", nil); code != http.StatusNoContent {
+		t.Fatalf("remove: %d", code)
+	}
+	if code := do(t, srv, "POST", "/v1.47/containers/ab/exec", map[string]any{"Cmd": []string{"sh"}}); code != http.StatusForbidden {
+		t.Errorf("exec in the container whose id starts with the old name: %d, want 403", code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, s := range seen {
+		if strings.Contains(s, "ab99gitea") || s == "POST /v1.47/containers/ab/exec" {
+			t.Errorf("reached Docker: %s", s)
+		}
 	}
 }

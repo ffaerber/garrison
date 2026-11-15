@@ -9,8 +9,11 @@
 //     capabilities, devices, security options, host namespaces, host mounts,
 //     or other networks than the builds network;
 //   - exec, copy, logs, start, stop and removal only of containers and execs
-//     created through the guard, never of the platform's own;
-//   - volumes only of the runner's own (by name prefix), without driver options;
+//     created through the guard, never of the platform's own. Docker finds a
+//     container by id, name or the start of an id, so the guard asks which
+//     one a request means and passes it on under that container's full id;
+//   - volumes only of the runner's own (by name prefix), without driver
+//     options, also where a mount would have Docker make the volume;
 //   - image pulls, but no builds, pushes, tags, commits or imports, and
 //     nothing of Swarm, secrets, plugins or the system.
 //
@@ -53,7 +56,7 @@ type Guard struct {
 	docker *http.Client
 
 	mu         sync.Mutex
-	containers map[string]bool // ids and names of containers created through the guard
+	containers map[string]bool // full ids of containers created through the guard
 	execs      map[string]bool
 }
 
@@ -86,8 +89,13 @@ var (
 func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := versionPrefix.ReplaceAllString(r.URL.Path, "")
 	if err := g.allow(r, path); err != nil {
-		log.Printf("guard: refused %s %s: %v", r.Method, r.URL.Path, err)
 		w.Header().Set("Content-Type", "application/json")
+		if missing, ok := err.(noContainer); ok {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"message": missing.Error()})
+			return
+		}
+		log.Printf("guard: refused %s %s: %v", r.Method, r.URL.Path, err)
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]string{"message": "refused by the homecloud Docker guard: " + err.Error()})
 		return
@@ -95,35 +103,52 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.proxy.ServeHTTP(w, r)
 }
 
-func (g *Guard) owned(id string) bool {
+// noContainer: there is no container of that name, as Docker would say.
+type noContainer string
+
+func (n noContainer) Error() string { return "No such container: " + string(n) }
+
+// created tells whether id is the full id of a container made through the guard.
+func (g *Guard) created(id string) bool {
 	g.mu.Lock()
-	known := g.containers[id] || g.containers[strings.TrimPrefix(id, "/")]
-	g.mu.Unlock()
-	if known || g.Policy.Label == "" {
-		return known
+	defer g.mu.Unlock()
+	return g.containers[id]
+}
+
+// resolve finds the container ref means to Docker (a full id, a name, or
+// the start of an id, in that order) and tells whether it is the guard's:
+// created through it, or, under a label policy, carrying the label, as
+// those created before the guard last started do. Names are not remembered:
+// once a container is gone, its name can be the start of another's id.
+func (g *Guard) resolve(ref string) (id string, found, owned bool) {
+	if g.created(ref) {
+		return ref, true, true
 	}
-	// Created before the guard last started: known by the label.
-	resp, err := g.docker.Get("http://docker/containers/" + url.PathEscape(id) + "/json")
+	resp, err := g.docker.Get("http://docker/containers/" + url.PathEscape(ref) + "/json")
 	if err != nil {
-		return false
+		return "", true, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return true // no such container: Docker answers that itself
+		return "", false, false
 	}
 	var c struct {
+		Id     string
 		Config struct{ Labels map[string]string }
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&c) != nil {
-		return false
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&c) != nil || c.Id == "" {
+		return "", true, false
 	}
-	if c.Config.Labels[g.Policy.Label] != "true" {
-		return false
+	if g.created(c.Id) {
+		return c.Id, true, true
+	}
+	if g.Policy.Label == "" || c.Config.Labels[g.Policy.Label] != "true" {
+		return c.Id, true, false
 	}
 	g.mu.Lock()
-	g.containers[id] = true
+	g.containers[c.Id] = true
 	g.mu.Unlock()
-	return true
+	return c.Id, true, true
 }
 
 // imageAllowed: any image without an image policy, else only its repository.
@@ -165,9 +190,17 @@ func (g *Guard) allow(r *http.Request, path string) error {
 		return nil
 	}
 	if mm := containerPath.FindStringSubmatch(path); mm != nil {
-		if !g.owned(mm[1]) {
+		id, found, owned := g.resolve(mm[1])
+		switch {
+		case !found && g.Policy.Label != "":
+			return noContainer(mm[1])
+		case !owned:
 			return fmt.Errorf("container %s was not created through the guard", mm[1])
 		}
+		// Docker gets the id found here, not the name again: by the time it
+		// looked the name up itself, it could mean another container.
+		r.URL.Path = strings.TrimSuffix(r.URL.Path, path) + "/containers/" + id + strings.TrimPrefix(path, "/containers/"+mm[1])
+		r.URL.RawPath = ""
 		if mm[3] == "exec" {
 			return g.checkExec(r)
 		}
@@ -228,10 +261,19 @@ type createBody struct {
 		NetworkMode       string
 		Binds             []string
 		Mounts            []struct {
-			Type   string
-			Source string
+			Type          string
+			Source        string
+			VolumeOptions *struct {
+				DriverConfig *struct {
+					Name    string
+					Options map[string]string
+				}
+			}
 		}
 		VolumesFrom     []string
+		VolumeDriver    string
+		MaskedPaths     []string
+		ReadonlyPaths   []string
 		Runtime         string
 		Sysctls         map[string]string
 		Links           []string
@@ -276,8 +318,18 @@ func (g *Guard) checkCreate(r *http.Request) error {
 	for _, mt := range h.Mounts {
 		add(mt.Type != "volume" && mt.Type != "tmpfs", mt.Type+" mount")
 		add(mt.Type == "volume" && !g.volumeAllowed(mt.Source), "mount of "+mt.Source)
+		// Docker makes a missing volume with these: type=none, o=bind and
+		// device=/ would be the host's files under a job volume's name.
+		if o := mt.VolumeOptions; o != nil && o.DriverConfig != nil {
+			add((o.DriverConfig.Name != "" && o.DriverConfig.Name != "local") || len(o.DriverConfig.Options) > 0, "a volume with driver or driver options")
+		}
 	}
 	add(len(h.VolumesFrom) > 0, "volumes from another container")
+	add(h.VolumeDriver != "" && h.VolumeDriver != "local", "volume driver "+h.VolumeDriver)
+	// Set, even to nothing, they replace Docker's own: /proc/sys and the
+	// like would be writable, as with --security-opt systempaths=unconfined,
+	// which the docker CLI turns into these two before it sends anything.
+	add(h.MaskedPaths != nil || h.ReadonlyPaths != nil, "its own masked or read-only paths")
 	if g.Policy.Runtime != "" {
 		add(h.Runtime != g.Policy.Runtime, fmt.Sprintf("runtime %q, not %s", h.Runtime, g.Policy.Runtime))
 	} else {
@@ -340,9 +392,6 @@ func (g *Guard) record(resp *http.Response) error {
 		if err := peek(resp, &out); err == nil && out.Id != "" {
 			g.mu.Lock()
 			g.containers[out.Id] = true
-			if name := req.URL.Query().Get("name"); name != "" {
-				g.containers[name] = true
-			}
 			g.mu.Unlock()
 		}
 	case req.Method == http.MethodPost && strings.HasSuffix(path, "/exec") && resp.StatusCode == http.StatusCreated:
@@ -392,7 +441,7 @@ func (g *Guard) filterList(resp *http.Response) error {
 			}
 			continue
 		}
-		if id, _ := c["Id"].(string); g.owned(id) {
+		if id, _ := c["Id"].(string); g.created(id) {
 			mine = append(mine, c)
 		}
 	}
