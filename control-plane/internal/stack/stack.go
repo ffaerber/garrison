@@ -54,6 +54,14 @@ func (s *Stack) WithPreviews(names []string) {
 	}
 }
 
+// Placeholders in a service's image: {{registry}} is the installation's
+// registry, {{commit}} the environment's commit. Spaces inside the braces
+// are allowed, as they are commonly written.
+var (
+	RegistryPlaceholder = regexp.MustCompile(`\{\{\s*registry\s*\}\}`)
+	CommitPlaceholder   = regexp.MustCompile(`\{\{\s*commit\s*\}\}`)
+)
+
 // schemaURL only names the embedded schema in error messages.
 const schemaURL = "homecloud:///schemas/stack.schema.json"
 
@@ -173,7 +181,7 @@ func ParseIn(data []byte, namespace, name string) (*Stack, error) {
 			}
 		}
 		for _, svc := range s.ServiceNames() {
-			if img := s.Services[svc].Image; regexp.MustCompile(`\{\{\s*commit\s*\}\}`).MatchString(img) {
+			if img := s.Services[svc].Image; CommitPlaceholder.MatchString(img) {
 				errs = append(errs, fmt.Errorf("service %s: {{commit}} in its image needs a source repo, whose commits it names", svc))
 			}
 		}

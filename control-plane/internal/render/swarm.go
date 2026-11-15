@@ -46,8 +46,8 @@ func Image(image, domain, commit string) string {
 	if len(commit) > 12 {
 		commit = commit[:12]
 	}
-	image = strings.ReplaceAll(image, "{{registry}}", Registry(domain))
-	return strings.ReplaceAll(image, "{{commit}}", commit)
+	image = stack.RegistryPlaceholder.ReplaceAllLiteralString(image, Registry(domain))
+	return stack.CommitPlaceholder.ReplaceAllLiteralString(image, commit)
 }
 
 // DefaultDataRoot is where the installer mounts the dataset that holds all

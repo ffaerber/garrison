@@ -54,3 +54,17 @@ func TestSwarmErrors(t *testing.T) {
 		t.Error("missing domain accepted")
 	}
 }
+
+// The placeholders are filled in with or without spaces inside the braces:
+// the stack's check counts both as {{commit}}.
+func TestImagePlaceholders(t *testing.T) {
+	for image, want := range map[string]string{
+		"{{registry}}/homepage/todo:{{commit}}":     "git.example.com/homepage/todo:aaaaaaaaaaaa",
+		"{{ registry }}/homepage/todo:{{ commit }}": "git.example.com/homepage/todo:aaaaaaaaaaaa",
+		"postgres:17-alpine":                        "postgres:17-alpine",
+	} {
+		if got := Image(image, "example.com", "aaaaaaaaaaaa1111"); got != want {
+			t.Errorf("Image(%q) = %q, want %q", image, got, want)
+		}
+	}
+}
