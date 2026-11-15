@@ -72,14 +72,17 @@ func (f *grantsGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(f.prs[n])
 	case p == "/repos/homepage/todo/pulls":
+		// Like Gitea: ?state=open leaves out the merged and closed ones.
 		out := []any{}
 		for _, pr := range f.prs {
-			out = append(out, pr)
+			if s := r.URL.Query().Get("state"); s == "" || s == "all" || s == pr["state"] {
+				out = append(out, pr)
+			}
 		}
 		json.NewEncoder(w).Encode(out)
 	case sscan(p, "/repos/homepage/todo/pulls/%d/merge", &n):
 		f.merged = append(f.merged, fmt.Sprintf("%d by %s", n, as))
-		f.prs[n]["merged"] = true
+		f.prs[n]["merged"], f.prs[n]["state"] = true, "closed"
 		io.WriteString(w, "{}")
 	case sscan(p, "/repos/homepage/todo/pulls/%d/reviews", &n):
 		json.NewEncoder(w).Encode(append([]map[string]any{}, f.reviews[n]...))
