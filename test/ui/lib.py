@@ -65,6 +65,11 @@ def check(name: str, fn, *args, **kwargs):
             print(f"slow  {int(took):4d}s  {name}", flush=True)
 
 
+def channel_id(url: str) -> str:
+    """The channel of an Open WebUI page /channels/<id>[?thread=…]."""
+    return url.split("/channels/", 1)[1].split("?", 1)[0].split("/", 1)[0]
+
+
 def until(seconds: float, fn, *args, every: float = 2, **kwargs):
     """Calls fn until it returns something true, for up to seconds."""
     deadline = time.time() + seconds
@@ -233,7 +238,7 @@ class Person:
         link.first.click()
         p.wait_for_url(f"{CHAT}/channels/**")
         p.wait_for_selector("#chat-input")
-        return p.url.rsplit("/", 1)[1]
+        return channel_id(p.url)
 
     def has_channel(self, name: str) -> bool:
         return any(c["name"] == name for c in self.owui("/api/v1/channels/"))
@@ -251,7 +256,7 @@ class Person:
         """In the open channel: types @agent, picks it from the list, types
         text and sends it. Returns the message's id."""
         p = self.page
-        cid = p.url.rsplit("/", 1)[1]
+        cid = channel_id(p.url)
         before = {m["id"] for m in self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")}
         option = p.locator("button.selected-command-option-button, button[data-selected='true']").filter(has_text=agent)
         # The page knows the agents there were when it loaded; one of a
@@ -271,6 +276,7 @@ class Person:
                 p.reload()
                 p.locator("#chat-input").wait_for()
         option.first.click()
+        p.wait_for_timeout(500)  # the editor swallows keys while it inserts the mention
         p.keyboard.type(" " + text)
         p.keyboard.press("Enter")
         mine = until(30, lambda: [m for m in self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")
@@ -282,7 +288,7 @@ class Person:
         """The agent's answer in the thread of message, once finished; opens
         the thread on the page."""
         p = self.page
-        cid = p.url.rsplit("/", 1)[1]
+        cid = channel_id(p.url)
 
         def finished():
             for m in self.owui(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50"):
@@ -291,7 +297,7 @@ class Person:
                     return m.get("content") or " "
             return None
         text = until(seconds, finished, every=5)
-        p.goto(f"{CHAT}/channels/{cid}/messages/{message}")
+        p.goto(f"{CHAT}/channels/{cid}?thread={message}")
         p.wait_for_timeout(2000)
         self.snap(f"answer of {agent}")
         return text
@@ -303,13 +309,25 @@ class Person:
     def reply(self, message: str, text: str):
         """Replies in the thread of message of the open channel."""
         p = self.page
-        cid = p.url.split("/channels/", 1)[1].split("/", 1)[0]
-        p.goto(f"{CHAT}/channels/{cid}/messages/{message}")
-        box = p.locator("#chat-input").last
+        cid = channel_id(p.url)
+        p.goto(f"{CHAT}/channels/{cid}?thread={message}")
+        # The thread's box, not the channel's: the pane opens after the page.
+        box = p.locator("#chat-input[aria-label='Reply to thread...']")
         box.wait_for()
-        box.click()
-        p.keyboard.type(text)
-        p.keyboard.press("Enter")
+        # The pane redraws as its messages load and takes the focus away
+        # mid-typing; type again until the box holds the whole text.
+        for attempt in range(5):
+            box.click()
+            p.keyboard.press("Control+A")
+            p.keyboard.press("Delete")
+            p.keyboard.type(text)
+            p.wait_for_timeout(700)
+            if box.inner_text().strip() == text:
+                break
+        else:
+            raise AssertionError(f"the thread's box holds {box.inner_text()!r}")
+        # Enter in the thread's box does not send; its button does.
+        p.locator("#send-message-button").last.click()
         until(20, lambda: any(text in (m.get("content") or "")
                               for m in self.owui(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")))
         self.snap("replied")

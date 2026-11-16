@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from lib import (CHAT, DOMAIN, GIT, HOME, Person, approval, browser, check, done, gitea, newest_pr, pr_files,
+from lib import (CHAT, channel_id, DOMAIN, GIT, HOME, Person, approval, browser, check, done, gitea, newest_pr, pr_files,
                  raw, section, until)
 
 NS, APP = os.environ.get("UI_NAMESPACE", "shop"), os.environ.get("UI_APP", "web")
@@ -196,7 +196,7 @@ def waiting_for_bob():
 check("it waits for him there", until, 30, waiting_for_bob)
 bob.snap("waiting for you")
 bob.page.locator("section.waiting a.answer").first.click()
-check("its link takes him to the channel", lambda: bob.page.wait_for_url(f"{CHAT}/channels/**") or True)
+check("its link opens the question's thread", lambda: bob.page.wait_for_url(f"{CHAT}/channels/**?thread={question['id'] if question else ''}") or True)
 check("he answers in its thread", bob.reply, question["id"] if question else "", "Yes, open on Sundays.")
 
 
@@ -210,7 +210,7 @@ def went_on():
 
 
 check("the routine goes on with his answer, in the thread", until, 300, went_on, every=5)
-bob.page.goto(f"{CHAT}/channels/{bob.page.url.split('/channels/')[1].split('/')[0]}/messages/{question['id'] if question else ''}")
+bob.page.goto(f"{CHAT}/channels/{channel_id(bob.page.url)}?thread={question['id'] if question else ''}")
 bob.snap("the routine went on")
 check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), "Waiting for you" not in bob.page.content())[1])
 
