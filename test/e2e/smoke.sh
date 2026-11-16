@@ -1749,7 +1749,9 @@ section_ui() {
   test/ui/run.sh 2>"$tmp/ui.err" | tee "$tmp/ui.out" || true
   local n
   n=$(grep -c '^FAIL' "$tmp/ui.out" || true)
-  grep -q '^all checks passed' "$tmp/ui.out" || [ "$n" -gt 0 ] || { echo "FAIL  the browser scenarios ran to the end"; tail -5 "$tmp/ui.err"; n=1; }
+  # done() prints one of these last; without it the script broke off.
+  grep -Eq '^(all checks passed|[0-9]+ check\(s\) failed)' "$tmp/ui.out" ||
+    { echo "FAIL  the browser scenarios ran to the end"; tail -15 "$tmp/ui.err"; n=$((n + 1)); }
   failed=$((failed + n))
 }
 

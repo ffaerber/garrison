@@ -222,8 +222,12 @@ class Person:
         if p.locator("button[aria-label='Open Sidebar']").first.is_visible():
             p.locator("button[aria-label='Open Sidebar']").first.click()
         link = p.locator("a[href*='/channels/']").filter(has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
-        if not link.count():
-            p.get_by_text("Channels", exact=True).click()  # the section opens on a click
+        # The sidebar renders after the page; its Channels section may be
+        # closed, and opens on a click (a click on an open one closes it).
+        try:
+            link.first.wait_for(timeout=5_000)
+        except Exception:  # noqa: BLE001 - closed
+            p.get_by_text("Channels", exact=True).click()
         link.first.click()
         p.wait_for_url(f"{CHAT}/channels/**")
         p.wait_for_selector("#chat-input")
@@ -247,11 +251,23 @@ class Person:
         p = self.page
         cid = p.url.rsplit("/", 1)[1]
         before = {m["id"] for m in self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")}
-        ed = p.locator("#chat-input")
-        ed.click()
-        p.keyboard.type("@" + agent)
         option = p.locator("button.selected-command-option-button, button[data-selected='true']").filter(has_text=agent)
-        option.first.wait_for()
+        # The page knows the agents there were when it loaded; one of a
+        # namespace made since appears after a reload, as for a person.
+        for attempt in range(3):
+            ed = p.locator("#chat-input")
+            ed.click()
+            p.keyboard.press("Control+A")
+            p.keyboard.press("Delete")
+            p.keyboard.type("@" + agent)
+            try:
+                option.first.wait_for(timeout=10_000)
+                break
+            except Exception:  # noqa: BLE001 - not offered (yet)
+                if attempt == 2:
+                    raise
+                p.reload()
+                p.locator("#chat-input").wait_for()
         option.first.click()
         p.keyboard.type(" " + text)
         p.keyboard.press("Enter")
