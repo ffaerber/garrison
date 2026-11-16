@@ -40,9 +40,11 @@ check "with its pipeline"                  test "$(gitea_api "" -o /dev/null -w 
 started_by() { gitea_api "" "$lab/example/commits?sha=main&limit=1" | python3 -c 'import json,sys; print((json.load(sys.stdin)[0].get("author") or {}).get("login", ""))'; }
 check "written as alice"                   test "$(started_by)" = alice
 lab_channel() { channel_of lab alice >/dev/null; }
-check "lab gets its channel"               until_true 180 lab_channel
+# The operator answers once lab is set up, so its channel and operator are
+# there as soon as it has.
+check "lab has its channel when the operator answers" until_true 5 lab_channel
 lab_operator() { chat_api alice "$chat/api/models" | grep -q '"id":"lab/operator"'; }
-check "and its operator"                   until_true 180 lab_operator
+check "and its operator"                   until_true 5 lab_operator
 main1=$(head_of_lab example main)
 built() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/lab/container/example/${1:0:12}")" = 200 ]; }
 check "the pipeline builds main's image"   until_true 900 built "$main1"

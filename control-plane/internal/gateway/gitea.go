@@ -488,6 +488,21 @@ func (g *Gitea) Changes(ctx context.Context, as, org string) ([]Change, error) {
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
+// Exists tells whether the repo org/repo exists.
+func (g *Gitea) Exists(ctx context.Context, org, repo string) (bool, error) {
+	if err := validOrg(org); err != nil {
+		return false, err
+	}
+	if err := validRepo(repo); err != nil {
+		return false, err
+	}
+	status, err := g.do(ctx, "", http.MethodGet, "/repos/"+org+"/"+repo, nil, nil)
+	if status == http.StatusNotFound {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // CreateNamespace makes a namespace, a Gitea organisation, as person. Gitea
 // lets only its admins, the root admins, make organisations. Its creator is
 // its first owner; the members sync then makes its config repo, with them as

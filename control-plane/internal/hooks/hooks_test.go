@@ -160,7 +160,7 @@ func TestKeepRegistersOrganisationsOnLaterPages(t *testing.T) {
 	defer gitea.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go (&Gitea{URL: gitea.URL, User: "admin", Password: "pw"}).Keep(ctx, "http://deployer/hook", []byte("s"), time.Hour)
+	go (&Gitea{URL: gitea.URL, User: "admin", Password: "pw"}).Keep(ctx, "http://deployer/hook", []byte("s"), time.Hour, nil)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
@@ -174,4 +174,54 @@ func TestKeepRegistersOrganisationsOnLaterPages(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	t.Errorf("%d organisations got the webhook; photos: %v", len(hooked), hooked["photos"])
+}
+
+// Gitea tells nobody of a new organisation: Keep wakes the loops when it
+// finds one, and not when nothing is new.
+func TestKeepWakesTheLoopsForANewOrganisation(t *testing.T) {
+	var mu sync.Mutex
+	orgs := []string{"todo"}
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/api/v1/admin/orgs":
+			var page []map[string]string
+			if p := r.URL.Query().Get("page"); p == "1" || p == "" {
+				for _, o := range orgs {
+					page = append(page, map[string]string{"username": o})
+				}
+			}
+			json.NewEncoder(w).Encode(page)
+		case r.Method == http.MethodGet:
+			w.Write([]byte("[]"))
+		default:
+			w.Write([]byte("{}"))
+		}
+	}))
+	defer gitea.Close()
+	wake := &Wake{}
+	woken := wake.Subscribe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go (&Gitea{URL: gitea.URL, User: "admin", Password: "pw"}).Keep(ctx, "http://deployer/hook", []byte("s"), 20*time.Millisecond, wake)
+	wait := func(want bool) {
+		t.Helper()
+		select {
+		case <-woken:
+			if !want {
+				t.Fatal("woken with nothing new")
+			}
+		case <-time.After(200 * time.Millisecond):
+			if want {
+				t.Fatal("not woken")
+			}
+		}
+	}
+	wait(true) // the first pass finds todo
+	wait(false)
+	mu.Lock()
+	orgs = append(orgs, "lab")
+	mu.Unlock()
+	wait(true)
 }

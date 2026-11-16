@@ -50,6 +50,9 @@ type Tools struct {
 	Prometheus string       // e.g. http://prometheus_prometheus:9090
 	Browser    *Browser     // for screenshot; nil: none
 	HTTP       *http.Client
+	// Ready, if set, waits until a namespace just made is set up: its config
+	// repo, its operator and its channel.
+	Ready func(ctx context.Context, ns string) error
 
 	privateMu sync.Mutex
 	private   map[string]bool // hostnames of private environments, read a few seconds ago
@@ -379,7 +382,13 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. Within a minute it has its config repo (members.yaml, its agents), its operator and its channel. Make its repos with create_repo.", name, p.Name), nil
+		if t.Ready != nil {
+			if err := t.Ready(ctx, name); err != nil {
+				return fmt.Sprintf("Made the namespace %s, with %s as its first admin. %v. Make its repos with create_repo.", name, p.Name, err), nil
+			}
+			return fmt.Sprintf("Made the namespace %s, with %s as its first admin. It is ready: its config repo (members.yaml, its agents), its operator @%s/operator and its channel %s. Make its repos with create_repo.", name, p.Name, name, name), nil
+		}
+		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. In a few seconds it has its config repo (members.yaml, its agents), its operator and its channel. Make its repos with create_repo.", name, p.Name), nil
 	case "create_repo":
 		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Namespace, a.Repo, a.Description, a.Private, a.Template)
 		if err != nil {

@@ -41,13 +41,17 @@ func TestMakingNamespacesAndRepos(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	var readied []string
+	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"},
+		Ready: func(_ context.Context, ns string) error { readied = append(readied, ns); return nil }}
 	call := func(who, tool string, args map[string]any) (string, error) {
 		raw, _ := json.Marshal(args)
 		return tools.Call(context.Background(), Person{Name: who}, nil, tool, raw)
 	}
-	if out, err := call("alice", "create_namespace", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") {
-		t.Errorf("alice: %q %v", out, err)
+	// The agent answers once the namespace is set up, not before.
+	if out, err := call("alice", "create_namespace", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") ||
+		!strings.Contains(out, "It is ready") || !strings.Contains(out, "@photos/operator") || len(readied) != 1 {
+		t.Errorf("alice: %q %v %v", out, err, readied)
 	}
 	if _, err := call("bob", "create_namespace", map[string]any{"name": "bobs"}); err == nil || !strings.Contains(err.Error(), "only root admins may") {
 		t.Errorf("bob: %v", err)

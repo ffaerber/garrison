@@ -84,14 +84,18 @@ o=$api/orgs/$ns
 echo "# a namespace"
 check "alice creates the namespace crud"   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"crud","visibility":"limited","description":"Made by the crud test"}' "$api/orgs")" = 201
 first_admin() { gitea_api "" "$api/repos/$ns/config/raw/members.yaml" | python3 -c 'import sys,yaml; sys.exit(0 if (yaml.safe_load(sys.stdin) or {}).get("admins") == ["alice"] else 1)'; }
-check "it gets its config, alice its first admin" until_true 180 first_admin
-check "and alice joins its admins"         until_true 60 team_has $ns admins alice
+# Gitea tells nobody of a new organisation; the platform notices within
+# seconds and sets it up at once, not at its loops' next tick.
+check "within seconds it has its config, alice its first admin" until_true 15 first_admin
+check "and alice joins its admins"         until_true 15 team_has $ns admins alice
 builder() { [ "$(user_status $ns-builder)" = 200 ] && gitea_api "" "$o/actions/secrets" | grep -q REGISTRY_TOKEN; }
-check "a build account, with its token"    until_true 120 builder
-check "a group in Open WebUI"              until_true 120 has_group $ns
-check "a channel alice sees"               until_true 120 sees_channel alice $ns
+check "a build account, with its token"    until_true 20 builder
+check "a group in Open WebUI"              until_true 20 has_group $ns
+check "a channel alice sees"               until_true 20 sees_channel alice $ns
 check "but bob, not in it, does not"       not sees_channel bob crud
-check "and its operator, which bob may use too" until_true 120 sees_model bob $ns/operator
+check "and its operator, which bob may use too" until_true 20 sees_model bob $ns/operator
+check "alice opens her dashboard"          until_true 60 home_login alice
+check "whose feed says crud is set up"     until_true 20 in_feed alice ns=$ns "e['kind'] == 'namespace' and e['actor'] == 'alice'"
 check "bob sees the namespace"             grep -q '"username":"crud"' <<<"$(gitea_api bob "$api/orgs?limit=50")"
 check "and reads its config"               test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/repos/$ns/config/raw/members.yaml")" = 200
 check "alice changes its description"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"description":"Changed by the crud test"}' "$o")" = 200

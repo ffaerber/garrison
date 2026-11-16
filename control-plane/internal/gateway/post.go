@@ -211,6 +211,19 @@ func PostHandler(o *OpenWebUI, key string) http.Handler {
 	})
 }
 
+// HasChannel tells whether namespace ns has its channel yet.
+func (o *OpenWebUI) HasChannel(ctx context.Context, ns string) (bool, error) {
+	token, err := o.session(ctx)
+	if err != nil {
+		return false, err
+	}
+	var all []owuiChannel
+	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(all, func(c owuiChannel) bool { return c.Meta[ChannelMarker] == ns }), nil
+}
+
 // ChannelInfo is what a channel is to the platform.
 type ChannelInfo struct {
 	Namespace string `json:"namespace"` // empty: not a namespace's

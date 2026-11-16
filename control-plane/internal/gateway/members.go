@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/hooks"
 	"garrison/templates"
 )
@@ -39,8 +40,9 @@ import (
 // request of config.
 type Members struct {
 	// Wake, when set, starts a sync before the interval is over.
-	Wake  <-chan struct{}
-	Gitea *Gitea
+	Wake   <-chan struct{}
+	Gitea  *Gitea
+	Events events.Recorder // the feed, told when a namespace is set up; nil: none
 
 	posted  map[string]string // pull request head -> status last posted
 	applied map[string]string // agent account -> the repos it was last given
@@ -455,6 +457,13 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 			return err
 		}
 		log.Printf("members: %s/config made, admins %v", ns, owners)
+		if m.Events != nil {
+			m.Events.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK,
+				Namespace: ns, Audience: events.AudienceMembers, Actor: owners[0],
+				Title:  fmt.Sprintf("The namespace %s is set up: its config repo, with %s as its first admin, and its operator", ns, strings.Join(owners, ", ")),
+				Detail: "Its channel and its build account follow in moments. Make its repos, and propose its apps in stacks/ of its config.",
+				Key:    "namespace:" + ns + ":" + time.Now().UTC().Format(time.RFC3339)})
+		}
 	} else if err != nil {
 		return err
 	}

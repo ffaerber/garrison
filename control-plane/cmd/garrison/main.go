@@ -468,7 +468,26 @@ func gatewayCmd(args []string) error {
 		ca = string(pem)
 	}
 	go (&gateway.Builders{Gitea: g, Domain: domain, CA: ca, Wake: wake.Subscribe()}).Run(ctx, time.Minute)
-	go (&gateway.Members{Gitea: g, Wake: wake.Subscribe()}).Run(ctx, 20*time.Second)
+	go (&gateway.Members{Gitea: g, Wake: wake.Subscribe(), Events: recorder(store)}).Run(ctx, 20*time.Second)
+	// A namespace made through an agent: every sync at once, and the agent
+	// answers once its config repo and channel are there.
+	tools.Ready = func(ctx context.Context, ns string) error {
+		wake.Poke()
+		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		for {
+			if ok, err := g.Exists(ctx, ns, gateway.ConfigRepo); err == nil && ok {
+				if has, err := sync.HasChannel(ctx, ns); err == nil && has {
+					return nil
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("%s is made, but its config and channel are not there yet; they follow shortly", ns)
+			case <-time.After(time.Second):
+			}
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)
@@ -479,7 +498,7 @@ func gatewayCmd(args []string) error {
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)
 		mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
-		go (&hooks.Gitea{URL: *gitea, User: g.User, Password: g.Password}).Keep(ctx, *hookURL, secret, 10*time.Second)
+		go (&hooks.Gitea{URL: *gitea, User: g.User, Password: g.Password}).Keep(ctx, *hookURL, secret, 2*time.Second, wake)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	server := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
@@ -512,7 +531,7 @@ func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(ln)
 	go func() { <-ctx.Done(); server.Close() }()
-	go g.Keep(ctx, target, secret, 10*time.Second)
+	go g.Keep(ctx, target, secret, 2*time.Second, wake)
 	return nil
 }
 

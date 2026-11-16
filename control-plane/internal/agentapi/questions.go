@@ -45,7 +45,7 @@ type Questions struct {
 	Server *Server
 	Store  events.QuestionStore
 	Wait   time.Duration // how long a question waits; 0: QuestionWait
-	Tick   time.Duration // how often to look for answers; 0: 20 seconds
+	Tick   time.Duration // how often to look for answers; 0: 5 seconds
 	Now    func() time.Time
 
 	mu   sync.Mutex
@@ -170,7 +170,7 @@ func (q *Questions) record(ctx context.Context, x events.Question, status, detai
 func (q *Questions) Run(ctx context.Context) {
 	tick := q.Tick
 	if tick <= 0 {
-		tick = 20 * time.Second
+		tick = 5 * time.Second
 	}
 	t := time.NewTicker(tick)
 	defer t.Stop()
