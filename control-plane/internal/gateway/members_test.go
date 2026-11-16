@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestParseRoster(t *testing.T) {
@@ -288,5 +289,55 @@ func TestAppReposOfSeveralPeopleNeedApprovals(t *testing.T) {
 	m.protectApps(ctx, "lab", Roster{Admins: []string{"alice"}, Members: []string{"alice"}})
 	if len(rules) != 0 {
 		t.Errorf("still protected: %v", rules)
+	}
+}
+
+// A config repo whose files did not go in is taken away again, so that the
+// next pass makes it anew rather than take it as set up; files that go in
+// on a second try keep it.
+func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	failures := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		calls = append(calls, r.Method+" "+p)
+		switch {
+		case p == "/orgs/lab/repos" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, "{}")
+		case p == "/repos/lab/config/contents" && failures > 0:
+			failures--
+			http.Error(w, `{"message":"push rejected"}`, http.StatusInternalServerError)
+		case p == "/repos/lab/config/contents":
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, "{}")
+		case p == "/repos/lab/config" && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	m := &Members{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}, RetryWait: time.Millisecond}
+	files := map[string]string{"members.yaml": "admins: [alice]\n"}
+	ctx := context.Background()
+
+	failures = 1
+	if err := m.createConfig(ctx, "lab", "d", "m", files); err != nil {
+		t.Fatalf("second try: %v", err)
+	}
+	if strings.Join(calls, ",") != "POST /orgs/lab/repos,POST /repos/lab/config/contents,POST /repos/lab/config/contents" {
+		t.Fatalf("calls: %v", calls)
+	}
+
+	calls, failures = nil, 3
+	if err := m.createConfig(ctx, "lab", "d", "m", files); err == nil || !strings.Contains(err.Error(), "taken away again") {
+		t.Fatalf("err: %v", err)
+	}
+	if last := calls[len(calls)-1]; last != "DELETE /repos/lab/config" || len(calls) != 5 {
+		t.Fatalf("calls: %v", calls)
 	}
 }

@@ -43,6 +43,9 @@ type Members struct {
 	Wake   <-chan struct{}
 	Gitea  *Gitea
 	Events events.Recorder // the feed, told when a namespace is set up; nil: none
+	// RetryWait is the pause before a config repo's files are tried again;
+	// 0: a second.
+	RetryWait time.Duration
 
 	posted  map[string]string // pull request head -> status last posted
 	applied map[string]string // agent account -> the repos it was last given
@@ -519,6 +522,10 @@ func (m *Members) system(ctx context.Context, roots []string) error {
 }
 
 // createConfig makes a namespace's config repo with files, in one commit.
+// The repo and its files are two requests: should the files not go in (a
+// push by someone else in between makes Gitea refuse it, as the model list
+// of system/config did once), the repo goes again, so the next pass makes
+// it anew instead of finding it there and taking it as set up.
 func (m *Members) createConfig(ctx context.Context, ns, description, message string, files map[string]string) error {
 	g := m.Gitea
 	if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/repos", map[string]any{
@@ -531,10 +538,32 @@ func (m *Members) createConfig(ctx context.Context, ns, description, message str
 	for _, path := range sortedKeys(files) {
 		ops = append(ops, map[string]string{"operation": "create", "path": path, "content": b64(files[path])})
 	}
-	_, err := g.do(ctx, "", http.MethodPost, "/repos/"+ns+"/"+ConfigRepo+"/contents", map[string]any{
-		"branch": "main", "message": message, "files": ops,
-	}, nil)
-	return err
+	var err error
+	for try := range 3 {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(m.retryWait()):
+			}
+		}
+		if _, err = g.do(ctx, "", http.MethodPost, "/repos/"+ns+"/"+ConfigRepo+"/contents", map[string]any{
+			"branch": "main", "message": message, "files": ops,
+		}, nil); err == nil {
+			return nil
+		}
+	}
+	if _, derr := g.do(context.WithoutCancel(ctx), "", http.MethodDelete, "/repos/"+ns+"/"+ConfigRepo, nil, nil); derr != nil {
+		return fmt.Errorf("%w; and %s/config, made without its files, stays: %v", err, ns, derr)
+	}
+	return fmt.Errorf("%s/config without its files, taken away again: %w", ns, err)
+}
+
+func (m *Members) retryWait() time.Duration {
+	if m.RetryWait > 0 {
+		return m.RetryWait
+	}
+	return time.Second
 }
 
 // syncTeam makes a team's members want. People without a Gitea account yet
