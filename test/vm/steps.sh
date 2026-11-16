@@ -12,8 +12,8 @@
 #   test/vm/steps.sh --clean       delete the VMs and their snapshots
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #
-# Steps: base, install, login, platform, agent, deploy, talk, crud. The agent and
-# talk steps talk to a real LLM: by default Ollama on this computer, which
+# Steps: base, install, login, platform, agent, deploy, talk, journey, crud. The
+# agent, talk and journey steps talk to a real LLM: by default Ollama on this computer, which
 # the VM reaches through its gateway (LOCAL_MODEL, default qwen3.8-64k);
 # with LLM=cloud, Ollama's cloud with OLLAMA_API_KEY from this checkout's .env.
 #
@@ -37,11 +37,12 @@ cd "$ROOT"
 #
 #   1 base - 2 install - 3 login -+- 4.1 platform
 #                                 +- 4.2 agent
-#                                 +- 4.3 deploy - 5 talk
+#                                 +- 4.3 deploy -+- 5.1 talk
+#                                 |              +- 5.2 journey
 #                                 +- 4.4 crud
-STEPS=(base install login platform agent deploy talk crud)
-declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [crud]=login)
-declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5 [crud]=4.4)
+STEPS=(base install login platform agent deploy talk journey crud)
+declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [crud]=login)
+declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [crud]=4.4)
 # Where the tree forks. In parallel runs (the default) the trunk up to here
 # runs in $VM, and each branch from here in its own clone, $VM-<first step>.
 FORK=login
@@ -61,6 +62,7 @@ inputs() {
     agent)    echo test/e2e/smoke.sh ;;
     deploy)   echo test/e2e/smoke.sh examples installer/push-repo.sh ;;
     talk)     echo test/e2e/smoke.sh test/e2e/apps docs/scenarios.md ;;
+    journey)  echo test/e2e/smoke.sh test/e2e/journey.sh ;;
     crud)     echo test/e2e/smoke.sh test/e2e/crud.sh ;;
   esac
 }
@@ -132,6 +134,15 @@ step_talk() {
   sync_repo
   put_llm_key
   smoke talk
+}
+
+# Scenario 10 of docs/scenarios.md: alice has the agents make a namespace, a
+# repo from a template and its stack, deploys it, changes it on dev through
+# an agent and merges dev into main. Talks to the real LLM.
+step_journey() {
+  sync_repo
+  put_llm_key
+  smoke journey
 }
 
 # Every kind of thing a namespace holds, made, read, changed and removed:
