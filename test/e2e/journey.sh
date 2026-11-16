@@ -37,7 +37,7 @@ fi
 check "it makes the namespace lab, as alice" lab_made
 check "and the repo lab/example from the template" example_made
 check "with its pipeline"                  test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/.gitea/workflows/pipeline.yaml")" = 200
-started_by() { gitea_api "" "$lab/example/commits?sha=main&limit=1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["commit"]["author"]["name"])'; }
+started_by() { gitea_api "" "$lab/example/commits?sha=main&limit=1" | python3 -c 'import json,sys; print((json.load(sys.stdin)[0].get("author") or {}).get("login", ""))'; }
 check "written as alice"                   test "$(started_by)" = alice
 lab_channel() { channel_of lab alice >/dev/null; }
 check "lab gets its channel"               until_true 180 lab_channel
@@ -102,5 +102,6 @@ mpr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"d
 check "alice opens the pull request from dev to main" test -n "$mpr"
 check "alice merges it"                    test "$(lab_merge example "${mpr:-0}")" = 200
 check "example, on main, turns green"      until_true 900 shows example "#2e7d32"
-check "the feed shows lab's deploys"       in_feed alice ns=lab "e['kind'] == 'deploy' and e['status'] == 'ok'"
+check "alice opens her dashboard"          until_true 60 home_login alice
+check "its feed shows lab's deploys"       in_feed alice ns=lab "e['kind'] == 'deploy' and e['status'] == 'ok'"
 }
