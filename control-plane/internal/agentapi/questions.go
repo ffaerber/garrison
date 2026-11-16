@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -163,7 +164,24 @@ func (q *Questions) record(ctx context.Context, x events.Question, status, detai
 	s.Events.Record(ctx, events.Event{Source: events.SourceAgents, Kind: events.KindQuestion, Status: status,
 		Namespace: x.Namespace, Audience: events.AudienceMembers, Actor: x.Person, Agent: x.Agent, StartedBy: "agent " + x.Agent,
 		Title:  fmt.Sprintf("%s asks %s: %s", x.Agent, x.Person, title),
-		Detail: detail, Link: fmt.Sprintf("https://chat.%s/channels/%s", s.Domain, x.Channel), Key: x.EventKey})
+		Detail: detail, Link: s.threadLink(x), Key: x.EventKey})
+}
+
+// threadLink opens the question's thread in Open WebUI, at the question.
+func (s *Server) threadLink(x events.Question) string {
+	root := x.Root
+	if root == "" {
+		root = x.Message
+	}
+	link := fmt.Sprintf("https://chat.%s/channels/%s", s.Domain, x.Channel)
+	if root == "" {
+		return link
+	}
+	link += "?thread=" + url.QueryEscape(root)
+	if x.Message != "" && x.Message != root {
+		link += "&message=" + url.QueryEscape(x.Message)
+	}
+	return link
 }
 
 // Run looks for answers until ctx ends.
@@ -286,7 +304,7 @@ func (q *Questions) resume(ctx context.Context, x events.Question) {
 	ev := events.Event{Source: events.SourceAgents, Kind: events.KindRoutine, Status: events.StatusRunning,
 		Namespace: x.Namespace, Audience: events.AudienceMembers, Actor: x.Person, Agent: x.Agent, StartedBy: rec.StartedBy,
 		Title: fmt.Sprintf("%s goes on for %s after their answer", x.Agent, x.Person), Key: fmt.Sprintf("resume:%d", x.ID),
-		Link: fmt.Sprintf("https://chat.%s/channels/%s", s.Domain, x.Channel)}
+		Link: s.threadLink(x)}
 	record := func(status, detail string) {
 		if s.Events != nil {
 			ev.Status, ev.Detail = status, detail

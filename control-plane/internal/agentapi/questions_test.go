@@ -78,7 +78,7 @@ func TestARoutineAsksItsPersonAndGoesOn(t *testing.T) {
 	// bob's dashboard lists it.
 	mine, _ := feed.List(ctx, events.Query{Visibility: events.Visibility{Person: "bob", Members: map[string]bool{"homepage": true}},
 		Kinds: []string{events.KindQuestion}, Actor: "bob", Status: events.StatusWaiting})
-	if len(mine) != 1 || !strings.Contains(mine[0].Title, "homepage/dev asks bob: Blue or green") || mine[0].Link != "https://chat.example.com/channels/ch-homepage" {
+	if len(mine) != 1 || !strings.Contains(mine[0].Title, "homepage/dev asks bob: Blue or green") || mine[0].Link != "https://chat.example.com/channels/ch-homepage?thread=m1" {
 		t.Errorf("waiting for bob: %+v", mine)
 	}
 
