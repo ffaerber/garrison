@@ -1412,6 +1412,58 @@ check "the commit it saw is kept, for after a restart" head_kept
 check "the feed has the run, for todo's people" in_feed carol ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/developer' and e['actor'] == 'bob' and e['status'] == 'ok' and e['detail'] != ''"
 if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
 
+echo "# 4j2. a routine asks its person, and goes on with the answer"
+cat > "$tmp/asker.yaml" <<'YAML'
+description: Asks before it decides
+tools: [list_repos]
+routines:
+  - name: colour
+    on_push: {repo: app, branch: main}
+    owner: bob
+    task: "Call ask_person with exactly this question: Which colour should the header of todo be, blue or green? Then end your turn. When you have the answer, reply with one sentence that names the colour chosen."
+YAML
+printf 'You ask before you decide anything, and say plainly what was decided.\n' > "$tmp/asker.md"
+apr=$(propose_config asker "Add the asker" "agents/asker/agent.yaml=$tmp/asker.yaml" "agents/asker/prompt.md=$tmp/asker.md")
+check "carol approves the asker"           test "$(review config carol "$apr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$apr" success
+check "alice merges it"                    test "$(merge config alice "$apr")" = 200
+# Its routine must see main before the push, so the push is news to it.
+asker_seen() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/asker/colour'" | grep -q .; }
+check "the routine sees main"              until_true 180 asker_seen
+printf 'More notes.\n' > "$tmp/notes2.md"
+check "alice pushes to app's main again"   bash -c '[ "$0" = 201 ] || [ "$0" = 200 ]' "$(set_file app main NOTES2.md "$tmp/notes2.md" "More notes")"
+question_post() {
+  chat_api bob "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    c = m.get("content") or ""
+    if c.startswith("**todo/asker**") and "<@U:" in c and "|bob>" in c and "Reply in this thread" in c:
+        print(m["id"]); sys.exit(0)
+sys.exit(1)'
+}
+check "it asks bob in the channel, naming him" until_true 600 question_post
+qid=$(question_post)
+waiting_page() { feed bob / | grep -q "Waiting for you" && feed bob / | grep -q "todo/asker asks bob"; }
+check "bob's dashboard lists it as waiting for him" until_true 60 waiting_page
+check "the feed has it, waiting"           in_feed bob ns=todo "e['kind'] == 'question' and e['agent'] == 'todo/asker' and e['actor'] == 'bob' and e['status'] == 'waiting'"
+check "bob answers in its thread" \
+  test "$(chat_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Green, please.","parent_id":"'"$qid"'"}' "$chat/api/v1/channels/$hcid/messages/post")" = 200
+asker_reply() {
+  chat_api bob "$chat/api/v1/channels/$hcid/messages/$qid/thread?limit=50" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    c = m.get("content") or ""
+    if c.startswith("**todo/asker**") and "<@U:" not in c and len(c) > len("**todo/asker**") + 2:
+        print(c); sys.exit(0)
+sys.exit(1)'
+}
+check "the routine goes on, and says so in the thread" until_true 600 asker_reply
+check "with bob's answer"                  grep -qi green <<<"$(asker_reply)"
+check "the question is answered in the feed" in_feed bob ns=todo "e['kind'] == 'question' and e['agent'] == 'todo/asker' and e['status'] == 'ok' and 'Green' in e['detail']"
+# The feed itself still lists the question; the list above it is gone.
+not_waiting() { ! feed bob / | grep -q "Waiting for you"; }
+check "bob's dashboard no longer lists it" until_true 60 not_waiting
+
 echo "# 4k. an agent installs what it needs, from the package registries"
 printf 'description: Tries things out with the tools it needs\ntools: [list_repos]\ninternet: packages\n' > "$tmp/builder.yaml"
 printf 'You try things out in your sandbox, installing the tools a task needs. Show the commands you ran and what they printed.\n' > "$tmp/builder.md"

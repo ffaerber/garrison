@@ -148,6 +148,8 @@ func (q Query) matches(e Event) bool {
 		return false
 	case q.Problems && e.Status != StatusFailed && e.Status != StatusRefused:
 		return false
+	case q.Actor != "" && e.Actor != q.Actor, q.Status != "" && e.Status != q.Status:
+		return false
 	case q.Text != "" && !strings.Contains(strings.ToLower(e.Title+" "+e.Actor+" "+e.Agent+" "+e.Repo), strings.ToLower(q.Text)):
 		return false
 	}

@@ -28,8 +28,9 @@ const (
 	KindRoutine       = "routine"
 	KindAsk           = "ask" // an agent handed work to another
 	KindAlert         = "alert"
-	KindSecret        = "secret" // a secret set or deleted in the dashboard
-	KindModel         = "model"  // an agent's model cannot be used: it got the default
+	KindSecret        = "secret"   // a secret set or deleted in the dashboard
+	KindModel         = "model"    // an agent's model cannot be used: it got the default
+	KindQuestion      = "question" // an agent asks a person and waits for the answer
 )
 
 // ApprovalContext is the commit status the gateway's approval check posts.

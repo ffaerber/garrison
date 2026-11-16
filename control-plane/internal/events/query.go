@@ -28,6 +28,8 @@ type Query struct {
 	Kinds      []string
 	Sources    []string
 	Problems   bool   // only failed or refused
+	Actor      string // only those for this person
+	Status     string // only those with this status
 	Text       string // in title, person, agent or repo
 	Before     int64  // only events with a smaller ID: the next page
 	After      int64  // only events with a greater ID: what is new

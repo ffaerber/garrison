@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"garrison/control-plane/internal/agents"
@@ -250,7 +251,7 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 		if s.Poster == nil {
 			return
 		}
-		if err := s.Poster.Post(ctx, gateway.Post{Agent: a.ID(), Text: text}); err != nil {
+		if _, err := s.Poster.Post(ctx, gateway.Post{Agent: a.ID(), Text: text}); err != nil {
 			log.Printf("routines: %s: post: %v", key, err)
 		}
 	}
@@ -278,16 +279,23 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 	}
 	log.Printf("routines: %s for %s: %s", key, rt.Owner, why)
 	record(events.StatusRunning, "")
-	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.
-
-Task: %s`, rt.Name, rt.Owner, why, a.Namespace, strings.TrimSpace(rt.Task))
+	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.`, rt.Name, rt.Owner, why, a.Namespace)
+	if s.Questions != nil && s.Poster != nil {
+		text += fmt.Sprintf(" If you need something only %s can tell you (a choice, a missing fact, an approval), ask them with ask_person and end your turn: you go on here when they answer.", rt.Owner)
+	}
+	text += "\n\nTask: " + strings.TrimSpace(rt.Task)
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }
-	run := sandbox.Run{StartedBy: "routine " + key, Chain: []string{a.ID()}, Unattended: true, Owner: rt.Owner}
+	run := sandbox.Run{StartedBy: "routine " + key, Chain: []string{a.ID()}, Unattended: true, Owner: rt.Owner, Asked: &atomic.Bool{}}
 	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout())
 	defer cancel()
 	out := &collect{}
 	_, err = s.sandboxTurn(tctx, run, rt.Owner, "routine:"+key, "routine\x00"+key, a, msg, out)
 	answer := out.answer()
+	if err == nil && run.Asked.Load() {
+		// The question is in the channel; the run goes on with its answer.
+		record(events.StatusOK, strings.TrimSpace(fmt.Sprintf("Asked %s a question; it goes on when they answer.\n\n%s", rt.Owner, answer)))
+		return
+	}
 	if err != nil {
 		log.Printf("routines: %s: %v", key, err)
 		answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())

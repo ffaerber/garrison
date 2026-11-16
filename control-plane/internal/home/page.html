@@ -78,6 +78,10 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .nav a.on { color: var(--text); background: var(--chip); }
 .nav a:not(.on):hover { background: var(--hover); }
 .note { color: var(--muted); font-size: 14px; max-width: 70ch; margin: 0 0 14px; }
+.waiting { margin-bottom: 16px; }
+.waiting h2 { font-size: 15px; margin: 0 0 8px; color: var(--waiting); }
+.waiting .panel { border-color: var(--waiting); }
+.waiting .answer { font-weight: 600; color: var(--accent); }
 .notice { border-left: 3px solid var(--ok); padding: 8px 12px; margin-bottom: 12px; background: var(--panel); }
 ul.names { list-style: none; margin: 0; padding: 0; }
 .names li { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); }
@@ -121,6 +125,17 @@ button.danger { color: var(--failed); }
   <span class="live" id="live" title="New entries appear on their own"><i></i><span>live</span></span>
 </form>
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{if .Waiting}}{{$now := .Now}}<section class="waiting" aria-labelledby="waiting">
+  <h2 id="waiting">Waiting for you</h2>
+  <div class="panel"><ol class="feed">{{range .Waiting}}<li>
+    <span class="mark g-agent s-waiting waiting" title="question, waiting"></span>
+    <div>
+      <a class="title" href="/e/{{.ID}}">{{.Title}}</a>
+      <div class="meta"><span class="chip">{{.Agent}}</span>{{if .Link}}<a class="answer" href="{{.Link}}">Answer in the chat</a>{{end}}</div>
+    </div>
+    <time class="when" datetime="{{iso .At}}" title="{{stamp .At}}">{{ago $now .At}}</time>
+  </li>{{end}}</ol></div>
+</section>{{end}}
 <div class="panel">
   <ol class="feed" id="feed" data-query="{{.Query}}">{{template "entries" .}}</ol>
   {{if not .Events}}<div class="empty" id="empty">Nothing yet{{if .Filter}} for this filter{{end}}. Pushes, pipelines, deploys and what agents do appear here as they happen.</div>{{end}}

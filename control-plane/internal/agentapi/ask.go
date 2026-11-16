@@ -27,8 +27,10 @@ const MaxChain = 3
 // Poster posts an answer no message waits for into a channel, and tells
 // what a channel is.
 type Poster interface {
-	Post(ctx context.Context, p gateway.Post) error
+	Post(ctx context.Context, p gateway.Post) (gateway.Posted, error)
 	Channel(ctx context.Context, id string) (gateway.ChannelInfo, error)
+	// Thread is the thread under a message, oldest first.
+	Thread(ctx context.Context, channel, message string) ([]gateway.ThreadMessage, error)
 }
 
 // GatewayPoster posts through the gateway, which holds Open WebUI's account.
@@ -63,24 +65,44 @@ func (g *GatewayPoster) Channel(ctx context.Context, id string) (gateway.Channel
 	return info, json.NewDecoder(resp.Body).Decode(&info)
 }
 
-func (g *GatewayPoster) Post(ctx context.Context, p gateway.Post) error {
+func (g *GatewayPoster) Post(ctx context.Context, p gateway.Post) (gateway.Posted, error) {
+	var out gateway.Posted
 	body, _ := json.Marshal(p)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.URL+"/internal/post", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return out, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
 	resp, err := g.client().Do(req)
 	if err != nil {
-		return err
+		return out, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
-		return fmt.Errorf("post: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return out, fmt.Errorf("post: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
-	return nil
+	return out, json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out)
+}
+
+func (g *GatewayPoster) Thread(ctx context.Context, channel, message string) ([]gateway.ThreadMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.URL+"/internal/threads/"+url.PathEscape(channel)+"/"+url.PathEscape(message), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
+		return nil, fmt.Errorf("thread: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+	}
+	var out []gateway.ThreadMessage
+	return out, json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&out)
 }
 
 // collect gathers an asked agent's answer, showing its progress, line by
@@ -262,7 +284,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 			if err != nil {
 				answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())
 			}
-			if err := s.Poster.Post(pctx, gateway.Post{Agent: target.ID(), Channel: channel,
+			if _, err := s.Poster.Post(pctx, gateway.Post{Agent: target.ID(), Channel: channel,
 				Text: fmt.Sprintf("For %s, asked by %s:\n\n%s", who, c.Agent, answer)}); err != nil {
 				log.Printf("agents: %s: %s's answer for %s: %v", who, target.ID(), c.Agent, err)
 			}

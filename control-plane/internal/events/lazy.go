@@ -125,3 +125,27 @@ func (l *Lazy) SaveRoutineState(ctx context.Context, key string, s RoutineState)
 	}
 	return pg.SaveRoutineState(ctx, key, s)
 }
+
+func (l *Lazy) AddQuestion(ctx context.Context, q *Question) error {
+	pg, err := l.get(ctx)
+	if err != nil {
+		return err
+	}
+	return pg.AddQuestion(ctx, q)
+}
+
+func (l *Lazy) Questions(ctx context.Context, status string) ([]Question, error) {
+	pg, err := l.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return pg.Questions(ctx, status)
+}
+
+func (l *Lazy) SetQuestion(ctx context.Context, q Question) error {
+	pg, err := l.get(ctx)
+	if err != nil {
+		return err
+	}
+	return pg.SetQuestion(ctx, q)
+}

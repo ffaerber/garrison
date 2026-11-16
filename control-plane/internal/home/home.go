@@ -184,6 +184,7 @@ type feedPage struct {
 	Domain     string
 	All        bool
 	Events     []events.Event
+	Waiting    []events.Event // questions agents asked this person, still open
 	Namespaces []string
 	Views      []struct{ Name, Label string }
 	Filter     url.Values
@@ -219,6 +220,9 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 		p.More = es[len(es)-1].ID
 	}
 	p.Namespaces, _ = s.Events.Namespaces(r.Context(), v)
+	// What agents asked this person and wait for, above everything else.
+	p.Waiting, _ = s.Events.List(r.Context(), events.Query{Visibility: v, Kinds: []string{events.KindQuestion},
+		Actor: v.Person, Status: events.StatusWaiting, Limit: 20})
 	s.render(w, "page", p)
 }
 

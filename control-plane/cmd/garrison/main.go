@@ -475,6 +475,7 @@ func gatewayCmd(args []string) error {
 	mux.Handle("/mcp/", mcp)
 	mux.Handle("POST /internal/post", gateway.PostHandler(sync, serviceKey))
 	mux.Handle("GET /internal/channels/{id}", gateway.ChannelHandler(sync, serviceKey))
+	mux.Handle("GET /internal/threads/{channel}/{message}", gateway.ThreadHandler(sync, serviceKey))
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)
 		mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake})
@@ -713,6 +714,13 @@ func agentsCmd(args []string) error {
 		if store != nil {
 			routines.Store = store
 		}
+		// What routines ask people (ask_person), kept with the feed so a
+		// question outlives a restart.
+		srv.Questions = &agentapi.Questions{Server: srv, Store: &events.MemoryQuestions{}}
+		if store != nil {
+			srv.Questions.Store = store
+		}
+		go srv.Questions.Run(ctx)
 		go routines.Run(ctx)
 		if *alertsListen != "" {
 			token, err := os.ReadFile(*alertsTokenFile)

@@ -96,6 +96,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 		max = 60
 	}
 	calls := 0
+	run.Key = key
 	err := s.Sandboxes.Turn(ctx, want, run, func(sb *sandbox.Session) error {
 		pi := sb.Pi()
 		st, err := pi.State(ctx)
@@ -314,6 +315,9 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 	if a, ok, err := s.Agents.Get(r.Context(), c.Agent); err == nil && ok && len(a.Asks) > 0 {
 		specs = append(specs, askSpec(a), findSpec)
 	}
+	if s.mayAskPerson(c) {
+		specs = append(specs, askPersonSpec)
+	}
 	writeJSON(w, specs)
 }
 
@@ -337,6 +341,10 @@ func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
 		return
 	case "find_agents":
 		text, isErr := s.findAgents(r.Context(), c, req.Arguments)
+		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
+		return
+	case askPersonSpec.Name:
+		text, isErr := s.askPerson(r.Context(), c, req.Arguments)
 		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
 		return
 	}

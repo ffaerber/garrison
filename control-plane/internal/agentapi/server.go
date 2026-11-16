@@ -51,6 +51,7 @@ type Server struct {
 	Gitea        *gateway.Gitea   // who may use an agent (visible); nil: everyone
 	Poster       Poster           // posts answers no message waits for; nil: none
 	Events       events.Recorder  // the feed, which gets the routines' runs; nil: none
+	Questions    *Questions       // what routines asked people (ask_person); nil: they cannot ask
 }
 
 // Headers Open WebUI's connection fills in for each request.

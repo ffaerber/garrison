@@ -59,7 +59,7 @@ func Open(ctx context.Context, url string, wait time.Duration) (*Postgres, error
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		_, err = pool.Exec(ctx, schema+routineSchema)
+		_, err = pool.Exec(ctx, schema+routineSchema+questionSchema)
 		if err == nil || time.Now().After(deadline) || ctx.Err() != nil {
 			break
 		}
@@ -139,6 +139,12 @@ func (p *Postgres) List(ctx context.Context, q Query) ([]Event, error) {
 	}
 	if len(q.Sources) > 0 {
 		where += " AND source = ANY(" + arg(q.Sources) + ")"
+	}
+	if q.Actor != "" {
+		where += " AND actor = " + arg(q.Actor)
+	}
+	if q.Status != "" {
+		where += " AND status = " + arg(q.Status)
 	}
 	if q.Problems {
 		where += fmt.Sprintf(" AND status IN ('%s', '%s')", StatusFailed, StatusRefused)

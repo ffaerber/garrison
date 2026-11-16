@@ -82,4 +82,32 @@ func TestPostgres(t *testing.T) {
 	if err != nil || len(st) != 2 || !st["todo/dev/morning"].Last.Equal(at) || st["todo/dev/on-main"].Head != "c2" || !st["todo/dev/on-main"].Last.IsZero() {
 		t.Errorf("routine state: %v %+v", err, st)
 	}
+
+	// Questions, and the person's waiting ones in the feed.
+	pg.Pool.Exec(ctx, "TRUNCATE questions RESTART IDENTITY")
+	q := &Question{At: at, Namespace: "todo", Agent: "todo/dev", Person: "bob", Text: "Blue?", Channel: "ch", Message: "m1", Root: "m1",
+		User: "u-bob", Key: "routine\x00todo/dev/n", Chat: "routine:todo/dev/n", Run: []byte(`{"owner":"bob"}`), EventKey: "question:1", Status: QuestionWaiting}
+	if err := pg.AddQuestion(ctx, q); err != nil || q.ID != 1 {
+		t.Fatalf("add: %v %d", err, q.ID)
+	}
+	waiting, err := pg.Questions(ctx, QuestionWaiting)
+	if err != nil || len(waiting) != 1 || waiting[0].Key != q.Key || string(waiting[0].Run) != `{"owner": "bob"}` || !waiting[0].At.Equal(at) {
+		t.Fatalf("waiting: %v %+v", err, waiting)
+	}
+	q.Status, q.Answer, q.Answered = QuestionAnswered, "Green", at.Add(time.Hour)
+	if err := pg.SetQuestion(ctx, *q); err != nil {
+		t.Fatal(err)
+	}
+	if w, _ := pg.Questions(ctx, QuestionWaiting); len(w) != 0 {
+		t.Errorf("still waiting: %+v", w)
+	}
+	if a, _ := pg.Questions(ctx, QuestionAnswered); len(a) != 1 || a[0].Answer != "Green" || !a[0].Answered.Equal(at.Add(time.Hour)) {
+		t.Errorf("answered: %+v", a)
+	}
+	pg.Record(ctx, Event{Kind: KindQuestion, Namespace: "todo", Audience: AudienceMembers, Actor: "bob", Status: StatusWaiting, Title: "asks bob", Key: "q:b"})
+	pg.Record(ctx, Event{Kind: KindQuestion, Namespace: "todo", Audience: AudienceMembers, Actor: "carol", Status: StatusWaiting, Title: "asks carol", Key: "q:c"})
+	mine, _ := pg.List(ctx, Query{Visibility: all, Kinds: []string{KindQuestion}, Actor: "bob", Status: StatusWaiting})
+	if len(mine) != 1 || mine[0].Title != "asks bob" {
+		t.Errorf("bob's: %+v", mine)
+	}
 }

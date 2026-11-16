@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -105,6 +106,13 @@ type Run struct {
 	// Show, if set, shows progress to whoever waits for the run, e.g. the
 	// person whose agent asked this one.
 	Show func(string) `json:"-"`
+	// Key is the sandbox's, set for the turn.
+	Key string
+	// Asked, if set, is set when the run asked a person (ask_person) and
+	// waits for the answer. Thread, in a run that goes on after an answer,
+	// is where it was asked: <channel>/<message>.
+	Asked  *atomic.Bool `json:"-"`
+	Thread string
 }
 
 // Turn runs fn with the key's sandbox, started or restarted as needed, while

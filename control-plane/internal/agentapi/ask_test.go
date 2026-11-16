@@ -3,9 +3,11 @@ package agentapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -22,17 +24,45 @@ type fakePoster struct {
 	mu       sync.Mutex
 	posts    []gateway.Post
 	channels map[string]gateway.ChannelInfo
+	threads  map[string][]gateway.ThreadMessage // channel/message
 }
 
 func (f *fakePoster) Channel(_ context.Context, id string) (gateway.ChannelInfo, error) {
 	return f.channels[id], nil
 }
 
-func (f *fakePoster) Post(_ context.Context, p gateway.Post) error {
+// Post keeps p; its message is m<n>, in the channel named or ch-<namespace>,
+// and a person mentioned is the Open WebUI user u-<name>.
+func (f *fakePoster) Post(_ context.Context, p gateway.Post) (gateway.Posted, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.posts = append(f.posts, p)
-	f.mu.Unlock()
-	return nil
+	out := gateway.Posted{ID: fmt.Sprintf("m%d", len(f.posts)), Channel: p.Channel}
+	if out.Channel == "" {
+		ns, _, _ := strings.Cut(p.Agent, "/")
+		out.Channel = "ch-" + ns
+	}
+	if p.Mention != "" {
+		out.User = "u-" + p.Mention
+	}
+	return out, nil
+}
+
+func (f *fakePoster) Thread(_ context.Context, channel, message string) ([]gateway.ThreadMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.threads[channel+"/"+message]), nil
+}
+
+// reply adds a reply by user to the thread under message.
+func (f *fakePoster) reply(channel, message, user, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.threads == nil {
+		f.threads = map[string][]gateway.ThreadMessage{}
+	}
+	k := channel + "/" + message
+	f.threads[k] = append(f.threads[k], gateway.ThreadMessage{ID: fmt.Sprintf("r%d", len(f.threads[k])+1), User: user, Content: text, At: time.Now().UnixNano()})
 }
 
 func (f *fakePoster) all() []gateway.Post {
@@ -560,9 +590,9 @@ func TestAPushDuringARunStartsTheRoutineAfterIt(t *testing.T) {
 // ctxPoster posts only while its context lasts, as the real one does.
 type ctxPoster struct{ fakePoster }
 
-func (f *ctxPoster) Post(ctx context.Context, p gateway.Post) error {
+func (f *ctxPoster) Post(ctx context.Context, p gateway.Post) (gateway.Posted, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return gateway.Posted{}, err
 	}
 	return f.fakePoster.Post(ctx, p)
 }
