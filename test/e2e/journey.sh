@@ -74,6 +74,10 @@ check "https://example.$DOMAIN shows the page" until_true 300 shows example "<h1
 check "on white"                           shows example "background-color: #ffffff"
 
 echo "# 3. alice makes the branch dev in Gitea; it deploys at dev-example"
+# Nobody merges for this: the stack names dev as an environment, so the
+# deployer deploys the branch once it exists, from the image of its commit,
+# which main's build made already. alice is lab's only person, so she
+# pushes and merges in its repos freely.
 check "alice makes dev from main"          test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$lab/example/branches")" = 201
 check "the deployer deploys dev"           until_true 900 deployed dev dev-example
 check "https://dev-example.$DOMAIN shows the page" until_true 300 shows dev-example "<h1>example</h1>"

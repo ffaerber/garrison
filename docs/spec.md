@@ -162,6 +162,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 - Agents propose; the deployer enforces. Approvals are checked by the deployer, never by the agent.
 - Nobody approves their own role change. Namespace config changes always need a human merge.
 - A namespace's `config/members.yaml` names its admins and members; the gateway keeps the Gitea teams `admins` and `members` in line with it. Its `main` branch takes changes only by pull request, approved by an admin of the namespace or a root admin who neither wrote it (opened it or pushed to its branch, as Gitea's activity feed of the repo tells) nor has their role changed by it; the gateway checks this and posts the required status `garrison/approval`. The scenarios in `docs/scenarios.md` play this out through the agents.
+- A namespace's other repos, its apps', follow its size. With one person in `members.yaml`, they push and merge to `main` freely. With two or more, `main` takes no direct pushes, and a pull request into it needs the approval of another of the namespace's people (an approval goes stale with new commits); so nobody deploys alone what the others have not seen. Other branches, `dev` among them, stay free. The gateway keeps this rule on every app repo as people join and leave; an agent's `merge_change` into `main` needs that approval too.
 - Per repo and branch, an autonomy level decides how far agents go:
 
 | Level | Agent may | Human does |

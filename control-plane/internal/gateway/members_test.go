@@ -215,3 +215,78 @@ func TestWhoPushedToAConfigChangeDoesNotApproveIt(t *testing.T) {
 		t.Errorf("dave's approval: %q", got)
 	}
 }
+
+// main of a namespace's app repos is free for one person, and takes only
+// approved pull requests once there are two; config keeps its own rule.
+func TestAppReposOfSeveralPeopleNeedApprovals(t *testing.T) {
+	rules := map[string]map[string]any{} // repo -> its rule for main
+	var writes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		if p == "/orgs/lab/repos" {
+			if r.URL.Query().Get("page") == "1" {
+				io.WriteString(w, `[{"name":"config"},{"name":"example"},{"name":"notes"}]`)
+			} else {
+				io.WriteString(w, `[]`)
+			}
+			return
+		}
+		repo, rest, _ := strings.Cut(strings.TrimPrefix(p, "/repos/lab/"), "/")
+		switch {
+		case rest == "branch_protections/main" && r.Method == http.MethodGet:
+			if rules[repo] == nil {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(rules[repo])
+		case rest == "branch_protections" && r.Method == http.MethodPost, rest == "branch_protections/main" && r.Method == http.MethodPatch:
+			var rule map[string]any
+			json.NewDecoder(r.Body).Decode(&rule)
+			rule["rule_name"] = "main"
+			rules[repo] = rule
+			writes = append(writes, r.Method+" "+repo)
+			io.WriteString(w, "{}")
+		case rest == "branch_protections/main" && r.Method == http.MethodDelete:
+			delete(rules, repo)
+			writes = append(writes, "DELETE "+repo)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	m := &Members{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	ctx := context.Background()
+
+	// alice alone: nothing to protect.
+	if err := m.protectApps(ctx, "lab", Roster{Admins: []string{"alice"}}); err != nil || len(writes) != 0 {
+		t.Fatalf("alone: %v %v", writes, err)
+	}
+	// bob joins: main of each app repo, not config, takes approved pull requests only.
+	if err := m.protectApps(ctx, "lab", Roster{Admins: []string{"alice"}, Members: []string{"bob"}}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(writes, ",") != "POST example,POST notes" || rules["config"] != nil {
+		t.Fatalf("protected: %v", writes)
+	}
+	r := rules["example"]
+	if r["enable_push"] != false || r["required_approvals"] != float64(1) || r["dismiss_stale_approvals"] != true || r["block_admin_merge_override"] != true {
+		t.Errorf("rule: %v", r)
+	}
+	// Again: unchanged, not written.
+	m.protectApps(ctx, "lab", Roster{Admins: []string{"alice"}, Members: []string{"bob"}})
+	if len(writes) != 2 {
+		t.Errorf("written again: %v", writes)
+	}
+	// Someone loosens it by hand: put back.
+	rules["notes"]["enable_push"] = true
+	m.protectApps(ctx, "lab", Roster{Admins: []string{"alice", "bob"}})
+	if writes[len(writes)-1] != "PATCH notes" || rules["notes"]["enable_push"] != false {
+		t.Errorf("not put back: %v", writes)
+	}
+	// bob leaves: free again. Being listed twice does not make two people.
+	m.protectApps(ctx, "lab", Roster{Admins: []string{"alice"}, Members: []string{"alice"}})
+	if len(rules) != 0 {
+		t.Errorf("still protected: %v", rules)
+	}
+}

@@ -210,6 +210,42 @@ agents_api() {
     curl -sS --max-time 20 "${@:1:$#-1}" "http://control-plane_agents:8070$path"
 }
 
+# The agents, asked in Open WebUI channels as people do. What is posted is
+# listed in $tmp/posted, to be deleted at the end of the talk section.
+: > "$tmp/posted"
+# channel_of NAME [PERSON]: the id of a channel PERSON (bob) sees.
+channel_of() { chat_api "${2:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == sys.argv[1]))' "$1" 2>/dev/null; }
+# mention CHANNEL PERSON AGENT TEXT: PERSON posts TEXT in CHANNEL, mentioning
+# AGENT; prints the channel's and the message's id.
+mention() {
+  local cid mid
+  cid=$(channel_of "$1" "$2") || return 1
+  mid=$(chat_api "$2" -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:%s|%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$3" "$4")" \
+    "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
+  echo "$cid $mid" >> "$tmp/posted"
+  echo "$cid $mid"
+}
+# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent of the namespace,
+# its operator by default, in its channel (or $CHANNEL) and prints its answer
+# from the thread.
+ask_agent() {
+  local ns=$1 who=$2 question=$3 id=$1/${4:-operator} cid mid i
+  read -r cid mid <<<"$(mention "${CHANNEL:-$ns}" "$who" "$id" "$question")"
+  [ -n "$mid" ] || return 1
+  for i in $(seq 72); do
+    chat_api "$who" "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    meta = m.get("meta") or {}
+    if meta.get("model_id") == sys.argv[1] and meta.get("done"):
+        print(m.get("content") or ""); sys.exit(0)
+sys.exit(1)' "$id" && return 0
+    sleep 5
+  done
+  return 1
+}
+
 # ---------- sections ----------
 # system: the stacks the installer deploys are up and safe.
 section_system() {
@@ -902,39 +938,6 @@ done
 admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" \
   "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-# channel_of NAME [PERSON]: the id of a channel PERSON (bob) sees.
-channel_of() { chat_api "${2:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == sys.argv[1]))' "$1" 2>/dev/null; }
-: > "$tmp/posted"
-# mention CHANNEL PERSON AGENT TEXT: PERSON posts TEXT in CHANNEL, mentioning
-# AGENT; prints the channel's and the message's id.
-mention() {
-  local cid mid
-  cid=$(channel_of "$1" "$2") || return 1
-  mid=$(chat_api "$2" -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:%s|%s> %s" % (sys.argv[1], sys.argv[1], sys.argv[2])}))' "$3" "$4")" \
-    "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
-  echo "$cid $mid" >> "$tmp/posted"
-  echo "$cid $mid"
-}
-# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent of the namespace,
-# its operator by default, in its channel (or $CHANNEL) and prints its answer
-# from the thread.
-ask_agent() {
-  local ns=$1 who=$2 question=$3 id=$1/${4:-operator} cid mid i
-  read -r cid mid <<<"$(mention "${CHANNEL:-$ns}" "$who" "$id" "$question")"
-  [ -n "$mid" ] || return 1
-  for i in $(seq 72); do
-    chat_api "$who" "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c '
-import json,sys
-for m in json.load(sys.stdin):
-    meta = m.get("meta") or {}
-    if meta.get("model_id") == sys.argv[1] and meta.get("done"):
-        print(m.get("content") or ""); sys.exit(0)
-sys.exit(1)' "$id" && return 0
-    sleep 5
-  done
-  return 1
-}
 # newest_pr REPO AUTHOR [AFTER]: the newest open pull request of todo/REPO by AUTHOR, numbered above AFTER.
 newest_pr() {
   gitea_api "" "$hp/$1/pulls?state=open&limit=50" | python3 -c '
@@ -1101,7 +1104,11 @@ if [ -z "$tpr" ]; then
 fi
 check "the agent proposes it, as bob"      test -n "$tpr"
 check "it changes the heading"             grep -q '^+.*Our todos' <<<"$(gitea_api "" "$hp/app/pulls/$tpr.diff")"
-check "carol merges it"                    test "$(merge app carol "$tpr")" = 200
+# With three people in todo, main of its app repos takes only pull requests
+# another of them approved.
+check "carol cannot merge it unapproved"   test "$(merge app carol "$tpr")" != 200
+check "carol approves it"                  test "$(review app carol "$tpr")" = 200
+check "and merges it"                      test "$(merge app carol "$tpr")" = 200
 merged=$(gitea_api "" "$hp/app/pulls/$tpr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["merge_commit_sha"])')
 deployed_at() { garrison applied | grep -q "^app todo/todo@main todo $1"; }
 check "its pipeline builds it and the deployer deploys it" until_true 1200 deployed_at "$merged"
@@ -1272,12 +1279,21 @@ gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"
 
 echo "# 4g. agents get rights of their own"
 # set_file REPO BRANCH PATH FILE MESSAGE: alice writes FILE to PATH on BRANCH
-# of todo/REPO, directly (she may: the app repos take pushes).
+# of todo/REPO, directly (she may, on every branch but a protected main).
 set_file() {
   local sha body
   sha=$(gitea_api "" "$hp/$1/contents/$3?ref=$2" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)
   body=$(python3 -c 'import base64,json,sys; d={"branch":sys.argv[1],"message":sys.argv[3],"content":base64.b64encode(open(sys.argv[2],"rb").read()).decode()}; d.update({"sha":sys.argv[4]} if sys.argv[4] else {}); print(json.dumps(d))' "$2" "$4" "$5" "$sha")
   gitea_api alice -o /dev/null -w '%{http_code}' -X "$([ -n "$sha" ] && echo PUT || echo POST)" -H 'Content-Type: application/json' -d "$body" "$hp/$1/contents/$3"
+}
+# to_main REPO PATH FILE MESSAGE: FILE lands on main of todo/REPO as main
+# takes it: alice proposes it, carol approves, alice merges.
+to_main() {
+  local branch=land-$(date +%s%N | cut -c1-13) n
+  [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"'"$branch"'","old_branch_name":"main"}' "$hp/$1/branches")" = 201 ] || return 1
+  case $(set_file "$1" "$branch" "$2" "$3" "$4") in 200|201) ;; *) return 1 ;; esac
+  n=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"'"$4"'"}' "$hp/$1/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])') || return 1
+  [ "$(review "$1" carol "$n")" = 200 ] && [ "$(merge "$1" alice "$n")" = 200 ]
 }
 # propose_config BRANCH TITLE PATH=FILE...: alice proposes files in todo/config; prints the pull request's number.
 propose_config() {
@@ -1380,7 +1396,8 @@ check "alice gives todo previews, carol approves" set_stack todo todo "$tmp/todo
 while [ $((SECONDS - routines_seen)) -lt 90 ]; do sleep 10; done
 mainmoved=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf 'Notes.\n' > "$tmp/notes.md"
-check "alice pushes to app's main"        bash -c '[ "$0" = 201 ] || [ "$0" = 200 ]' "$(set_file app main NOTES.md "$tmp/notes.md" "Notes")"
+check "alice cannot push to app's main directly" bash -c '[ "$0" != 201 ] && [ "$0" != 200 ]' "$(set_file app main NOTES.md "$tmp/notes.md" "Notes")"
+check "her change lands there once carol approves it" to_main app NOTES.md "$tmp/notes.md" "Notes"
 since=$(last_pr app)
 answer=$(ask_agent todo bob "Clone the repo app of the namespace todo, add a file PREVIEW.md with the line: Preview test. Propose it with propose_workspace_changes, titled: Preview test. Do not merge it." developer)
 ppr=$(newest_pr app bob "$since")
@@ -1433,7 +1450,7 @@ check "alice merges it"                    test "$(merge config alice "$apr")" =
 asker_seen() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/asker/colour'" | grep -q .; }
 check "the routine sees main"              until_true 180 asker_seen
 printf 'More notes.\n' > "$tmp/notes2.md"
-check "alice pushes to app's main again"   bash -c '[ "$0" = 201 ] || [ "$0" = 200 ]' "$(set_file app main NOTES2.md "$tmp/notes2.md" "More notes")"
+check "another change lands on app's main" to_main app NOTES2.md "$tmp/notes2.md" "More notes"
 question_post() {
   chat_api bob "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
 import json,sys
@@ -1723,12 +1740,14 @@ done < "$tmp/posted"
 
 # crud: made, read, changed and removed, every kind of thing a namespace holds.
 . test/e2e/crud.sh
+# journey: an app with code of its own, from nothing to main, through the agents.
+. test/e2e/journey.sh
 
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
   t0=$SECONDS
-  case $s in system|login|platform|agent|deploy|talk|crud) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent|deploy|talk|crud|journey) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
   echo "time  section $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
 done
 # Slow checks: each check's time, longest first.

@@ -32,7 +32,7 @@ Alice proposes making carol a member instead of an admin; carol approves it.
 Bob: *@todo/operator In the repo app of todo, change the heading of page.html from Todo to Our todos, in both the title and the h1.*
 
 - The agent opens a pull request on `todo/app`, as bob.
-- Carol merges it. The pipeline tests, builds and pushes the image, and the deployer deploys it: the todo page shows *Our todos*.
+- Carol approves it, then merges it: with three people in `todo`, `main` of its app repos takes only pull requests another of them approved. The pipeline tests, builds and pushes the image, and the deployer deploys it: the todo page shows *Our todos*.
 - Carol's dashboard feed has bob's change through the operator; its thread shows how it was handled: carol's merge and the deploy of the merge commit.
 
 ## 4b. Bob asks the media agent for a screenshot
@@ -169,3 +169,13 @@ Alice: *@todo/operator I deleted todos in the todo app by mistake. Bring todo's 
 - The operator lists todo's snapshots (`list_snapshots`), as alice, and proposes a restore request, `restores/<name>.yaml` in `todo/config`, naming one of them.
 - Carol approves it, the approval check passes, alice merges it.
 - The deployer snapshots todo's current data, stops todo, copies its database back from the snapshot and starts it again; todo answers.
+
+## 10. An app from nothing to main
+
+Played by the `journey` step (`test/e2e/smoke.sh journey`, `test/e2e/journey.sh`), after deploy, in a namespace of its own. Alice is its only person, so she pushes and merges in its repos freely.
+
+1. Alice: *@system/operator Make a namespace lab, and in it the repo example from the template static-web.* The namespace and the repo appear, written as alice; lab gets its channel and operator; the pipeline builds main's image.
+2. Alice: *@lab/operator Deploy the app example: propose stacks/example.yaml as its README says, with main and dev, both public.* A pull request on `lab/config` that the deployer takes; a root admin approves it, alice merges it in Gitea, and `https://example.<domain>` shows the page on white.
+3. Alice makes the branch `dev` in Gitea. Nobody merges anything: the stack names `dev`, so the deployer deploys it at `https://dev-example.<domain>`, from the image main's build made of the same commit.
+4. Alice: *@lab/operator Change the background of the page to #2e7d32 on dev.* A pull request into `dev` that changes `index.html` alone; alice merges it, its pipeline builds it, dev-example turns green, and example on main stays white.
+5. Alice opens a pull request from `dev` to `main` in Gitea and merges it: example turns green, and her dashboard's feed shows lab's deploys.

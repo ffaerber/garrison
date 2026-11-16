@@ -134,6 +134,26 @@ check "bob cannot delete it"               test "$(gitea_api bob -o /dev/null -w
 check "alice deletes it"                   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$api/repos/$ns/scratch")" = 204
 check "it is gone"                         test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/$ns/scratch")" = 404
 
+echo "# main of a repo, alone and with others"
+notes=$api/repos/$ns/notes
+# put_main NAME: alice writes the file NAME onto notes' main directly; prints the status.
+put_main() { gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"branch":"main","message":"'"$1"'","content":"bm90ZQo="}' "$notes/contents/$1.txt"; }
+check "alone in crud, alice pushes to notes' main" test "$(put_main alone)" = 201
+check "alice adds bob as a member"         change_config $ns "" members.yaml="$(put_file m5 'admins: [alice]\nmembers: [bob]\n')"
+refused_main() { [ "$(put_main "shared-$(date +%s%N)")" != 201 ]; }
+check "with two people, main takes no direct push" until_true 60 refused_main
+check "alice proposes a change instead"    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"branch":"main","new_branch":"tidy","message":"Tidy","content":"bm90ZQo="}' "$notes/contents/tidy.txt")" = 201
+npr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"tidy","base":"main","title":"Tidy"}' "$notes/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')
+nmerge() { gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$notes/pulls/$npr/merge"; }
+check "she cannot merge it unapproved"     test "$(nmerge)" != 200
+check "nor approve it herself"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED"}' "$notes/pulls/$npr/reviews")" != 200 -o "$(nmerge)" != 200
+check "bob approves it"                    test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Fine."}' "$notes/pulls/$npr/reviews")" = 200
+check "then alice merges it"               test "$(nmerge)" = 200
+check "other branches stay free"           test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"branch":"tidy","message":"more","content":"bm90ZQo="}' "$notes/contents/more.txt")" = 201
+check "alice removes bob again"            change_config $ns "" members.yaml="$(put_file m6 'admins: [alice]\nmembers: []\n')"
+free_main() { [ "$(put_main "alone-$(date +%s%N)")" = 201 ]; }
+check "alone again, she pushes to main freely" until_true 60 free_main
+
 echo "# an agent"
 agent_yaml() { put_file "$1" "description: $2\ntools: [list_stacks, read_file]\n${3:-}"; }
 prompt=$(put_file prompt.md 'You help with the notes of the namespace crud.\n')

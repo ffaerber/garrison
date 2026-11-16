@@ -476,6 +476,9 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 			return err
 		}
 	}
+	if err := m.protectApps(ctx, ns, roster); err != nil {
+		return err
+	}
 	return m.approvals(ctx, ns, &roster, roots)
 }
 
@@ -582,12 +585,25 @@ func (m *Members) protect(ctx context.Context, ns string, mergers []string) erro
 		"dismiss_stale_approvals":      true,
 		"block_admin_merge_override":   true,
 	}
-	path := "/repos/" + ns + "/" + ConfigRepo + "/branch_protections"
+	return m.setRule(ctx, ns, ConfigRepo, rule)
+}
+
+// setRule makes the protection rule of a repo's main what rule says; nil
+// removes it.
+func (m *Members) setRule(ctx context.Context, ns, repo string, rule map[string]any) error {
+	path := "/repos/" + ns + "/" + repo + "/branch_protections"
 	var have map[string]any
-	if status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/main", nil, &have); status == http.StatusNotFound {
+	status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/main", nil, &have)
+	switch {
+	case status == http.StatusNotFound && rule == nil:
+		return nil
+	case status == http.StatusNotFound:
 		_, err := m.Gitea.do(ctx, "", http.MethodPost, path, rule, nil)
 		return err
-	} else if err != nil {
+	case err != nil:
+		return err
+	case rule == nil:
+		_, err := m.Gitea.do(ctx, "", http.MethodDelete, path+"/main", nil, nil)
 		return err
 	}
 	// Written only when it differs: every change of a rule makes Gitea check
@@ -595,9 +611,51 @@ func (m *Members) protect(ctx context.Context, ns string, mergers []string) erro
 	if sameRule(rule, have) {
 		return nil
 	}
+	rule = maps.Clone(rule)
 	delete(rule, "rule_name")
-	_, err := m.Gitea.do(ctx, "", http.MethodPatch, path+"/main", rule, nil)
+	_, err = m.Gitea.do(ctx, "", http.MethodPatch, path+"/main", rule, nil)
 	return err
+}
+
+// protectApps keeps main of a namespace's other repos, its apps': a
+// namespace of one person pushes and merges there freely; one of more
+// changes main only by pull requests another of its people approved, so
+// nobody deploys alone what the others have not seen. The platform owns
+// this rule: one set by hand is replaced.
+func (m *Members) protectApps(ctx context.Context, ns string, roster Roster) error {
+	people := map[string]bool{}
+	for _, p := range slices.Concat(roster.Admins, roster.Members) {
+		people[p] = true
+	}
+	var rule map[string]any
+	if len(people) > 1 {
+		rule = map[string]any{
+			"rule_name":                    "main",
+			"enable_push":                  false,
+			"enable_merge_whitelist":       false,
+			"enable_approvals_whitelist":   true,
+			"approvals_whitelist_teams":    []string{"admins", "members", RootTeam},
+			"approvals_whitelist_username": []string{},
+			"required_approvals":           1,
+			"block_on_rejected_reviews":    true,
+			"dismiss_stale_approvals":      true,
+			"block_admin_merge_override":   true,
+		}
+	}
+	repos, err := m.Gitea.Repos(ctx, "", ns)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, r := range repos {
+		if r.Name == ConfigRepo {
+			continue
+		}
+		if err := m.setRule(ctx, ns, r.Name, rule); err != nil {
+			errs = append(errs, fmt.Errorf("%s/%s: %w", ns, r.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // sameRule tells whether have, as Gitea returns it, already holds every
