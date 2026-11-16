@@ -61,8 +61,8 @@ homepage/config/
 
 ```yaml
 description: Makes screenshots and media and keeps the homepage current
-model: gpt-oss:120b          # a model of the LLM endpoint; empty for the default
-tools:                       # gateway tools this agent may use
+model: openrouter/anthropic/claude-sonnet-5.5   # an enabled model of system/config llm/models.yaml; empty for the default
+tools:                       # gateway tools this agent may use; `all` for every one, also later ones
   - list_repos
   - read_file
   - propose_change
@@ -81,8 +81,8 @@ internet: [packages, api.example.com]   # what its sandbox reaches; none without
 
 - `prompt.md` is the system prompt. The platform appends fixed rules after it (act as the person, propose and never claim a change is merged, give the link); a prompt can add rules but not remove these.
 - The model id, and the name people mention, is `<namespace>/<agent>`, e.g. `homepage/marketing`.
-- A new namespace gets `agents/operator/` written into its `config` repo with today's operator prompt. A namespace without an `agents/` folder still gets that operator.
-- The `garrison/approval` check on `config` pull requests also checks agent files: known tools and skills, a model the endpoint offers, a prompt that is not empty. Adding or widening an agent needs an admin's approval like a change to `members.yaml`.
+- A new namespace gets `agents/operator/` written into its `config` repo from `templates/namespace-config/`: today's operator prompt, the default model and `tools: all`. A namespace without an `agents/` folder still gets that operator.
+- The `garrison/approval` check on `config` pull requests also checks agent files: known tools and skills, an enabled model (see Models in [spec.md](spec.md)), a prompt that is not empty. Adding or widening an agent needs an admin's approval like a change to `members.yaml`.
 - `internet`: what the agent's sandbox reaches, through the agent service's proxy (see Sandbox). `packages` opens the package registries: Alpine, Debian, Ubuntu, PyPI, npm, Go modules and Rust crates, download hosts only, no GitHub. `all` opens every public address. A list names `packages` and domains, each with its subdomains. Without it, nothing. An agent that works on a private repo, or is `visible: members`, reaches the registries at most: the approval check refuses more, and should a repo turn private later, the proxy holds it to the registries, if it had them.
 
 ## Accounts and grants

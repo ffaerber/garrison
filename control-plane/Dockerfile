@@ -1,5 +1,5 @@
 # Built by Gitea Actions from the repo system/control-plane (control-plane/ci/build.yaml).
-# Context: the repo root, which holds go.mod, schemas/ and control-plane/.
+# Context: the repo root, which holds go.mod, schemas/, templates/ and control-plane/.
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -7,6 +7,7 @@ COPY go.mod go.sum ./
 # BuildKit between builds, so a small change compiles in seconds.
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY schemas ./schemas
+COPY templates ./templates
 COPY control-plane ./control-plane
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -o /garrison ./control-plane/cmd/garrison

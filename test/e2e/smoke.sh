@@ -460,6 +460,84 @@ check "a stack claiming a reserved hostname is rejected" bash -c "! $CTL apply -
 check "rejected stacks were not deployed"  bash -c '! (docker stack ls --format "{{.Name}}" | grep -qx git)'
 check "hello still answers after the rejected deploys"   status_is 200 hello / 30
 
+echo "# models"
+# The model list in system's config: written from the install's LLM, then
+# kept current by the model sync's pull requests. A fake provider, a static
+# file served on this machine, stands in for OpenRouter and the like.
+sys=$api/repos/system/config
+llm_file() { gitea_api "" "$sys/raw/llm/$1?ref=${2:-main}"; }
+seeded() { llm_file providers.yaml | grep -q '^default: ' && llm_file models.yaml | grep -q 'enabled: true'; }
+check "system's config gets the model list" until_true 180 seeded
+install_model=$(sed -n 's/^LLM_MODEL=//p' $ETC/install.env)
+check "its default is the install's model, enabled" \
+  bash -c 'grep -qF "/$1\"" <<<"$2" && grep -qF "/$1\": {enabled: true" <<<"$3"' _ "$install_model" "$(llm_file providers.yaml)" "$(llm_file models.yaml)"
+check "everyone signed in may read it" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$sys/raw/llm/models.yaml")" = 200
+check "the agent service reads keys from a root-only folder" test "$(stat -c %a $ETC/llm-keys)" = 700
+
+fake=$tmp/fake-llm
+mkdir -p "$fake/v1"
+printf '{"object":"list","data":[{"id":"fake-small"},{"id":"fake-large"},{"id":"other-model"}]}' > "$fake/v1/models"
+(cd "$fake" && exec python3 -m http.server 8399 --bind 0.0.0.0 >/dev/null 2>&1) &
+fake_pid=$!
+fake_url="http://$(hostname -I | awk '{print $1}'):8399/v1"
+llm_file providers.yaml > "$tmp/providers.yaml"
+printf '  fake:\n    url: "%s"\n    include: ["fake-*"]\n' "$fake_url" >> "$tmp/providers.yaml"
+check "alice adds a provider; another root admin approves" set_config system llm/providers.yaml "$tmp/providers.yaml"
+
+models_pr() { gitea_api "" "$sys/pulls?state=open&limit=50" | python3 -c '
+import json,sys
+print(next((str(p["number"]) for p in json.load(sys.stdin) if p["head"]["ref"]=="garrison/models"),""))'; }
+models_pr_with() { local n; n=$(models_pr); [ -n "$n" ] && gitea_api "" "$sys/pulls/$n" | grep -qF "$1"; }
+sys_approval() { gitea_api "" "$sys/commits/$(gitea_api "" "$sys/pulls/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
+import json,sys
+for s in json.load(sys.stdin).get("statuses") or []:
+    if s["context"] == "garrison/approval": print(s["status"], s["description"]); break'; }
+check "the model sync proposes the provider's models" until_true 180 models_pr_with "fake: 2 new"
+pr=$(models_pr)
+proposed=$(llm_file models.yaml garrison/models)
+check "they come turned off, only those include names" \
+  bash -c 'grep -qF "\"fake/fake-small\": {enabled: false" <<<"$0" && grep -qF "\"fake/fake-large\": {enabled: false" <<<"$0" && ! grep -q other-model <<<"$0"' "$proposed"
+check "the install's models are kept"      grep -qF "/$install_model\": {enabled: true" <<<"$proposed"
+approval_has() { sys_approval "$1" | grep -q "$2"; }
+sys_review() { gitea_api "$1" -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$sys/pulls/$2/reviews"; }
+check "it waits for a root admin's approval" until_true 60 approval_has "$pr" "^pending"
+sys_review bob "$pr"; sleep 25
+check "bob's approval does not count"      approval_has "$pr" "^pending"
+sys_review alice "$pr"
+check "alice's does"                       until_true 60 approval_has "$pr" "^success"
+check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$sys/pulls/$pr/merge")" = 200
+check "main lists fake's models"           grep -qF '"fake/fake-small"' <<<"$(llm_file models.yaml)"
+
+# An agent may name only an enabled model: refused while fake-small is off,
+# taken once the same pull request enables it.
+agent_pr() {
+  local branch=models-agent-$1 ops
+  ops=$(python3 -c '
+import base64,json,sys
+b=lambda s: base64.b64encode(s.encode()).decode()
+files=[{"operation":"create","path":"agents/tester/agent.yaml","content":b("description: Tests\nmodel: fake/fake-small\ntools: [list_repos]\n")},
+       {"operation":"create","path":"agents/tester/prompt.md","content":b("You test.\n")}]
+if sys.argv[2]: files.append({"operation":"update","path":"llm/models.yaml","sha":sys.argv[3],"content":b(sys.argv[2])})
+print(json.dumps({"branch":"main","new_branch":sys.argv[1],"message":"An agent on fake","files":files}))' "$branch" "${2:-}" "$(gitea_api "" "$sys/contents/llm/models.yaml" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')")
+  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$ops" "$sys/contents"
+  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"An agent on fake"}' "$sys/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
+}
+refused_pr=$(agent_pr off)
+check "an agent naming a model that is off is refused" until_true 90 approval_has "$refused_pr" "^failure.*fake/fake-small is not enabled"
+enabled_pr=$(agent_pr on "$(llm_file models.yaml | sed 's#"fake/fake-small": {enabled: false#"fake/fake-small": {enabled: true#')")
+check "the same, enabling the model, waits only for approval" until_true 90 approval_has "$enabled_pr" "^pending"
+for n in "$refused_pr" "$enabled_pr"; do
+  gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$sys/pulls/$n"
+done
+
+# A model the provider stops offering is marked gone, in the next sync.
+printf '{"object":"list","data":[{"id":"fake-small"}]}' > "$fake/v1/models"
+sed -i 's#include: \["fake-\*"\]#include: ["fake-small", "fake-large"]#' "$tmp/providers.yaml"
+check "alice narrows the provider"         set_config system llm/providers.yaml "$tmp/providers.yaml"
+check "the next sync proposes fake-large as retired" until_true 180 models_pr_with "Retired: fake/fake-large"
+check "with the date it went"              grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: [0-9-]+\}' <<<"$(llm_file models.yaml garrison/models)"
+kill "$fake_pid" 2>/dev/null || true
+
 }
 
 # agent: the namespace agents answer in their channels in Open WebUI, when

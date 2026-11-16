@@ -212,6 +212,11 @@ chmod 600 "$ETC/llm-api-key"
 if [ -n "$LLM_API_KEY" ]; then
   printf '%s' "$LLM_API_KEY" > "$ETC/llm-api-key"
 fi
+# The keys of further LLM providers (llm/providers.yaml in system's config),
+# a file each, named after the provider. The install's LLM keeps the file
+# above.
+mkdir -p "$ETC/llm-keys"
+chmod 700 "$ETC/llm-keys"
 install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
 
 # The namespaces' secrets are encrypted for their own keys, which the

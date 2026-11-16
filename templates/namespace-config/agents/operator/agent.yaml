@@ -1,0 +1,4 @@
+# The operator: answers questions about the namespace and proposes changes.
+description: Looks at the namespace and proposes changes to it
+model: ""     # the default; or an enabled model of system/config llm/models.yaml
+tools: all    # every tool of the platform, including those added later

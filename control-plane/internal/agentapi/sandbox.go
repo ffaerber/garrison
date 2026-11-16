@@ -69,10 +69,8 @@ type prompt func(fresh bool) (string, []sandbox.Image)
 // own tools in its workspace and the agent's platform tools. key names the
 // sandbox, with chat; person is whom it counts against.
 func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat, key string, a agents.Agent, msg prompt, out output) (int, error) {
-	model := a.Model
-	if model == "" {
-		model = s.DefaultModel
-	}
+	// The model's full id: the sandbox's LLM requests are routed by it.
+	_, _, model := s.route(ctx, a.ID(), a.Model)
 	a.Internet = s.internet(ctx, a)
 	system := agents.System(a, s.Domain) + "\n\n" + Workspace
 	if a.Internet.None() {
@@ -286,8 +284,9 @@ func (s *Server) sandboxLLM(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "not a chat completion request")
 		return
 	}
-	body["model"] = c.Model
-	if err := s.LLM.Proxy(r.Context(), w, body); err != nil {
+	llm, model, _ := s.route(r.Context(), c.Agent, c.Model)
+	body["model"] = model
+	if err := llm.Proxy(r.Context(), w, body); err != nil {
 		apiError(w, http.StatusBadGateway, err.Error())
 	}
 }

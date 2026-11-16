@@ -119,6 +119,7 @@ func baseSpecs() []Spec {
 		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the namespace's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"namespace": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "namespace", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for system, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
+		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in system/config, which root admins change.", nil),
 		spec("list_repos", "Lists the repos of a namespace. In system, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "namespace", "repo"),
 		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "namespace", "repo", "path"),
@@ -317,6 +318,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return "members.yaml of " + a.Namespace + "/config on main:\n" + roster +
 			"\nTo change it, propose a new members.yaml in the repo config. It needs the approval of an admin who did not write the change and whose role it does not change.", nil
+	case "list_models":
+		return t.listModels(ctx)
 	case "list_repos":
 		repos, err := t.Gitea.Repos(ctx, p.Name, a.Namespace)
 		if err != nil {

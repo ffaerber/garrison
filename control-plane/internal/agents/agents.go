@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 
+	"garrison/templates"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -98,7 +100,7 @@ var (
 type config struct {
 	Description string    `yaml:"description"`
 	Model       string    `yaml:"model"`
-	Tools       []string  `yaml:"tools"`
+	Tools       toolList  `yaml:"tools"`
 	Skills      []string  `yaml:"skills"`
 	Repos       []string  `yaml:"repos"`
 	Visible     string    `yaml:"visible,omitempty"` // only "members"
@@ -107,6 +109,26 @@ type config struct {
 	Routines    []Routine `yaml:"routines,omitempty"`
 	Internet    Internet  `yaml:"internet,omitempty"`
 	Enabled     *bool     `yaml:"enabled,omitempty"`
+}
+
+// AllTools, as tools: all, gives an agent every tool, also those added
+// later.
+const AllTools = "all"
+
+// toolList is tools in agent.yaml: a list of tools, or all.
+type toolList []string
+
+func (l *toolList) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode && n.Value == AllTools {
+		*l = toolList{AllTools}
+		return nil
+	}
+	var names []string
+	if err := n.Decode(&names); err != nil {
+		return err
+	}
+	*l = names
+	return nil
 }
 
 // askList is agents in agent.yaml: a list of agents, or any.
@@ -227,6 +249,9 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 	if c.Model != "" && !modelName.MatchString(c.Model) {
 		why = append(why, fmt.Sprintf("model %q is not a model name", c.Model))
 	}
+	if len(c.Tools) == 1 && c.Tools[0] == AllTools {
+		c.Tools = slices.Clone(tools)
+	}
 	seen := map[string]bool{}
 	for _, t := range c.Tools {
 		switch {
@@ -281,7 +306,7 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 	}
 	return Agent{
 		Namespace: namespace, Name: name, Description: c.Description, Model: c.Model,
-		Tools: c.Tools, Repos: c.Repos, Prompt: prompt, Skills: skills,
+		Tools: []string(c.Tools), Repos: c.Repos, Prompt: prompt, Skills: skills,
 		Visible: c.Visible, Asks: []string(c.Agents), Grants: grants, Routines: routines,
 		Internet: c.Internet,
 	}, nil, nil
@@ -362,19 +387,15 @@ func Operator(namespace string, tools []string) Agent {
 	}
 }
 
-// OperatorPrompt is the operator's prompt.md. How the home cloud works is
-// in every agent's system prompt (Platform), so a namespace made earlier,
-// which keeps its own copy of this file, learns it too.
-const OperatorPrompt = `You answer questions about the namespace's apps and stacks, and set up and change them, using your tools: you look things up, make namespaces and repos where the person may, and propose changes.
-
-- Logs: service_logs. Metrics: service_usage for CPU and memory of a stack, query_metrics for any PromQL.
-- To add, remove or change someone in the namespace, propose a new members.yaml; it needs the approval of an admin who neither wrote the change nor has their role changed by it, so nobody can raise their own rights. Root admins are managed outside the namespaces and cannot be changed from here.
-- When someone asks for a new app, ask what you need to know first (which namespace; anything you would otherwise guess), then make what is missing and propose the rest.
-`
+// OperatorPrompt is the operator's prompt.md (templates/namespace-config).
+// How the home cloud works is in every agent's system prompt (Platform), so
+// a namespace made earlier, which keeps its own copy of this file, learns it
+// too.
+var OperatorPrompt = templates.File(templates.Namespace, Dir+"/"+OperatorName+"/"+PromptFile)
 
 // Platform is how the home cloud works, in every agent's system prompt.
 const Platform = `How the home cloud works:
-- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people. Its agents are folders under agents/ in config (agent.yaml, prompt.md).
+- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people. Its agents are folders under agents/ in config (agent.yaml, prompt.md); an agent's model is empty for the default or an enabled model of llm/models.yaml in system/config, as <provider>/<model> (list_models lists them).
 - The namespace system is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into system.
 - A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into system.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
@@ -415,50 +436,27 @@ const Platform = `How the home cloud works:
 // offline is said to agents without internet.
 const offline = "- You have no internet: you cannot look up images or their versions. Use versions you know, pinned, and tell the person to check them in the review.\n"
 
-// OperatorFiles are the files of the operator's folder, as written into a
-// new config repo.
-func OperatorFiles(tools []string) map[string]string {
-	cfg, _ := yaml.Marshal(config{Description: "Looks at the namespace and proposes changes to it", Tools: tools})
-	return map[string]string{
-		Dir + "/README.md": `# Agents
-
-One folder per agent. People mention an agent in the chat as ` + "`@<namespace>/<folder>`" + `.
-
-- ` + "`agent.yaml`" + `: ` + "`description`" + `, ` + "`model`" + ` (empty for the default), ` + "`tools`" + ` (the gateway tools it may use), ` + "`skills`" + ` (shared skills from ` + "`skills/`" + ` at the top of this repo), ` + "`repos`" + ` and ` + "`internet`" + ` (what its sandbox reaches: ` + "`packages`" + `, the package registries; ` + "`all`" + `; or a list of ` + "`packages`" + ` and domains; none without it).
-- ` + "`routines`" + `: work it does by itself, for an ` + "`owner`" + `, with a ` + "`task`" + `: on a ` + "`schedule`" + ` (cron, e.g. ` + "`\"30 6 * * mon-fri\"`" + `, in the home cloud's time zone), ` + "`every`" + ` (e.g. ` + "`6h`" + `), ` + "`on_push`" + ` (` + "`{repo, branch}`" + `) or ` + "`on_alert`" + ` (label values of this namespace's alerts, e.g. ` + "`{alertname: ServiceFailing}`" + `). Its answer goes to the namespace's channel.
-- ` + "`prompt.md`" + `: its instructions. The platform adds its own rules after them.
-- ` + "`skills/<name>/SKILL.md`" + `: skills of this agent only, in the Agent Skills format.
-
-An agent acts with the rights of the person talking to it. Changes here need an admin's approval, like members.yaml.
-`,
-		Dir + "/" + OperatorName + "/" + ConfigFile: "# The operator: answers questions about the namespace and proposes changes.\n" + string(cfg),
-		Dir + "/" + OperatorName + "/" + PromptFile: OperatorPrompt,
+// OperatorFiles are the agents folder of a new config repo: its README and
+// the operator (templates/namespace-config).
+func OperatorFiles() map[string]string {
+	out := map[string]string{}
+	for p, c := range templates.Files(templates.Namespace) {
+		if strings.HasPrefix(p, Dir+"/") {
+			out[p] = c
+		}
 	}
+	return out
 }
 
-// CommanderPrompt is the commander's prompt.md: it finds the agent for what
-// a person wants, and hands the work over or sends the person there.
-const CommanderPrompt = `You are the commander. People come to you when they do not know which agent to ask. You do not do the work yourself: you find the agent for it, then hand the work over or tell the person whom to talk to.
+// CommanderPrompt is the commander's prompt.md (templates/system-config): it
+// finds the agent for what a person wants, and hands the work over or sends
+// the person there.
+var CommanderPrompt = templates.File(templates.System, Dir+"/"+CommanderName+"/"+PromptFile)
 
-1. Call find_agents, without in_namespace. It lists the agents this person may use here: what each does, its tools, skills, repos and rights, and which namespace this channel belongs to.
-2. Pick the agent whose description, tools and repos fit. Prefer the namespace the person names, then this channel's namespace. Each namespace has an operator, which sets up namespaces, repos and apps and reads logs and metrics.
-3. Then one of these:
-   - A clear task one agent can finish in one go (a screenshot, a new repo, why an app does not start): hand it over with ask_agent. Put everything it needs into task (namespace, repo, branch, what exactly), what it must not do into limits, and what a good answer is into done_when. In a channel, set background: the agent posts its answer here itself. Tell the person whom you asked and for what.
-   - Work with back and forth (building a feature, setting up a new app, anything the person decides along the way): do not hand it over. Tell the person which agent to talk to, as @<namespace>/<agent>, and in one sentence why it fits.
-   - If you cannot tell what the person wants, or which of two agents fits, ask one short question first.
-4. If no agent fits, say so, and what an agent for it would need (tools, repos): the namespace's operator can propose one.
-
-Pass on what an agent answered as it is; never say it did something it did not say it did.
-`
-
-// CommanderFiles are the files of the commander's folder in system's config
-// repo: it may ask any agent the person may use, and needs no tools.
+// CommanderFiles are what system's config repo has besides the operator:
+// the commander's folder and llm/README.md (templates/system-config).
 func CommanderFiles() map[string]string {
-	cfg, _ := yaml.Marshal(config{Description: "Finds the agent for what you want, and hands the work to it or tells you whom to ask", Tools: []string{}, Agents: askList{AnyAgent}})
-	return map[string]string{
-		Dir + "/" + CommanderName + "/" + ConfigFile: "# The commander: finds the agent for a task. It acts only through other agents, as the person.\n" + string(cfg),
-		Dir + "/" + CommanderName + "/" + PromptFile: CommanderPrompt,
-	}
+	return templates.Files(templates.System)
 }
 
 // System is an agent's whole system prompt: what it is, its prompt.md, its

@@ -102,38 +102,16 @@ func (g *Gitea) Commit(ctx context.Context, org, repo, message, author string, f
 	if !userName.MatchString(author) {
 		return fmt.Errorf("%w: user %q", ErrInvalid, author)
 	}
-	var ops []map[string]string
-	for _, path := range sortedKeys(files) {
-		if err := validPath(path); err != nil || path == "" {
-			return fmt.Errorf("%w: path %q", ErrInvalid, path)
-		}
-		var have struct {
-			SHA string `json:"sha"`
-		}
-		status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/contents/%s?ref=main", org, repo, escapePath(path)), nil, &have)
-		if err != nil && status != http.StatusNotFound {
-			return err
-		}
-		op := map[string]string{"path": path}
-		switch {
-		case files[path] == nil && have.SHA == "":
-			continue // already gone
-		case files[path] == nil:
-			op["operation"], op["sha"] = "delete", have.SHA
-		case have.SHA == "":
-			op["operation"] = "create"
-		default:
-			op["operation"], op["sha"] = "update", have.SHA
-		}
-		if files[path] != nil {
-			op["content"] = base64.StdEncoding.EncodeToString(files[path])
-		}
-		ops = append(ops, op)
+	ops, err := g.fileOps(ctx, org, repo, files)
+	if err != nil || len(ops) == 0 {
+		return err
 	}
-	if len(ops) == 0 {
-		return nil
+	for _, op := range ops {
+		if c, ok := op["content"]; ok {
+			op["content"] = base64.StdEncoding.EncodeToString([]byte(c))
+		}
 	}
-	_, err := g.do(ctx, "", http.MethodPost, fmt.Sprintf("/repos/%s/%s/contents", org, repo), map[string]any{
+	_, err = g.do(ctx, "", http.MethodPost, fmt.Sprintf("/repos/%s/%s/contents", org, repo), map[string]any{
 		"branch": "main", "message": message, "files": ops,
 		"author": map[string]string{"name": author, "email": author + "@users.noreply.garrison"},
 	}, nil)

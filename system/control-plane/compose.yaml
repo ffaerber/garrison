@@ -102,6 +102,8 @@ services:
     volumes:
       - /etc/garrison/install.env:/etc/garrison/install.env:ro
       - /etc/garrison/llm-api-key:/etc/garrison/llm-api-key:ro
+      # The keys of the providers in llm/providers.yaml of system's config.
+      - /etc/garrison/llm-keys:/etc/garrison/llm-keys:ro
     # Gitea, the gateway and Open WebUI on the system network; Keycloak's keys
     # at its public name through Traefik, there too; the LLM outside; the
     # sandboxes, and Docker for them through their guard. Not on

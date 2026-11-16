@@ -591,7 +591,10 @@ func agentsCmd(args []string) error {
 	giteaURL := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
 	gatewayURL := fs.String("gateway", "http://control-plane_gateway:8080/mcp", "the gateway's MCP endpoint")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the LLM's API key")
+	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the install's LLM's API key")
+	keyDir := fs.String("llm-keys", etcDir+"/llm-keys", "the providers' API keys, a file per provider named after it")
+	modelsCheck := fs.Duration("models-check", time.Minute, "how often to look for a changed llm/providers.yaml in system's config")
+	modelsEvery := fs.Duration("models-every", 24*time.Hour, "how often to ask the providers for their models")
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	image := fs.String("sandbox-image", "", "the sandbox image; if empty, turns run in this process")
@@ -657,6 +660,11 @@ func agentsCmd(args []string) error {
 		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
 		Events:       recorder(store),
 	}
+	srv.Models = &agentapi.Models{
+		Gitea: g, KeyDir: *keyDir, InstallURL: base, InstallModel: model, InstallKey: *keyFile,
+		Events: srv.Events, Domain: domain,
+	}
+	go srv.Models.Run(ctx, *modelsCheck, *modelsEvery)
 	if *image != "" {
 		// The sandbox image is pulled from Gitea's registry as the admin, if
 		// the build did not leave it on this machine.

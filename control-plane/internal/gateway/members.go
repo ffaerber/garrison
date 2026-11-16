@@ -19,6 +19,7 @@ import (
 
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/hooks"
+	"garrison/templates"
 )
 
 // Members keeps each namespace's config repo: who may change the namespace,
@@ -447,11 +448,9 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 			return errors.New("no owner to make the first admin")
 		}
 		data, _ := yaml.Marshal(Roster{Admins: owners, Members: []string{}})
-		files := agents.OperatorFiles(ToolNames())
-		files[MembersFile] = "# Who may change the namespace " + ns + ". Everyone signed in may read everything.\n" +
-			"# admins approve and merge changes, including to this file; members push to its repos.\n" +
-			"# Change it by pull request: it needs the approval of an admin who did not write it\n" +
-			"# and whose role it does not change.\n" + string(data)
+		// templates/namespace-config: members.yaml is its header.
+		files := templates.Files(templates.Namespace)
+		files[MembersFile] += string(data)
 		if err := m.createConfig(ctx, ns, "Who may change this namespace, and its agents", "First admins: the namespace's creators; the operator agent", files); err != nil {
 			return err
 		}
@@ -489,7 +488,7 @@ func (m *Members) system(ctx context.Context, roots []string) error {
 		return err
 	}
 	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
-		files := agents.OperatorFiles(ToolNames())
+		files := agents.OperatorFiles()
 		maps.Copy(files, agents.CommanderFiles())
 		if err := m.createConfig(ctx, ns, "The agents of the system namespace; root admins approve changes", "The operator and the commander", files); err != nil {
 			return err
@@ -678,6 +677,11 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 			return err
 		}
 		more, err := g.grantProblems(ctx, ns, list)
+		if err != nil {
+			return err
+		}
+		problems = append(problems, more...)
+		more, err = g.modelProblems(ctx, ns, pr.Head.SHA, list)
 		if err != nil {
 			return err
 		}

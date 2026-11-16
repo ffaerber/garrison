@@ -60,7 +60,7 @@ func TestNoFolderMeansTheOperator(t *testing.T) {
 
 func TestTheWrittenOperatorLoads(t *testing.T) {
 	files := mapFiles{}
-	for p, c := range OperatorFiles(tools) {
+	for p, c := range OperatorFiles() {
 		files[p] = c
 	}
 	got, problems, err := Load(context.Background(), files, "homepage", tools)
@@ -74,7 +74,7 @@ func TestTheWrittenOperatorLoads(t *testing.T) {
 
 func TestTheCommanderLoadsInSystem(t *testing.T) {
 	files := mapFiles{}
-	for p, c := range OperatorFiles(tools) {
+	for p, c := range OperatorFiles() {
 		files[p] = c
 	}
 	for p, c := range CommanderFiles() {

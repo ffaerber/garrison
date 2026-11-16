@@ -38,7 +38,8 @@ type Agents interface {
 type Server struct {
 	Agents       Agents
 	Verifier     gateway.Verifier
-	LLM          *LLM
+	LLM          *LLM    // the LLM when Models is nil
+	Models       *Models // the providers and models of system's config; nil: LLM and DefaultModel
 	Gateway      *Gateway
 	Domain       string
 	DefaultModel string // the LLM model of agents that name none, and of Open WebUI's own tasks
@@ -57,6 +58,18 @@ const (
 	ChatHeader = "X-Garrison-Chat" // {{CHAT_ID}}
 	TaskHeader = "X-Garrison-Task" // {{TASK}}: title, tags, follow-ups...
 )
+
+// route is the LLM, and the model's name there, for what an agent names as
+// its model ("" the default), and the model's full id.
+func (s *Server) route(ctx context.Context, agent, model string) (*LLM, string, string) {
+	if s.Models != nil {
+		return s.Models.Route(ctx, agent, model)
+	}
+	if model == "" {
+		model = s.DefaultModel
+	}
+	return s.LLM, model, model
+}
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -115,7 +128,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if task := r.Header.Get(TaskHeader); task != "" {
 		var generic map[string]any
 		json.Unmarshal(body, &generic)
-		if err := s.LLM.Forward(r.Context(), w, generic, s.DefaultModel); err != nil {
+		llm, model, _ := s.route(r.Context(), "", "")
+		if err := llm.Forward(r.Context(), w, generic, model); err != nil {
 			log.Printf("agents: %s: task %s: %v", person.Name, task, err)
 			apiError(w, http.StatusBadGateway, err.Error())
 		}
@@ -198,10 +212,7 @@ func (s *Server) turn(ctx context.Context, token string, a agents.Agent, incomin
 	if err != nil {
 		return 0, err
 	}
-	model := a.Model
-	if model == "" {
-		model = s.DefaultModel
-	}
+	llm, model, _ := s.route(ctx, a.ID(), a.Model)
 	max := s.MaxRounds
 	if max <= 0 {
 		max = 25
@@ -213,7 +224,7 @@ func (s *Server) turn(ctx context.Context, token string, a agents.Agent, incomin
 			offer = nil // the last round must answer
 			messages = append(messages, Message{Role: "system", Content: "You have used all your tool calls for this turn. Answer now with what you found."})
 		}
-		msg, err := s.LLM.Chat(ctx, model, messages, offer)
+		msg, err := llm.Chat(ctx, model, messages, offer)
 		if err != nil {
 			return calls, err
 		}
