@@ -284,12 +284,13 @@ func (c *Config) git(ctx context.Context, args ...string) (string, error) {
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",
 	}
-	var base []string
+	// No auto maintenance: it forks a detached child per fetch, and the
+	// checkouts are small and thrown away when they go wrong.
+	base := []string{"-c", "maintenance.auto=false", "-c", "gc.auto=0"}
 	if c.public() {
-		base = []string{
-			"-c", "http.sslCAInfo=" + c.CAFile,
-			"-c", fmt.Sprintf("http.curloptResolve=git.%s:443:127.0.0.1", c.Domain),
-		}
+		base = append(base,
+			"-c", "http.sslCAInfo="+c.CAFile,
+			"-c", fmt.Sprintf("http.curloptResolve=git.%s:443:127.0.0.1", c.Domain))
 	}
 	out, err := c.Run(ctx, env, nil, "git", append(base, args...)...)
 	return strings.TrimSpace(string(out)), err

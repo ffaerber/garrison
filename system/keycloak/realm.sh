@@ -6,6 +6,12 @@ id_of() { kc get "$1" -r "$realm" "${@:2}" --fields id --format csv --noquotes; 
 
 kc get "realms/$realm" >/dev/null 2>&1 ||
   kc create realms -s "realm=$realm" -s enabled=true -s "displayName=Garrison" >/dev/null
+# Sessions last as long as people stay signed in to the apps: Open WebUI
+# keeps a person signed in for weeks and refreshes their token for the
+# agents with the session's refresh token. With Keycloak's default of 30
+# minutes idle, the agents refused anyone back from a break ("a Keycloak
+# access token is required") while the chat still showed them signed in.
+kc update "realms/$realm" -s ssoSessionIdleTimeout=604800 -s ssoSessionMaxLifespan=2592000
 
 # Root admins: the people who may change the platform itself.
 [ -n "$(id_of groups -q search=root-admins -q exact=true)" ] ||
