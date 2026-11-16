@@ -221,7 +221,9 @@ class Person:
         self.dismiss()
         if p.locator("button[aria-label='Open Sidebar']").first.is_visible():
             p.locator("button[aria-label='Open Sidebar']").first.click()
-        link = p.locator("a[href*='/channels/']").filter(has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
+        # By its address: the link's text gains an unread count.
+        cid = next(c["id"] for c in self.owui("/api/v1/channels/") if c["name"] == name)
+        link = p.locator(f"a[href$='/channels/{cid}']")
         # The sidebar renders after the page; its Channels section may be
         # closed, and opens on a click (a click on an open one closes it).
         try:
