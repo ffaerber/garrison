@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -139,4 +140,74 @@ func TestTheApprovalCheckReadsStacks(t *testing.T) {
 	if problems, _ := g.stackProblems(context.Background(), "system", "abc"); len(problems) == 0 || !strings.Contains(problems[0], "system holds the platform") {
 		t.Errorf("system: %v", problems)
 	}
+}
+
+// A repo from a template starts with a working app, written as the person,
+// its README naming the stack to propose.
+func TestARepoFromATemplate(t *testing.T) {
+	var ops []map[string]string
+	var by string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/orgs/lab/repos":
+			io.WriteString(w, `{"html_url":"https://git/lab/example"}`)
+		case "/api/v1/repos/lab/example/contents/README.md": // auto_init made it
+			io.WriteString(w, `{"sha":"r1"}`)
+		case "/api/v1/repos/lab/example/contents":
+			by = r.Header.Get("Sudo")
+			var body struct {
+				Branch string              `json:"branch"`
+				Files  []map[string]string `json:"files"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			ops = body.Files
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, "{}")
+		case "/api/v1/repos/lab/example/raw/README.md":
+			for _, op := range ops {
+				if op["path"] == "README.md" {
+					data, _ := base64.StdEncoding.DecodeString(op["content"])
+					w.Write(data)
+					return
+				}
+			}
+			io.WriteString(w, "# example\n")
+		case "/api/v1/repos/lab/example":
+			io.WriteString(w, `{"permissions":{"pull":true}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	raw, _ := json.Marshal(map[string]any{"namespace": "lab", "repo": "example", "template": "static-web"})
+	out, err := tools.Call(context.Background(), Person{Name: "alice"}, nil, "create_repo", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, op := range ops {
+		data, _ := base64.StdEncoding.DecodeString(op["content"])
+		got[op["path"]+" "+op["operation"]] = string(data)
+	}
+	if by != "alice" || len(got) != 4 || !strings.Contains(got["index.html create"], "<h1>example</h1>") ||
+		!strings.Contains(got[".gitea/workflows/pipeline.yaml create"], "buildctl") || !strings.Contains(got["Dockerfile create"], "EXPOSE 8080") ||
+		!strings.Contains(got["README.md update"], `image: "{{registry}}/lab/example:{{commit}}"`) {
+		t.Errorf("by %s: %v", by, keys(got))
+	}
+	if !strings.Contains(out, "from the template static-web") || !strings.Contains(out, "source: example") {
+		t.Errorf("out: %s", out)
+	}
+	raw, _ = json.Marshal(map[string]any{"namespace": "lab", "repo": "other", "template": "../namespace-config"})
+	if _, err := tools.Call(context.Background(), Person{Name: "alice"}, nil, "create_repo", raw); err == nil {
+		t.Error("a template outside app/")
+	}
+}
+
+func keys(m map[string]string) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

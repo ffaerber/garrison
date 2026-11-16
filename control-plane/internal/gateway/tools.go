@@ -17,6 +17,7 @@ import (
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/gitops"
+	"garrison/templates"
 )
 
 // Person is who is asking: the signed-in user behind a tool call.
@@ -145,11 +146,12 @@ func baseSpecs() []Spec {
 			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
 			"description": str("what it is for"),
 		}, "name"),
-		spec("create_repo", "Makes an empty repo in a namespace, as the person asking: its admins and root admins may. For an app's own code: the app itself is deployed from stacks/<name>.yaml in the namespace's config, which names the repo as its source. Propose the repo's files with propose_change or propose_patch.", map[string]any{
+		spec("create_repo", "Makes a repo in a namespace, as the person asking: its admins and root admins may. For an app's own code: the app itself is deployed from stacks/<name>.yaml in the namespace's config, which names the repo as its source. With template, it starts with a working app, its Dockerfile and the pipeline that builds its image for every push, and its README says what stack to propose; without, empty but for a README. Propose further files with propose_change or propose_patch.", map[string]any{
 			"namespace":   nsArg,
 			"repo":        str("lowercase letters, digits and dashes; an app's repo is named after it, e.g. immich"),
 			"description": str("what it holds"),
 			"private":     map[string]any{"type": "boolean", "description": "only the namespace's people may read it; default false"},
+			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: static-web, one static page (index.html) served by nginx on port 8080; empty for nothing"},
 		}, "namespace", "repo"),
 		spec("merge_change", "Merges a pull request of one of your proposals, with your own account, if one of your grants allows merging into its base branch for the person you talk to and its checks have passed. A merge into a branch that deploys (main, dev) deploys it. If it is refused, say why; do not work around it.", map[string]any{
 			"namespace": nsArg,
@@ -188,6 +190,7 @@ type args struct {
 	Text                                                                                   string
 	Submit                                                                                 bool
 	URL                                                                                    string `json:"url"`
+	Template                                                                               string `json:"template"`
 	FullPage                                                                               bool   `json:"full_page"`
 }
 
@@ -378,9 +381,13 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. Within a minute it has its config repo (members.yaml, its agents), its operator and its channel. Make its repos with create_repo.", name, p.Name), nil
 	case "create_repo":
-		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Namespace, a.Repo, a.Description, a.Private)
+		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Namespace, a.Repo, a.Description, a.Private, a.Template)
 		if err != nil {
 			return "", err
+		}
+		if a.Template != "" {
+			readme, _ := t.Gitea.Read(ctx, p.Name, a.Namespace, a.Repo, "README.md")
+			return fmt.Sprintf("Made the repo %s/%s from the template %s, on main; its pipeline builds its image for every push. To deploy it, propose stacks/%s.yaml in %s/config as its README says; nothing runs until a person merges it.\n%s\n\nREADME.md:\n%s", a.Namespace, a.Repo, a.Template, a.Repo, a.Namespace, u, readme), nil
 		}
 		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); to deploy it, propose stacks/%s.yaml in %s/config with source: %s. Nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, a.Repo, a.Namespace, a.Repo, u), nil
 	case "merge_change":

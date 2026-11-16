@@ -1,0 +1,52 @@
+# Build and push the image for every push, in one BuildKit build. The
+# deployer deploys each branch the namespace's config names as an
+# environment (main, dev) once its image exists. From the template
+# static-web of the home cloud.
+name: pipeline
+on:
+  push:
+    branches: ["**"]
+
+defaults:
+  run:
+    shell: sh
+
+jobs:
+  image:
+    runs-on: garrison-user
+    container:
+      image: moby/buildkit:v0.34.1
+    steps:
+      - name: Test, build and push
+        env:
+          TOKEN: ${{ gitea.token }}
+          REPO: ${{ gitea.repository }}
+          SHA: ${{ gitea.sha }}
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_CA: ${{ vars.REGISTRY_CA }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          apk add --no-cache git >/dev/null
+          # The registry is on this machine: reach it through the job's gateway,
+          # and trust the installation's certificate when it is self-signed.
+          echo "$(ip route | awk '/default/ { print $3 }') $REGISTRY" >> /etc/hosts
+          [ -z "$REGISTRY_CA" ] || printf '%s\n' "$REGISTRY_CA" >> /etc/ssl/certs/ca-certificates.crt
+          git -c http.extraHeader="Authorization: token $TOKEN" clone -q "http://gitea_gitea:3000/$REPO.git" src
+          git -C src checkout -q "$SHA"
+          image="$REGISTRY/$REPO:$(echo "$SHA" | cut -c1-12)"
+          cache="$REGISTRY/$REPO:buildcache"
+          mkdir -p "$HOME/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}' "$REGISTRY" "$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 | tr -d '\n')" > "$HOME/.docker/config.json"
+          # The image and its cache go up at once, and Gitea's registry can fail
+          # one of two uploads of the same layer: a second try finds it there.
+          build() {
+            buildctl --addr tcp://garrison-buildkit:1234 build \
+              --frontend dockerfile.v0 --local context=src --local dockerfile=src \
+              --import-cache "type=registry,ref=$cache" \
+              --export-cache "type=registry,ref=$cache,mode=max,image-manifest=true,oci-mediatypes=true" \
+              --output "type=image,name=$image,push=true"
+          }
+          build || { echo "trying again"; sleep 5; build; } || { echo "trying again"; sleep 15; build; }
+          echo "pushed $image"

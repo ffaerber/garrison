@@ -400,7 +400,7 @@ const Platform = `How the home cloud works:
 - A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into system.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
 - An app with its own code has a repo with it (code, Dockerfile, tests; nothing of the home cloud) and names it as source. Then each branch of that repo named as an environment is deployed at its newest commit (dev as https://dev-<name>.<domain>), with an environment preview each open pull request too (https://pr-<number>-<name>.<domain>), and {{registry}}/<namespace>/<repo>:{{commit}} is the image its pipeline built for that commit.
-- A new app: a namespace for it if it needs one (create_namespace; only root admins may, so ask whether an existing one fits), a repo only for code of its own (create_repo), then propose stacks/<name>.yaml in config. Changes to config need the approval of an admin of the namespace; it runs once merged.
+- A new app: a namespace for it if it needs one (create_namespace; only root admins may, so ask whether an existing one fits), a repo only for code of its own (create_repo; template static-web gives a web page with its Dockerfile and pipeline, ready to build, and its README the stack to propose), then propose stacks/<name>.yaml in config. Changes to config need the approval of an admin of the namespace; it runs once merged.
 - stacks/<name>.yaml, in full (nothing else is allowed), here config/stacks/immich.yaml of the namespace photos:
     entrypoint: server         # the service that gets the hostname; it needs a port
     services:

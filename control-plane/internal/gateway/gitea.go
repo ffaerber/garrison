@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"garrison/templates"
 )
 
 // Gitea calls Gitea's API as its admin account, acting as a given person
@@ -515,9 +517,13 @@ func (g *Gitea) CreateNamespace(ctx context.Context, as, name, description strin
 // namespace's admins and the root admins. It starts with a README on main,
 // so changes can be proposed to it; nothing in it runs until a stack in the
 // namespace's config names it as its source.
-func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description string, private bool) (string, error) {
+func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description string, private bool, template string) (string, error) {
 	if err := validOrg(org); err != nil {
 		return "", err
+	}
+	files := templates.AppFiles(template, org, repo)
+	if template != "" && files == nil {
+		return "", fmt.Errorf("%w: there is no template %q; there are: %s", ErrInvalid, template, strings.Join(templates.Apps(), ", "))
 	}
 	if err := validRepo(repo); err != nil {
 		return "", err
@@ -544,6 +550,25 @@ func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description strin
 		return "", refused{fmt.Sprintf("%s may not make repos in %s: its admins and root admins may", as, org)}
 	case err != nil:
 		return "", err
+	}
+	if files != nil {
+		raw := map[string][]byte{}
+		for p, c := range files {
+			raw[p] = []byte(c)
+		}
+		ops, err := g.fileOps(ctx, org, repo, raw)
+		if err != nil {
+			return "", err
+		}
+		for _, op := range ops {
+			op["content"] = base64.StdEncoding.EncodeToString([]byte(op["content"]))
+		}
+		// As the person, who may write to the repo they just made.
+		if _, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/contents", org, repo), map[string]any{
+			"branch": "main", "message": "Start from the template " + template, "files": ops,
+		}, nil); err != nil {
+			return "", fmt.Errorf("the repo %s/%s is made, but its template's files are not: %w", org, repo, err)
+		}
 	}
 	return r.HTMLURL, nil
 }
