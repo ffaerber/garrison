@@ -758,6 +758,38 @@ check "its page lists them"                page_lists
 check "bob opens it too"                   until_true 60 home_login bob
 check "he sees todo's deploys, as he may read its repos" in_feed bob ns=todo "e['kind'] == 'deploy' and e['commit'] == '$fixed'"
 
+echo "# secrets"
+# set_secret WHO NS NAME VALUE [ORIGIN]: the dashboard's form; prints the status.
+set_secret() {
+  web -b "$tmp/home-$1.jar" -o /dev/null -w '%{http_code}' -H "Origin: ${5:-https://$DOMAIN}" \
+    --data-urlencode action=set --data-urlencode "name=$3" --data-urlencode "value=$4" "https://$DOMAIN/secrets/$2"
+}
+token=$(openssl rand -hex 16)
+check "alice sets a secret of todo in the dashboard" test "$(set_secret alice todo smoke-token "$token")" = 303
+check "bob may not: he is not in todo"     test "$(set_secret bob todo smoke-token stolen)" = 403
+check "an app's page cannot post the form" test "$(set_secret alice todo smoke-token forged "https://todo.$DOMAIN")" = 403
+stored() { gitea_api "" -f "$api/repos/todo/config/raw/secrets/smoke-token.yaml"; }
+encrypted() { local f; f=$(stored) && grep -q 'ENC\[AES256_GCM' <<<"$f" && ! grep -q "$token" <<<"$f" && [ "$(grep -c 'recipient: age1' <<<"$f")" = 2 ]; }
+check "it is in todo's config, encrypted for todo's key and the recovery key" encrypted
+check "with .sops.yaml beside it"          bash -c 'grep -q "age: age1" <<<"$0"' "$(gitea_api "" "$api/repos/todo/config/raw/.sops.yaml")"
+author() { gitea_api "" "$api/repos/todo/config/commits?path=secrets/smoke-token.yaml&limit=1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["commit"]["author"]["name"])'; }
+check "committed with alice as its author" test "$(author)" = alice
+listed() { local p; p=$(feed alice "/secrets?ns=todo") && grep -q smoke-token <<<"$p" && ! grep -q "$token" <<<"$p"; }
+check "the page lists it, never its value" listed
+check "the feed says alice set it"         until_true 30 in_feed alice ns=todo "e['kind'] == 'secret' and e['actor'] == 'alice' and 'smoke-token' in e['title']"
+check "only the deployer holds todo's key" bash -c 'test -s /etc/garrison/sops/todo.txt && [ "$(stat -c %a /etc/garrison/sops)" = 700 ] && ! test -e /etc/garrison/sops/recovery-key.txt'
+# Postgres takes its password from the stored secret.
+printf 'entrypoint: db\nservices:\n  db:\n    image: postgres:17-alpine\n    port: 5432\n    secrets: [smoke-token]\n    env: { POSTGRES_PASSWORD_FILE: /run/secrets/smoke-token }\nenvironments:\n  main: {}\n' > "$tmp/keyed.yaml"
+check "alice adds an app that uses it"     set_stack todo keyed "$tmp/keyed.yaml"
+in_app() { local c; c=$(docker ps -q -f name=keyed_db | head -n1) && [ -n "$c" ] && [ "$(docker exec "$c" cat /run/secrets/smoke-token)" = "$1" ]; }
+check "the app gets the value"             until_true 240 in_app "$token"
+token2=$(openssl rand -hex 16)
+check "alice replaces it"                  test "$(set_secret alice todo smoke-token "$token2")" = 303
+check "the app is redeployed with the new value" until_true 240 in_app "$token2"
+check "alice removes the app"              set_stack todo keyed -
+deleted() { [ "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://$DOMAIN" --data-urlencode action=delete --data-urlencode name=smoke-token "https://$DOMAIN/secrets/todo")" = 303 ] && ! stored >/dev/null 2>&1; }
+check "and deletes the secret"             deleted
+
 echo "# alerts"
 health() { docker exec "$(docker ps -q -f name=prometheus_prometheus | head -n1)" wget -qO- "http://control-plane_deployer:8090/metrics"; }
 check "the deployer tells Prometheus how each service does" grep -q 'garrison_service_replicas_running{namespace="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"

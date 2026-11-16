@@ -42,6 +42,7 @@ import (
 	"garrison/control-plane/internal/hostnames"
 	"garrison/control-plane/internal/render"
 	"garrison/control-plane/internal/sandbox"
+	"garrison/control-plane/internal/secrets"
 	"garrison/control-plane/internal/stack"
 )
 
@@ -272,6 +273,7 @@ func deployCmd(args []string) error {
 	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
 	dockerSocket := fs.String("docker-socket", "/var/run/docker.sock", "Docker's API, for the services' metrics on -listen (/metrics)")
+	keysDir := fs.String("keys", "", "the namespaces' age keys, which decrypt their stored secrets (e.g. "+etcDir+"/sops); empty: apps with stored secrets are left alone")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 
@@ -296,6 +298,11 @@ func deployCmd(args []string) error {
 	}
 	if *hostExec != "" {
 		c.Run = apply.HostExec(*hostExec)
+	}
+	var keys *secrets.Keys
+	if *keysDir != "" {
+		keys = &secrets.Keys{Dir: *keysDir, Run: secrets.Runner(apply.Exec)}
+		c.Keys = keys
 	}
 	store, err := feed.store()
 	if err != nil {
@@ -342,7 +349,16 @@ func deployCmd(args []string) error {
 		}
 		wake := &hooks.Wake{}
 		c.Wake = wake.Subscribe()
-		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent, (&health.Docker{Socket: *dockerSocket}).Handler()); err != nil {
+		extra := map[string]http.Handler{"GET /metrics": (&health.Docker{Socket: *dockerSocket}).Handler()}
+		if keys != nil {
+			// The dashboard asks for a namespace's public keys here, to
+			// encrypt the secrets people set.
+			extra["GET /secrets/{namespace}/recipients"] = keys.Handler(func(ctx context.Context, ns string) (bool, error) {
+				nss, err := c.Namespaces(ctx)
+				return slices.Contains(nss, ns), err
+			})
+		}
+		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent, extra); err != nil {
 			return err
 		}
 	}
@@ -481,7 +497,7 @@ func gatewayCmd(args []string) error {
 
 // serveHook takes Gitea's webhook on listen and registers it with Gitea as
 // target. It returns once listening.
-func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea, onEvent func(event, delivery string, body []byte), metrics http.Handler) error {
+func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *hooks.Gitea, onEvent func(event, delivery string, body []byte), extra map[string]http.Handler) error {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return err
@@ -489,8 +505,8 @@ func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *
 	secret := hooks.Secret(g.Password, target)
 	mux := http.NewServeMux()
 	mux.Handle("POST /hook", &hooks.Handler{Secret: secret, Wake: wake, OnEvent: onEvent})
-	if metrics != nil {
-		mux.Handle("GET /metrics", metrics)
+	for pattern, h := range extra {
+		mux.Handle(pattern, h)
 	}
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go server.Serve(ln)
@@ -772,6 +788,7 @@ func homeCmd(args []string) error {
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL, to ask what each person may read")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
+	deployer := fs.String("deployer", "", "the deployer's URL, which gives the namespaces' public keys, for the secrets page (e.g. http://control-plane_deployer:8090); empty: no secrets page")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 
@@ -798,6 +815,9 @@ func homeCmd(args []string) error {
 	go store.Prune(ctx)
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
 	s := &home.Server{Events: store, Access: g, Domain: vars["DOMAIN"]}
+	if *deployer != "" {
+		s.Secrets = &secrets.Store{Gitea: g, Recipients: secrets.Remote(*deployer), Run: secrets.Runner(apply.Exec), Domain: vars["DOMAIN"]}
+	}
 	server := &http.Server{Addr: *listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

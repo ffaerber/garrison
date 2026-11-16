@@ -559,11 +559,17 @@ func (m *Members) syncTeam(ctx context.Context, ns, name string, id int64, want 
 }
 
 // protect keeps config's main branch changing only by approved pull requests.
-// mergers are the teams that approve and merge.
+// mergers are the teams that approve and merge. Only the platform's own
+// account pushes there: the dashboard's secrets form writes the encrypted
+// secrets an admin sets (secrets.Store), which have no diff to review.
 func (m *Members) protect(ctx context.Context, ns string, mergers []string) error {
 	rule := map[string]any{
 		"rule_name":                    "main",
-		"enable_push":                  false,
+		"enable_push":                  true,
+		"enable_push_whitelist":        true,
+		"push_whitelist_usernames":     []string{m.Gitea.User},
+		"push_whitelist_teams":         []string{},
+		"push_whitelist_deploy_keys":   false,
 		"enable_merge_whitelist":       true,
 		"merge_whitelist_teams":        mergers,
 		"merge_whitelist_usernames":    []string{},

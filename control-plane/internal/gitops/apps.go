@@ -5,8 +5,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +23,7 @@ import (
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/hostnames"
 	"garrison/control-plane/internal/render"
+	"garrison/control-plane/internal/secrets"
 	"garrison/control-plane/internal/stack"
 )
 
@@ -56,9 +59,68 @@ func (c *Config) ingressKey(stack string) string {
 	return hex.EncodeToString(m.Sum(nil))[:32]
 }
 
-// options are how an environment of s is rendered at commit.
-func (c *Config) options(s *stack.Stack, env, commit string) render.Options {
-	return render.Options{Environment: env, Domain: c.Domain, Commit: commit, IngressKey: c.ingressKey(render.StackName(s, env))}
+// options are how an environment of s is rendered at commit. The main
+// environment gets the namespace's stored secrets that s names, decrypted
+// from config's checkout in cfgDir; other environments, which run code not
+// yet merged, get generated values.
+func (c *Config) options(ctx context.Context, s *stack.Stack, env, commit, cfgDir string) (render.Options, error) {
+	o := render.Options{Environment: env, Domain: c.Domain, Commit: commit, IngressKey: c.ingressKey(render.StackName(s, env))}
+	if env != stack.MainEnvironment {
+		return o, nil
+	}
+	stored := storedSecrets(cfgDir, s)
+	if len(stored) == 0 {
+		return o, nil
+	}
+	if c.Keys == nil {
+		return o, errNoKeys
+	}
+	o.Secrets = map[string]render.Stored{}
+	for _, name := range slices.Sorted(maps.Keys(stored)) {
+		value, err := c.Keys.Decrypt(ctx, s.Namespace, stored[name])
+		if err != nil {
+			return o, fmt.Errorf("the secret %s: %w", name, err)
+		}
+		sum := sha256.Sum256(stored[name])
+		o.Secrets[name] = render.Stored{Value: value, Version: hex.EncodeToString(sum[:6])}
+	}
+	return o, nil
+}
+
+// errNoKeys: the deployer on the host, without the namespaces' keys, leaves
+// apps with stored secrets to the one in Swarm.
+var errNoKeys = errors.New("stored secrets are decrypted only by the deployer in Swarm")
+
+// storedSecrets are the files, in config's checkout in cfgDir, of the
+// stored secrets s names.
+func storedSecrets(cfgDir string, s *stack.Stack) map[string][]byte {
+	out := map[string][]byte{}
+	for _, svc := range s.ServiceNames() {
+		for _, name := range s.Services[svc].Secrets {
+			if _, ok := out[name]; ok || !secrets.Name.MatchString(name) {
+				continue
+			}
+			if data, err := os.ReadFile(filepath.Join(cfgDir, filepath.FromSlash(secrets.Path(name)))); err == nil {
+				out[name] = data
+			}
+		}
+	}
+	return out
+}
+
+// mainSpec is the main environment's spec: the stack file's, and the stored
+// secrets it gets, so that a changed secret redeploys it.
+func mainSpec(spec string, stored map[string][]byte) string {
+	if len(stored) == 0 {
+		return spec
+	}
+	h := sha256.New()
+	h.Write([]byte(spec))
+	for _, name := range slices.Sorted(maps.Keys(stored)) {
+		h.Write([]byte("\x00" + name + "\x00"))
+		h.Write(stored[name])
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 
 func (c *Config) claimsFile() string {
@@ -85,6 +147,10 @@ func (c *Config) get(ctx context.Context, path string, out any) error {
 	}
 	return decodeJSON(resp, out)
 }
+
+// Namespaces are the namespaces whose apps the deployer deploys: every
+// organisation but its own.
+func (c *Config) Namespaces(ctx context.Context) ([]string, error) { return c.namespaces(ctx) }
 
 func (c *Config) namespaces(ctx context.Context) ([]string, error) {
 	var out []string
@@ -300,7 +366,8 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				continue
 			}
 			sum := sha256.Sum256(data)
-			spec := hex.EncodeToString(sum[:8])
+			fileSpec := hex.EncodeToString(sum[:8])
+			withSecrets := mainSpec(fileSpec, storedSecrets(cfgDir, s))
 			// Environments and the commit each is deployed at: the source
 			// repo's branches named in the stack, and a preview of each of
 			// its open pull requests; without a source, main as config says.
@@ -345,6 +412,10 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				if !ok {
 					continue // no branch, no environment
 				}
+				spec := fileSpec
+				if env == stack.MainEnvironment {
+					spec = withSecrets
+				}
 				app := App{Namespace: ns, Repo: name, Environment: env, Stack: render.StackName(s, env), Commit: commit, Source: s.Source, Spec: spec,
 					Private: s.Environments[env].Private}
 				for _, svc := range s.ServiceNames() {
@@ -383,7 +454,16 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					}
 					c.snapsChanged = c.snapsChanged || took
 				}
-				if err := apply.Stack(ctx, c.Run, s, c.options(s, env, commit)); err != nil {
+				o, err := c.options(ctx, s, env, commit, cfgDir)
+				if errors.Is(err, errNoKeys) {
+					log.Printf("apps: %s left to the deployer in Swarm: %v", key, err)
+					keep(key)
+					continue
+				}
+				if err == nil {
+					err = apply.Stack(ctx, c.Run, s, o)
+				}
+				if err != nil {
 					fail(ns, s.Source, commit, "deploy %s: %v", key, err)
 					keep(key)
 					continue
@@ -394,7 +474,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				if old, ok := prev[key]; ok {
 					how = "redeployed"
 					if old.Spec != spec {
-						how += " with a changed stack file"
+						how += " with a changed stack file or secret"
 					}
 				}
 				c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusOK, Namespace: ns, Repo: s.Source, Commit: commit,

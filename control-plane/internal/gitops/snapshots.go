@@ -147,7 +147,11 @@ func (c *Config) restores(ctx context.Context, ns, cfgDir string, stacks map[str
 			restore.Status, restore.Title = events.StatusOK, fmt.Sprintf("restored %s to the snapshot %s", app.Stack, r.Snapshot)
 		}
 		c.record(ctx, restore)
-		if err := apply.Stack(ctx, c.Run, s, c.options(s, r.Environment, app.Commit)); err != nil {
+		o, err := c.options(ctx, s, r.Environment, app.Commit, cfgDir)
+		if err == nil {
+			err = apply.Stack(ctx, c.Run, s, o)
+		}
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %s not started again: %w", at, app.Stack, err))
 		}
 	}

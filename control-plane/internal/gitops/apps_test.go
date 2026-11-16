@@ -3,6 +3,7 @@ package gitops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"testing"
 
 	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/secrets"
+	"garrison/control-plane/internal/stack"
 )
 
 const todoStack = `source: todo
@@ -547,5 +550,51 @@ func TestPrivateEnvironmentsGetTheirIngressKey(t *testing.T) {
 	}
 	if strings.Contains(f.composes["dev-todo"], main) {
 		t.Error("dev was given main's key")
+	}
+}
+
+// The main environment gets a stored secret, decrypted with the namespace's
+// key; other environments, running code not yet merged, do not. A changed
+// secret changes main's spec, so main redeploys and the others do not.
+func TestOnlyMainGetsStoredSecrets(t *testing.T) {
+	ctx := context.Background()
+	cfg := t.TempDir()
+	os.MkdirAll(filepath.Join(cfg, "secrets"), 0o700)
+	os.WriteFile(filepath.Join(cfg, "secrets", "api-key.yaml"), []byte("value: ENC[v1]\n"), 0o600)
+	keys := t.TempDir()
+	os.WriteFile(filepath.Join(keys, "todo.txt"), []byte("AGE-SECRET-KEY-1X\n"), 0o600)
+	var decrypted []string
+	c := &Config{Domain: "home.test", Keys: &secrets.Keys{Dir: keys, Run: func(_ context.Context, env []string, stdin []byte, name string, args ...string) ([]byte, error) {
+		if name != "sops" || args[0] != "decrypt" || !slices.Contains(env, "SOPS_AGE_KEY_FILE="+filepath.Join(keys, "todo.txt")) {
+			t.Fatalf("ran %s %v %v", name, args, env)
+		}
+		decrypted = append(decrypted, string(stdin))
+		return []byte("value: the key\n"), nil
+	}}}
+	s, err := stack.ParseIn([]byte("source: app\nentrypoint: web\nservices:\n  web: { image: x/y:1, port: 80, secrets: [api-key, other] }\nenvironments:\n  main: {}\n  dev: {}\n"), "todo", "todo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := c.options(ctx, s, "main", "c1", cfg)
+	if err != nil || o.Secrets["api-key"].Value != "the key" || len(o.Secrets) != 1 || o.SwarmSecret(s, "other") != "todo.other" {
+		t.Fatalf("main: %+v %v", o.Secrets, err)
+	}
+	if !strings.HasPrefix(o.SwarmSecret(s, "api-key"), "todo.api-key.") {
+		t.Errorf("swarm secret %s", o.SwarmSecret(s, "api-key"))
+	}
+	if o, err := c.options(ctx, s, "dev", "c1", cfg); err != nil || o.Secrets != nil || len(decrypted) != 1 {
+		t.Errorf("dev got stored secrets: %+v %v", o.Secrets, err)
+	}
+
+	before := mainSpec("f", storedSecrets(cfg, s))
+	os.WriteFile(filepath.Join(cfg, "secrets", "api-key.yaml"), []byte("value: ENC[v2]\n"), 0o600)
+	if after := mainSpec("f", storedSecrets(cfg, s)); after == before || mainSpec("f", nil) != "f" {
+		t.Error("a changed secret does not change main's spec")
+	}
+
+	// The deployer on the host has no keys: it leaves such apps alone.
+	c.Keys = nil
+	if _, err := c.options(ctx, s, "main", "c1", cfg); !errors.Is(err, errNoKeys) {
+		t.Errorf("without keys: %v", err)
 	}
 }

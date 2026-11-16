@@ -12,8 +12,9 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 go build -trimpath -o /garrison ./control-plane/cmd/garrison
 
 # The Docker CLI deploys stacks; git follows the platform repo; nsenter runs
-# ZFS commands on the host.
+# ZFS commands on the host; sops and age encrypt the namespaces' secrets
+# (the dashboard) and decrypt them (the deployer, which alone has the keys).
 FROM docker:29-cli
-RUN apk add --no-cache git util-linux-misc
+RUN apk add --no-cache git util-linux-misc sops age
 COPY --from=build /garrison /usr/local/bin/garrison
 ENTRYPOINT ["/usr/local/bin/garrison"]

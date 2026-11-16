@@ -34,8 +34,10 @@ type Access interface {
 type Server struct {
 	Events events.Store
 	Access Access
-	Domain string
-	Now    func() time.Time
+	// Secrets, if set, backs the secrets page (secrets.Store).
+	Secrets Secrets
+	Domain  string
+	Now     func() time.Time
 
 	mu    sync.Mutex
 	cache map[string]cached
@@ -82,6 +84,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /e/{id}", s.signedIn(s.event))
 	mux.Handle("GET /api/events", s.signedIn(s.apiList))
 	mux.Handle("GET /api/events/{id}", s.signedIn(s.apiEvent))
+	mux.Handle("GET /secrets", s.signedIn(s.secretsPage))
+	mux.Handle("POST /secrets/{ns}", s.signedIn(s.secretsPost))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	return securityHeaders(mux)
 }
@@ -190,9 +194,12 @@ type feedPage struct {
 	Event      *events.Event
 	Thread     []events.Event
 	Error      string
+	Secrets    *secretsView // the secrets page
+	HasSecrets bool         // the dashboard has a secrets page
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, p feedPage) {
+	p.HasSecrets = s.Secrets != nil
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := page.ExecuteTemplate(w, name, p); err != nil {
 		log.Printf("home: render %s: %v", name, err)
@@ -341,6 +348,8 @@ func sourceName(s string) string {
 		return "agent service"
 	case events.SourceAlerts:
 		return "Alertmanager"
+	case events.SourceHome:
+		return "dashboard"
 	}
 	return s
 }

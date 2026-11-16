@@ -25,6 +25,7 @@ import (
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/hooks"
+	"garrison/control-plane/internal/secrets"
 	"garrison/control-plane/internal/system"
 )
 
@@ -51,6 +52,7 @@ type Config struct {
 	Apps         bool            // also deploy apps: stack.yaml repos of every other namespace
 	ClaimsFile   string          // hostname claims; WorkDir/claims.json if empty
 	Events       events.Recorder // optional: the feed, which gets each deploy, removal and failure
+	Keys         *secrets.Keys   // the namespaces' keys, which decrypt stored secrets; nil: apps with them are left alone
 
 	password string
 	home     string            // HOME for git, holding the .netrc

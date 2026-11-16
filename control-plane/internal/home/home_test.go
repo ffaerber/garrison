@@ -65,7 +65,7 @@ func TestEachSeesWhatTheyMayRead(t *testing.T) {
 		}
 	}
 	dave := get(s, "dave", "/").Body.String()
-	if !strings.Contains(dave, "deployed todo/todo@main") || strings.Contains(dave, "secret") || strings.Contains(dave, "browse was refused") {
+	if !strings.Contains(dave, "deployed todo/todo@main") || strings.Contains(dave, "pushed to secret") || strings.Contains(dave, "browse was refused") {
 		t.Errorf("dave's feed:\n%s", dave)
 	}
 	if w := get(s, "dave", "/e/2"); w.Code != http.StatusNotFound {

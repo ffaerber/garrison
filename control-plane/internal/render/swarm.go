@@ -46,6 +46,17 @@ type Options struct {
 	// IngressKey, if set, is the ingress key of a private environment (see
 	// IngressHeader): letters and digits only. Empty: none.
 	IngressKey string
+	// Secrets are the namespace's stored secrets this environment gets, by
+	// name (secrets/<name>.yaml in its config, decrypted); every other
+	// secret a service names has a generated value.
+	Secrets map[string]Stored
+}
+
+// Stored is the value of a stored secret, and its version: a Swarm secret
+// cannot change, so each version is a Swarm secret of its own.
+type Stored struct {
+	Value   string
+	Version string // letters and digits, e.g. a hash of the encrypted file
 }
 
 // Registry is the installation's image registry: Gitea's, at git.<domain>.
@@ -80,9 +91,18 @@ func SharePath(root, namespace, share string) string {
 	return path.Join(root, namespace, "shares", share)
 }
 
-// SecretName is the Swarm secret holding an environment's secret.
+// SecretName is the Swarm secret holding an environment's generated secret.
+// A stored one's are this followed by "." and its version.
 func SecretName(s *stack.Stack, env, secret string) string {
 	return s.Hostname(env) + "." + secret
+}
+
+// SwarmSecret is the Swarm secret an environment gets for secret.
+func (o Options) SwarmSecret(s *stack.Stack, secret string) string {
+	if st, ok := o.Secrets[secret]; ok {
+		return SecretName(s, o.Environment, secret) + "." + st.Version
+	}
+	return SecretName(s, o.Environment, secret)
 }
 
 type composeFile struct {
@@ -214,7 +234,7 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 			if file.Secrets == nil {
 				file.Secrets = map[string]external{}
 			}
-			file.Secrets[sec] = external{External: true, Name: SecretName(s, o.Environment, sec)}
+			file.Secrets[sec] = external{External: true, Name: o.SwarmSecret(s, sec)}
 		}
 
 		var res composeResources

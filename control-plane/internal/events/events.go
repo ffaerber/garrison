@@ -19,6 +19,7 @@ const (
 	SourceGateway  = "gateway"
 	SourceAgents   = "agents"
 	SourceAlerts   = "alerts" // Alertmanager
+	SourceHome     = "home"   // the dashboard
 )
 
 // Statuses: how it went.

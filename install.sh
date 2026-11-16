@@ -56,6 +56,7 @@ command -v rsync   >/dev/null || need+=(rsync)    # copies a dataset back from a
 command -v sanoid  >/dev/null || need+=(sanoid)   # scheduled snapshots
 command -v python3 >/dev/null || need+=(python3)  # merges Docker's daemon.json
 command -v gpg     >/dev/null || need+=(gnupg)    # gVisor's repository key
+command -v age-keygen >/dev/null || need+=(age)   # the secrets' recovery key
 if [ ${#need[@]} -gt 0 ]; then
   apt-get update -qq
   apt-get install -y -qq "${need[@]}" >/dev/null
@@ -212,6 +213,17 @@ if [ -n "$LLM_API_KEY" ]; then
   printf '%s' "$LLM_API_KEY" > "$ETC/llm-api-key"
 fi
 install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
+
+# The namespaces' secrets are encrypted for their own keys, which the
+# deployer makes here, and for the recovery key. Only its public half stays;
+# the private half is shown once, when the install is done, to be kept
+# offline: it decrypts every secret should the machine be lost.
+mkdir -p "$ETC/sops"
+chmod 700 "$ETC/sops"
+if [ ! -s "$ETC/sops/recovery.pub" ]; then
+  (umask 077; age-keygen -o "$ETC/sops/recovery-key.txt" 2>/dev/null)
+  age-keygen -y "$ETC/sops/recovery-key.txt" > "$ETC/sops/recovery.pub"
+fi
 
 # Gitea's registry, at git.<domain>, is used by this machine's Docker daemon:
 # builds push to it and Swarm pulls from it. The daemon reaches it through
@@ -399,3 +411,17 @@ cat <<MSG
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt
 MSG
+# Shown once: the file goes now.
+if [ -s "$ETC/sops/recovery-key.txt" ]; then
+  cat <<MSG
+
+  Recovery key for every secret. Keep it offline, e.g. printed or in a
+  password manager; it is not kept on this machine and is not shown again.
+
+$(grep -v '^#' "$ETC/sops/recovery-key.txt" | sed 's/^/    /')
+
+  With it, \`SOPS_AGE_KEY_FILE=<file holding it> sops decrypt secrets/<name>.yaml\`
+  in a namespace's config repo shows a secret.
+MSG
+  rm -f "$ETC/sops/recovery-key.txt"
+fi

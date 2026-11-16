@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Event}}{{.Event.Title}} · {{end}}Home cloud</title>
+<title>{{if .Event}}{{.Event.Title}} · {{else if .Secrets}}Secrets · {{end}}Home cloud</title>
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #e3e6ea; --hover: #f0f2f5;
@@ -73,6 +73,26 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospac
 h2 { font-size: 15px; margin: 22px 0 8px; }
 .feed li.this { background: color-mix(in srgb, var(--accent) 9%, transparent); }
 code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.nav { display: flex; gap: 4px; }
+.nav a { text-decoration: none; padding: 4px 10px; border-radius: 8px; color: var(--muted); font-size: 14px; }
+.nav a.on { color: var(--text); background: var(--chip); }
+.nav a:not(.on):hover { background: var(--hover); }
+.note { color: var(--muted); font-size: 14px; max-width: 70ch; margin: 0 0 14px; }
+.notice { border-left: 3px solid var(--ok); padding: 8px 12px; margin-bottom: 12px; background: var(--panel); }
+ul.names { list-style: none; margin: 0; padding: 0; }
+.names li { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); }
+.names li:first-child { border-top: 0; }
+.names .hidden { color: var(--muted); letter-spacing: .12em; }
+.names form { margin-left: auto; }
+button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+button:hover { background: var(--hover); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--failed); }
+.setform { display: grid; gap: 12px; }
+.setform label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.setform input, .setform textarea { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
+.setform .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.hint { font-size: 13px; color: var(--muted); }
 @media (max-width: 600px) {
   .feed li { grid-template-columns: 18px 1fr; }
   .when { grid-column: 2; }
@@ -81,9 +101,9 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>
 </head>
 <body>
-<header><div class="bar"><a class="brand" href="/">Home cloud</a><span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
+<header><div class="bar"><a class="brand" href="/">Home cloud</a>{{if .HasSecrets}}<nav class="nav"><a href="/"{{if not .Secrets}} class="on"{{end}}>Feed</a><a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a></nav>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
 <main>
-{{if .Event}}{{template "event" .}}{{else}}{{template "feed" .}}{{end}}
+{{if .Event}}{{template "event" .}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else}}{{template "feed" .}}{{end}}
 </main>
 </body>
 </html>{{end}}
@@ -179,4 +199,38 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 <h2>How it was handled</h2>
 {{if gt (len .Thread) 1}}<div class="panel"><ol class="feed">{{range .Thread}}{{template "entry" (entry . $now (eq .ID $e.ID))}}{{end}}</ol></div>
 {{else}}<p class="empty panel">Nothing else belongs to it yet: no pull request, commit or run ties it to other entries.</p>{{end}}
+{{end}}
+
+{{define "secrets"}}
+<h1>Secrets</h1>
+<p class="note">Keys, passwords and tokens for a namespace's apps. A value is encrypted as you save it, and nobody can read it back, here or in Git: it can only be replaced. An app's main environment gets each secret its stack file names under <code>secrets:</code>, as the file <code>/run/secrets/&lt;name&gt;</code>; its other environments get values of their own, so code not yet merged never sees one.</p>
+{{if .Notice}}<div class="notice">{{.Notice}}</div>{{end}}
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{if not .Namespaces}}
+<div class="panel empty">Only a namespace's admins and root admins manage its secrets, and you are neither in any namespace.</div>
+{{else}}
+<form class="filters" method="get" action="/secrets">
+  <select name="ns" aria-label="Namespace" onchange="this.form.submit()">
+    {{$ns := .NS}}{{range .Namespaces}}<option value="{{.}}"{{if eq . $ns}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <noscript><button>Show</button></noscript>
+</form>
+<div class="panel">
+  <ul class="names" id="names">
+  {{range .Names}}<li><code>{{.}}</code><span class="hidden" aria-label="hidden">••••••••</span>
+    <form method="post" action="/secrets/{{$ns}}" onsubmit="return confirm('Delete the secret {{.}}? Apps that use it get a generated value instead on their next deploy.')">
+      <input type="hidden" name="action" value="delete"><input type="hidden" name="name" value="{{.}}">
+      <button class="danger">Delete</button>
+    </form></li>
+  {{else}}<li class="hint">{{$ns}} has no secrets yet.</li>{{end}}
+  </ul>
+</div>
+<h2>Set a secret of {{.NS}}</h2>
+<form class="panel head setform" method="post" action="/secrets/{{.NS}}" autocomplete="off">
+  <input type="hidden" name="action" value="set">
+  <label>Name <input name="name" value="{{.Name}}" required maxlength="32" pattern="[a-z0-9]([a-z0-9\-]{0,30}[a-z0-9])?" placeholder="shop-api-key" spellcheck="false" autocapitalize="off"></label>
+  <label>Value <textarea name="value" required rows="3" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></label>
+  <div class="row"><button class="primary">Save</button><span class="hint">Lowercase letters, digits and dashes. Saving under a name that exists replaces its value.</span></div>
+</form>
+{{end}}
 {{end}}

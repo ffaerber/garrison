@@ -62,7 +62,13 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 			}
 		}
 		for _, sec := range svc.Secrets {
-			if err := ensureSecret(ctx, run, render.SecretName(s, o.Environment, sec)); err != nil {
+			name := o.SwarmSecret(s, sec)
+			if st, ok := o.Secrets[sec]; ok {
+				err = ensureStored(ctx, run, name, st.Value)
+			} else {
+				err = ensureSecret(ctx, run, name)
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -71,7 +77,46 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 	// --with-registry-auth: images from the installation's registry need the
 	// credentials the deployer signed in with.
 	_, err = run(ctx, nil, compose, "docker", "stack", "deploy", "--detach=true", "--resolve-image", "never", "--with-registry-auth", "--compose-file", "-", render.StackName(s, o.Environment))
+	if err != nil {
+		return err
+	}
+	pruneStored(ctx, run, s, o)
+	return nil
+}
+
+// ensureStored creates the Swarm secret holding a version of a stored
+// secret, if it is missing. The value goes to Docker on stdin.
+func ensureStored(ctx context.Context, run Runner, name, value string) error {
+	if _, err := run(ctx, nil, nil, "docker", "secret", "inspect", "--format", "{{.ID}}", name); err == nil {
+		return nil
+	}
+	_, err := run(ctx, nil, []byte(value), "docker", "secret", "create", "--label", "garrison.stored=true", name, "-")
 	return err
+}
+
+// pruneStored removes the earlier versions of an environment's stored
+// secrets. Swarm refuses while a task still uses one, as during the update
+// just started: those go on a later deploy.
+func pruneStored(ctx context.Context, run Runner, s *stack.Stack, o render.Options) {
+	seen := map[string]bool{}
+	for _, name := range s.ServiceNames() {
+		for _, sec := range s.Services[name].Secrets {
+			if seen[sec] {
+				continue
+			}
+			seen[sec] = true
+			prefix := render.SecretName(s, o.Environment, sec) + "."
+			out, err := run(ctx, nil, nil, "docker", "secret", "ls", "--filter", "name="+prefix, "--filter", "label=garrison.stored", "--format", "{{.Name}}")
+			if err != nil {
+				continue
+			}
+			for _, have := range strings.Fields(string(out)) {
+				if strings.HasPrefix(have, prefix) && have != o.SwarmSecret(s, sec) {
+					run(ctx, nil, nil, "docker", "secret", "rm", have)
+				}
+			}
+		}
+	}
 }
 
 // EnsureDataset creates the ZFS dataset mounted at path if it is missing and,

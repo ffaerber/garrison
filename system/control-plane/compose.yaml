@@ -22,12 +22,17 @@ services:
       # What it deploys, and Gitea's deliveries, go to the dashboard's feed;
       # Prometheus reads the services' health at /metrics here.
       - -events-db=postgres://garrison@postgres_postgres:5432/garrison
+      # The namespaces' age keys: it decrypts their stored secrets for their
+      # apps, and gives the dashboard the public keys at /secrets/<ns>/recipients.
+      - -keys=/etc/garrison/sops
     secrets:
       - admin-password
       - garrison-db-password
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/garrison/install.env:/etc/garrison/install.env:ro
+      # Only the deployer has the keys; the installer made the directory.
+      - /etc/garrison/sops:/etc/garrison/sops
       # Shared with the CLI on the host: checkouts, state and lock.
       - /var/lib/garrison/deployer:/var/lib/garrison/deployer
     networks: [system]
@@ -143,6 +148,9 @@ services:
       - home
       - -password-file=/run/secrets/admin-password
       - -events-db=postgres://garrison@postgres_postgres:5432/garrison
+      # The secrets page encrypts with the namespaces' public keys, which the
+      # deployer gives; it never reads a value back.
+      - -deployer=http://control-plane_deployer:8090
     secrets:
       - admin-password
       - garrison-db-password
