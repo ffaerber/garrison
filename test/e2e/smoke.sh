@@ -1743,11 +1743,21 @@ done < "$tmp/posted"
 # journey: an app with code of its own, from nothing to main, through the agents.
 . test/e2e/journey.sh
 
+# ui: the same, and more, clicked and typed in the browser (test/ui).
+section_ui() {
+  echo "# the browser scenarios (test/ui), in Playwright's Chromium"
+  test/ui/run.sh 2>"$tmp/ui.err" | tee "$tmp/ui.out" || true
+  local n
+  n=$(grep -c '^FAIL' "$tmp/ui.out" || true)
+  grep -q '^all checks passed' "$tmp/ui.out" || [ "$n" -gt 0 ] || { echo "FAIL  the browser scenarios ran to the end"; tail -5 "$tmp/ui.err"; n=1; }
+  failed=$((failed + n))
+}
+
 # Usage: smoke.sh [SECTION...]; system, login and platform by default.
 sections=${*:-system login platform}
 for s in $sections; do
   t0=$SECONDS
-  case $s in system|login|platform|agent|deploy|talk|crud|journey) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent|deploy|talk|crud|journey|ui) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
   echo "time  section $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
 done
 # Slow checks: each check's time, longest first.

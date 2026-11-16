@@ -179,3 +179,17 @@ Played by the `journey` step (`test/e2e/smoke.sh journey`, `test/e2e/journey.sh`
 3. Alice makes the branch `dev` in Gitea. Nobody merges anything: the stack names `dev`, so the deployer deploys it at `https://dev-example.<domain>`, from the image main's build made of the same commit.
 4. Alice: *@lab/operator Change the background of the page to #2e7d32 on dev.* A pull request into `dev` that changes `index.html` alone; alice merges it, its pipeline builds it, dev-example turns green, and example on main stays white.
 5. Alice opens a pull request from `dev` to `main` in Gitea and merges it: example turns green, and her dashboard's feed shows lab's deploys.
+
+## In the browser
+
+Played by the `ui` step (`test/e2e/smoke.sh ui`, `test/ui/`): Playwright's Chromium in a container on the machine, one browser per person, everything clicked and typed in Gitea, Open WebUI and the dashboard, signed in through Keycloak's own form. The checks look at the pages, and at Gitea's and Open WebUI's APIs where a page cannot tell (an agent's answer is finished, a pull request was opened). Every step's screenshot, and every failure's, lands in `bin/ui-shots/`. Selectors of Gitea's and Open WebUI's pages live in `test/ui/lib.py` only.
+
+1. **Signing in:** alice signs in to Gitea through Keycloak, then to Open WebUI and the dashboard without typing her password again; bob and the admin sign in too.
+2. **A namespace in Gitea's form:** alice fills in New Organisation for `shop`. Within seconds Gitea lists its repo `config`, Open WebUI shows its channel in her sidebar (not in bob's), and her dashboard says it is set up.
+3. **A secret:** alice saves `api-token` on the dashboard's Secrets page; the page lists its name and never its value, and `shop/config` has it encrypted.
+4. **An app through the chat:** in the channel she types `@shop/operator`, picks it from the list and asks for the repo `web` from the template and its stack. Her pull request page offers no merge while the approval check waits; the admin approves on the Files changed tab; alice merges with the button; `https://web.<domain>` shows the page on white.
+5. **dev:** alice makes `dev` in Gitea's branch list; `dev-web` comes up. The operator proposes a green background for dev; she merges it; dev-web turns green while web stays white. She compares dev with main, opens the pull request and merges it: web turns green.
+6. **A screenshot:** the operator takes a screenshot of web and proposes it as `docs/web.png`; Gitea's Files changed tab shows the image.
+7. **People and main:** the operator proposes bob as a member; the admin approves; alice merges. Bob's edit of `index.html` straight onto main in Gitea's editor is refused; he commits it to a new branch and opens a pull request, whose page offers him no merge until alice approves it; then he merges it and web shows his heading.
+8. **A scheduled job:** alice adds two routines to the operator's `agent.yaml` in Gitea's editor, on a new branch, scheduled a few minutes ahead in the installation's time zone; the admin approves; she merges. At its time the greeting is posted in shop's channel.
+9. **A routine's question:** at its time the other routine asks bob whether the shop opens on Sundays. His dashboard lists it under Waiting for you; its link takes him to the chat; he answers in the question's thread; the routine goes on with his answer, in the thread, and the dashboard no longer lists it.

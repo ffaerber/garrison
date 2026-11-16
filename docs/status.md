@@ -37,7 +37,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Not started
 
-History repos; change records and approvals in the deployer; of secrets: the agents' use of them (tokens, logins, an Ethereum signer, see the spec), the keys sealed to a TPM, rotation (`garrison secrets rotate`), and the platform's own (LLM key, DNS token) in `system`; the backup drive and restic; the dashboard beyond the feed (namespace, stack and service pages, config forms), alerts to people's phones (ntfy), Playwright tests.
+History repos; change records and approvals in the deployer; of secrets: the agents' use of them (tokens, logins, an Ethereum signer, see the spec), the keys sealed to a TPM, rotation (`garrison secrets rotate`), and the platform's own (LLM key, DNS token) in `system`; the backup drive and restic; the dashboard beyond the feed (namespace, stack and service pages, config forms), alerts to people's phones (ntfy).
 
 ## Known limits
 

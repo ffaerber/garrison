@@ -12,8 +12,8 @@
 #   test/vm/steps.sh --clean       delete the VMs and their snapshots
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #
-# Steps: base, install, login, platform, agent, deploy, talk, journey, crud. The
-# agent, talk and journey steps talk to a real LLM: by default Ollama on this computer, which
+# Steps: base, install, login, platform, agent, deploy, talk, journey, ui, crud.
+# The agent, talk, journey and ui steps talk to a real LLM: by default Ollama on this computer, which
 # the VM reaches through its gateway (LOCAL_MODEL, default qwen3.8-64k);
 # with LLM=cloud, Ollama's cloud with OLLAMA_API_KEY from this checkout's .env.
 #
@@ -39,10 +39,11 @@ cd "$ROOT"
 #                                 +- 4.2 agent
 #                                 +- 4.3 deploy -+- 5.1 talk
 #                                 |              +- 5.2 journey
+#                                 |              +- 5.3 ui
 #                                 +- 4.4 crud
-STEPS=(base install login platform agent deploy talk journey crud)
-declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [crud]=login)
-declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [crud]=4.4)
+STEPS=(base install login platform agent deploy talk journey ui crud)
+declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [ui]=deploy [crud]=login)
+declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [ui]=5.3 [crud]=4.4)
 # Where the tree forks. In parallel runs (the default) the trunk up to here
 # runs in $VM, and each branch from here in its own clone, $VM-<first step>.
 FORK=login
@@ -63,6 +64,7 @@ inputs() {
     deploy)   echo test/e2e/smoke.sh examples installer/push-repo.sh ;;
     talk)     echo test/e2e/smoke.sh test/e2e/apps docs/scenarios.md ;;
     journey)  echo test/e2e/smoke.sh test/e2e/journey.sh ;;
+    ui)       echo test/e2e/smoke.sh test/ui ;;
     crud)     echo test/e2e/smoke.sh test/e2e/crud.sh ;;
   esac
 }
@@ -143,6 +145,23 @@ step_journey() {
   sync_repo
   put_llm_key
   smoke journey
+}
+
+# The browser scenarios (test/ui): people click and type in Gitea, Open WebUI
+# and the dashboard, from a new namespace to a deployed web app, a
+# screenshot, a scheduled job and a routine's question. Talks to the real
+# LLM. The screenshots of every step land in bin/ui-shots/.
+step_ui() {
+  sync_repo
+  put_llm_key
+  local rc=0
+  smoke ui || rc=$?
+  in_vm sudo tar -C /var/tmp -cf /home/ubuntu/ui-shots.tar garrison-ui 2>/dev/null &&
+    in_vm sudo chmod 644 /home/ubuntu/ui-shots.tar &&
+    multipass transfer "$VM:ui-shots.tar" "$ROOT/bin/ui-shots.tar" &&
+    rm -rf "$ROOT/bin/ui-shots" && mkdir -p "$ROOT/bin/ui-shots" &&
+    tar -C "$ROOT/bin/ui-shots" --strip-components=1 -xf "$ROOT/bin/ui-shots.tar" || true
+  return $rc
 }
 
 # Every kind of thing a namespace holds, made, read, changed and removed:
