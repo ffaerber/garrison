@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"garrison/control-plane/internal/agents"
 )
@@ -173,6 +174,13 @@ func TestProposeFiles(t *testing.T) {
 	defer srv.Close()
 	g := &Gitea{URL: srv.URL, User: "admin", Password: "pw"}
 	ctx := context.Background()
+	// The branch of the open pull request: garrison/models-<time>.
+	open := func() string {
+		for _, b := range f.prs {
+			return b
+		}
+		return ""
+	}
 	propose := func(content string) string {
 		t.Helper()
 		var files map[string][]byte
@@ -185,7 +193,9 @@ func TestProposeFiles(t *testing.T) {
 		}
 		return link
 	}
-	if link := propose("new"); link != "pr/garrison/models" || f.branches["garrison/models"]["llm/models.yaml"] != "new" || len(f.prs) != 1 {
+	link := propose("new")
+	first := open()
+	if !strings.HasPrefix(first, "garrison/models-") || link != "pr/"+first || f.branches[first]["llm/models.yaml"] != "new" || len(f.prs) != 1 {
 		t.Fatalf("first: %s %v %v", link, f.branches, f.prs)
 	}
 	// The same again: left as it is.
@@ -194,12 +204,16 @@ func TestProposeFiles(t *testing.T) {
 		t.Errorf("proposed again: %d %v", f.next, f.closed)
 	}
 	// Other files: the old one closed, a new one from main.
+	// Other files: the old one closed and its branch gone, a new one, on a
+	// branch of a new name, from main.
+	time.Sleep(2 * time.Millisecond)
 	propose("newer")
-	if f.next != 2 || len(f.closed) != 1 || len(f.prs) != 1 || f.branches["garrison/models"]["llm/models.yaml"] != "newer" {
-		t.Errorf("replaced: %d %v %v", f.next, f.closed, f.prs)
+	second := open()
+	if f.next != 2 || len(f.closed) != 1 || len(f.prs) != 1 || second == first || f.branches[first] != nil || f.branches[second]["llm/models.yaml"] != "newer" {
+		t.Errorf("replaced: %d %v %v %v", f.next, f.closed, f.prs, f.branches)
 	}
 	// Nothing to propose: closed, branch gone.
-	if link := propose(""); link != "" || len(f.prs) != 0 || f.branches["garrison/models"] != nil {
+	if link := propose(""); link != "" || len(f.prs) != 0 || f.branches[second] != nil {
 		t.Errorf("closed: %s %v %v", link, f.prs, f.branches)
 	}
 }

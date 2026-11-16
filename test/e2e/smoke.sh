@@ -486,7 +486,9 @@ check "alice adds a provider; another root admin approves" set_config system llm
 
 models_pr() { gitea_api "" "$sys/pulls?state=open&limit=50" | python3 -c '
 import json,sys
-print(next((str(p["number"]) for p in json.load(sys.stdin) if p["head"]["ref"]=="garrison/models"),""))'; }
+print(next((str(p["number"]) for p in json.load(sys.stdin) if p["head"]["ref"].startswith("garrison/models-")),""))'; }
+# models_branch: the branch of the model sync's open pull request.
+models_branch() { gitea_api "" "$sys/pulls/$(models_pr)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["ref"])'; }
 models_pr_with() { local n; n=$(models_pr); [ -n "$n" ] && gitea_api "" "$sys/pulls/$n" | grep -qF "$1"; }
 sys_approval() { gitea_api "" "$sys/commits/$(gitea_api "" "$sys/pulls/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
 import json,sys
@@ -494,7 +496,7 @@ for s in json.load(sys.stdin).get("statuses") or []:
     if s["context"] == "garrison/approval": print(s["status"], s["description"]); break'; }
 check "the model sync proposes the provider's models" until_true 180 models_pr_with "fake: 2 new"
 pr=$(models_pr)
-proposed=$(llm_file models.yaml garrison/models)
+proposed=$(llm_file models.yaml "$(models_branch)")
 check "they come turned off, only those include names" \
   bash -c 'grep -qF "\"fake/fake-small\": {enabled: false" <<<"$0" && grep -qF "\"fake/fake-large\": {enabled: false" <<<"$0" && ! grep -q other-model <<<"$0"' "$proposed"
 check "the install's models are kept"      grep -qF "/$install_model\": {enabled: true" <<<"$proposed"
@@ -535,7 +537,7 @@ printf '{"object":"list","data":[{"id":"fake-small"}]}' > "$fake/v1/models"
 sed -i 's#include: \["fake-\*"\]#include: ["fake-small", "fake-large"]#' "$tmp/providers.yaml"
 check "alice narrows the provider"         set_config system llm/providers.yaml "$tmp/providers.yaml"
 check "the next sync proposes fake-large as retired" until_true 180 models_pr_with "Retired: fake/fake-large"
-check "with the date it went"              grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: [0-9-]+\}' <<<"$(llm_file models.yaml garrison/models)"
+check "with the date it went"              grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: [0-9-]+\}' <<<"$(llm_file models.yaml "$(models_branch)")"
 kill "$fake_pid" 2>/dev/null || true
 
 }

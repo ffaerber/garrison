@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/models"
@@ -117,12 +118,14 @@ func (t *Tools) listModels(ctx context.Context) (string, error) {
 }
 
 // ProposeFiles proposes files (nil: deletes) for a repo's main branch as a
-// pull request by the platform's account, on branch, which it owns: an open
-// pull request of branch with the same files is left as it is, one with
-// others is closed and opened anew from main. It returns the pull request's
-// link. Without files, it closes the open pull request of branch, if there
-// is one.
-func (g *Gitea) ProposeFiles(ctx context.Context, org, repo, branch, title, body string, files map[string][]byte) (string, error) {
+// pull request by the platform's account, on a new branch named prefix-<time>:
+// an open pull request of such a branch with the same files is left as it
+// is, one with others is closed, its branch deleted, and a new one opened
+// from main. A branch name is never used twice: Gitea closes the pull
+// requests of a deleted branch some moments later, which would take a new
+// one of the same name with it. It returns the pull request's link. Without
+// files, it closes the open pull requests of prefix.
+func (g *Gitea) ProposeFiles(ctx context.Context, org, repo, prefix, title, body string, files map[string][]byte) (string, error) {
 	if err := validOrg(org); err != nil {
 		return "", err
 	}
@@ -141,9 +144,10 @@ func (g *Gitea) ProposeFiles(ctx context.Context, org, repo, branch, title, body
 		return "", err
 	}
 	for _, pr := range prs {
-		if pr.Head.Ref != branch {
+		if !strings.HasPrefix(pr.Head.Ref, prefix+"-") {
 			continue
 		}
+		branch := pr.Head.Ref
 		same := len(files) > 0
 		for path, want := range files {
 			var have string
@@ -162,13 +166,14 @@ func (g *Gitea) ProposeFiles(ctx context.Context, org, repo, branch, title, body
 		if _, err := g.do(ctx, "", http.MethodPatch, fmt.Sprintf("%s/pulls/%d", base, pr.Number), map[string]string{"state": "closed"}, nil); err != nil {
 			return "", err
 		}
-	}
-	if status, err := g.do(ctx, "", http.MethodDelete, base+"/branches/"+escapePath(branch), nil, nil); err != nil && status != http.StatusNotFound {
-		return "", err
+		if status, err := g.do(ctx, "", http.MethodDelete, base+"/branches/"+escapePath(branch), nil, nil); err != nil && status != http.StatusNotFound {
+			return "", err
+		}
 	}
 	if len(files) == 0 {
 		return "", nil
 	}
+	branch := fmt.Sprintf("%s-%d", prefix, time.Now().UnixMilli())
 	ops, err := g.fileOps(ctx, org, repo, files)
 	if err != nil || len(ops) == 0 {
 		return "", err

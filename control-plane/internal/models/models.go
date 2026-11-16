@@ -25,7 +25,7 @@ const (
 	Repo          = "config"
 	ProvidersFile = "llm/providers.yaml"
 	ModelsFile    = "llm/models.yaml"
-	// Branch is the model sync's pull request's.
+	// Branch starts the names of the model sync's branches: garrison/models-<time>.
 	Branch = "garrison/models"
 )
 
