@@ -498,6 +498,9 @@ else
   declare -A pid=()
   for v in "${!group[@]}"; do
     log=$ROOT/bin/steps-${v#"$VM-"}.log
+    # The steps of the branch that failed, one per line: a branch's other
+    # steps may well be green.
+    : > "${log%.log}.failed"
     say "Branch $v:${group[$v]} (log: ${log#"$ROOT/"})"
     (
       VM=$v
@@ -507,7 +510,7 @@ else
         branch "$t" "$FORK"
         r=$?
         set -e
-        [ $r = 0 ] || rc=$r
+        [ $r = 0 ] || { rc=$r; echo "${NUMBER[$t]} $t" >> "${log%.log}.failed"; }
       done
       exit $rc
     ) > "$log" 2>&1 &
@@ -518,8 +521,10 @@ else
       say "Branch $v green"
     else
       say "Branch $v failed"
-      grep -E '^(FAIL|==> Step .* failed)' -A2 "$ROOT/bin/steps-${v#"$VM-"}.log" | head -40
-      for t in ${group[$v]}; do failed+=("${NUMBER[$t]} $t"); done
+      log=$ROOT/bin/steps-${v#"$VM-"}.log
+      grep -E '^(FAIL|==> .*Step .* failed)' -A2 "$log" | head -40
+      while read -r t; do failed+=("$t"); done < "${log%.log}.failed"
+      [ -s "${log%.log}.failed" ] || failed+=("${group[$v]# }")
     fi
   done
   # The browser goes to the branch with the apps, if it ran.
