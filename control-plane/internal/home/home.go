@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/events"
 )
 
@@ -36,6 +37,8 @@ type Server struct {
 	Access Access
 	// Secrets, if set, backs the secrets page (secrets.Store).
 	Secrets Secrets
+	// Changes, if set, backs the cards of pull requests.
+	Changes Changes
 	Domain  string
 	Now     func() time.Time
 
@@ -59,6 +62,14 @@ var page = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"group":  group,
 	"source": sourceName,
 	"entry":  func(e events.Event, now time.Time, this bool) entry { return entry{E: e, Now: now, This: this} },
+	"card":   func(c changes.Card) string { return changes.Path(c.Namespace, c.Repo, c.Number) },
+	"join":   func(s []string) string { return strings.Join(s, ", ") },
+	"state": func(s string) string {
+		if s == "" {
+			return "pending"
+		}
+		return s
+	},
 }).ParseFS(files, "page.html"))
 
 // entry is one line of a feed: the event, the time to tell its age by, and
@@ -86,6 +97,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/events/{id}", s.signedIn(s.apiEvent))
 	mux.Handle("GET /secrets", s.signedIn(s.secretsPage))
 	mux.Handle("POST /secrets/{ns}", s.signedIn(s.secretsPost))
+	mux.Handle("GET /c/{ns}/{repo}/{n}", s.signedIn(s.cardPage))
+	mux.Handle("POST /c/{ns}/{repo}/{n}", s.signedIn(s.cardPost))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	return securityHeaders(mux)
 }
@@ -185,6 +198,8 @@ type feedPage struct {
 	All        bool
 	Events     []events.Event
 	Waiting    []events.Event // questions agents asked this person, still open
+	Cards      []changes.Card // pull requests waiting for this person, or theirs
+	Card       *cardView      // the page of one change
 	Namespaces []string
 	Views      []struct{ Name, Label string }
 	Filter     url.Values
@@ -223,6 +238,13 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 	// What agents asked this person and wait for, above everything else.
 	p.Waiting, _ = s.Events.List(r.Context(), events.Query{Visibility: v, Kinds: []string{events.KindQuestion},
 		Actor: v.Person, Status: events.StatusWaiting, Limit: 20})
+	if s.Changes != nil {
+		cards, err := s.Changes.Waiting(r.Context(), v.Person, 10)
+		if err != nil {
+			log.Printf("home: %s: waiting changes: %v", v.Person, err)
+		}
+		p.Cards = cards
+	}
 	s.render(w, "page", p)
 }
 

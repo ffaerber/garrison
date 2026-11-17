@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"garrison/control-plane/internal/changes"
 	"garrison/templates"
 )
 
@@ -32,7 +33,7 @@ type Gitea struct {
 }
 
 // ErrForbidden means Gitea refused the person.
-var ErrForbidden = errors.New("not allowed")
+var ErrForbidden = changes.ErrForbidden
 
 // ErrInvalid marks a request the gateway refuses before asking anyone.
 var ErrInvalid = errors.New("invalid request")

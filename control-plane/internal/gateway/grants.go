@@ -434,13 +434,13 @@ func (t *Tools) proposePatch(ctx context.Context, p Person, agent *agents.Agent,
 	if viaAgent {
 		by = fmt.Sprintf(" It is by the agent's account %s, for %s.", as, p.asker())
 	}
-	next := "Nothing is changed yet: a person allowed to merge must review and merge it in Gitea."
+	next := "Nothing is changed yet: a person allowed to merge must review and merge it."
 	if agent != nil && slices.ContainsFunc(agent.Grants, func(g agents.Grant) bool {
 		return g.Repo == a.Repo && agents.Rank(g.Level) >= agents.Rank(agents.LevelMerge)
 	}) && slices.Contains(agent.Tools, "merge_change") {
-		next = "Nothing is changed yet. If the person wants it live and one of your grants covers it, merge it with merge_change once its checks pass; otherwise a person merges it in Gitea."
+		next = "Nothing is changed yet. If the person wants it live and one of your grants covers it, merge it with merge_change once its checks pass; otherwise a person merges it."
 	}
-	return fmt.Sprintf("Change %s/%s#%d now holds the patch, on branch %s.%s\nBranch: %s\n%s\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, branch, by, branch, next, c.URL), nil
+	return fmt.Sprintf("Change %s/%s#%d now holds the patch, on branch %s.%s\nBranch: %s\n%s\n%s", c.Namespace, c.Repo, c.Number, branch, by, branch, next, t.links(c)), nil
 }
 
 // BranchHead is the commit a branch points at, as the admin; "" if there

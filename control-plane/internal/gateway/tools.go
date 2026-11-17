@@ -16,6 +16,7 @@ import (
 
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/apply"
+	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/gitops"
 	"garrison/templates"
 )
@@ -53,6 +54,9 @@ type Tools struct {
 	// then works as the agent's own account. nil: such runs cannot browse.
 	Keycloak *Keycloak
 	HTTP     *http.Client
+	// Dashboard is the dashboard's address, e.g. https://example.com: a
+	// change opened links its card there. "": only Gitea's page.
+	Dashboard string
 	// Ready, if set, waits until a namespace just made is set up: its config
 	// repo and its channel.
 	Ready func(ctx context.Context, ns string) error
@@ -447,7 +451,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s", c.Namespace, c.Repo, c.Number, c.URL), nil
+		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it.\n%s", c.Namespace, c.Repo, c.Number, t.links(c)), nil
 	}
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
 }
@@ -530,8 +534,19 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 	if shot.Blocked > 0 {
 		blocked = fmt.Sprintf(" %d requests to other sites were refused, so parts loaded from elsewhere may be missing.", shot.Blocked)
 	}
-	return fmt.Sprintf("Took the screenshot of %s (page title %q, %d KB) and opened change %s/%s#%d with %s.%s Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s",
-		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, blocked, c.URL), nil
+	return fmt.Sprintf("Took the screenshot of %s (page title %q, %d KB) and opened change %s/%s#%d with %s.%s Nothing is changed yet: a person allowed to merge must review and merge it.\n%s",
+		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, blocked, t.links(c)), nil
+}
+
+// links ends a tool's answer about a change it opened: the card on the
+// dashboard, where the person sees in plain words what it changes and
+// approves or merges it with a click, and the pull request in Gitea.
+func (t *Tools) links(c Change) string {
+	if t.Dashboard == "" {
+		return "End your answer with this link, exactly as it is, so the person can open it:\n" + c.URL
+	}
+	return fmt.Sprintf("End your answer with these two lines, exactly as they are: the first opens the change's card, where the person reads in plain words what it changes and approves or merges it; the second is the pull request in Gitea.\nReview it: %s%s\nIn Gitea: %s",
+		strings.TrimSuffix(t.Dashboard, "/"), changes.Path(c.Namespace, c.Repo, c.Number), c.URL)
 }
 
 // skill reads one of the agent's skills from its config repo, as person.

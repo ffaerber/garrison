@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Event}}{{.Event.Title}} · {{else if .Secrets}}Secrets · {{end}}Home cloud</title>
+<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{end}}Home cloud</title>
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #e3e6ea; --hover: #f0f2f5;
@@ -97,6 +97,14 @@ button.danger { color: var(--failed); }
 .setform input, .setform textarea { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
 .setform .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .hint { font-size: 13px; color: var(--muted); }
+.card .says { margin: 0 0 4px; }
+.card h2 { margin: 18px 0 6px; }
+ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: grid; gap: 4px; }
+.files .verb { color: var(--muted); }
+.files .what { color: var(--muted); }
+.status.success { color: var(--ok); } .status.pending { color: var(--running); } .status.failure, .status.error { color: var(--failed); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+.actions .gitea, .card .gitea { font-size: 14px; color: var(--muted); }
 @media (max-width: 600px) {
   .feed li { grid-template-columns: 18px 1fr; }
   .when { grid-column: 2; }
@@ -107,7 +115,7 @@ button.danger { color: var(--failed); }
 <body>
 <header><div class="bar"><a class="brand" href="/">Home cloud</a>{{if .HasSecrets}}<nav class="nav"><a href="/"{{if not .Secrets}} class="on"{{end}}>Feed</a><a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a></nav>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
 <main>
-{{if .Event}}{{template "event" .}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else}}{{template "feed" .}}{{end}}
+{{if .Event}}{{template "event" .}}{{else if .Card}}{{template "card" .Card}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else}}{{template "feed" .}}{{end}}
 </main>
 </body>
 </html>{{end}}
@@ -125,7 +133,7 @@ button.danger { color: var(--failed); }
   <span class="live" id="live" title="New entries appear on their own"><i></i><span>live</span></span>
 </form>
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-{{if .Waiting}}{{$now := .Now}}<section class="waiting" aria-labelledby="waiting">
+{{if or .Waiting .Cards}}{{$now := .Now}}<section class="waiting" aria-labelledby="waiting">
   <h2 id="waiting">Waiting for you</h2>
   <div class="panel"><ol class="feed">{{range .Waiting}}<li>
     <span class="mark g-agent s-waiting waiting" title="question, waiting"></span>
@@ -134,6 +142,13 @@ button.danger { color: var(--failed); }
       <div class="meta"><span class="chip">{{.Agent}}</span>{{if .Link}}<a class="answer" href="{{.Link}}">Answer in the chat</a>{{end}}</div>
     </div>
     <time class="when" datetime="{{iso .At}}" title="{{stamp .At}}">{{ago $now .At}}</time>
+  </li>{{end}}{{range .Cards}}<li class="change">
+    <span class="mark g-review {{if .Ready}}ok{{else}}s-waiting waiting{{end}}" title="change{{if .Ready}}, ready{{end}}"></span>
+    <div>
+      <a class="title" href="{{card .}}">{{.Title}}</a>
+      <div class="meta"><span class="chip">{{.Namespace}}/{{.Repo}}</span><span>{{if .Mine}}yours{{else}}by {{.Author}}{{end}}</span><span>· {{.Waits}}</span></div>
+    </div>
+    <time class="when" datetime="{{iso .Created}}" title="{{stamp .Created}}">{{ago $now .Created}}</time>
   </li>{{end}}</ol></div>
 </section>{{end}}
 <div class="panel">
@@ -214,6 +229,28 @@ button.danger { color: var(--failed); }
 <h2>How it was handled</h2>
 {{if gt (len .Thread) 1}}<div class="panel"><ol class="feed">{{range .Thread}}{{template "entry" (entry . $now (eq .ID $e.ID))}}{{end}}</ol></div>
 {{else}}<p class="empty panel">Nothing else belongs to it yet: no pull request, commit or run ties it to other entries.</p>{{end}}
+{{end}}
+
+{{define "card"}}{{$c := .Card}}
+<a class="back" href="/">← Feed</a>
+{{if .Notice}}<div class="notice" style="margin-top:10px">{{.Notice}}{{if $c.Merged}}{{if $c.Deploys}} The deployer takes it from here: it shows up in the feed as it deploys.{{end}}{{end}}</div>{{end}}
+{{if .Error}}<div class="error" style="margin-top:10px">{{.Error}}</div>{{end}}
+<div class="panel head card" style="margin-top:10px">
+  <div class="meta"><span class="chip">{{$c.Namespace}}/{{$c.Repo}}</span><span>#{{$c.Number}}</span><span>into {{$c.Base}}</span></div>
+  <h1>{{$c.Title}}</h1>
+  <p class="says">{{if $c.Mine}}You proposed it{{else}}{{$c.Author}} proposed it{{end}}. {{$c.Waits}}</p>
+  <h2>What it changes</h2>
+  <ul class="files">{{range $c.Files}}<li><span class="verb">{{.Verb}}</span> <code>{{.Path}}</code>{{with .What $c.Repo}}<span class="what">: {{.}}</span>{{end}}</li>{{else}}<li class="hint">No files.</li>{{end}}</ul>
+  {{if $c.Open}}{{if $c.Deploys}}<p class="hint">Merging it deploys it.</p>{{end}}{{end}}
+  {{if $c.Body}}<h2>Why</h2><pre class="body">{{$c.Body}}</pre>{{end}}
+  {{if $c.Checks}}<h2>Checks</h2><ul class="files">{{range $c.Checks}}<li><span class="status {{state .State}}">{{state .State}}</span> {{.Name}}{{if .Detail}}: {{.Detail}}{{end}}</li>{{end}}</ul>{{end}}
+  {{if $c.Approvals}}<p class="hint">Approved by {{join $c.Approvals}}.</p>{{end}}
+  {{if $c.Open}}<form class="actions" method="post" action="{{card $c}}">
+    {{if not $c.Mine}}{{if not $c.Approved}}<button name="action" value="approve" class="{{if not $c.Ready}}primary{{end}}">Approve</button>{{end}}{{end}}
+    <button name="action" value="merge" class="{{if $c.Ready}}primary{{end}}">Merge</button>
+    <a class="gitea" href="{{$c.URL}}">See it in Gitea</a>
+  </form>{{else}}<p><a class="gitea" href="{{$c.URL}}">See it in Gitea</a></p>{{end}}
+</div>
 {{end}}
 
 {{define "secrets"}}

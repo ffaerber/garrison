@@ -444,6 +444,9 @@ func gatewayCmd(args []string) error {
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
 	catalog := &gateway.Catalog{Gitea: g}
 	tools := &gateway.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus}
+	if vars["DOMAIN"] != "" {
+		tools.Dashboard = "https://" + vars["DOMAIN"]
+	}
 	if *keycloakURL != "" {
 		tools.Keycloak = &gateway.Keycloak{URL: *keycloakURL, User: vars["ADMIN_USER"], Password: g.Password}
 	}
@@ -854,7 +857,7 @@ func homeCmd(args []string) error {
 	defer stop()
 	go store.Prune(ctx)
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
-	s := &home.Server{Events: store, Access: g, Domain: vars["DOMAIN"]}
+	s := &home.Server{Events: store, Access: g, Changes: g, Domain: vars["DOMAIN"]}
 	if *deployer != "" {
 		s.Secrets = &secrets.Store{Gitea: g, Recipients: secrets.Remote(*deployer), Run: secrets.Runner(apply.Exec), Domain: vars["DOMAIN"]}
 	}
