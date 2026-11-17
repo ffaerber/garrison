@@ -1,7 +1,11 @@
-// Package agents reads a namespace's agents from its config repo: one folder
-// per agent under agents/, with agent.yaml (model, tools, skills) and
-// prompt.md, and skills shared by the namespace's agents under skills/.
+// Package agents reads the agents. They are all defined in garrison's
+// config repo: one folder per agent under agents/, with agent.yaml (model,
+// tools, skills) and prompt.md, and skills shared by them under skills/.
 // Skills use the Agent Skills format: a folder with SKILL.md.
+//
+// Each agent works in every namespace: in a namespace it is an instance,
+// <namespace>/<agent>, with the rights (grants.yaml) and routines
+// (routines.yaml) that namespace's config repo gives it.
 package agents
 
 import (
@@ -24,9 +28,13 @@ const (
 	ConfigFile = "agent.yaml"
 	PromptFile = "prompt.md"
 	SkillFile  = "SKILL.md"
-	// OperatorName is the agent every namespace has unless its config repo
-	// says otherwise.
+	// OperatorName is the agent garrison has unless its config repo says
+	// otherwise.
 	OperatorName = "operator"
+	// GrantsFile and RoutinesFile, in a namespace's config repo, give
+	// garrison's agents rights and routines there.
+	GrantsFile   = "grants.yaml"
+	RoutinesFile = "routines.yaml"
 	// CommanderName is the agent of garrison that finds the agent for a task.
 	CommanderName = "commander"
 	// PlatformNamespace is the platform's own namespace.
@@ -37,46 +45,51 @@ const (
 	maxPrompt = 32000
 )
 
-// Agent is one agent of a namespace.
+// Agent is one of garrison's agents, working in a namespace: its instance
+// there.
 type Agent struct {
-	Namespace   string
+	Namespace   string // where it works: its rights, routines and channel
 	Name        string
 	Description string
 	Model       string   // empty: the platform's default
 	Tools       []string // gateway tools it may use
-	Repos       []string // repos it works on, for its workspace
 	Prompt      string   // prompt.md
 	Skills      []Skill  // shared ones it names, then its own
 	Visible     string   // members: only the namespace's people; empty: as its repos (WorksOn)
-	Asks        []string // agents it may ask for work, <namespace>/<agent>
-	Grants      []Grant  // rights of its own
+	Asks        []string // agents it may ask for work, by name
+	Grants      []Grant  // rights of its own in Namespace (grants.yaml)
 	Routines    []Routine
 	Internet    Internet // what its sandbox reaches through the proxy
 }
 
-// ID is the agent's model id in the chat, and the name people mention:
-// <namespace>/<agent>.
+// ID is the instance: <namespace>/<agent>. Garrison's, garrison/<agent>, is
+// the model id in the chat.
 func (a Agent) ID() string { return a.Namespace + "/" + a.Name }
 
-// DisplayName is what people see and type after @ in the chat: the ID,
-// except for garrison's commander, which is the same agent in every channel
-// and goes by "commander" alone. Other agents keep their namespace, as each
-// namespace has an operator of its own.
-func (a Agent) DisplayName() string {
-	if a.Namespace == PlatformNamespace && a.Name == CommanderName {
-		return CommanderName
+// DisplayName is what people see and type after @ in the chat: the agent's
+// name. It is the same agent in every channel, working in the channel's
+// namespace.
+func (a Agent) DisplayName() string { return a.Name }
+
+// NameOf is the agent's name in an ID or a name: operator for
+// lab/operator, garrison/operator or operator.
+func NameOf(id string) string {
+	_, name, ok := strings.Cut(id, "/")
+	if !ok {
+		return id
 	}
-	return a.ID()
+	return name
 }
 
 // AsksAny tells whether a may ask every agent the person may use.
 func (a Agent) AsksAny() bool { return slices.Contains(a.Asks, AnyAgent) }
 
-// MayAsk tells whether a may hand work to the agent id: one of its agents,
-// or any but itself with agents: any. Whether the person may use it is the
-// agent service's to check.
+// MayAsk tells whether a may hand work to the agent id (an instance or a
+// name): one of its agents, or any but itself with agents: any. Whether the
+// person may use it is the agent service's to check.
 func (a Agent) MayAsk(id string) bool {
-	return id != a.ID() && (a.AsksAny() || slices.Contains(a.Asks, id))
+	name := NameOf(id)
+	return name != a.Name && (a.AsksAny() || slices.ContainsFunc(a.Asks, func(x string) bool { return NameOf(x) == name }))
 }
 
 // Skill is a skill an agent may load.
@@ -109,17 +122,19 @@ var (
 )
 
 type config struct {
-	Description string    `yaml:"description"`
-	Model       string    `yaml:"model"`
-	Tools       toolList  `yaml:"tools"`
-	Skills      []string  `yaml:"skills"`
-	Repos       []string  `yaml:"repos"`
-	Visible     string    `yaml:"visible,omitempty"` // only "members"
-	Agents      askList   `yaml:"agents,omitempty"`
-	Grants      []Grant   `yaml:"grants,omitempty"`
-	Routines    []Routine `yaml:"routines,omitempty"`
-	Internet    Internet  `yaml:"internet,omitempty"`
-	Enabled     *bool     `yaml:"enabled,omitempty"`
+	Description string   `yaml:"description"`
+	Model       string   `yaml:"model"`
+	Tools       toolList `yaml:"tools"`
+	Skills      []string `yaml:"skills"`
+	Visible     string   `yaml:"visible,omitempty"` // only "members"
+	Agents      askList  `yaml:"agents,omitempty"`
+	Internet    Internet `yaml:"internet,omitempty"`
+	Enabled     *bool    `yaml:"enabled,omitempty"`
+	// Not here any more: each namespace gives the agent these in its own
+	// config repo, or none.
+	Repos    any `yaml:"repos,omitempty"`
+	Grants   any `yaml:"grants,omitempty"`
+	Routines any `yaml:"routines,omitempty"`
 }
 
 // AllTools, as tools: all, gives an agent every tool, also those added
@@ -165,11 +180,137 @@ func (l askList) MarshalYAML() (any, error) {
 	return []string(l), nil
 }
 
-// Load reads every agent of namespace. tools are the names agents may list.
-// A namespace without an agents folder has the operator, with every tool.
-// Problems name what is wrong with each agent or skill that is left out;
-// err is for failing to read at all.
-func Load(ctx context.Context, f Files, namespace string, tools []string) (out []Agent, problems []string, err error) {
+// Load reads the agents as they work in namespace: garrison's agents, from
+// platform (garrison's config repo), with the grants and routines of f
+// (namespace's config repo; platform itself for garrison). tools are the
+// names agents may list. Problems name what is wrong with each agent, skill,
+// grant or routine that is left out; garrison's own problems only for
+// garrison. err is for failing to read at all.
+func Load(ctx context.Context, platform, f Files, namespace string, tools []string) ([]Agent, []string, error) {
+	defs, problems, err := Definitions(ctx, platform, tools)
+	if err != nil {
+		return nil, nil, err
+	}
+	if namespace != PlatformNamespace {
+		problems = nil // garrison's to fix, in its own pull requests
+		if _, err := f.List(ctx, Dir); err == nil {
+			problems = append(problems, Dir+"/: agents are defined in garrison/config only, and work in every namespace; remove this folder, and give them rights and routines here in "+GrantsFile+" and "+RoutinesFile)
+		} else if !errors.Is(err, ErrNotExist) {
+			return nil, nil, err
+		}
+	}
+	grants, routines, more, err := Bindings(ctx, f, defs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return Bind(defs, namespace, grants, routines), append(problems, more...), nil
+}
+
+// Bind makes the instances of garrison's agents in namespace, each with its
+// grants and routines there.
+func Bind(defs []Agent, namespace string, grants map[string][]Grant, routines map[string][]Routine) []Agent {
+	out := make([]Agent, 0, len(defs))
+	for _, d := range defs {
+		d.Namespace = namespace
+		d.Grants = grants[d.Name]
+		d.Routines = routines[d.Name]
+		out = append(out, d)
+	}
+	return out
+}
+
+// Bindings reads a namespace's grants.yaml and routines.yaml: lists, each
+// entry naming one of garrison's agents (defs) with agent. Entries that are
+// wrong are left out, and named in problems.
+func Bindings(ctx context.Context, f Files, defs []Agent) (map[string][]Grant, map[string][]Routine, []string, error) {
+	known := func(name string) string {
+		switch {
+		case name == "":
+			return "agent is missing: which of garrison's agents it is for"
+		case !slices.ContainsFunc(defs, func(a Agent) bool { return a.Name == name }):
+			var names []string
+			for _, a := range defs {
+				names = append(names, a.Name)
+			}
+			return fmt.Sprintf("there is no agent %q in garrison; the agents are: %s", name, strings.Join(names, ", "))
+		}
+		return ""
+	}
+	var problems []string
+	grants := map[string][]Grant{}
+	var gs []Grant
+	if raw, err := f.Read(ctx, GrantsFile); err == nil {
+		if err := decodeStrict(raw, &gs); err != nil {
+			problems = append(problems, GrantsFile+": "+err.Error())
+			gs = nil
+		}
+	} else if !errors.Is(err, ErrNotExist) {
+		return nil, nil, nil, err
+	}
+	for i, g := range gs {
+		at := fmt.Sprintf("%s: [%d]", GrantsFile, i)
+		g.Agent = NameOf(g.Agent)
+		if why := known(g.Agent); why != "" {
+			problems = append(problems, at+": "+why)
+			continue
+		}
+		ok, why := checkGrants([]Grant{g})
+		if len(why) > 0 {
+			for _, w := range why {
+				problems = append(problems, at+" "+strings.TrimPrefix(w, "grants[0]: "))
+			}
+			continue
+		}
+		grants[g.Agent] = append(grants[g.Agent], ok...)
+	}
+	routines := map[string][]Routine{}
+	var rs []Routine
+	if raw, err := f.Read(ctx, RoutinesFile); err == nil {
+		if err := decodeStrict(raw, &rs); err != nil {
+			problems = append(problems, RoutinesFile+": "+err.Error())
+			rs = nil
+		}
+	} else if !errors.Is(err, ErrNotExist) {
+		return nil, nil, nil, err
+	}
+	seen := map[string]bool{}
+	for i, r := range rs {
+		at := fmt.Sprintf("%s: [%d]", RoutinesFile, i)
+		r.Agent = NameOf(r.Agent)
+		if why := known(r.Agent); why != "" {
+			problems = append(problems, at+": "+why)
+			continue
+		}
+		ok, why := checkRoutines([]Routine{r})
+		if seen[r.Agent+"/"+r.Name] {
+			why = append(why, fmt.Sprintf("there are two routines %q of %s", r.Name, r.Agent))
+		}
+		seen[r.Agent+"/"+r.Name] = true
+		if len(why) > 0 {
+			for _, w := range why {
+				problems = append(problems, at+" "+strings.TrimPrefix(w, "routines[0]: "))
+			}
+			continue
+		}
+		routines[r.Agent] = append(routines[r.Agent], ok...)
+	}
+	return grants, routines, problems, nil
+}
+
+func decodeStrict(raw string, out any) error {
+	dec := yaml.NewDecoder(strings.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
+// Definitions reads garrison's agents from its config repo (f), as they
+// are defined, working in garrison. Without an agents folder, garrison has
+// the operator, with every tool.
+func Definitions(ctx context.Context, f Files, tools []string) (out []Agent, problems []string, err error) {
+	namespace := PlatformNamespace
 	entries, err := f.List(ctx, Dir)
 	if errors.Is(err, ErrNotExist) {
 		return []Agent{Operator(namespace, tools)}, nil, nil
@@ -200,18 +341,13 @@ func Load(ctx context.Context, f Files, namespace string, tools []string) (out [
 		}
 		out = append(out, a)
 	}
-	// Agents of this namespace that one asks must be here; those of other
-	// namespaces are looked up when asked.
+	// The agents one asks must be there.
 	var kept []Agent
 	for _, a := range out {
 		var why []string
-		for _, id := range a.Asks {
-			if id == AnyAgent {
-				continue
-			}
-			ns, name, _ := strings.Cut(id, "/")
-			if ns == namespace && !slices.ContainsFunc(out, func(b Agent) bool { return b.Name == name }) {
-				why = append(why, fmt.Sprintf("agents: there is no agent %s", id))
+		for _, name := range a.Asks {
+			if name != AnyAgent && !slices.ContainsFunc(out, func(b Agent) bool { return b.Name == name }) {
+				why = append(why, fmt.Sprintf("agents: there is no agent %s", name))
 			}
 		}
 		if len(why) > 0 {
@@ -238,10 +374,14 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 		return Agent{}, nil, err
 	}
 	var c config
-	dec := yaml.NewDecoder(strings.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&c); err != nil && !errors.Is(err, io.EOF) {
+	if err := decodeStrict(raw, &c); err != nil {
 		return Agent{}, []string{ConfigFile + ": " + err.Error()}, nil
+	}
+	for field, n := range map[string]any{"repos": c.Repos, "grants": c.Grants, "routines": c.Routines} {
+		if n != nil {
+			where := map[string]string{"repos": "it clones what it needs", "grants": "each namespace gives them in " + GrantsFile + " of its config repo", "routines": "each namespace gives them in " + RoutinesFile + " of its config repo"}[field]
+			why = append(why, fmt.Sprintf("%s: %s is not part of an agent: %s", ConfigFile, field, where))
+		}
 	}
 	prompt, err := f.Read(ctx, dir+"/"+PromptFile)
 	switch {
@@ -273,18 +413,10 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 		}
 		seen[t] = true
 	}
-	for _, r := range c.Repos {
-		if !repoName.MatchString(r) || r == "." || r == ".." {
-			why = append(why, fmt.Sprintf("%q is not a repo name", r))
-		}
-	}
 	if c.Visible != "" && c.Visible != VisibleMembers {
 		why = append(why, fmt.Sprintf("visible can only be members, to keep the agent to the namespace's people; without it the agent follows its repos: for everyone, unless one is private. Not %q", c.Visible))
 	}
-	why = append(why, checkAsks(namespace+"/"+name, c.Agents)...)
-	grants, w := checkGrants(c.Grants)
-	why = append(why, w...)
-	routines, w := checkRoutines(c.Routines)
+	asks, w := checkAsks(name, c.Agents)
 	why = append(why, w...)
 	var skills []Skill
 	for _, s := range c.Skills {
@@ -317,9 +449,8 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 	}
 	return Agent{
 		Namespace: namespace, Name: name, Description: c.Description, Model: c.Model,
-		Tools: []string(c.Tools), Repos: c.Repos, Prompt: prompt, Skills: skills,
-		Visible: c.Visible, Asks: []string(c.Agents), Grants: grants, Routines: routines,
-		Internet: c.Internet,
+		Tools: []string(c.Tools), Prompt: prompt, Skills: skills,
+		Visible: c.Visible, Asks: asks, Internet: c.Internet,
 	}, nil, nil
 }
 
@@ -388,25 +519,26 @@ func ParseSkill(raw string) (Skill, error) {
 	return Skill{Name: fm.Name, Description: strings.TrimSpace(fm.Description)}, nil
 }
 
-// Operator is the agent of a namespace whose config repo has no agents
-// folder: today's operator, with every tool.
+// Operator is garrison's agent when its config repo has no agents folder:
+// the operator, with every tool.
 func Operator(namespace string, tools []string) Agent {
 	return Agent{
 		Namespace: namespace, Name: OperatorName,
-		Description: "Operator agent of the namespace " + namespace,
+		Description: "Looks at a namespace and proposes changes to it",
 		Tools:       tools, Prompt: OperatorPrompt,
 	}
 }
 
-// OperatorPrompt is the operator's prompt.md (templates/namespace-config).
+// OperatorPrompt is the operator's prompt.md (templates/garrison-config).
 // How the home cloud works is in every agent's system prompt (Platform), so
-// a namespace made earlier, which keeps its own copy of this file, learns it
+// a garrison made earlier, which keeps its own copy of this file, learns it
 // too.
-var OperatorPrompt = templates.File(templates.Namespace, Dir+"/"+OperatorName+"/"+PromptFile)
+var OperatorPrompt = templates.File(templates.Platform, Dir+"/"+OperatorName+"/"+PromptFile)
 
 // Platform is how the home cloud works, in every agent's system prompt.
 const Platform = `How the home cloud works:
-- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people. Its agents are folders under agents/ in config (agent.yaml, prompt.md); an agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
+- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people.
+- The agents are all garrison's, folders under agents/ in garrison/config (agent.yaml, prompt.md), which only root admins change; each works in every namespace, mentioned by its name (@operator) in the namespace's channel. A namespace gives them rights of their own in grants.yaml and routines (work they start by themselves: on a schedule, on a push, on an alert) in routines.yaml of its config, each entry naming the agent. An agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
 - The namespace garrison is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into garrison.
 - A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into garrison.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
@@ -447,26 +579,14 @@ const Platform = `How the home cloud works:
 // offline is said to agents without internet.
 const offline = "- You have no internet: you cannot look up images or their versions. Use versions you know, pinned, and tell the person to check them in the review.\n"
 
-// OperatorFiles are the agents folder of a new config repo: its README and
-// the operator (templates/namespace-config).
-func OperatorFiles() map[string]string {
-	out := map[string]string{}
-	for p, c := range templates.Files(templates.Namespace) {
-		if strings.HasPrefix(p, Dir+"/") {
-			out[p] = c
-		}
-	}
-	return out
-}
-
 // CommanderPrompt is the commander's prompt.md (templates/garrison-config): it
 // finds the agent for what a person wants, and hands the work over or sends
 // the person there.
 var CommanderPrompt = templates.File(templates.Platform, Dir+"/"+CommanderName+"/"+PromptFile)
 
-// CommanderFiles are what garrison's config repo has besides the operator:
-// the commander's folder and llm/README.md (templates/garrison-config).
-func CommanderFiles() map[string]string {
+// PlatformFiles are garrison's config repo as it is made: the operator, the
+// commander and llm/README.md (templates/garrison-config).
+func PlatformFiles() map[string]string {
 	return templates.Files(templates.Platform)
 }
 
@@ -474,7 +594,11 @@ func CommanderFiles() map[string]string {
 // skills, then the platform's rules, which a prompt cannot take back.
 func System(a Agent, domain string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are %s, an agent of the namespace %q of a home cloud at %s. Pass namespace %q to every tool that takes one.\n\n", a.ID(), a.Namespace, domain, a.Namespace)
+	if a.Namespace == PlatformNamespace {
+		fmt.Fprintf(&b, "You are %s, an agent of a home cloud at %s. Here you work in no namespace in particular: work in the one the person names (ask if it is unclear) and pass it to every tool that takes one; garrison is the platform itself.\n\n", a.Name, domain)
+	} else {
+		fmt.Fprintf(&b, "You are %s, an agent of a home cloud at %s, here working in the namespace %q. Pass namespace %q to every tool that takes one, unless the person names another.\n\n", a.Name, domain, a.Namespace, a.Namespace)
+	}
 	b.WriteString(strings.TrimSpace(a.Prompt))
 	b.WriteString("\n\n" + Platform)
 	if a.Internet.None() {

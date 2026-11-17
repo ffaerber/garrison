@@ -192,7 +192,8 @@ func TestModelsAreTheAgents(t *testing.T) {
 	s, _, _ := setup(t)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"homepage/reader"`) || !strings.Contains(w.Body.String(), `"id":"garrison/operator"`) {
+	// garrison's agents; the instances in namespaces are not models.
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"id":"homepage/reader"`) || !strings.Contains(w.Body.String(), `"id":"garrison/operator"`) || !strings.Contains(w.Body.String(), `"name":"operator"`) {
 		t.Errorf("models: %d %s", w.Code, w.Body)
 	}
 }
@@ -236,7 +237,7 @@ func TestATurnUsesTheAgentsToolsAsThePerson(t *testing.T) {
 	first := llm.requests[0]
 	msgs := first["messages"].([]any)
 	sys := msgs[0].(map[string]any)["content"].(string)
-	if first["model"] != "small-model" || !strings.Contains(sys, "You are homepage/reader") || !strings.Contains(sys, "Rules of the platform") {
+	if first["model"] != "small-model" || !strings.Contains(sys, `You are reader, an agent of a home cloud at example.com, here working in the namespace "homepage"`) || !strings.Contains(sys, "Rules of the platform") {
 		t.Errorf("first request: model %v, system %q", first["model"], sys)
 	}
 	if msgs[1].(map[string]any)["content"] != "Here's the thread history: bob: hi" || msgs[2].(map[string]any)["role"] != "user" {
@@ -311,5 +312,23 @@ func TestATurnEnds(t *testing.T) {
 	}
 	if len(llm.requests) != 3 || llm.requests[2]["tools"] != nil {
 		t.Errorf("%d requests, the last with tools %v", len(llm.requests), llm.requests[len(llm.requests)-1]["tools"])
+	}
+}
+
+// A model is garrison's agent; in a namespace's channel, it works there.
+func TestAChatRunsTheAgentWhereItsChannelIs(t *testing.T) {
+	s := &Server{Poster: &fakePoster{channels: map[string]gateway.ChannelInfo{
+		"c-lab": {Namespace: "lab", Members: true}, "c-garrison": {Namespace: "garrison"},
+	}}}
+	for _, c := range []struct{ model, chat, want string }{
+		{"garrison/operator", "channel:c-lab", "lab/operator"},
+		{"operator", "channel:c-lab", "lab/operator"},
+		{"garrison/operator", "channel:c-garrison", "garrison/operator"},
+		{"garrison/operator", "chat-1", "garrison/operator"}, // a private chat: in no namespace
+		{"todo/operator", "channel:c-lab", "todo/operator"},  // an instance named as it is
+	} {
+		if got, err := s.placed(context.Background(), c.model, c.chat); err != nil || got != c.want {
+			t.Errorf("%s in %s: %q %v, want %q", c.model, c.chat, got, err, c.want)
+		}
 	}
 }

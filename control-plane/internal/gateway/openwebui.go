@@ -66,17 +66,18 @@ type owuiModel struct {
 // WebUI returns access grants in its own shape.
 const AccessMarker = "garrison_access"
 
-// want is the model entry of an agent. A private agent (AgentPrivate) goes
-// only to its namespace's group (groups); root admins are Open WebUI's
-// admins and see every agent.
+// want is the model entry of an agent: garrison's instance, which works in
+// whichever namespace's channel it is mentioned. A private agent
+// (AgentPrivate) goes only to its namespace's group (groups); root admins
+// are Open WebUI's admins and see every agent.
 func (o *OpenWebUI) want(a agents.Agent, groups map[string]string, private bool) owuiModel {
 	desc := a.Description
 	if desc == "" {
-		desc = "Agent of the namespace " + a.Namespace
+		desc = "Agent of the home cloud"
 	}
 	access, grants := "everyone", []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}}
 	if private {
-		desc += " (works on private repos: for " + a.Namespace + "'s people)"
+		desc += " (for " + a.Namespace + "'s people only)"
 		access, grants = "admins", []any{}
 		if id := groups[a.Namespace]; id != "" {
 			access, grants = "group:"+id, []any{map[string]any{"principal_type": "group", "principal_id": id, "permission": "read"}}
@@ -183,13 +184,16 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The chat's models are garrison's agents; in a namespace's channel,
+	// the agent service runs their instance there.
+	models := byNS[PlatformNamespace]
 	private := map[string]bool{}
-	for _, a := range list {
+	for _, a := range models {
 		if private[a.ID()], err = o.Gitea.AgentPrivate(ctx, &a); err != nil {
 			return err
 		}
 	}
-	if err := o.syncModels(ctx, signin.Token, list, groups, private); err != nil {
+	if err := o.syncModels(ctx, signin.Token, models, groups, private); err != nil {
 		return err
 	}
 	return o.syncChannels(ctx, signin.Token, namespaces, byNS, groups)
@@ -286,7 +290,11 @@ func (o *OpenWebUI) syncProfile(ctx context.Context, token string) error {
 }
 
 // HowToMarker starts the pinned message that explains a channel.
-const HowToMarker = "**How to ask the agent of this namespace**"
+const HowToMarker = "**How to ask the agents**"
+
+// legacyHowTo started the how-to of an earlier version, which the sync
+// replaces.
+const legacyHowTo = "**How to ask the agent of this namespace**"
 
 // howTo is a channel's pinned message. commander is garrison's commander, if
 // there is one: it finds the agent for what someone wants.
@@ -296,17 +304,21 @@ func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent, commander string) s
 		ask = "\n\nNot sure which agent fits? Ask `@" + commander + "`: it finds the agent for what you want, and hands the work over or tells you whom to ask."
 	}
 	if len(list) == 0 {
-		return HowToMarker + "\n\nThis namespace has no agents. Add one as a folder under agents/ in its repo config." + ask
+		return HowToMarker + "\n\nThere are no agents yet. Root admins add them as folders under agents/ in garrison/config." + ask
 	}
 	var b strings.Builder
-	b.WriteString(HowToMarker + "\n\nType `@` and pick an agent from the list, then your question. The agents of this namespace:\n\n")
+	where := "here they work in " + ns.Name
+	if ns.Name == PlatformNamespace {
+		where = "here they work in whichever namespace you name"
+	}
+	b.WriteString(HowToMarker + "\n\nType `@` and pick an agent from the list, then your question. The agents are the home cloud's, the same in every channel; " + where + ":\n\n")
 	example := list[0]
 	for _, a := range list {
 		desc := a.Description
 		if desc == "" {
 			desc = "no description"
 		}
-		fmt.Fprintf(&b, "- **%s**: %s\n", a.ID(), desc)
+		fmt.Fprintf(&b, "- **%s**: %s\n", a.DisplayName(), desc)
 		if a.Name == agents.OperatorName {
 			example = a
 		}
@@ -319,9 +331,9 @@ For example:
 
 It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention an agent are for the people here.%[2]s
 
-An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are folders under agents/ in the repo config.`, example.ID(), ask)
+An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are defined in garrison/config, which root admins change.`, example.DisplayName(), ask)
 	if ns.Name != PlatformNamespace {
-		b.WriteString("\n\nOnly the people of " + ns.Name + " read this channel. Others can talk to its agents that work on public repos in a private chat.")
+		b.WriteString("\n\nOnly the people of " + ns.Name + " read this channel. Rights of the agents' own here, and work they do here by themselves, are in grants.yaml and routines.yaml of " + ns.Name + "/config.")
 	}
 	return b.String()
 }
@@ -336,7 +348,9 @@ type owuiMessage struct {
 // syncHowTo keeps the how-to pinned at the top of a namespace's channel. A
 // how-to someone unpinned is pinned again; a deleted one is posted again.
 func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns Namespace, list []agents.Agent, commander string) error {
-	ours := func(m owuiMessage) bool { return m.UserID == o.accountID && strings.HasPrefix(m.Content, HowToMarker) }
+	ours := func(m owuiMessage) bool {
+		return m.UserID == o.accountID && (strings.HasPrefix(m.Content, HowToMarker) || strings.HasPrefix(m.Content, legacyHowTo))
+	}
 	var pinned []owuiMessage
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/"+channelID+"/messages/pinned", nil, &pinned); err != nil {
 		return err
@@ -388,9 +402,9 @@ type owuiChannel struct {
 
 func (o *OpenWebUI) channelDescription(ns Namespace) string {
 	if ns.Name == PlatformNamespace {
-		return "Chat of the platform, for everyone signed in. Ask its agents with @garrison/<agent>; see the pinned message."
+		return "Chat of the platform, for everyone signed in. Ask the agents with @<agent>; see the pinned message."
 	}
-	return fmt.Sprintf("Team chat of the namespace %s: only its people read it. Ask its agents with @%s/<agent>; see the pinned message.", ns.Name, ns.Name)
+	return fmt.Sprintf("Team chat of the namespace %s: only its people read it. Ask the agents with @<agent>; here they work in %s. See the pinned message.", ns.Name, ns.Name)
 }
 
 var everyoneReadsAndWrites = []any{

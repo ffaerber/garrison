@@ -274,7 +274,7 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 	if role == "" {
 		log.Printf("routines: %s: not run: its owner %s is not in %s", key, rt.Owner, a.Namespace)
 		record(events.StatusRefused, fmt.Sprintf("Not run: its owner %s is not in %s.", rt.Owner, a.Namespace))
-		post(fmt.Sprintf("The routine %s did not run: its owner %s is not in %s. Change its owner in agents/%s/agent.yaml.", rt.Name, rt.Owner, a.Namespace, a.Name))
+		post(fmt.Sprintf("The routine %s did not run: its owner %s is not in %s. Change its owner in %s of %s/config.", rt.Name, rt.Owner, a.Namespace, agents.RoutinesFile, a.Namespace))
 		return
 	}
 	log.Printf("routines: %s for %s: %s", key, rt.Owner, why)

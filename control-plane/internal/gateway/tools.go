@@ -51,7 +51,7 @@ type Tools struct {
 	Browser    *Browser     // for screenshot; nil: none
 	HTTP       *http.Client
 	// Ready, if set, waits until a namespace just made is set up: its config
-	// repo, its operator and its channel.
+	// repo and its channel.
 	Ready func(ctx context.Context, ns string) error
 
 	privateMu sync.Mutex
@@ -145,7 +145,7 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "namespace", "repo", "patch", "title"),
-		spec("create_namespace", "Makes a new namespace (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml, its operator agent and its channel.", map[string]any{
+		spec("create_namespace", "Makes a new namespace (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml and its channel, where the agents work in it.", map[string]any{
 			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
 			"description": str("what it is for"),
 		}, "name"),
@@ -229,6 +229,16 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 }
 
 func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name string, a args) (string, error) {
+	switch name {
+	case "propose_change", "propose_patch", "merge_change":
+		// A change to a namespace is made with that namespace's grants,
+		// wherever the person asked.
+		there, err := t.instance(ctx, p, agent, a.Namespace)
+		if err != nil {
+			return "", err
+		}
+		agent = there
+	}
 	switch name {
 	case "list_namespaces":
 		nss, err := t.Gitea.Namespaces(ctx, p.Name)
@@ -386,9 +396,9 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			if err := t.Ready(ctx, name); err != nil {
 				return fmt.Sprintf("Made the namespace %s, with %s as its first admin. %v. Make its repos with create_repo.", name, p.Name, err), nil
 			}
-			return fmt.Sprintf("Made the namespace %s, with %s as its first admin. It is ready: its config repo (members.yaml, its agents), its operator @%s/operator and its channel %s. Make its repos with create_repo.", name, p.Name, name, name), nil
+			return fmt.Sprintf("Made the namespace %s, with %s as its first admin. It is ready: its config repo (members.yaml; grants.yaml and routines.yaml give the agents rights and routines there) and its channel %s, where the agents (@operator and the others) work in %s. Make its repos with create_repo.", name, p.Name, name, name), nil
 		}
-		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. In a few seconds it has its config repo (members.yaml, its agents), its operator and its channel. Make its repos with create_repo.", name, p.Name), nil
+		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. In a few seconds it has its config repo (members.yaml) and its channel, where the agents work in %s. Make its repos with create_repo.", name, p.Name, name), nil
 	case "create_repo":
 		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Namespace, a.Repo, a.Description, a.Private, a.Template)
 		if err != nil {
@@ -493,16 +503,17 @@ func (t *Tools) skill(ctx context.Context, p Person, agent *agents.Agent, name s
 		if err := validPath(a.Path); err != nil || a.Path == "" {
 			return "", fmt.Errorf("%w: path %q", ErrInvalid, a.Path)
 		}
-		return t.Gitea.Read(ctx, p.Name, agent.Namespace, ConfigRepo, sk.Dir+"/"+a.Path)
+		return t.Gitea.Read(ctx, p.Name, PlatformNamespace, ConfigRepo, sk.Dir+"/"+a.Path)
 	}
-	body, err := t.Gitea.Read(ctx, p.Name, agent.Namespace, ConfigRepo, sk.Dir+"/"+agents.SkillFile)
+	// Skills are garrison's, with its agents.
+	body, err := t.Gitea.Read(ctx, p.Name, PlatformNamespace, ConfigRepo, sk.Dir+"/"+agents.SkillFile)
 	if err != nil {
 		return "", err
 	}
 	var files []string
 	var walk func(dir, prefix string) error
 	walk = func(dir, prefix string) error {
-		entries, err := t.Gitea.List(ctx, p.Name, agent.Namespace, ConfigRepo, dir)
+		entries, err := t.Gitea.List(ctx, p.Name, PlatformNamespace, ConfigRepo, dir)
 		if err != nil {
 			return err
 		}

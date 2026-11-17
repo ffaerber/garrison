@@ -40,8 +40,10 @@ func Rank(level string) int {
 // the level promises, so a grant must say autonomous.
 var Deploying = []string{"main", "dev"}
 
-// Grant is a right of an agent's own, in one repo of its namespace.
+// Grant is a right of an agent's own, in one repo of the namespace whose
+// grants.yaml gives it.
 type Grant struct {
+	Agent      string   `yaml:"agent"` // which of garrison's agents
 	Repo       string   `yaml:"repo"`
 	Branch     string   `yaml:"branch"`     // the branch it may merge into; empty for propose
 	Level      string   `yaml:"level"`      // propose, merge or autonomous
@@ -50,9 +52,11 @@ type Grant struct {
 	Unattended bool     `yaml:"unattended"` // may runs without a person use it
 }
 
-// Routine is work an agent starts by itself, for its owner: every so
-// often, or when a branch moves.
+// Routine is work an agent starts by itself in the namespace whose
+// routines.yaml names it, for its owner: every so often, or when a branch
+// moves.
 type Routine struct {
+	Agent    string         `yaml:"agent"` // which of garrison's agents
 	Name     string         `yaml:"name"`
 	Every    time.Duration  `yaml:"-"`
 	Raw      string         `yaml:"every"`
@@ -211,23 +215,32 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 	return out, why
 }
 
-func checkAsks(self string, ids []string) []string {
-	var why []string
+// checkAsks checks agents in agent.yaml, the agents self may ask: names of
+// garrison's agents (garrison/<name> is taken too), or any. It returns them
+// as names.
+func checkAsks(self string, ids []string) (out []string, why []string) {
 	for _, id := range ids {
+		name := id
+		if m := agentID.FindStringSubmatch(id); m != nil {
+			if m[1] != PlatformNamespace {
+				why = append(why, fmt.Sprintf("agents: %q: the agents are all garrison's; name it %s", id, m[2]))
+				continue
+			}
+			name = m[2]
+		}
 		switch {
-		case id == AnyAgent:
-			if ns, _, _ := strings.Cut(self, "/"); ns != PlatformNamespace {
-				why = append(why, "agents: any is only for the agents of garrison, which root admins approve; name the agents this one may ask")
-			} else if len(ids) > 1 {
+		case name == AnyAgent:
+			if len(ids) > 1 {
 				why = append(why, "agents: any stands alone, without other agents")
 			}
-		case !agentID.MatchString(id):
-			why = append(why, fmt.Sprintf("agents: %q is not an agent, <namespace>/<agent>", id))
-		case id == self:
+		case !agentName.MatchString(name):
+			why = append(why, fmt.Sprintf("agents: %q is not an agent's name", id))
+		case name == self:
 			why = append(why, "agents: an agent does not ask itself")
 		}
+		out = append(out, name)
 	}
-	return why
+	return out, why
 }
 
 // GrantFor finds a grant of a that lets a request of someone with role
@@ -260,11 +273,11 @@ func (a Agent) GrantFor(repo, branch, level, role string, unattended bool) (Gran
 // it has grants or routines.
 func (a Agent) NeedsAccount() bool { return len(a.Grants) > 0 || len(a.Routines) > 0 }
 
-// WorksOn are the repos an agent works on: those it names, those of its
-// grants and those its routines watch. If one is private, so is the agent.
+// WorksOn are the repos of its namespace an agent works on there: those of
+// its grants and those its routines watch. If one is private, so is the
+// agent, there.
 func (a Agent) WorksOn() []string {
-	out := append([]string{}, a.Repos...)
-	out = append(out, a.GrantedRepos()...)
+	out := append([]string{}, a.GrantedRepos()...)
 	for _, r := range a.Routines {
 		if r.OnPush != nil {
 			out = append(out, r.OnPush.Repo)

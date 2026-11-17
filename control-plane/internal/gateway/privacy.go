@@ -101,7 +101,7 @@ func (g *Gitea) grantProblems(ctx context.Context, ns string, list []agents.Agen
 				return nil, err
 			}
 			if private {
-				out = append(out, fmt.Sprintf("%s/%s: grants[%d]: %s is private, so only %s's people may ask for changes to it; for: everyone is not possible there", agents.Dir, a.Name, i, gr.Repo, ns))
+				out = append(out, fmt.Sprintf("%s: %s's grant %d: %s is private, so only %s's people may ask for changes to it; for: everyone is not possible there", agents.GrantsFile, a.Name, i+1, gr.Repo, ns))
 			}
 		}
 		// An agent that reads private code and reaches the internet could be
@@ -112,7 +112,7 @@ func (g *Gitea) grantProblems(ctx context.Context, ns string, list []agents.Agen
 				return nil, err
 			}
 			if private {
-				out = append(out, fmt.Sprintf("%s/%s: internet: it works on private repos or for %s's people only, so it may reach the package registries (internet: packages), no more", agents.Dir, a.Name, ns))
+				out = append(out, fmt.Sprintf("%s: %s reaches %s, so it cannot work on private repos of %s (grants or routines here) or for its people only: an agent that reads private code may reach the package registries (internet: packages), no more", a.Name, a.Name, a.Internet, ns))
 			}
 		}
 	}

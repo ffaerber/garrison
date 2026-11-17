@@ -161,9 +161,9 @@ func (c *collect) answer() string {
 
 // askSpec is the tool ask_agent, for an agent that may ask others.
 func askSpec(a agents.Agent) toolSpec {
-	agent := map[string]any{"type": "string", "enum": a.Asks, "description": "the agent to ask"}
+	agent := map[string]any{"type": "string", "enum": a.Asks, "description": "the agent to ask; it works in your namespace"}
 	if a.AsksAny() {
-		agent = map[string]any{"type": "string", "description": "the agent to ask, <namespace>/<agent>, as find_agents lists it"}
+		agent = map[string]any{"type": "string", "description": "the agent to ask, by name as find_agents lists it; it works in your namespace. For one working in another namespace: <namespace>/<agent>"}
 	}
 	return toolSpec{
 		Name:        "ask_agent",
@@ -200,23 +200,24 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	if err != nil || !ok {
 		return "error: cannot read your own agent folder", true
 	}
+	id := instance(in.Agent, asker.Namespace)
 	switch {
-	case !asker.MayAsk(in.Agent):
+	case !asker.MayAsk(id):
 		if asker.AsksAny() {
 			return "not allowed: you do not ask yourself", true
 		}
 		return fmt.Sprintf("not allowed: you may ask only %s (agents in your agent.yaml)", strings.Join(asker.Asks, ", ")), true
-	case slices.Contains(c.Run.Chain, in.Agent):
-		return fmt.Sprintf("not allowed: %s is already part of this run (%s); it cannot be asked again", in.Agent, strings.Join(c.Run.Chain, " → ")), true
+	case inChain(c.Run.Chain, agents.NameOf(id)):
+		return fmt.Sprintf("not allowed: %s is already part of this run (%s); it cannot be asked again", agents.NameOf(id), strings.Join(c.Run.Chain, " → ")), true
 	case len(c.Run.Chain) >= MaxChain:
 		return fmt.Sprintf("not allowed: this run already holds %d agents (%s), the most there may be; do it yourself or answer with what you have", len(c.Run.Chain), strings.Join(c.Run.Chain, " → ")), true
 	}
-	target, ok, err := s.Agents.Get(ctx, in.Agent)
+	target, ok, err := s.Agents.Get(ctx, id)
 	if err != nil {
 		return "error: " + err.Error(), true
 	}
 	if !ok {
-		return "error: there is no agent " + in.Agent, true
+		return "error: there is no agent " + id, true
 	}
 	who := c.Person
 	if why, err := s.mayAnswer(ctx, c, target); err != nil {
@@ -310,6 +311,15 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		answer = "(no answer)"
 	}
 	return target.ID() + " answers:\n" + answer, false
+}
+
+// instance is the agent asked for as it works: in the namespace named, as
+// <namespace>/<agent>, or else, by its name (or garrison/<name>), in ns.
+func instance(id, ns string) string {
+	if pre, name, ok := strings.Cut(id, "/"); ok && pre != agents.PlatformNamespace {
+		return pre + "/" + name
+	}
+	return ns + "/" + agents.NameOf(id)
 }
 
 // mayAnswer says why target may not work for the caller's person here: one

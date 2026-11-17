@@ -74,7 +74,7 @@ func TestAnAgentReachesWhatItsInternetAllows(t *testing.T) {
 		t.Errorf("packages, an address: %q", got)
 	}
 	_, got = chatIn(t, s, "c2", "homepage/builder", Message{Role: "user", Content: "fetch http://example.org/"})
-	if !strings.Contains(got, "403") || !strings.Contains(got, "ask an admin of homepage to add example.org") {
+	if !strings.Contains(got, "403") || !strings.Contains(got, "ask a root admin to add example.org to builder's internet in garrison/config") {
 		t.Errorf("packages, example.org: %q", got)
 	}
 	// An agent on private repos keeps the registries only.

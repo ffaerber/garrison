@@ -159,7 +159,7 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot read the namespace's members", http.StatusBadGateway)
 		return
 	} else if !allowed {
-		http.Error(w, fmt.Sprintf("%s may not use the agent %s: it is for the people of %s", person.Name, agent.ID(), agent.Namespace), http.StatusForbidden)
+		http.Error(w, fmt.Sprintf("%s may not use the agent %s: in %s it is for the people of %s", person.Name, agent.Name, agent.Namespace, agent.Namespace), http.StatusForbidden)
 		return
 	}
 	var req rpcRequest

@@ -45,6 +45,17 @@ func (f *grantsGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/repos/homepage/config/raw/members.yaml":
 		io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+	// garrison's agent dev, to which homepage gives a grant.
+	case p == "/orgs/homepage":
+		io.WriteString(w, "{}")
+	case p == "/repos/garrison/config/contents/agents":
+		io.WriteString(w, `[{"name":"dev","type":"dir"}]`)
+	case p == "/repos/garrison/config/raw/agents/dev/agent.yaml":
+		io.WriteString(w, "tools: [propose_patch, merge_change]\n")
+	case p == "/repos/garrison/config/raw/agents/dev/prompt.md":
+		io.WriteString(w, "Code.\n")
+	case p == "/repos/homepage/config/raw/grants.yaml":
+		io.WriteString(w, "- {agent: dev, repo: todo, level: propose, for: everyone}\n")
 	case p == "/repos/homepage/secret":
 		// Private: hidden from carol, who is not in homepage.
 		if as == "carol" {
@@ -122,6 +133,29 @@ func sscan(p, format string, n *int) bool {
 	}
 	_, err = fmt.Sscanf(p, format, n)
 	return err == nil && fmt.Sprintf(format, *n) == p
+}
+
+// A change to a namespace's repo goes with that namespace's grants, also
+// when the person asked the agent elsewhere, e.g. in a private chat.
+func TestAChangeUsesTheGrantsOfItsNamespace(t *testing.T) {
+	f := newGrantsGitea()
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	carol := Person{Name: "carol", StartedBy: "person"}
+	raw, _ := json.Marshal(map[string]any{"namespace": "homepage", "repo": "todo", "patch": "diff --git a/x b/x\n", "title": "T", "base": "dev"})
+	dev := &agents.Agent{Namespace: "garrison", Name: "dev", Tools: []string{"propose_patch"}}
+	out, err := tools.Call(context.Background(), carol, dev, "propose_patch", raw)
+	if err != nil || !strings.Contains(out, "Branch: agent/dev/carol-") || !strings.Contains(out, "agent-homepage-dev") {
+		t.Fatalf("carol through garrison's dev: %q %v", out, err)
+	}
+	if body := f.prs[1]["body"].(string); !strings.Contains(body, "Asked by carol (not in homepage) through homepage/dev.") {
+		t.Errorf("body: %q", body)
+	}
+	// A run without a person keeps to its own namespace's grants.
+	if _, err := tools.Call(context.Background(), Person{Name: "agent-garrison-dev", Unattended: true, Owner: "carol"}, dev, "propose_patch", raw); err == nil || !strings.Contains(err.Error(), "no grant with unattended") {
+		t.Errorf("unattended: %v", err)
+	}
 }
 
 func TestGrants(t *testing.T) {
@@ -327,16 +361,16 @@ func TestPrivateAgentsReachOnlyTheRegistries(t *testing.T) {
 	defer srv.Close()
 	g := &Gitea{URL: srv.URL, User: "admin", Password: "pw"}
 	list := []agents.Agent{
-		{Namespace: "homepage", Name: "wide", Repos: []string{"secret"}, Internet: agents.Internet{All: true}},
+		{Namespace: "homepage", Name: "wide", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}, Internet: agents.Internet{All: true}},
 		{Namespace: "homepage", Name: "listed", Visible: agents.VisibleMembers, Internet: agents.Internet{Domains: []string{"example.org"}}},
-		{Namespace: "homepage", Name: "builder", Repos: []string{"secret"}, Internet: agents.Internet{Packages: true}},
-		{Namespace: "homepage", Name: "offline", Repos: []string{"secret"}},
+		{Namespace: "homepage", Name: "builder", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}, Internet: agents.Internet{Packages: true}},
+		{Namespace: "homepage", Name: "offline", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
 	}
 	problems, err := g.grantProblems(context.Background(), "homepage", list)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(problems) != 2 || !strings.HasPrefix(problems[0], "agents/wide: internet:") || !strings.HasPrefix(problems[1], "agents/listed: internet:") ||
+	if len(problems) != 2 || !strings.HasPrefix(problems[0], "wide: wide reaches") || !strings.HasPrefix(problems[1], "listed: listed reaches") ||
 		!strings.Contains(problems[0], "internet: packages") {
 		t.Errorf("problems %q", problems)
 	}

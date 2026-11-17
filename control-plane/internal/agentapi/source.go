@@ -11,7 +11,8 @@ import (
 	"garrison/control-plane/internal/gateway"
 )
 
-// GiteaAgents reads the agents from each namespace's config repo on main.
+// GiteaAgents reads the agents as they work in each namespace: garrison's,
+// with each namespace's grants and routines, on main.
 // A chat reads its agent afresh, so a merged change applies to the next
 // message; the list of all agents is kept for a few seconds, as Open WebUI
 // asks for it often.
@@ -38,9 +39,13 @@ func (g *GiteaAgents) All(ctx context.Context) ([]agents.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	defs, err := g.Gitea.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
 	list := []agents.Agent{}
 	for _, ns := range namespaces {
-		found, _, err := g.Gitea.Agents(ctx, ns.Name, "main")
+		found, err := g.Gitea.AgentsWith(ctx, defs, ns.Name)
 		if err != nil {
 			return nil, err
 		}

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/gateway"
 	"garrison/control-plane/internal/hooks"
@@ -120,8 +121,8 @@ func (m *Models) warn(ctx context.Context, agent, full, why string) {
 	m.Events.Record(ctx, events.Event{Source: events.SourceAgents, Kind: events.KindModel, Status: events.StatusRefused,
 		Namespace: ns, Agent: agent, StartedBy: "agent " + agent,
 		Title:  fmt.Sprintf("%s uses the default model: its own cannot be used", agent),
-		Detail: why + fmt.Sprintf(". Choose another model in agents/%s/agent.yaml.", name),
-		Link:   fmt.Sprintf("https://git.%s/%s/config/src/branch/main/agents/%s/agent.yaml", m.Domain, ns, name)})
+		Detail: why + fmt.Sprintf(". A root admin chooses another model in agents/%s/agent.yaml of garrison/config.", name),
+		Link:   fmt.Sprintf("https://git.%s/%s/config/src/branch/main/agents/%s/agent.yaml", m.Domain, agents.PlatformNamespace, name)})
 }
 
 // list asks a provider for its models: GET <url>/models.
@@ -268,25 +269,19 @@ func (m *Models) describe(ctx context.Context, changes []models.Change, next mod
 		}
 	}
 	// Agents naming a model that is gone: they use the default until changed.
-	nss, err := m.Gitea.Namespaces(ctx, "")
+	l, _ := m.current(ctx)
+	var stuck []string
+	list, err := m.Gitea.Definitions(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	l, _ := m.current(ctx)
-	var stuck []string
-	for _, ns := range nss {
-		list, _, err := m.Gitea.Agents(ctx, ns.Name, "main")
-		if err != nil {
-			return "", "", err
+	for _, a := range list {
+		if a.Model == "" {
+			continue
 		}
-		for _, a := range list {
-			if a.Model == "" {
-				continue
-			}
-			_, _, full := l.Providers.Resolve(a.Model)
-			if e, ok := next[full]; ok && e.Gone != "" {
-				stuck = append(stuck, fmt.Sprintf("%s (%s)", a.ID(), full))
-			}
+		_, _, full := l.Providers.Resolve(a.Model)
+		if e, ok := next[full]; ok && e.Gone != "" {
+			stuck = append(stuck, fmt.Sprintf("%s (%s)", a.Name, full))
 		}
 	}
 	if len(stuck) > 0 {

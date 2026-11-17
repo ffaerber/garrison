@@ -89,22 +89,29 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"private":true}`)
 	case p == "/repos/homepage/config/raw/members.yaml":
 		io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
-	// homepage/config has two agents, one of them broken, and a skill.
-	case p == "/repos/homepage/config/contents/agents":
-		io.WriteString(w, `[{"name":"marketing","type":"dir"},{"name":"broken","type":"dir"},{"name":"README.md","type":"file"}]`)
-	case p == "/repos/homepage/config/raw/agents/marketing/agent.yaml":
+	// garrison/config has three agents, one of them broken, and a skill;
+	// homepage gives marketing a grant.
+	case p == "/repos/garrison/config/contents/agents":
+		io.WriteString(w, `[{"name":"marketing","type":"dir"},{"name":"broken","type":"dir"},{"name":"operator","type":"dir"},{"name":"README.md","type":"file"}]`)
+	case p == "/repos/garrison/config/raw/agents/marketing/agent.yaml":
 		io.WriteString(w, "description: Media\ntools: [read_file]\n")
-	case p == "/repos/homepage/config/raw/agents/marketing/prompt.md":
+	case p == "/repos/garrison/config/raw/agents/marketing/prompt.md":
 		io.WriteString(w, "You make media.\n")
-	case p == "/repos/homepage/config/raw/agents/broken/agent.yaml":
+	case p == "/repos/garrison/config/raw/agents/operator/agent.yaml":
+		io.WriteString(w, "tools: all\n")
+	case p == "/repos/garrison/config/raw/agents/operator/prompt.md":
+		io.WriteString(w, "You operate.\n")
+	case p == "/repos/garrison/config/raw/agents/broken/agent.yaml":
 		io.WriteString(w, "tools: [rm_rf]\n")
-	case p == "/repos/homepage/config/raw/agents/broken/prompt.md":
+	case p == "/repos/garrison/config/raw/agents/broken/prompt.md":
 		io.WriteString(w, "x\n")
-	case p == "/repos/homepage/config/contents/agents/marketing/skills/thumbnail":
+	case p == "/repos/homepage/config/raw/grants.yaml":
+		io.WriteString(w, "- {agent: marketing, repo: site, level: propose}\n")
+	case p == "/repos/garrison/config/contents/agents/marketing/skills/thumbnail":
 		io.WriteString(w, `[{"name":"SKILL.md","type":"file"},{"name":"frame.svg","type":"file"}]`)
-	case p == "/repos/homepage/config/raw/agents/marketing/skills/thumbnail/SKILL.md":
+	case p == "/repos/garrison/config/raw/agents/marketing/skills/thumbnail/SKILL.md":
 		io.WriteString(w, "---\nname: thumbnail\ndescription: Make a thumbnail.\n---\nUse frame.svg.\n")
-	case p == "/repos/homepage/config/raw/agents/marketing/skills/thumbnail/frame.svg":
+	case p == "/repos/garrison/config/raw/agents/marketing/skills/thumbnail/frame.svg":
 		io.WriteString(w, "<svg/>")
 	default:
 		http.NotFound(w, r)
@@ -532,8 +539,8 @@ func TestOpenWebUISync(t *testing.T) {
 	// Agents on public repos are for everyone; homepage's channel is for its
 	// group, garrison's for everyone; the team channel of before is gone.
 	gid := "g" + GroupPrefix + "homepage"
-	if models["homepage/marketing"].Meta[AccessMarker] != "everyone" || models["garrison/operator"].Meta[AccessMarker] != "everyone" {
-		t.Errorf("access: %v %v", models["homepage/marketing"].Meta, models["garrison/operator"].Meta)
+	if models["garrison/marketing"].Meta[AccessMarker] != "everyone" || models["garrison/operator"].Meta[AccessMarker] != "everyone" {
+		t.Errorf("access: %v %v", models["garrison/marketing"].Meta, models["garrison/operator"].Meta)
 	}
 	for _, c := range channels {
 		grants, _ := json.Marshal(c.AccessGrants)
@@ -554,19 +561,23 @@ func TestOpenWebUISync(t *testing.T) {
 	if strings.Join(groupUsers[gid], ",") != "u-alice" {
 		t.Errorf("homepage's group: %v (alice is in it; bob has not signed in to Open WebUI; carol is not in homepage)", groupUsers[gid])
 	}
-	// garrison has no agents folder: its operator. homepage has its own agents,
-	// of which the broken one is left out.
+	// The models are garrison's agents, by their names, but the broken one.
+	// They work in every namespace: the catalog has them in homepage too,
+	// with homepage's grants.
 	sys, ok := models["garrison/operator"]
-	if !ok || sys.Name != "garrison/operator" || models["homepage/marketing"].Name != "homepage/marketing" {
+	if !ok || sys.Name != "operator" || models["garrison/marketing"].Name != "marketing" {
 		t.Fatalf("models = %v", models)
 	}
-	for _, id := range []string{"homepage/operator", "homepage/broken"} {
+	for _, id := range []string{"homepage/operator", "homepage/marketing", "garrison/broken"} {
 		if _, ok := models[id]; ok {
 			t.Errorf("%s was added", id)
 		}
 	}
-	if _, ok := catalog.Get("homepage/marketing"); !ok {
-		t.Error("the catalog lacks homepage/marketing")
+	if a, ok := catalog.Get("homepage/marketing"); !ok || len(a.Grants) != 1 {
+		t.Errorf("the catalog lacks homepage/marketing with its grant: %+v", a)
+	}
+	if a, ok := catalog.Get("garrison/marketing"); !ok || len(a.Grants) != 0 {
+		t.Errorf("garrison/marketing: %+v", a)
 	}
 	if _, ok := models["homepage/old"]; ok {
 		t.Error("the model of a removed agent folder was kept")
@@ -585,8 +596,8 @@ func TestOpenWebUISync(t *testing.T) {
 	if sys.BaseModelID != nil || len(sys.AccessGrants) != 1 || sys.Meta[AgentMarker] != "garrison/operator" {
 		t.Errorf("garrison/operator = %+v", sys)
 	}
-	if m := models["homepage/marketing"]; m.BaseModelID != nil || m.Meta["description"] != "Media" {
-		t.Errorf("homepage/marketing = %+v", m)
+	if m := models["garrison/marketing"]; m.BaseModelID != nil || m.Meta["description"] != "Media" {
+		t.Errorf("garrison/marketing = %+v", m)
 	}
 	if _, ok := models["gpt-oss:120b"]; ok {
 		t.Error("an entry for the LLM was made")
@@ -624,7 +635,7 @@ func TestOpenWebUISync(t *testing.T) {
 	pinnedHowTos := func() int {
 		n := 0
 		for _, m := range messages[sysID] {
-			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@garrison/operator") {
+			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@operator ") && strings.Contains(m.Content, "- **marketing**: Media") {
 				n++
 			}
 		}
@@ -723,8 +734,8 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	// carol is not in homepage: she may use its agents on public repos, not
 	// those on private ones or kept to its people.
 	m.Agents.Set([]agents.Agent{
-		{Namespace: "homepage", Name: "desk", Tools: []string{"read_file"}, Repos: []string{"site"}},
-		{Namespace: "homepage", Name: "keeper", Tools: []string{"read_file"}, Repos: []string{"secret"}},
+		{Namespace: "homepage", Name: "desk", Tools: []string{"read_file"}, Grants: []agents.Grant{{Repo: "site", Level: agents.LevelPropose}}},
+		{Namespace: "homepage", Name: "keeper", Tools: []string{"read_file"}, Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
 		{Namespace: "homepage", Name: "inner", Tools: []string{"read_file"}, Visible: agents.VisibleMembers},
 	})
 	for agent, want := range map[string]int{"desk": http.StatusOK, "keeper": http.StatusForbidden, "inner": http.StatusForbidden} {
@@ -771,7 +782,10 @@ func TestCatalogReadsUnknownAgentsFromGitea(t *testing.T) {
 	if _, ok := c.Lookup(context.Background(), "garrison/operator"); !ok {
 		t.Error("garrison/operator before any sync")
 	}
-	for _, id := range []string{"homepage/broken", "homepage/nobody", "../x", "nobody"} {
+	if a, ok := c.Lookup(context.Background(), "garrison/marketing"); !ok || len(a.Grants) != 0 {
+		t.Errorf("garrison/marketing before any sync: %+v %v", a, ok)
+	}
+	for _, id := range []string{"homepage/broken", "garrison/broken", "homepage/nobody", "../x", "nobody"} {
 		if _, ok := c.Lookup(context.Background(), id); ok {
 			t.Errorf("%s found", id)
 		}

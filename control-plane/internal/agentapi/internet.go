@@ -121,7 +121,7 @@ func (p *InternetProxy) refuse(ctx context.Context, c sandbox.Caller, target str
 		return "addresses only with internet: all; use the host's name"
 	}
 	if !internet.Allows(host) {
-		return fmt.Sprintf("%s reaches %s; ask an admin of %s to add %s to internet in its agent.yaml", c.Agent, internet, a.Namespace, host)
+		return fmt.Sprintf("ask a root admin to add %s to %s's internet in garrison/config; it reaches %s", host, a.Name, internet)
 	}
 	return ""
 }

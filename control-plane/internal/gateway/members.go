@@ -456,14 +456,14 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 		// templates/namespace-config: members.yaml is its header.
 		files := templates.Files(templates.Namespace)
 		files[MembersFile] += string(data)
-		if err := m.createConfig(ctx, ns, "Who may change this namespace, and its agents", "First admins: the namespace's creators; the operator agent", files); err != nil {
+		if err := m.createConfig(ctx, ns, "Who may change this namespace, its apps, and what the agents may do here", "First admins: the namespace's creators", files); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made, admins %v", ns, owners)
 		if m.Events != nil {
 			m.Events.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK,
 				Namespace: ns, Audience: events.AudienceMembers, Actor: owners[0],
-				Title:  fmt.Sprintf("The namespace %s is set up: its config repo, with %s as its first admin, and its operator", ns, strings.Join(owners, ", ")),
+				Title:  fmt.Sprintf("The namespace %s is set up: its config repo, with %s as its first admin", ns, strings.Join(owners, ", ")),
 				Detail: "Its channel and its build account follow in moments. Make its repos, and propose its apps in stacks/ of its config.",
 				Key:    "namespace:" + ns + ":" + time.Now().UTC().Format(time.RFC3339)})
 		}
@@ -494,8 +494,9 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 	return m.approvals(ctx, ns, &roster, roots)
 }
 
-// platform keeps garrison/config, which holds the garrison namespace's agents.
-// It has no members.yaml: root admins approve and merge its changes.
+// platform keeps garrison/config, which holds the agents, for every
+// namespace. It has no members.yaml: root admins approve and merge its
+// changes.
 func (m *Members) platform(ctx context.Context, roots []string) error {
 	ns := PlatformNamespace
 	teams, err := m.teams(ctx, ns, map[string]string{RootTeam: "admin"})
@@ -503,9 +504,7 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 		return err
 	}
 	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
-		files := agents.OperatorFiles()
-		maps.Copy(files, agents.CommanderFiles())
-		if err := m.createConfig(ctx, ns, "The agents of the garrison namespace; root admins approve changes", "The operator and the commander", files); err != nil {
+		if err := m.createConfig(ctx, ns, "The home cloud's agents, for every namespace; root admins approve changes", "The operator and the commander", agents.PlatformFiles()); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made", ns)

@@ -52,7 +52,7 @@ func TestModelChecks(t *testing.T) {
 		{Name: "retired", Model: "openrouter/openai/gpt-5-mini"},
 		{Name: "typo", Model: "openrouter/anthropic/claude-sonet"},
 	}
-	got, err := g.modelProblems(ctx, "todo", "abc", list)
+	got, err := g.modelProblems(ctx, "garrison", "abc", list)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +68,11 @@ func TestModelChecks(t *testing.T) {
 		!strings.Contains(out, "- openrouter/anthropic/claude-sonnet-5.5\n") || !strings.Contains(out, "not enabled (a root admin may enable one in llm/models.yaml): ollama-cloud/qwen3-coder") ||
 		!strings.Contains(out, "Retired; agents naming one use the default: openrouter/openai/gpt-5-mini (since 2026-11-10)") {
 		t.Errorf("list_models: %v\n%s", err, out)
+	}
+
+	// The agents are garrison's: a namespace's change is not refused for them.
+	if got, _ := g.modelProblems(ctx, "todo", "abc", list); len(got) != 0 {
+		t.Errorf("todo: %v", got)
 	}
 
 	// A broken model list refuses garrison's own change, not the namespaces'.

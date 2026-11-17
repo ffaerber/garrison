@@ -15,13 +15,13 @@ import (
 // it may hand work to, for this person, here.
 var findSpec = toolSpec{
 	Name:        "find_agents",
-	Description: "Lists the agents you may hand work to with ask_agent, for this person and here: what each does, its tools, skills, repos and rights. Call it when you do not know which agent fits.",
+	Description: "Lists the agents you may hand work to with ask_agent, for this person and here, as they work in your namespace: what each does, its tools, skills and rights there. Call it when you do not know which agent fits.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			// Not "namespace": agents are told to pass their own to every
-			// tool that takes one, which would hide all the others.
-			"in_namespace": map[string]any{"type": "string", "description": "only the agents of this namespace; leave it out to see all, which is what you usually want"},
+			// tool that takes one.
+			"in_namespace": map[string]any{"type": "string", "description": "the agents as they work in another namespace, with its rights there; leave it out for the one you work in, which is what you usually want"},
 		},
 		"additionalProperties": false,
 	},
@@ -52,9 +52,13 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 			fmt.Fprintf(&b, "This channel belongs to the namespace %s.\n\n", info.Namespace)
 		}
 	}
+	ns := asker.Namespace
+	if in.Namespace != "" {
+		ns = in.Namespace
+	}
 	n := 0
 	for _, a := range list {
-		if !asker.MayAsk(a.ID()) || slices.Contains(c.Run.Chain, a.ID()) || (in.Namespace != "" && a.Namespace != in.Namespace) {
+		if a.Namespace != ns || !asker.MayAsk(a.ID()) || inChain(c.Run.Chain, a.Name) {
 			continue
 		}
 		if why, err := s.mayAnswer(ctx, c, a); err != nil {
@@ -70,8 +74,16 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 		if in.Namespace != "" {
 			b.WriteString(" Try without in_namespace.")
 		}
+	} else if ns != asker.Namespace {
+		fmt.Fprintf(&b, "\nTo ask one of these working in %s, name it as %s/<agent> in ask_agent.", ns, ns)
 	}
 	return strings.TrimSpace(b.String()), false
+}
+
+// inChain tells whether the agent name is part of a run already, in any
+// namespace.
+func inChain(chain []string, name string) bool {
+	return slices.ContainsFunc(chain, func(id string) bool { return agents.NameOf(id) == name })
 }
 
 // describe writes what an agent is for, to choose it by.
@@ -80,7 +92,7 @@ func describe(b *strings.Builder, a agents.Agent) {
 	if desc == "" {
 		desc = "(no description)"
 	}
-	fmt.Fprintf(b, "- %s: %s\n", a.ID(), desc)
+	fmt.Fprintf(b, "- %s: %s\n", a.Name, desc)
 	if len(a.Tools) > 0 {
 		fmt.Fprintf(b, "  tools: %s\n", strings.Join(a.Tools, ", "))
 	}
@@ -91,9 +103,6 @@ func describe(b *strings.Builder, a agents.Agent) {
 		}
 		fmt.Fprintf(b, "  skills: %s\n", strings.Join(skills, "; "))
 	}
-	if len(a.Repos) > 0 {
-		fmt.Fprintf(b, "  works on: %s\n", strings.Join(a.Repos, ", "))
-	}
 	if len(a.Asks) > 0 {
 		fmt.Fprintf(b, "  asks: %s\n", strings.Join(a.Asks, ", "))
 	}
@@ -102,7 +111,7 @@ func describe(b *strings.Builder, a agents.Agent) {
 		if g.Branch != "" {
 			where += " into " + g.Branch
 		}
-		fmt.Fprintf(b, "  may %s on %s, for %s\n", g.Level, where, grantFor(g.For))
+		fmt.Fprintf(b, "  may %s on %s/%s, for %s\n", g.Level, a.Namespace, where, grantFor(g.For))
 	}
 }
 

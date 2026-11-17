@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"garrison/control-plane/internal/agents"
 )
 
 // Post is an answer of an agent that no person's message is waiting for:
@@ -81,7 +83,7 @@ func (o *OpenWebUI) Post(ctx context.Context, p Post) (Posted, error) {
 		}
 		text = fmt.Sprintf("<@U:%s|%s> %s", out.User, p.Mention, text)
 	}
-	body := map[string]string{"content": "**" + p.Agent + "**\n\n" + text}
+	body := map[string]string{"content": "**" + agents.NameOf(p.Agent) + "**\n\n" + text}
 	if p.Parent != "" {
 		body["parent_id"] = p.Parent
 	}

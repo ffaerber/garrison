@@ -23,9 +23,10 @@ func ToolNames() []string {
 	return out
 }
 
-// Catalog holds every namespace's agents, as the Open WebUI sync last read
-// them, for the MCP endpoints to look up. An agent it does not know yet, e.g.
-// before the first sync, is read from Gitea when it is asked for.
+// Catalog holds the agents as they work in every namespace, as the Open
+// WebUI sync last read them, for the MCP endpoints to look up. An agent it
+// does not know yet, e.g. before the first sync, is read from Gitea when it
+// is asked for.
 type Catalog struct {
 	Gitea *Gitea
 
@@ -44,7 +45,7 @@ func (c *Catalog) Set(list []agents.Agent) {
 	c.mu.Unlock()
 }
 
-// Get looks an agent up by its ID, <namespace>/<agent>.
+// Get looks an agent up by its instance, <namespace>/<agent>.
 func (c *Catalog) Get(id string) (agents.Agent, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -118,8 +119,11 @@ func (f configFiles) Read(ctx context.Context, path string) (string, error) {
 	return out, err
 }
 
-// Agents reads a namespace's agents from its config repo at ref. A
-// namespace that does not exist has none.
+// Agents reads the agents as they work in a namespace: garrison's agents,
+// with the grants and routines of the namespace's config repo at ref.
+// garrison's agents are read at ref for garrison's own pull requests, which
+// may change them, and on main for the others. A namespace that does not
+// exist has none.
 func (g *Gitea) Agents(ctx context.Context, ns, ref string) ([]agents.Agent, []string, error) {
 	if err := validOrg(ns); err != nil {
 		return nil, nil, err
@@ -129,5 +133,29 @@ func (g *Gitea) Agents(ctx context.Context, ns, ref string) ([]agents.Agent, []s
 	} else if err != nil {
 		return nil, nil, err
 	}
-	return agents.Load(ctx, configFiles{g: g, ns: ns, ref: ref}, ns, ToolNames())
+	platformRef := "main"
+	if ns == PlatformNamespace {
+		platformRef = ref
+	}
+	return agents.Load(ctx, configFiles{g: g, ns: PlatformNamespace, ref: platformRef}, configFiles{g: g, ns: ns, ref: ref}, ns, ToolNames())
+}
+
+// Definitions reads garrison's agents on main, as they work in garrison.
+func (g *Gitea) Definitions(ctx context.Context) ([]agents.Agent, error) {
+	defs, _, err := agents.Definitions(ctx, configFiles{g: g, ns: PlatformNamespace, ref: "main"}, ToolNames())
+	return defs, err
+}
+
+// AgentsWith is Agents on main with garrison's agents already read (defs),
+// for going through every namespace.
+func (g *Gitea) AgentsWith(ctx context.Context, defs []agents.Agent, ns string) ([]agents.Agent, error) {
+	if ns == PlatformNamespace {
+		list, _, err := g.Agents(ctx, ns, "main")
+		return list, err
+	}
+	grants, routines, _, err := agents.Bindings(ctx, configFiles{g: g, ns: ns, ref: "main"}, defs)
+	if err != nil {
+		return nil, err
+	}
+	return agents.Bind(defs, ns, grants, routines), nil
 }

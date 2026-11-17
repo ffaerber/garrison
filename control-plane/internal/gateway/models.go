@@ -70,8 +70,10 @@ func (g *Gitea) modelProblems(ctx context.Context, ns, ref string, list []agents
 	if ns == models.Namespace && len(l.Problems) > 0 {
 		return l.Problems, nil
 	}
-	if len(l.Problems) > 0 {
-		return nil, nil // garrison's to fix; the agents fall back to the default meanwhile
+	if len(l.Problems) > 0 || ns != models.Namespace {
+		// garrison's to fix, where the agents are; they fall back to the
+		// default meanwhile.
+		return nil, nil
 	}
 	var out []string
 	for _, a := range list {

@@ -55,16 +55,13 @@ func TestAgentThatTurnsPrivateLosesItsAccess(t *testing.T) {
 	}
 }
 
-// In the chat, garrison's commander goes by "commander", the same agent in
-// every channel; every other agent by namespace/name, as each namespace
-// has an operator of its own. The model's ID stays namespace/name.
-func TestTheCommanderGoesByItsNameAlone(t *testing.T) {
+// In the chat, an agent goes by its name: it is the same agent in every
+// channel. The model's ID is garrison/<name>.
+func TestAnAgentGoesByItsNameAlone(t *testing.T) {
 	o := &OpenWebUI{}
 	for _, c := range []struct{ ns, name, id, shown string }{
 		{"garrison", "commander", "garrison/commander", "commander"},
-		{"garrison", "operator", "garrison/operator", "garrison/operator"},
-		{"lab", "commander", "lab/commander", "lab/commander"},
-		{"lab", "operator", "lab/operator", "lab/operator"},
+		{"garrison", "operator", "garrison/operator", "operator"},
 	} {
 		m := o.want(agents.Agent{Namespace: c.ns, Name: c.name}, nil, false)
 		if m.ID != c.id || m.Name != c.shown {

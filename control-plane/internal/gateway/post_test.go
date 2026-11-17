@@ -55,7 +55,7 @@ func TestPostsMentionAndThreads(t *testing.T) {
 	if err != nil || p.ID != "m-9" || p.Channel != "ch-1" || p.User != "u-bob" {
 		t.Fatalf("posted %+v %v", p, err)
 	}
-	if got := posted[0]["content"]; got != "**homepage/dev**\n\n<@U:u-bob|bob> Blue or green?" || posted[0]["parent_id"] != "" {
+	if got := posted[0]["content"]; got != "**dev**\n\n<@U:u-bob|bob> Blue or green?" || posted[0]["parent_id"] != "" {
 		t.Errorf("content %q", got)
 	}
 	if _, err := o.Post(ctx, Post{Agent: "homepage/dev", Channel: "ch-1", Parent: "m-1", Text: "Done."}); err != nil || posted[1]["parent_id"] != "m-1" {

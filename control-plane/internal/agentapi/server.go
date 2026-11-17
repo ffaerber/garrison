@@ -80,8 +80,9 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// models lists every agent. Everyone signed in may see every agent, and
-// Open WebUI may ask without a person, so this needs no token.
+// models lists every agent: garrison's, which work in every namespace.
+// Everyone signed in may see every agent, and Open WebUI may ask without a
+// person, so this needs no token.
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Agents.All(r.Context())
 	if err != nil {
@@ -91,7 +92,9 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]any, 0, len(list))
 	for _, a := range list {
-		data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "garrison", "name": a.DisplayName()})
+		if a.Namespace == agents.PlatformNamespace {
+			data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "garrison", "name": a.DisplayName()})
+		}
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})
 }
@@ -136,7 +139,14 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	agent, found, err := s.Agents.Get(r.Context(), req.Model)
+	chat := r.Header.Get(ChatHeader)
+	id, err := s.placed(r.Context(), req.Model, chat)
+	if err != nil {
+		log.Printf("agents: %s: %s: %v", person.Name, req.Model, err)
+		apiError(w, http.StatusBadGateway, "cannot tell which namespace this channel belongs to")
+		return
+	}
+	agent, found, err := s.Agents.Get(r.Context(), id)
 	if err != nil {
 		log.Printf("agents: %s: %s: %v", person.Name, req.Model, err)
 		apiError(w, http.StatusBadGateway, "cannot read the agent")
@@ -154,11 +164,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok {
 			log.Printf("agents: %s: %s: refused: not in %s", person.Name, agent.ID(), agent.Namespace)
-			apiError(w, http.StatusForbidden, fmt.Sprintf("%s is for the people of %s; ask one of its admins to add you to members.yaml, or ask an agent that serves everyone", agent.ID(), agent.Namespace))
+			apiError(w, http.StatusForbidden, fmt.Sprintf("in %s, %s is for the people of %s; ask one of its admins to add you to members.yaml", agent.Namespace, agent.Name, agent.Namespace))
 			return
 		}
 	}
-	chat := r.Header.Get(ChatHeader)
 	if why, err := s.privateHere(r.Context(), agent, chat); err != nil {
 		apiError(w, http.StatusBadGateway, err.Error())
 		return
@@ -185,6 +194,30 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("agents: %s: %s: chat %s: %d tool calls", person.Name, agent.ID(), chat, rounds)
 	out.finish()
+}
+
+// placed is the agent a chat asks for (model: garrison's agent, as Open
+// WebUI lists them) as it works there: its instance in the namespace of the
+// chat's channel, and garrison's in a private chat. A model naming an
+// instance in another namespace is taken as it is.
+func (s *Server) placed(ctx context.Context, model, chat string) (string, error) {
+	ns, name, ok := strings.Cut(model, "/")
+	if !ok {
+		ns, name = agents.PlatformNamespace, model
+	}
+	if ns != agents.PlatformNamespace {
+		return model, nil
+	}
+	if id, inChannel := strings.CutPrefix(chat, "channel:"); inChannel && s.Poster != nil {
+		info, err := s.Poster.Channel(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if info.Namespace != "" {
+			ns = info.Namespace
+		}
+	}
+	return ns + "/" + name, nil
 }
 
 func (s *Server) turnTimeout() time.Duration {

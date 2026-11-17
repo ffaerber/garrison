@@ -1,9 +1,9 @@
 package gateway
 
 // Agents' own accounts and grants. By default an agent acts as the person
-// talking to it. A namespace can give an agent rights of its own in
-// agent.yaml (grants), used only for requests of the groups each grant
-// names, with an account of its own in Gitea. See docs/agents.md.
+// talking to it. A namespace can give an agent rights of its own there in
+// grants.yaml of its config, used only for requests of the groups each
+// grant names, with an account of its own in Gitea. See docs/agents.md.
 
 import (
 	"context"
@@ -124,6 +124,26 @@ type refused struct{ msg string }
 
 func (r refused) Error() string { return "not allowed: " + r.msg }
 
+// instance is the agent as it works in org, with the grants org gives it:
+// agent itself if it works there, else its instance in org, for a person
+// who asked elsewhere (e.g. in a private chat). A run without a person
+// keeps to its own namespace.
+func (t *Tools) instance(ctx context.Context, p Person, agent *agents.Agent, org string) (*agents.Agent, error) {
+	if agent == nil || agent.Namespace == org || p.Unattended || validOrg(org) != nil {
+		return agent, nil
+	}
+	list, _, err := t.Gitea.Agents(ctx, org, "main")
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		if list[i].Name == agent.Name {
+			return &list[i], nil
+		}
+	}
+	return agent, nil
+}
+
 // proposer decides as whom a proposal to org/repo is made: the person, if
 // they may write to it; else the agent's account, if one of its grants
 // lets it propose there for them.
@@ -152,7 +172,7 @@ func (t *Tools) proposer(ctx context.Context, p Person, agent *agents.Agent, org
 	if p.Unattended {
 		return "", false, refused{fmt.Sprintf("this run has no person, and %s has no grant with unattended: true to propose in %s/%s", agentID(agent), org, repo)}
 	}
-	return "", false, refused{fmt.Sprintf("%s may not write to %s/%s, and %s has no grant that lets it propose there for them. Say so; an admin of %s can add a grant in its agent.yaml", p.Name, org, repo, agentID(agent), org)}
+	return "", false, refused{fmt.Sprintf("%s may not write to %s/%s, and %s has no grant that lets it propose there for them. Say so; an admin of %s can add a grant in %s of %s/config", p.Name, org, repo, agentID(agent), org, agents.GrantsFile, org)}
 }
 
 // newBranch is the branch of a new proposal: change/<person>-<ms> when made
@@ -247,8 +267,8 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	}
 	grant, ok := agent.GrantFor(repo, pr.Base.Ref, agents.LevelMerge, role, p.Unattended)
 	if !ok {
-		return "", refused{fmt.Sprintf("%s has no grant to merge into %s of %s/%s for %s (role: %s%s). Say so: a person allowed to merges it in Gitea, or an admin of %s adds a grant in its agent.yaml",
-			agent.ID(), pr.Base.Ref, org, repo, p.asker(), roleName(role), map[bool]string{true: ", with nobody watching"}[p.Unattended], org)}
+		return "", refused{fmt.Sprintf("%s has no grant to merge into %s of %s/%s for %s (role: %s%s). Say so: a person allowed to merges it in Gitea, or an admin of %s adds a grant in %s of %s/config",
+			agent.ID(), pr.Base.Ref, org, repo, p.asker(), roleName(role), map[bool]string{true: ", with nobody watching"}[p.Unattended], org, agents.GrantsFile, org)}
 	}
 	if agents.Rank(grant.Level) < agents.Rank(agents.LevelAutonomous) && slices.Contains(agents.Deploying, pr.Base.Ref) {
 		return "", refused{"a merge into " + pr.Base.Ref + " deploys, which needs autonomous"}

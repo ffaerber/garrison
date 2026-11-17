@@ -107,15 +107,25 @@ func TestAnAgentAsksAnother(t *testing.T) {
 	}
 }
 
+// The commander works in the namespace it is asked in: it finds the agents
+// as they work there, with that namespace's grants, and hands work to them.
 func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	s, _, _ := setup(t)
-	s.Agents = fakeAgents{
-		{Namespace: "garrison", Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}},
-		{Namespace: "homepage", Name: "media", Description: "Makes screenshots", Prompt: "Shoot.", Tools: []string{"screenshot"}, Repos: []string{"site"},
-			Skills: []agents.Skill{{Name: "thumbs", Description: "thumbnails"}},
-			Grants: []agents.Grant{{Repo: "site", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers}}},
-		{Namespace: "todo", Name: "operator", Description: "Runs todo", Prompt: "Run."},
+	commander := agents.Agent{Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}}
+	media := agents.Agent{Name: "media", Description: "Makes screenshots", Prompt: "Shoot.", Tools: []string{"screenshot"},
+		Skills: []agents.Skill{{Name: "thumbs", Description: "thumbnails"}}}
+	operator := agents.Agent{Name: "operator", Description: "Runs things", Prompt: "Run."}
+	var list fakeAgents
+	for _, ns := range []string{"garrison", "homepage", "todo"} {
+		for _, a := range []agents.Agent{commander, media, operator} {
+			a.Namespace = ns
+			if ns == "homepage" && a.Name == "media" {
+				a.Grants = []agents.Grant{{Repo: "site", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers}}
+			}
+			list = append(list, a)
+		}
 	}
+	s.Agents = list
 	feed := &events.Memory{}
 	s.Events = feed
 	withSandboxes(t, s)
@@ -123,17 +133,17 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		text, _ := s.findAgents(context.Background(), c, json.RawMessage(args))
 		return text
 	}
-	c := sandbox.Caller{Agent: "garrison/commander", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"garrison/commander"}}}
+	c := sandbox.Caller{Agent: "homepage/commander", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/commander"}}}
 	got := find(c, `{}`)
-	for _, want := range []string{"- homepage/media: Makes screenshots", "tools: screenshot", "skills: thumbs (thumbnails)", "works on: site", "may autonomous on site into dev, for members", "- todo/operator: Runs todo"} {
+	for _, want := range []string{"- media: Makes screenshots", "tools: screenshot", "skills: thumbs (thumbnails)", "may autonomous on homepage/site into dev, for members", "- operator: Runs things"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("find_agents lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "garrison/commander") {
-		t.Errorf("the commander lists itself:\n%s", got)
+	if strings.Contains(got, "- commander") || strings.Contains(got, "name it as") {
+		t.Errorf("the commander lists itself, or another namespace:\n%s", got)
 	}
-	if got := find(c, `{"in_namespace":"todo"}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
+	if got := find(c, `{"in_namespace":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- media") || !strings.Contains(got, "name it as todo/<agent>") {
 		t.Errorf("by namespace:\n%s", got)
 	}
 	if got := find(c, `{"in_namespace":"nope"}`); !strings.Contains(got, "no agent you may ask") {
@@ -141,14 +151,15 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	}
 	// An agent with a list finds only those on it.
 	lead := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice"}
-	s.Agents = append(s.Agents.(fakeAgents), agents.Agent{Namespace: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"todo/operator"}})
-	if got := find(lead, `{}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
+	s.Agents = append(s.Agents.(fakeAgents), agents.Agent{Namespace: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"operator"}})
+	if got := find(lead, `{}`); strings.Contains(got, "- media") || !strings.Contains(got, "- operator") {
 		t.Errorf("the lead finds:\n%s", got)
 	}
 
-	// It asks any agent, and the feed has the hand-off and its end.
-	_, content := chatIn(t, s, "chat-1", "garrison/commander", Message{Role: "user",
-		Content: `call ask_agent {"agent":"homepage/media","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
+	// It asks any agent by its name, which works where it does, and the
+	// feed has the hand-off and its end.
+	_, content := chatIn(t, s, "chat-1", "homepage/commander", Message{Role: "user",
+		Content: `call ask_agent {"agent":"media","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
 	if !strings.Contains(content, "homepage/media answers:") {
 		t.Fatalf("content %q", content)
 	}
@@ -159,11 +170,17 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		}
 	}
 	if ask == nil || ask.Status != events.StatusOK || ask.Namespace != "homepage" || ask.Agent != "homepage/media" || ask.Actor != "alice" ||
-		ask.StartedBy != "agent garrison/commander" || !strings.Contains(ask.Title, "garrison/commander asked homepage/media, for alice: Screenshot the homepage.") {
+		ask.StartedBy != "agent homepage/commander" || !strings.Contains(ask.Title, "homepage/commander asked homepage/media, for alice: Screenshot the homepage.") {
 		t.Errorf("feed: %+v", ask)
 	}
-	if _, content = chatIn(t, s, "chat-1", "garrison/commander", Message{Role: "user", Content: `call ask_agent {"agent":"garrison/commander","task":"x","done_when":"y"}`}); !strings.Contains(content, "you do not ask yourself") {
-		t.Errorf("asked itself: %q", content)
+	// Another namespace's, by <namespace>/<agent>.
+	if _, content = chatIn(t, s, "chat-2", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"todo/operator","task":"x","done_when":"y"}`}); !strings.Contains(content, "todo/operator answers:") {
+		t.Errorf("asked todo's: %q", content)
+	}
+	for _, self := range []string{"commander", "garrison/commander", "todo/commander"} {
+		if _, content = chatIn(t, s, "chat-1", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"` + self + `","task":"x","done_when":"y"}`}); !strings.Contains(content, "you do not ask yourself") {
+			t.Errorf("asked itself as %s: %q", self, content)
+		}
 	}
 }
 
@@ -301,8 +318,8 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 		"homepage": {Namespace: "homepage", Members: true}, "garrison": {Namespace: "garrison"}, "shop": {Namespace: "shop", Members: true},
 	}}
 	s.Agents = fakeAgents{
-		{Namespace: "homepage", Name: "keeper", Prompt: "Keep.", Repos: []string{"secret"}},
-		{Namespace: "homepage", Name: "desk", Prompt: "Desk.", Repos: []string{"site"}},
+		{Namespace: "homepage", Name: "keeper", Prompt: "Keep.", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
+		{Namespace: "homepage", Name: "desk", Prompt: "Desk.", Grants: []agents.Grant{{Repo: "site", Level: agents.LevelPropose}}},
 	}
 	withSandboxes(t, s)
 	for _, c := range []struct {

@@ -48,43 +48,40 @@ func skill(name, desc string) string {
 	return "---\nname: " + name + "\ndescription: " + desc + "\nlicense: MIT\n---\n# " + name + "\nDo it well.\n"
 }
 
-func TestNoFolderMeansTheOperator(t *testing.T) {
-	got, problems, err := Load(context.Background(), mapFiles{"members.yaml": "admins: [alice]\n"}, "homepage", tools)
-	if err != nil || len(problems) > 0 || len(got) != 1 {
-		t.Fatalf("got %v %v %v", got, problems, err)
+// platformOnly loads garrison's agents from files, as they work in garrison.
+func platformOnly(t *testing.T, files mapFiles) ([]Agent, []string) {
+	t.Helper()
+	got, problems, err := Load(context.Background(), files, files, PlatformNamespace, tools)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got[0].ID() != "homepage/operator" || !slices.Equal(got[0].Tools, tools) || got[0].Prompt != OperatorPrompt {
+	return got, problems
+}
+
+func TestNoFolderMeansTheOperator(t *testing.T) {
+	got, problems := platformOnly(t, mapFiles{"llm/README.md": "models\n"})
+	if len(problems) > 0 || len(got) != 1 {
+		t.Fatalf("got %v %v", got, problems)
+	}
+	if got[0].ID() != "garrison/operator" || !slices.Equal(got[0].Tools, tools) || got[0].Prompt != OperatorPrompt {
 		t.Errorf("operator = %+v", got[0])
 	}
 }
 
-func TestTheWrittenOperatorLoads(t *testing.T) {
+func TestTheWrittenAgentsLoad(t *testing.T) {
 	files := mapFiles{}
-	for p, c := range OperatorFiles() {
+	for p, c := range PlatformFiles() {
 		files[p] = c
 	}
-	got, problems, err := Load(context.Background(), files, "homepage", tools)
-	if err != nil || len(problems) > 0 || len(got) != 1 {
-		t.Fatalf("got %v %v %v", got, problems, err)
+	got, problems := platformOnly(t, files)
+	if len(problems) > 0 || len(got) != 2 {
+		t.Fatalf("got %v %v", got, problems)
 	}
-	if want := Operator("homepage", tools); got[0].Prompt != want.Prompt || !slices.Equal(got[0].Tools, want.Tools) {
-		t.Errorf("written operator %+v differs from the built-in one", got[0])
+	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == OperatorName })
+	if want := Operator(PlatformNamespace, tools); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
+		t.Errorf("written operator differs from the built-in one: %+v", got)
 	}
-}
-
-func TestTheCommanderLoadsInSystem(t *testing.T) {
-	files := mapFiles{}
-	for p, c := range OperatorFiles() {
-		files[p] = c
-	}
-	for p, c := range CommanderFiles() {
-		files[p] = c
-	}
-	got, problems, err := Load(context.Background(), files, PlatformNamespace, tools)
-	if err != nil || len(problems) > 0 || len(got) != 2 {
-		t.Fatalf("got %v %v %v", got, problems, err)
-	}
-	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == CommanderName })
+	i = slices.IndexFunc(got, func(a Agent) bool { return a.Name == CommanderName })
 	if i < 0 {
 		t.Fatalf("no commander in %+v", got)
 	}
@@ -92,7 +89,7 @@ func TestTheCommanderLoadsInSystem(t *testing.T) {
 	if !c.AsksAny() || len(c.Tools) != 0 || c.Prompt != CommanderPrompt || c.Description == "" {
 		t.Errorf("commander = %+v", c)
 	}
-	if !c.MayAsk("todo/developer") || c.MayAsk("garrison/commander") {
+	if !c.MayAsk("todo/developer") || !c.MayAsk("operator") || c.MayAsk("garrison/commander") || c.MayAsk("lab/commander") {
 		t.Errorf("the commander may ask others, never itself")
 	}
 	if !strings.Contains(files["agents/commander/agent.yaml"], "agents: any") {
@@ -100,28 +97,85 @@ func TestTheCommanderLoadsInSystem(t *testing.T) {
 	}
 }
 
-func TestAnyIsForSystemOnly(t *testing.T) {
-	for _, c := range []struct {
-		ns, yaml, want string
-	}{
-		{"todo", "agents: any\n", "only for the agents of garrison"},
-		{"todo", "agents: [any]\n", "only for the agents of garrison"},
-		{PlatformNamespace, "agents: [any, todo/developer]\n", "stands alone"},
-		{PlatformNamespace, "agents: any\n", ""},
-	} {
-		files := mapFiles{"agents/x/agent.yaml": c.yaml, "agents/x/prompt.md": "p"}
-		got, problems, err := Load(context.Background(), files, c.ns, tools)
-		if err != nil {
-			t.Fatal(err)
+// garrison's agents work in every namespace, each with that namespace's
+// grants and routines, and nothing of another's.
+func TestTheAgentsWorkInEveryNamespace(t *testing.T) {
+	platform := mapFiles{
+		"agents/operator/agent.yaml": "tools: all\n", "agents/operator/prompt.md": "Operate.\n",
+		"agents/media/agent.yaml": "tools: [read_file]\n", "agents/media/prompt.md": "Shoot.\n",
+		"grants.yaml": "- {agent: operator, repo: control-plane, level: propose}\n",
+	}
+	lab := mapFiles{
+		"members.yaml":  "admins: [alice]\n",
+		"grants.yaml":   "- {agent: media, repo: example, branch: screenshots, level: autonomous, unattended: true}\n",
+		"routines.yaml": "- {agent: media, name: daily, schedule: \"@daily\", owner: alice, task: Take a screenshot.}\n",
+	}
+	got, problems, err := Load(context.Background(), platform, lab, "lab", tools)
+	if err != nil || len(problems) > 0 || len(got) != 2 {
+		t.Fatalf("got %+v %v %v", got, problems, err)
+	}
+	for _, a := range got {
+		if a.Namespace != "lab" || a.DisplayName() != a.Name {
+			t.Errorf("%+v", a)
 		}
+		switch a.Name {
+		case "media":
+			if len(a.Grants) != 1 || a.Grants[0].Repo != "example" || len(a.Routines) != 1 || a.Routines[0].Name != "daily" || !a.NeedsAccount() {
+				t.Errorf("media in lab: %+v", a)
+			}
+		case "operator":
+			if len(a.Grants) != 0 || len(a.Routines) != 0 || a.NeedsAccount() {
+				t.Errorf("the operator has garrison's grants in lab: %+v", a)
+			}
+		}
+	}
+	home, _, _ := Load(context.Background(), platform, platform, PlatformNamespace, tools)
+	if i := slices.IndexFunc(home, func(a Agent) bool { return a.Name == "operator" }); i < 0 || len(home[i].Grants) != 1 {
+		t.Errorf("garrison's own grants: %+v", home)
+	}
+	sys := System(got[0], "example.com")
+	if !strings.Contains(sys, `working in the namespace "lab"`) || !strings.Contains(sys, `Pass namespace "lab"`) {
+		t.Errorf("system prompt:\n%s", sys)
+	}
+	if sys := System(home[0], "example.com"); !strings.Contains(sys, "no namespace in particular") {
+		t.Errorf("garrison's system prompt:\n%s", sys)
+	}
+}
+
+// A namespace's own agents folder is refused: the agents are garrison's.
+// garrison's problems are not the namespace's to fix.
+func TestANamespaceHasNoAgentsOfItsOwn(t *testing.T) {
+	platform := mapFiles{"agents/x/agent.yaml": "tools: [rm_rf]\n", "agents/x/prompt.md": "p", "agents/ok/agent.yaml": "", "agents/ok/prompt.md": "p"}
+	lab := mapFiles{"agents/operator/agent.yaml": "tools: all\n", "agents/operator/prompt.md": "Mine.\n"}
+	got, problems, err := Load(context.Background(), platform, lab, "lab", tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "ok" || got[0].Prompt != "p" {
+		t.Errorf("agents %+v", got)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "agents are defined in garrison/config only") {
+		t.Errorf("problems %q", problems)
+	}
+}
+
+func TestAnyStandsAlone(t *testing.T) {
+	for _, c := range []struct {
+		yaml, want string
+	}{
+		{"agents: [any, developer]\n", "stands alone"},
+		{"agents: [todo/developer]\n", "the agents are all garrison's; name it developer"},
+		{"agents: any\n", ""},
+	} {
+		got, problems := platformOnly(t, mapFiles{"agents/x/agent.yaml": c.yaml, "agents/x/prompt.md": "p"})
 		if c.want == "" {
 			if len(problems) > 0 || len(got) != 1 || !got[0].AsksAny() {
-				t.Errorf("%s %q: %v %+v", c.ns, c.yaml, problems, got)
+				t.Errorf("%q: %v %+v", c.yaml, problems, got)
 			}
 			continue
 		}
 		if len(got) != 0 || !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, c.want) }) {
-			t.Errorf("%s %q: problems %q, want %q", c.ns, c.yaml, problems, c.want)
+			t.Errorf("%q: problems %q, want %q", c.yaml, problems, c.want)
 		}
 	}
 }
@@ -132,14 +186,14 @@ func TestAgentsAndSkills(t *testing.T) {
 		"skills/homepage-screenshots/viewports.yaml":  "desktop: 1440x900\n",
 		"skills/unused/SKILL.md":                      skill("unused", "Not named by anyone."),
 		"agents/README.md":                            "# Agents\n",
-		"agents/marketing/agent.yaml":                 "description: Media\nmodel: gpt-oss:120b\ntools: [read_file, propose_change]\nskills: [homepage-screenshots]\nrepos: [homepage]\n",
+		"agents/marketing/agent.yaml":                 "description: Media\nmodel: gpt-oss:120b\ntools: [read_file, propose_change]\nskills: [homepage-screenshots]\n",
 		"agents/marketing/prompt.md":                  "You make the homepage look good.\n",
 		"agents/marketing/skills/thumbnail/SKILL.md":  skill("thumbnail", "Make a YouTube thumbnail."),
 		"agents/marketing/skills/thumbnail/frame.svg": "<svg/>",
 		"agents/reader/agent.yaml":                    "tools: [read_file]\n",
 		"agents/reader/prompt.md":                     "You read.\n",
 	}
-	got, problems, err := Load(context.Background(), files, "homepage", tools)
+	got, problems, err := Load(context.Background(), files, mapFiles{}, "homepage", tools)
 	if err != nil || len(problems) > 0 {
 		t.Fatalf("problems %v, err %v", problems, err)
 	}
@@ -147,7 +201,7 @@ func TestAgentsAndSkills(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	m := got[0]
-	if m.Model != "gpt-oss:120b" || m.Description != "Media" || !slices.Equal(m.Repos, []string{"homepage"}) {
+	if m.Model != "gpt-oss:120b" || m.Description != "Media" {
 		t.Errorf("marketing = %+v", m)
 	}
 	if len(m.Skills) != 2 || m.Skills[0].Name != "homepage-screenshots" || m.Skills[0].Dir != "skills/homepage-screenshots" ||
@@ -158,7 +212,7 @@ func TestAgentsAndSkills(t *testing.T) {
 		t.Errorf("reader got skills %+v", got[1].Skills)
 	}
 	sys := System(m, "example.com")
-	for _, want := range []string{"You are homepage/marketing", `namespace "homepage"`, "You make the homepage look good.", "- thumbnail: Make a YouTube thumbnail.", "load_skill", "Rules of the platform"} {
+	for _, want := range []string{"You are marketing", `namespace "homepage"`, "You make the homepage look good.", "- thumbnail: Make a YouTube thumbnail.", "load_skill", "Rules of the platform"} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt lacks %q:\n%s", want, sys)
 		}
@@ -185,22 +239,22 @@ func TestBadAgentsAreLeftOut(t *testing.T) {
 		"bad name":         {mapFiles{"agents/X_1/agent.yaml": "", "agents/X_1/prompt.md": "p"}, "folder name"},
 		"tool twice":       {mapFiles{"agents/x/agent.yaml": "tools: [read_file, read_file]\n", "agents/x/prompt.md": "p"}, "listed twice"},
 		"bad model":        {mapFiles{"agents/x/agent.yaml": "model: 'a b'\n", "agents/x/prompt.md": "p"}, "not a model name"},
-		"bad repo":         {mapFiles{"agents/x/agent.yaml": "repos: [..]\n", "agents/x/prompt.md": "p"}, "not a repo name"},
+		"repos":            {mapFiles{"agents/x/agent.yaml": "repos: [site]\n", "agents/x/prompt.md": "p"}, "repos is not part of an agent"},
+		"grants":           {mapFiles{"agents/x/agent.yaml": "grants: [{repo: todo, level: propose}]\n", "agents/x/prompt.md": "p"}, "grants is not part of an agent: each namespace gives them in grants.yaml"},
+		"routines":         {mapFiles{"agents/x/agent.yaml": "routines: []\n", "agents/x/prompt.md": "p"}, "routines is not part of an agent"},
 		"no shared skill":  {mapFiles{"agents/x/agent.yaml": "skills: [nope]\n", "agents/x/prompt.md": "p"}, `no shared skill "nope"`},
 		"skill no front":   {mapFiles{"agents/x/agent.yaml": "", "agents/x/prompt.md": "p", "agents/x/skills/s/SKILL.md": "# s\n"}, "frontmatter"},
 		"skill wrong name": {mapFiles{"agents/x/agent.yaml": "", "agents/x/prompt.md": "p", "agents/x/skills/s/SKILL.md": skill("other", "d")}, "differs from its folder"},
 		"skill no desc":    {mapFiles{"agents/x/agent.yaml": "", "agents/x/prompt.md": "p", "agents/x/skills/s/SKILL.md": "---\nname: s\n---\n"}, "description is missing"},
 		"skill twice": {mapFiles{"skills/s/SKILL.md": skill("s", "d"), "agents/x/agent.yaml": "skills: [s]\n", "agents/x/prompt.md": "p",
 			"agents/x/skills/s/SKILL.md": skill("s", "d")}, "both shared and its own"},
+		"asks unknown": {mapFiles{"agents/x/agent.yaml": "agents: [nobody]\n", "agents/x/prompt.md": "p"}, "there is no agent nobody"},
+		"asks itself":  {mapFiles{"agents/x/agent.yaml": "agents: [garrison/x]\n", "agents/x/prompt.md": "p"}, "does not ask itself"},
 	}
 	for name, c := range cases {
 		c.files["agents/good/agent.yaml"] = "tools: [read_file]\n"
 		c.files["agents/good/prompt.md"] = "Good.\n"
-		got, problems, err := Load(context.Background(), c.files, "ns", tools)
-		if err != nil {
-			t.Errorf("%s: %v", name, err)
-			continue
-		}
+		got, problems := platformOnly(t, c.files)
 		if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, c.want) }) {
 			t.Errorf("%s: problems %q lack %q", name, problems, c.want)
 		}
@@ -211,8 +265,8 @@ func TestBadAgentsAreLeftOut(t *testing.T) {
 }
 
 func TestAnEmptyFolderMeansNoAgents(t *testing.T) {
-	got, problems, err := Load(context.Background(), mapFiles{"agents/README.md": "none here\n"}, "ns", tools)
-	if err != nil || len(problems) > 0 || len(got) != 0 {
-		t.Errorf("got %v %v %v", got, problems, err)
+	got, problems := platformOnly(t, mapFiles{"agents/README.md": "none here\n"})
+	if len(problems) > 0 || len(got) != 0 {
+		t.Errorf("got %v %v", got, problems)
 	}
 }
