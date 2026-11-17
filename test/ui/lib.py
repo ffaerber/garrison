@@ -374,9 +374,18 @@ class Person:
     def approve(self, org: str, repo: str, n: int):
         """Reviews a pull request in Gitea: Files changed, Review, Approve."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}/files", wait_until="domcontentloaded")
-        p.locator(".js-btn-review").first.click()
-        p.locator("textarea[name='content']:visible").first.fill("Looks right.")
+        # The Review button opens its form once the page's script runs; a
+        # click before that opens nothing, so it tries again on a fresh page.
+        box = p.locator("textarea[name='content']:visible").first
+        for _ in range(4):
+            p.goto(f"{GIT}/{org}/{repo}/pulls/{n}/files", wait_until="domcontentloaded")
+            p.locator(".js-btn-review").first.click()
+            try:
+                box.wait_for(state="visible", timeout=8000)
+                break
+            except Exception:
+                p.wait_for_timeout(2000)
+        box.fill("Looks right.")
         p.locator("button[name='type'][value='approve']:visible").click()
         until(20, lambda: any(r["state"] == "APPROVED" and r["user"]["login"] == self.name
                               for r in gitea(f"/repos/{org}/{repo}/pulls/{n}/reviews") or []))

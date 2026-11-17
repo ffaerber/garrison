@@ -1321,6 +1321,9 @@ to_main() {
   for i in $(seq 15); do
     code=$(merge "$1" alice "$n")
     [ "$code" = 200 ] && return 0
+    # An approval given while Gitea still checked the new pull request can
+    # go uncounted ("Does not have enough approvals"); carol gives it again.
+    [ "$code" = 405 ] && [ $((i % 5)) = 0 ] && review "$1" carol "$n" >/dev/null
     sleep 2
   done
   echo "      alice's merge of #$n: $code: $(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$n/merge" | head -c 300)"
