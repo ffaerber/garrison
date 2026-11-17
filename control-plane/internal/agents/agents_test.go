@@ -81,6 +81,10 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	if want := Operator(PlatformNamespace, tools); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
 		t.Errorf("written operator differs from the built-in one: %+v", got)
 	}
+	// It knows how to turn a wish into garrison's parts.
+	if !slices.ContainsFunc(got[i].Skills, func(s Skill) bool { return s.Name == "build" && strings.Contains(s.Description, "cron") }) {
+		t.Errorf("operator skills = %+v", got[i].Skills)
+	}
 	i = slices.IndexFunc(got, func(a Agent) bool { return a.Name == CommanderName })
 	if i < 0 {
 		t.Fatalf("no commander in %+v", got)

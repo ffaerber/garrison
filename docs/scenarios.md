@@ -168,6 +168,14 @@ Alice: *@operator I deleted todos in the todo app by mistake. Bring todo's data 
 - Carol approves it, the approval check passes, alice merges it.
 - The deployer snapshots todo's current data, stops todo, copies its database back from the snapshot and starts it again; todo answers.
 
+## 9b. The operator guides: it asks first, then does it
+
+Alice asks the operator, in garrison's channel, to "create an organization". It makes nothing: it says garrison calls those namespaces and asks for the name. Told "family", it makes the namespace family.
+
+In todo's channel, alice asks for "a cron job every day at 9 o'clock" that checks todo answers on main. The operator loads its skill `build`, reads todo's `routines.yaml` and proposes it with a routine added: `schedule: "0 9 * * *"`, `owner: alice`, one of garrison's agents, the routines already there kept. Carol approves; the approval check passes. (The test closes it unmerged.)
+
+A daily screenshot cannot be a routine yet: a run with nobody watching has no sign-in, so `screenshot` and `browse` are refused there, and the skill tells the operator to say so.
+
 ## 10. An app from nothing to main
 
 Played by the `journey` step (`test/e2e/smoke.sh journey`, `test/e2e/journey.sh`), after deploy, in a namespace of its own. Alice is its only person, so she pushes and merges in its repos freely.

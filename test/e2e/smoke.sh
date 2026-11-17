@@ -1775,6 +1775,52 @@ check "the deployer restores it"           until_true 300 restored_again
 todo_back() { status_is 302 todo / 5; }
 check "todo answers again"                 until_true 180 todo_back
 
+echo "# 9b. the operator guides: it asks for what it cannot know, then does it"
+# orgs: the names of every namespace.
+orgs() { gitea_api "" "$api/admin/orgs?limit=50" | python3 -c 'import json,sys; print(" ".join(sorted(o["username"] for o in json.load(sys.stdin))))'; }
+before=$(orgs)
+answer=$(ask_agent garrison alice "Please create an organization for me.")
+check "asked for an organisation, it makes none" test "$(orgs)" = "$before"
+check "it names it a namespace"            grep -qi 'namespace' <<<"$answer"
+check "and asks for its name"              grep -q '?' <<<"$answer"
+printf 'it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+answer=$(ask_agent garrison alice "Call it family.")
+family_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/family")" = 200 ]; }
+check "told the name, it makes the namespace family, as alice" until_true 30 family_made
+
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+routines_before=$(gitea_api "" "$hp/config/raw/routines.yaml" | python3 -c 'import sys,yaml; print(len(yaml.safe_load(sys.stdin) or []))')
+answer=$(ask_agent todo alice "Please create me a cron job: every day at 9 o'clock in the morning, check that the todo app answers on main and tell us in this channel. Do not ask back.")
+# routine_pr: the open pull request of todo/config by alice that changes routines.yaml.
+routine_pr() {
+  local n
+  for n in $(gitea_api "" "$hp/config/pulls?state=open&limit=10" | python3 -c 'import json,sys; [print(p["number"]) for p in json.load(sys.stdin) if p["user"]["login"]=="alice"]' 2>/dev/null); do
+    gitea_api "" "$hp/config/pulls/$n/files" | grep -q '"filename":"routines.yaml"' && { echo "$n"; return 0; }
+  done
+  return 1
+}
+if ! routine_pr >/dev/null; then
+  printf 'retry the operator proposed no routine; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent todo alice "Please go ahead now: load your skill build and propose the routine in routines.yaml of todo/config with propose_change, keeping the routines there.")
+fi
+check "it reads its skill build, as alice" grep -q "mcp: alice: load_skill" <<<"$(mcp_calls "$since" alice)"
+cpr=$(routine_pr)
+check "it proposes a routine in todo's config, as alice" test -n "$cpr"
+gitea_api "" "$hp/config/raw/routines.yaml?ref=$(gitea_api "" "$hp/config/pulls/${cpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/cron.yaml"
+check "daily at 9, owned by alice, by one of garrison's agents" python3 -c '
+import sys,yaml
+r = yaml.safe_load(open(sys.argv[1])) or []
+sys.exit(0 if any(str(x.get("schedule","")).split()[:2] == ["0","9"] and x.get("owner") == "alice" and x.get("agent") in ("operator","commander") for x in r) else 1)' "$tmp/cron.yaml"
+check "keeping the routines there"         python3 -c 'import sys,yaml; sys.exit(0 if len(yaml.safe_load(open(sys.argv[1])) or []) == int(sys.argv[2]) + 1 else 1)' "$tmp/cron.yaml" "${routines_before:-0}"
+cron_ok() {
+  gitea_api "" "$hp/config/commits/$(gitea_api "" "$hp/config/pulls/${cpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
+import json,sys
+sys.exit(0 if any(s["context"] == "garrison/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
+}
+check "carol approves it"                  test "$(gitea_api carol -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Good."}' "$hp/config/pulls/${cpr:-0}/reviews")" = 200
+check "the approval check passes"          until_true 120 cron_ok
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/${cpr:-0}"
+
 while read -r c m; do
   for id in $(web -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$m/thread" | python3 -c 'import json,sys; [print(x["id"]) for x in json.load(sys.stdin)]' 2>/dev/null) $m; do
     web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$id/delete"
