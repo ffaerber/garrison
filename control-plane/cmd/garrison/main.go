@@ -739,6 +739,10 @@ func agentsCmd(args []string) error {
 		}()
 		routines := &agentapi.Routines{Server: srv, Gitea: g, Location: zone(vars["TIMEZONE"])}
 		if store != nil {
+			// Agents say in the channel when their changes are merged and live.
+			go (&agentapi.Followups{Feed: store, Cards: g, Poster: srv.Poster}).Run(ctx, 10*time.Second)
+		}
+		if store != nil {
 			routines.Store = store
 		}
 		// What routines ask people (ask_person), kept with the feed so a
