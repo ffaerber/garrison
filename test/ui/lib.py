@@ -461,8 +461,8 @@ class Person:
 
     def scheduled_run(self, org: str, repo: str, workflow: str):
         """The newest run of workflow that its schedule started, from the
-        repo's Actions tab: opens it and returns its step names and status
-        text, None while there is none."""
+        repo's Actions tab: opens it and returns its page's text once it
+        has finished, None while there is none."""
         p = self.page
         p.goto(f"{GIT}/{org}/{repo}/actions?workflow={workflow}", wait_until="domcontentloaded")
         runs = p.locator(".flex-item").filter(has_text="Scheduled")
@@ -470,8 +470,11 @@ class Person:
             return None
         runs.first.locator("a[href*='/actions/runs/']").first.click()
         p.wait_for_url(re.compile(r"/actions/runs/\d+"))
-        p.wait_for_timeout(2000)
-        return p.locator("body").inner_text()
+        # Found as soon as it starts: its page shows how it ended once it has.
+        def finished():
+            text = p.locator("body").inner_text()
+            return text if re.search(r"\b(Success|Failure|Cancelled)\b", text) else None
+        return until(120, finished, every=3)
 
     def run_log(self, step: str) -> str:
         """Opens a step of the open run and returns its log."""
