@@ -1515,6 +1515,50 @@ check "the question is answered in the feed" in_feed bob ns=todo "e['kind'] == '
 not_waiting() { ! feed bob / | grep -q "Waiting for you"; }
 check "bob's dashboard no longer lists it" until_true 60 not_waiting
 
+echo "# 4j3. a routine takes a screenshot, signed in as the agent, with nobody watching"
+# The media agent gets a grant on app that routines may use, and a routine
+# that shoots todo, which is behind the sign-in, when the branch shots
+# moves. Its browser signs in with the agent's own account in Keycloak.
+check "alice makes the branch shots of app" test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"shots","old_branch_name":"main"}' "$hp/app/branches")" = 201
+gitea_api "" "$hp/config/raw/grants.yaml" > "$tmp/grants.yaml"
+printf -- '- {agent: media, repo: app, level: propose, unattended: true}\n' >> "$tmp/grants.yaml"
+cat >> "$tmp/routines.yaml" <<YAML
+- agent: media
+  name: shots
+  on_push: {repo: app, branch: shots}
+  owner: bob
+  task: "Call screenshot once: url https://todo.$DOMAIN/, namespace todo, repo app, path docs/screenshots/routine.png, title Screenshot by the routine. Then say in one sentence what the page shows."
+YAML
+spr=$(propose_config media-routine "The media agent shoots todo by itself" "grants.yaml=$tmp/grants.yaml" "routines.yaml=$tmp/routines.yaml")
+check "carol approves it in todo"          test "$(review config carol "$spr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$spr" success
+check "alice merges it"                    test "$(merge config alice "$spr")" = 200
+check "the media agent gets an account in Gitea" until_true 120 has_account agent-todo-media
+# kc_user NAME: whether the Keycloak account NAME is enabled (true, false, or nothing).
+kc_user() {
+  docker exec "$(docker ps -q -f name=keycloak_keycloak | head -n1)" bash -c '
+    KC_CLI_PASSWORD=$(</run/secrets/admin-password) /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/smoke.config \
+      --server http://localhost:8080 --realm master --user "$0" >/dev/null 2>&1 &&
+    /opt/keycloak/bin/kcadm.sh get users --config /tmp/smoke.config -r garrison -q "username=$1" -q exact=true --fields enabled --format csv --noquotes' "$ADMIN_USER" "$1"
+}
+kc_enabled() { [ "$(kc_user "$1")" = true ]; }
+check "and the same account in Keycloak"   until_true 120 kc_enabled agent-todo-media
+media_seen() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/media/shots'" | grep -q .; }
+check "the routine sees shots"             until_true 180 media_seen
+since=$(last_pr app)
+shot_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf 'Shoot.\n' > "$tmp/shoot.md"
+check "alice pushes to shots"              test "$(set_file app shots SHOOT.md "$tmp/shoot.md" "Shoot")" = 201
+routine_shot() { pr_with app agent-todo-media "$since" docs/screenshots/routine.png; }
+check "the routine proposes the screenshot, with the agent's account" until_true 600 routine_shot
+read -r rspr rsha <<<"$(routine_shot)"
+check "a PNG"                              test "$(png_size app docs/screenshots/routine.png "${rsha:-none}")" != none
+body=$(gitea_api "" "$hp/app/pulls/${rspr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
+check "of the todo app behind the sign-in, as the agent, for bob" \
+  bash -c 'grep -q "Screenshot of https://todo.$1/ as the agent todo/media" <<<"$0" && grep -q "Our todos" <<<"$0" && grep -q "Asked by bob through todo/media, routine todo/media/shots, with nobody watching" <<<"$0"' "$body" "$DOMAIN"
+check "the gateway shot it as the agent"   bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-media): todo/media: screenshot \[routine todo/media/shots\]"' "$shot_at"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/${rspr:-0}"
+
 echo "# 4k. an agent installs what it needs, from the package registries"
 printf 'description: Tries things out with the tools it needs\ntools: [list_repos]\ninternet: packages\n' > "$tmp/builder.yaml"
 printf 'You try things out in your sandbox, installing the tools a task needs. Show the commands you ran and what they printed.\n' > "$tmp/builder.md"

@@ -43,6 +43,9 @@ type Members struct {
 	Wake   <-chan struct{}
 	Gitea  *Gitea
 	Events events.Recorder // the feed, told when a namespace is set up; nil: none
+	// Keycloak, when set, gives each agent account one of the same name
+	// there, enabled while the Gitea account is unlocked.
+	Keycloak *Keycloak
 	// RetryWait is the pause before a config repo's files are tried again;
 	// 0: a second.
 	RetryWait time.Duration
@@ -209,8 +212,23 @@ func (m *Members) Sync(ctx context.Context) error {
 			continue
 		}
 		log.Printf("members: locked the account %s: its namespace %s is gone", u.Login, ns)
+		if err := m.keycloak(ctx, u.Login, rest, false); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
+}
+
+// keycloak enables or disables the agent's account in Keycloak, if there
+// is one to keep.
+func (m *Members) keycloak(ctx context.Context, account, id string, enabled bool) error {
+	if m.Keycloak == nil {
+		return nil
+	}
+	if err := m.Keycloak.Keep(ctx, account, id, enabled); err != nil {
+		return fmt.Errorf("keycloak account %s: %w", account, err)
+	}
+	return nil
 }
 
 // lock keeps an agent's account from acting: Gitea refuses its sign-ins
@@ -316,6 +334,9 @@ func (m *Members) accounts(ctx context.Context, ns string, users []giteaUser) er
 		if err := m.collaborations(ctx, ns, name, a.GrantedRepos(), names); err != nil {
 			return err
 		}
+		if err := m.keycloak(ctx, name, a.ID(), true); err != nil {
+			return err
+		}
 	}
 	for _, u := range mine {
 		if _, ok := want[u.Login]; ok {
@@ -329,6 +350,9 @@ func (m *Members) accounts(ctx context.Context, ns string, users []giteaUser) er
 				return err
 			}
 			log.Printf("members: locked the account %s: its agent is gone, switched off or has no grants", u.Login)
+		}
+		if err := m.keycloak(ctx, u.Login, strings.TrimPrefix(u.FullName, AccountPrefix), false); err != nil {
+			return err
 		}
 	}
 	return nil

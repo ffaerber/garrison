@@ -41,8 +41,27 @@ A routine starts an agent, as it works in the namespace, with a one-shot task. R
 
 - One of `schedule` (cron, or `@daily`, `@hourly`, ...), `every` (`10m` to `168h`), `on_push: {repo: todo, branch: main}` or `on_alert: {alertname: ServiceFailing}`. Not more often than every 10 minutes.
 - Its answer is posted in the namespace's channel.
-- It runs with nobody watching, with the agent's own account: it may change a repo only through a grant with `unattended: true` and the owner in its `for`, and then only with propose_patch. Propose that grant in the same pull request when the task changes something.
-- Tools that need a person's sign-in, screenshot, browse and propose_change, are refused in a routine. When a wish needs them on a schedule, say so plainly and offer what works: the same task in a chat whenever the person asks, or a routine that reads and reports.
+- It runs with nobody watching, with the agent's own account: it may change a repo only through a grant with `unattended: true` and the owner in its `for`, with propose_patch or screenshot (and merge_change where the grant's level allows). Propose that grant in the same pull request when the task changes something.
+- Its browser signs in as the agent's own account, so screenshot and browse work, also on private environments. propose_change, create_namespace and create_repo need a person and are refused.
+- The agent must have the tools the task needs: find_agents shows each agent's tools. A screenshot needs one with screenshot.
+
+A daily screenshot of the app todo into its repo app, for example, is a grant and a routine in `todo/config`:
+
+```yaml
+# grants.yaml
+- agent: media
+  repo: app
+  level: propose
+  for: members
+  unattended: true
+
+# routines.yaml
+- agent: media
+  name: daily-screenshot
+  schedule: "0 9 * * *"
+  owner: alice
+  task: Take a screenshot of https://todo.<domain>/ at 1280x800 and propose it as docs/screenshots/todo.png in the repo app of todo.
+```
 - Write the task as you would ask the agent yourself: what to look at, what to do, what to say.
 
 ## After proposing

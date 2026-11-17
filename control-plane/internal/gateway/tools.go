@@ -49,7 +49,10 @@ type Tools struct {
 	WorkDir    string       // the deployer's state, read-only
 	Prometheus string       // e.g. http://prometheus_prometheus:9090
 	Browser    *Browser     // for screenshot; nil: none
-	HTTP       *http.Client
+	// Keycloak signs agents in for a run without a person: their browser
+	// then works as the agent's own account. nil: such runs cannot browse.
+	Keycloak *Keycloak
+	HTTP     *http.Client
 	// Ready, if set, waits until a namespace just made is set up: its config
 	// repo and its channel.
 	Ready func(ctx context.Context, ns string) error
@@ -168,7 +171,7 @@ func baseSpecs() []Spec {
 			"text":      str("what to type"),
 			"submit":    map[string]any{"type": "boolean", "description": "press Enter after typing"},
 		}),
-		spec("screenshot", "Takes a screenshot of a page of the home cloud, signed in as the person asking, and proposes it as a PNG file in a repo: a pull request, as with propose_change. Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
+		spec("screenshot", "Takes a screenshot of a page of the home cloud, signed in as the person asking (in a routine, with nobody watching, as your own account), and proposes it as a PNG file in a repo: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
 			"namespace":   nsArg,
 			"repo":        str("repo the PNG goes into"),
 			"path":        str("file path of the PNG, ending in .png, e.g. docs/screenshots/todo.png"),
@@ -210,10 +213,14 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 	}
 	// A run without a person acts with the agent's account, which may write
-	// to its granted repos: only propose_patch and merge_change, which check
-	// the grants, change anything then. The browser needs a person's sign-in.
-	if p.Unattended && (name == "propose_change" || name == "screenshot" || name == "browse" || name == "create_namespace" || name == "create_repo") {
+	// to its granted repos: only propose_patch, screenshot and merge_change,
+	// which check the grants, change anything then. Its browser signs in
+	// with the agent's account in Keycloak.
+	if p.Unattended && (name == "propose_change" || name == "create_namespace" || name == "create_repo") {
 		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
+	}
+	if p.Unattended && (name == "screenshot" || name == "browse") && t.Keycloak == nil {
+		return "", refused{name + " needs a sign-in, and this installation gives agents none in Keycloak"}
 	}
 	var out string
 	var err error
@@ -230,7 +237,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 
 func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name string, a args) (string, error) {
 	switch name {
-	case "propose_change", "propose_patch", "merge_change":
+	case "propose_change", "propose_patch", "merge_change", "screenshot":
 		// A change to a namespace is made with that namespace's grants,
 		// wherever the person asked.
 		there, err := t.instance(ctx, p, agent, a.Namespace)
@@ -372,12 +379,16 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return b.String(), nil
 	case "screenshot":
-		return t.screenshot(ctx, p, a)
+		return t.screenshot(ctx, p, agent, a)
 	case "browse":
 		if t.Browser == nil {
 			return "", errors.New("this installation has no browser")
 		}
-		page, err := t.Browser.Browse(ctx, p.Name+"\x00"+agentID(agent), p.Token, Action{URL: a.URL, Click: a.Click, Type: a.TypeInto, Text: a.Text, Submit: a.Submit})
+		token, err := t.signIn(ctx, p, agent)
+		if err != nil {
+			return "", err
+		}
+		page, err := t.Browser.Browse(ctx, p.Name+"\x00"+agentID(agent), token, Action{URL: a.URL, Click: a.Click, Type: a.TypeInto, Text: a.Text, Submit: a.Submit})
 		if err != nil {
 			if page.URL != "" {
 				return "", fmt.Errorf("%w\n%s", err, page)
@@ -441,8 +452,22 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
 }
 
-// screenshot shoots a page as person and proposes the PNG.
-func (t *Tools) screenshot(ctx context.Context, p Person, a args) (string, error) {
+// signIn is the token the browser shows: the person's, or, in a run
+// without one, that of the agent's own account in Keycloak.
+func (t *Tools) signIn(ctx context.Context, p Person, agent *agents.Agent) (string, error) {
+	if !p.Unattended {
+		return p.Token, nil
+	}
+	if t.Keycloak == nil || agent == nil {
+		return "", refused{"this run has no person, and no account of the agent to sign in with"}
+	}
+	return t.Keycloak.Token(ctx, AgentAccount(agent), agent.ID())
+}
+
+// screenshot shoots a page as the person, or as the agent in a run without
+// one, and proposes the PNG: as the person if they may write to the repo,
+// else with the agent's account where a grant lets it.
+func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a args) (string, error) {
 	if t.Browser == nil {
 		return "", errors.New("no browser is set up")
 	}
@@ -459,29 +484,54 @@ func (t *Tools) screenshot(ctx context.Context, p Person, a args) (string, error
 	if w < 320 || w > 2560 || h < 240 || h > 2000 {
 		return "", fmt.Errorf("%w: the window must be 320 to 2560 wide and 240 to 2000 high", ErrInvalid)
 	}
-	// The repo is checked before the browser runs: a refusal costs nothing.
-	if err := t.Gitea.CanWrite(ctx, p.Name, a.Namespace, a.Repo); err != nil {
+	if err := validOrg(a.Namespace); err != nil {
 		return "", err
 	}
-	shot, err := t.Browser.Shoot(ctx, p.Token, a.URL, w, h, a.FullPage)
+	if err := validRepo(a.Repo); err != nil {
+		return "", err
+	}
+	// The repo is checked before the browser runs: a refusal costs nothing.
+	as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, a.Repo)
 	if err != nil {
 		return "", err
+	}
+	token, err := t.signIn(ctx, p, agent)
+	if err != nil {
+		return "", err
+	}
+	shot, err := t.Browser.Shoot(ctx, token, a.URL, w, h, a.FullPage)
+	if err != nil {
+		return "", err
+	}
+	seenAs := p.Name
+	if p.Unattended {
+		seenAs = "the agent " + agentID(agent)
 	}
 	desc := strings.TrimSpace(a.Description)
 	if desc != "" {
 		desc += "\n\n"
 	}
-	desc += fmt.Sprintf("Screenshot of %s as %s, %dx%d: page title %q.", shot.URL, p.Name, w, h, shot.Title)
-	c, err := t.Gitea.Propose(ctx, p.Name, a.Namespace, a.Repo, a.Path, string(shot.PNG), a.Title, desc, "", "")
+	desc += fmt.Sprintf("Screenshot of %s as %s, %dx%d: page title %q.", shot.URL, seenAs, w, h, shot.Title)
+	branch, note := "", ""
+	if viaAgent {
+		role, err := t.role(ctx, p, a.Namespace)
+		if err != nil {
+			return "", err
+		}
+		branch, note = newBranch(p, agent, true), askedBy(p, agent, role)
+	} else if agent != nil {
+		note = askedBy(p, agent, "member")
+	}
+	c, err := t.Gitea.Propose(ctx, as, a.Namespace, a.Repo, a.Path, string(shot.PNG), a.Title, desc, branch, note)
 	if err != nil {
 		return "", err
 	}
-	note := ""
+	blocked := ""
 	if shot.Blocked > 0 {
-		note = fmt.Sprintf(" %d requests to other sites were refused, so parts loaded from elsewhere may be missing.", shot.Blocked)
+		blocked = fmt.Sprintf(" %d requests to other sites were refused, so parts loaded from elsewhere may be missing.", shot.Blocked)
 	}
 	return fmt.Sprintf("Took the screenshot of %s (page title %q, %d KB) and opened change %s/%s#%d with %s.%s Nothing is changed yet: a person allowed to merge must review and merge it in Gitea.\nEnd your answer with this link, exactly as it is, so the person can open it:\n%s",
-		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, note, c.URL), nil
+		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, blocked, c.URL), nil
 }
 
 // skill reads one of the agent's skills from its config repo, as person.

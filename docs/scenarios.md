@@ -102,6 +102,13 @@ Alice's push to `main` (4i) starts the developer's routine `main-moved`.
 - It reads with the agent's own account, for bob, started by the routine; the gateway logs it as nobody watching.
 - Its answer is posted in todo's channel under the agent's name, and the run, with its answer, is in the feed of todo's people.
 
+## 4j3. A routine takes a screenshot, signed in as the agent
+
+Todo's config gives the media agent a grant on app that routines may use (`level: propose`, `unattended: true`) and a routine, owned by bob, that screenshots https://todo.<domain>/ when the branch `shots` moves. Carol approves, alice merges.
+
+- The media agent gets its account in Gitea, `agent-todo-media`, and the same account in Keycloak, enabled.
+- Alice pushes to `shots`. The routine runs with nobody watching: its browser signs in as `agent-todo-media`, which the sign-in in front of todo takes, and the agent's account proposes `docs/screenshots/routine.png`: the todo page, *as the agent todo/media*, *Asked by bob through todo/media, routine todo/media/shots, with nobody watching.*
+
 ## 4k. An agent installs what it needs, from the package registries
 
 Alice adds the builder to `garrison/config` with `internet: packages`; a root admin approves. Bob: *Install Python in your sandbox with apk add python3, then run python3 -c 'print(6*7)'.* Then: *Run curl https://example.org/.*
@@ -174,7 +181,7 @@ Alice asks the operator, in garrison's channel, to "create an organization". It 
 
 In todo's channel, alice asks for "a cron job every day at 9 o'clock" that checks todo answers on main. The operator loads its skill `build`, reads todo's `routines.yaml` and proposes it with a routine added: `schedule: "0 9 * * *"`, `owner: alice`, one of garrison's agents, the routines already there kept. Carol approves; the approval check passes. (The test closes it unmerged.)
 
-A daily screenshot cannot be a routine yet: a run with nobody watching has no sign-in, so `screenshot` and `browse` are refused there, and the skill tells the operator to say so.
+A daily screenshot is a routine too, with a grant for an agent with `screenshot` (see 4j3): the skill shows the operator both.
 
 ## 10. An app from nothing to main
 

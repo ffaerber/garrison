@@ -408,6 +408,7 @@ func gatewayCmd(args []string) error {
 	openwebui := fs.String("openwebui", "http://openwebui_openwebui:8080", "Open WebUI's URL")
 	browser := fs.String("browser", "http://control-plane_browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
+	keycloakURL := fs.String("keycloak", "http://keycloak_keycloak:8080", "Keycloak's URL, for the agents' accounts there; empty: agents get none, and runs without a person cannot browse")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
@@ -443,6 +444,9 @@ func gatewayCmd(args []string) error {
 	g := &gateway.Gitea{URL: *gitea, User: vars["ADMIN_USER"], Password: strings.TrimSpace(string(password))}
 	catalog := &gateway.Catalog{Gitea: g}
 	tools := &gateway.Tools{Gitea: g, Run: apply.Exec, WorkDir: *work, Prometheus: *prometheus}
+	if *keycloakURL != "" {
+		tools.Keycloak = &gateway.Keycloak{URL: *keycloakURL, User: vars["ADMIN_USER"], Password: g.Password}
+	}
 	if *browser != "" {
 		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain, Private: tools.PrivateHost}
 	}
@@ -469,7 +473,7 @@ func gatewayCmd(args []string) error {
 		ca = string(pem)
 	}
 	go (&gateway.Builders{Gitea: g, Domain: domain, CA: ca, Wake: wake.Subscribe()}).Run(ctx, time.Minute)
-	go (&gateway.Members{Gitea: g, Wake: wake.Subscribe(), Events: recorder(store)}).Run(ctx, 20*time.Second)
+	go (&gateway.Members{Gitea: g, Wake: wake.Subscribe(), Events: recorder(store), Keycloak: tools.Keycloak}).Run(ctx, 20*time.Second)
 	// A namespace made through an agent: every sync at once, and the agent
 	// answers once its config repo and channel are there.
 	tools.Ready = func(ctx context.Context, ns string) error {

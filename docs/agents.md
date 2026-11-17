@@ -106,6 +106,8 @@ Everyone signed in sees garrison's agents in Open WebUI. The gateway keeps an Op
 
 Each agent with grants or routines in a namespace gets an account in Gitea for its work there, `agent-<namespace>-<name>` (e.g. `agent-homepage-dev`; a hash where that is longer than Gitea allows), with the full name `Agent <namespace>/<name>`. The gateway makes it, gives it write access to the repos its grants name and to no other repo of the namespace, and locks it, with that access taken away, when the agent is gone, switched off or without grants there. Nobody signs in with it and no token of it exists: the gateway acts as it through Gitea's Sudo, as it acts as people.
 
+The same account is in Keycloak, in the realm `garrison`, so the agent can sign in where a person would: in a routine, with nobody watching, its browser (`screenshot`, `browse`) shows the apps as the agent, also private environments. The gateway makes it with the Gitea account (email `<account>@agents.invalid`, no groups) and disables it when it locks that. It gets the account's tokens through the Keycloak client `agents`, which it sets up itself: password grants only, its tokens naming `sso`, so the sign-in in front of private environments takes them; the gateway's own MCP endpoint does not. The account's password and the client's secret are derived from the admin password, which the gateway holds anyway, so there is no further secret; a password someone changes in Keycloak is set back at the next sign-in.
+
 ### Grants
 
 `grants.yaml` in `homepage/config`:
@@ -220,7 +222,7 @@ Routines: work one of garrison's agents does in a namespace by itself, in `routi
   task: Find out why it fails and say what to change.
 ```
 
-- **Who:** a routine acts with the agent's own account in the namespace, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Tools that need a person's sign-in (`screenshot`, `browse`, `propose_change`) are refused.
+- **Who:** a routine acts with the agent's own account in the namespace, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Its browser signs in with the agent's account in Keycloak, so `screenshot` and `browse` work, and a screenshot is proposed with the agent's account through such a grant. `propose_change`, `create_namespace` and `create_repo` need a person and are refused.
 - **Asking:** a routine that needs a choice, a fact or an approval from its owner calls `ask_person`; it ends its turn and goes on, in its sandbox, when the owner replies in the question's thread (see Notifications in [spec.md](spec.md)).
 - **When:** each routine has one of `schedule`, `every`, `on_push` and `on_alert`. The agent service looks every minute.
   - `on_alert` lists label values an alert of this namespace must have, e.g. `{alertname: ServiceFailing}` or `{alertname: ServiceDown, app: todo}`; `{}` takes every alert of the namespace. The platform's own alerts belong to `garrison`. The routine starts once per firing, and its task is told the alert's summary, labels and description. If it is still running from an earlier one, Alertmanager's next reminder (every 4 hours) starts it.
@@ -334,4 +336,3 @@ A new namespace or repo starts nothing: the agents work in it at once, and conta
 - A background `ask_agent` acts with the person's Keycloak token, which lasts five minutes.
 - Previews' datasets and secrets stay after the preview is taken down, like a deleted branch's.
 - Whether `merge` on `main` and `dev` becomes usable once the deployer holds deploys for approval.
-- An agent account for Keycloak, so routines could use the tools that need a person's sign-in (`screenshot`, `browse`).
