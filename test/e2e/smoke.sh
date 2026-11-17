@@ -1289,11 +1289,23 @@ set_file() {
 # to_main REPO PATH FILE MESSAGE: FILE lands on main of todo/REPO as main
 # takes it: alice proposes it, carol approves, alice merges.
 to_main() {
-  local branch=land-$(date +%s%N | cut -c1-13) n
-  [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"'"$branch"'","old_branch_name":"main"}' "$hp/$1/branches")" = 201 ] || return 1
-  case $(set_file "$1" "$branch" "$2" "$3" "$4") in 200|201) ;; *) return 1 ;; esac
-  n=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"'"$4"'"}' "$hp/$1/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])') || return 1
-  [ "$(review "$1" carol "$n")" = 200 ] && [ "$(merge "$1" alice "$n")" = 200 ]
+  local branch=land-$(date +%s%N | cut -c1-13) n code i
+  code=$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"'"$branch"'","old_branch_name":"main"}' "$hp/$1/branches")
+  [ "$code" = 201 ] || { echo "      the branch: $code"; return 1; }
+  code=$(set_file "$1" "$branch" "$2" "$3" "$4")
+  case $code in 200|201) ;; *) echo "      the file: $code"; return 1 ;; esac
+  n=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"'"$4"'"}' "$hp/$1/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])') || { echo "      no pull request"; return 1; }
+  code=$(review "$1" carol "$n")
+  [ "$code" = 200 ] || { echo "      carol's review of #$n: $code"; return 1; }
+  # Gitea checks a new pull request before it merges it, and says to try
+  # again later until it has.
+  for i in $(seq 15); do
+    code=$(merge "$1" alice "$n")
+    [ "$code" = 200 ] && return 0
+    sleep 2
+  done
+  echo "      alice's merge of #$n: $code: $(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$n/merge" | head -c 300)"
+  return 1
 }
 # propose_config BRANCH TITLE PATH=FILE...: alice proposes files in todo/config; prints the pull request's number.
 propose_config() {
