@@ -30,7 +30,7 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 - **Stack:** one app, possibly several services, described in the platform's stack format in its namespace's config repo, `config/stacks/<name>.yaml`. An app with code of its own names the repo holding it as its source; the repo itself holds nothing of the home cloud. System stacks are plain Compose files, one repo each, because they are the platform itself.
 - **Service:** one container in a stack. Exactly one is the entry point.
 - **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-homepage.domain.com.
-- **Agents:** operator agents (garrison, namespace) run the cluster; coding agents build apps.
+- **Agents:** the home cloud's agents, defined once in `garrison` and working in every namespace: the operator runs the cluster and its namespaces; coding agents build apps.
 
 ## System stack
 
@@ -70,7 +70,7 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 | --- | --- | --- | --- |
 | Platform repos | The `garrison` organisation, one per system stack | `compose.yaml` and the files it uses; for the deployer also its source and build | Root admins, garrison's operator via PR |
 | Platform repo | `garrison/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, garrison's operator via PR |
-| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `garrison`), `agents/` and `skills/`, `stacks/` (its apps; not in `garrison`); later SOPS-encrypted secrets | Namespace admins (root admins in `garrison`), agents via PR |
+| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `garrison`), `grants.yaml` and `routines.yaml` (what the agents may do and do by themselves there), `stacks/` (its apps; not in `garrison`), `secrets/`; in `garrison` only, `agents/` and `skills/`: every agent of the home cloud | Namespace admins (root admins in `garrison`), agents via PR |
 | History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Deployer only |
 | App repos | Inside a namespace, one per app with code of its own | Code, Dockerfile, tests, the pipeline that builds its image, numbered migrations | Members, coding agents |
 
@@ -156,7 +156,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 
 ## Rights and autonomy
 
-- An agent acts with the rights of the person who mentioned it. It has more only through grants in its folder in the config repo: an autonomy level per repo and branch, and the groups of its own namespace whose requests may use it (`for`). An outsider never uses an agent's grants beyond proposing, and no detour through another agent adds rights. See [agents.md](agents.md), Accounts and grants.
+- An agent acts with the rights of the person who mentioned it. It has more only through grants a namespace gives it in `grants.yaml` of its config repo: an autonomy level per repo and branch of that namespace, and the groups of that namespace whose requests may use it (`for`). An outsider never uses an agent's grants beyond proposing, and no detour through another agent adds rights. See [agents.md](agents.md), Accounts and grants.
 - When an agent acts without a mention, for example on an alert, it has read-only rights in its own scope (logs, metrics, state, repos) and may only propose, unless a grant allows unattended use for the run's owner. Its proposals always need a human to approve them; the approver's rights are the ones checked.
 - Everyone who is signed in can see everything: every repo, stack, log and history, except private repos, which only their namespace's people see. Seeing is not changing. Rights are per namespace, never per repo: a namespace's people change all its repos. An agent that works on a private repo is private too: only the namespace's people see it, and it answers only in private chats and the namespace's channel.
 - Rights to change flow downward only: root, then namespace, then repository. No scope can change the one above it.
@@ -173,7 +173,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 | Merge | Merge after checks pass | Approve deployment |
 | Autonomous | Merge and deploy | Watch, roll back if needed |
 
-- Per repo and branch autonomy is set in the namespace config repo and nowhere else, as grants in `agents/<name>/agent.yaml`. An agent with grants has an account of its own in Gitea; it reaches a granted branch only by merging a pull request, and pushes only its own `agent/<name>/*` branches.
+- Per repo and branch autonomy is set in the namespace config repo and nowhere else, as grants in `grants.yaml`, each naming one of garrison's agents. An agent with grants in a namespace has an account of its own there in Gitea; it reaches a granted branch only by merging a pull request, and pushes only its own `agent/<name>/*` branches.
 - Secrets: see Secrets below.
 - Every request, including rejected ones, stays in Git as the audit log.
 
@@ -227,11 +227,11 @@ secrets:
 | Namespace agent | One namespace | Long-running | Namespace config, members, stacks, namespace alerts |
 | Coding agent | One repo | Per task, sandboxed | Builds the app with the user, pushes to a branch, replies in thread |
 
-- Agents speak an OpenAI-compatible API (Ollama by default) and use the LLM key from setup. Namespace agents run in Open WebUI with the gateway's MCP tools (see Chat).
+- Agents speak an OpenAI-compatible API (Ollama by default) and use the LLM key from setup. The agents run in Open WebUI with the gateway's MCP tools (see Chat).
 - Coding agents start from an @mention in a Gitea comment (commit, PR, issue) via webhook, or from the team chat. Each task gets a fresh Docker container with the repo checked out, removed when done.
-- A namespace agent that finds a cause above its scope (e.g. a full disk) escalates a request to garrison's operator.
+- An agent working in a namespace that finds a cause above its scope (e.g. a full disk) escalates a request to the operator working in garrison.
 - Users can still work locally with their own coding tools and push to the same repos.
-- Agents are folders in each namespace's `config` repo (see Chat). Planned: each chat running in its own sandbox behind an OpenAI-compatible agent service. See [agents.md](agents.md).
+- Agents are folders in `garrison/config`, each working in every namespace (see Chat). Each chat runs in its own sandbox behind an OpenAI-compatible agent service. See [agents.md](agents.md).
 
 ## Dashboard
 
@@ -251,9 +251,9 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 ## Chat
 
 - Open WebUI, at `chat.<domain>`, is the chat. People sign in through Keycloak; root admins are its admins.
-- Each namespace has a channel there, named after it: its team chat, permanent, which only its people (and root admins) read; `garrison`'s, the platform's, everyone signed in reads. Outside a namespace, people talk to its agents in private chats. Only admins may change a channel, and the gateway puts back what it set. Mentioning one of the namespace's agents, `@<namespace>/<agent>` (e.g. `@garrison/operator`), makes it answer in a thread; a pinned message in each channel lists them.
-- A namespace's agents are folders under `agents/` in its repo config: `agent.yaml` (description, model, tools, skills) and `prompt.md`, with skills in the Agent Skills format (`SKILL.md`) under `skills/`. A new config repo gets the operator (from `templates/namespace-config/`, compiled into the control plane, with `tools: all`); a namespace without an `agents/` folder has it too. `garrison/config` holds the garrison namespace's agents, and only root admins approve changes to it. See [agents.md](agents.md).
-- Open WebUI's one model connection is the agent service, an OpenAI-compatible API in the control plane whose models are the agents, `<namespace>/<agent>`. Open WebUI sends it the person's Keycloak token and the chat's id; it has no LLM key and no tools itself. The agent service runs each turn: the LLM, whose key only it holds, with the agent's prompt and the platform's rules after it, calling the agent's tools at the gateway as the person. Tool calls show as the answer's reasoning. Open WebUI's own tasks (titles, tags) go straight to the LLM.
+- Each namespace has a channel there, named after it: its team chat, permanent, which only its people (and root admins) read; `garrison`'s, the platform's, everyone signed in reads. Outside a namespace, people talk to the agents in private chats. Only admins may change a channel, and the gateway puts back what it set. Mentioning an agent by its name, `@<agent>` (e.g. `@operator`), makes it answer in a thread, working in the channel's namespace; a pinned message in each channel lists them.
+- The agents are folders under `agents/` in `garrison/config`, which only root admins change: `agent.yaml` (description, model, tools, skills) and `prompt.md`, with skills in the Agent Skills format (`SKILL.md`) under `skills/`. `garrison/config` starts with the operator (`tools: all`) and the commander, from `templates/garrison-config/`, compiled into the control plane; without an `agents/` folder it has the operator. Namespaces have no agents of their own (the approval check refuses an `agents/` folder there); every agent works in every namespace, as `<namespace>/<agent>`, with the rights (`grants.yaml`) and routines (`routines.yaml`) that namespace gives it. See [agents.md](agents.md).
+- Open WebUI's one model connection is the agent service, an OpenAI-compatible API in the control plane whose models are the agents, `garrison/<agent>`, named `<agent>`; in a namespace's channel it runs the agent as it works there. Open WebUI sends it the person's Keycloak token and the chat's id; it has no LLM key and no tools itself. The agent service runs each turn: the LLM, whose key only it holds, with the agent's prompt and the platform's rules after it, calling the agent's tools at the gateway as the person. Tool calls show as the answer's reasoning. Open WebUI's own tasks (titles, tags) go straight to the LLM.
 - Models: `llm/providers.yaml` in `garrison/config` lists the LLM providers, OpenAI-compatible APIs (e.g. Ollama's cloud, OpenRouter, a local Ollama), and the default model; `llm/models.yaml` lists every model they offer, each `enabled` or not and, once its provider stops offering it, `gone` with the date. Root admins change both by pull request; everyone signed in reads them, and agents with `list_models`. The install writes the first provider from its answers. The agent service asks each provider for its models once a day and soon after `providers.yaml` changes, and proposes the changed list as a pull request (on a branch `garrison/models-<time>`): new models come turned off, retired ones are marked, and the agents still naming them listed; a provider that cannot be reached keeps its models. An agent names its model as `<provider>/<model>` (a bare name is the default provider's), and the approval check refuses one that is not enabled. The agent service sends each request to the model's provider; an agent whose model is turned off or retired gets the default, and its namespace's feed says so once a day. Each provider's key is a root-only file on the machine, `/etc/garrison/llm-keys/<provider>` (the install's LLM keeps `/etc/garrison/llm-api-key`), read only by the agent service.
 - The gateway serves an agent only the tools its `agent.yaml` lists (plus `load_skill` and `read_skill_file` if it has skills); a call that names no agent of a namespace gets none. It keeps an entry per agent in Open WebUI, for everyone, or only for the namespace's people if the agent works on a private repo, and one channel per namespace, for its people, adding and removing them as folders and organisations come and go. People can also chat with an agent privately.
 - The `garrison/approval` check on config pull requests also checks the agent files: an agent with an unknown tool or skill, or without a prompt, fails it.
@@ -267,7 +267,7 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 ## Notifications
 
 - **Sources:** Alertmanager (disk, node, backup, service health), deployer (failed deploys, PRs waiting), agents (task updates), chat (@mentions). Built: Alertmanager's alerts go to the dashboard's feed by namespace and start the agents' `on_alert` routines; see [status.md](status.md).
-- **Routing:** by namespace to its members, its channel and its agent; platform alerts to root admins and garrison's operator.
+- **Routing:** by namespace to its members, its channel and the agents its routines name; platform alerts to root admins and garrison's routines.
 - **Delivery:** in-app inbox, plus phone push through ntfy.
 - **Questions from agents:** a routine that needs something only its person can tell it (a choice, a missing fact, an approval) calls `ask_person`. The question is posted in the namespace's channel as a mention of its owner, which Open WebUI tells them of even in a muted channel, and is listed under **Waiting for you** at the top of their dashboard, with a link that opens the question's thread. The run ends its turn and waits, up to 24 hours: the agent service watches the question's thread, and the owner's first reply there is the answer. The run then goes on in the same sandbox, with its workspace and history, and posts what it did in the thread; it may ask again there. Without an answer it stops waiting and says so in the thread. Questions are kept in Postgres (`questions`), so a restart does not lose them, and the feed records each one, waiting, answered or not. Only a routine's own agent asks this way: in a chat the person reads the answer, and an agent another one asked puts its question in its answer. Not yet: phone push (ntfy).
 - People are notified immediately; agents investigate in parallel with read-only rights and follow up with a cause and a proposed fix for a person to approve.
