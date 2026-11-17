@@ -35,8 +35,8 @@ type Person struct {
 	Owner      string `json:"-"` // in such a run, the routine's owner, for whom grants are checked
 }
 
-// SystemNamespace is the namespace the deployer deploys.
-const SystemNamespace = "system"
+// PlatformNamespace is the namespace the deployer deploys.
+const PlatformNamespace = "garrison"
 
 // Tools are what the operator agents may do. Reads of the cluster (stacks,
 // logs, metrics) are open to everyone signed in, as everything is; reads and
@@ -82,7 +82,7 @@ func spec(name, desc string, props map[string]any, required ...string) Spec {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var nsArg = str("the namespace, i.e. the Gitea organisation, e.g. system")
+var nsArg = str("the namespace, i.e. the Gitea organisation, e.g. garrison")
 
 // Specs are the tools of the plain /mcp endpoint.
 func (t *Tools) Specs() []Spec { return SpecsFor(nil) }
@@ -122,9 +122,9 @@ func baseSpecs() []Spec {
 		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"namespace": nsArg, "stack": str("stack name, e.g. grafana")}, "namespace", "stack"),
 		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the namespace's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"namespace": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "namespace", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
-		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for system, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
-		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in system/config, which root admins change.", nil),
-		spec("list_repos", "Lists the repos of a namespace. In system, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
+		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
+		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
+		spec("list_repos", "Lists the repos of a namespace. In garrison, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "namespace", "repo"),
 		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "namespace", "repo", "path"),
 		spec("list_changes", "Lists a namespace's proposed changes (open pull requests) with their diffs and links.", map[string]any{"namespace": nsArg}, "namespace"),
@@ -315,8 +315,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return t.promQuery(ctx, a.Query)
 	case "list_members":
-		if a.Namespace == SystemNamespace {
-			return "The namespace system is changed by root admins only; it has no members.yaml.", nil
+		if a.Namespace == PlatformNamespace {
+			return "The namespace garrison is changed by root admins only; it has no members.yaml.", nil
 		}
 		roster, err := t.Gitea.Roster(ctx, p.Name, a.Namespace)
 		if err != nil {
@@ -529,11 +529,11 @@ func (t *Tools) skill(ctx context.Context, p Person, agent *agents.Agent, name s
 }
 
 // stackNames lists a namespace's deployed Swarm stacks with their commits:
-// in system the stacks the deployer deployed, elsewhere one per deployed
+// in garrison the stacks the deployer deployed, elsewhere one per deployed
 // environment of each app, named after its hostname (todo, dev-todo).
 func stackNames(state gitops.State, namespace string) map[string]string {
 	out := map[string]string{}
-	if namespace == SystemNamespace {
+	if namespace == PlatformNamespace {
 		for name, commit := range state.Stacks {
 			out[name] = commit
 		}

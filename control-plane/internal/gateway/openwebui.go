@@ -288,7 +288,7 @@ func (o *OpenWebUI) syncProfile(ctx context.Context, token string) error {
 // HowToMarker starts the pinned message that explains a channel.
 const HowToMarker = "**How to ask the agent of this namespace**"
 
-// howTo is a channel's pinned message. commander is system's commander, if
+// howTo is a channel's pinned message. commander is garrison's commander, if
 // there is one: it finds the agent for what someone wants.
 func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent, commander string) string {
 	ask := ""
@@ -320,7 +320,7 @@ For example:
 It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention an agent are for the people here.%[2]s
 
 An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are folders under agents/ in the repo config.`, example.ID(), ask)
-	if ns.Name != SystemNamespace {
+	if ns.Name != PlatformNamespace {
 		b.WriteString("\n\nOnly the people of " + ns.Name + " read this channel. Others can talk to its agents that work on public repos in a private chat.")
 	}
 	return b.String()
@@ -387,8 +387,8 @@ type owuiChannel struct {
 }
 
 func (o *OpenWebUI) channelDescription(ns Namespace) string {
-	if ns.Name == SystemNamespace {
-		return "Chat of the platform, for everyone signed in. Ask its agents with @system/<agent>; see the pinned message."
+	if ns.Name == PlatformNamespace {
+		return "Chat of the platform, for everyone signed in. Ask its agents with @garrison/<agent>; see the pinned message."
 	}
 	return fmt.Sprintf("Team chat of the namespace %s: only its people read it. Ask its agents with @%s/<agent>; see the pinned message.", ns.Name, ns.Name)
 }
@@ -400,10 +400,10 @@ var everyoneReadsAndWrites = []any{
 
 // channelAccess is who reads and writes a namespace's channel: its people,
 // by its Open WebUI group (root admins, Open WebUI's admins, read every
-// channel). system's is for everyone signed in: it has no people of its own,
+// channel). garrison's is for everyone signed in: it has no people of its own,
 // and its repos and agents serve everyone.
 func channelAccess(ns, group string) []any {
-	if ns == SystemNamespace {
+	if ns == PlatformNamespace {
 		return everyoneReadsAndWrites
 	}
 	if group == "" {
@@ -423,7 +423,7 @@ const legacyTeamMarker = "garrison_team"
 // namespace's people.
 func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces []Namespace, byNS map[string][]agents.Agent, groups map[string]string) error {
 	commander := ""
-	if slices.ContainsFunc(byNS[SystemNamespace], func(a agents.Agent) bool { return a.Name == agents.CommanderName }) {
+	if slices.ContainsFunc(byNS[PlatformNamespace], func(a agents.Agent) bool { return a.Name == agents.CommanderName }) {
 		commander = agents.CommanderName
 	}
 	var all []owuiChannel
@@ -517,7 +517,7 @@ type owuiGroup struct {
 // syncGroups keeps one Open WebUI group per namespace with the people of its
 // members.yaml who have signed in to Open WebUI, matched by email, so that
 // agents visible to members show only to them. It returns the group ids by
-// namespace. system has none: its people are root admins, whom Open WebUI
+// namespace. garrison has none: its people are root admins, whom Open WebUI
 // shows everything.
 func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []Namespace) (map[string]string, error) {
 	var groups []owuiGroup
@@ -545,7 +545,7 @@ func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []N
 	}
 	out := map[string]string{}
 	for _, ns := range namespaces {
-		if ns.Name == SystemNamespace {
+		if ns.Name == PlatformNamespace {
 			continue
 		}
 		id, ok := have[ns.Name]

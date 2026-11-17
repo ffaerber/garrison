@@ -43,7 +43,7 @@ type Config struct {
 	PasswordFile string          // its password
 	CAFile       string          // certificate the installation's TLS is verified with
 	Wake         <-chan struct{} // when set, Serve syncs before the interval is over
-	Org          string          // namespace to deploy, e.g. system
+	Org          string          // namespace to deploy, e.g. garrison
 	WorkDir      string          // the deployer's own directory: checkouts and state
 	Env          []string        // KEY=VALUE passed to every deploy
 	Run          apply.Runner
@@ -220,7 +220,7 @@ type repo struct {
 	Archived      bool   `json:"archived"`
 }
 
-// repos lists the system organisation's repos that can hold a stack, with
+// repos lists the garrison organisation's repos that can hold a stack, with
 // the deployer last.
 func (c *Config) repos(ctx context.Context) ([]repo, error) {
 	out, err := c.reposOf(ctx, c.Org)
@@ -397,7 +397,7 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 			errs = append(errs, fmt.Errorf("deploy %s: %w", r.Name, err))
 			c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusFailed, Commit: commit,
 				Title: fmt.Sprintf("the system stack %s at %.7s did not deploy", r.Name, commit), Detail: err.Error(),
-				Key: "deploy-failed:system/" + r.Name + "@" + commit})
+				Key: "deploy-failed:" + c.Org + "/" + r.Name + "@" + commit})
 			if old, ok := prev.Stacks[r.Name]; ok {
 				next.Stacks[r.Name] = old // still running, at the old commit
 			}

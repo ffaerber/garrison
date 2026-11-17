@@ -131,7 +131,7 @@ func (t *Tools) mayRead(ctx context.Context, p Person, org, repo string) error {
 
 // stackProblems checks the stacks of a namespace's config repo at ref, as
 // the deployer will read them: stacks/<name>.yaml, each valid, its source a
-// repo of the namespace. system has none: it holds the platform, not apps.
+// repo of the namespace. garrison has none: it holds the platform, not apps.
 func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, error) {
 	f := configFiles{g: g, ns: ns, ref: ref}
 	entries, err := f.List(ctx, stack.Dir)
@@ -147,8 +147,8 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 		path := stack.Dir + "/" + e.Name
 		name, ok := strings.CutSuffix(e.Name, ".yaml")
 		switch {
-		case ns == SystemNamespace:
-			out = append(out, path+": system holds the platform, not apps; put the app into a namespace of its own")
+		case ns == PlatformNamespace:
+			out = append(out, path+": garrison holds the platform, not apps; put the app into a namespace of its own")
 			continue
 		case e.Type != "file" || !ok:
 			out = append(out, path+": "+stack.Dir+"/ holds only <name>.yaml files")

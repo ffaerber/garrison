@@ -1,4 +1,4 @@
-# Built by Gitea Actions from the repo system/control-plane (control-plane/ci/build.yaml).
+# Built by Gitea Actions from the repo garrison/control-plane (control-plane/ci/build.yaml).
 # Context: the repo root, which holds go.mod, schemas/, templates/ and control-plane/.
 FROM golang:1.26-alpine AS build
 WORKDIR /src

@@ -61,7 +61,7 @@ services:
         {"0": {"enable": true, "auth_type": "system_oauth",
           "headers": {"X-Garrison-Chat": "{{`{{CHAT_ID}}`}}", "X-Garrison-Task": "{{`{{TASK}}`}}"}}}
       # New chats start with the commander, which finds the agent for a task.
-      DEFAULT_MODELS: system/commander
+      DEFAULT_MODELS: garrison/commander
       # One channel per namespace, kept by the gateway: the team chat
       # where people mention the namespace's agents.
       ENABLE_CHANNELS: "True"

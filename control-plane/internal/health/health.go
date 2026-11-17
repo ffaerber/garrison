@@ -2,7 +2,7 @@
 // cAdvisor cannot: it sees only running containers, so an app that exits at
 // start hardly shows. Its metrics come from Docker's API, per service, with
 // the namespace, app and environment the deployer labels each app with;
-// the platform's own services count as the namespace system.
+// the platform's own services count as the namespace garrison.
 package health
 
 import (
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/render"
 )
 
@@ -103,7 +104,7 @@ func (d *Docker) Services(ctx context.Context) ([]Service, error) {
 		h := &Service{Namespace: l[render.LabelNamespace], App: l[render.LabelApp], Environment: l[render.LabelEnvironment], Stack: stack, Service: s.Spec.Name}
 		if h.Namespace == "" {
 			// The platform's own stacks: postgres, gitea, control-plane ...
-			h.Namespace, h.App, h.Environment = "system", stack, "main"
+			h.Namespace, h.App, h.Environment = agents.PlatformNamespace, stack, "main"
 			if stack == "" {
 				h.App = s.Spec.Name
 			}

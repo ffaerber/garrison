@@ -24,7 +24,7 @@ import (
 )
 
 // Members keeps each namespace's config repo: who may change the namespace,
-// as members.yaml there says, and the checks on its agents. For system,
+// as members.yaml there says, and the checks on its agents. For garrison,
 // which has no members.yaml, only root admins approve changes to config.
 // Who may change a namespace, as members.yaml says:
 //
@@ -182,9 +182,9 @@ func (m *Members) Sync(ctx context.Context) error {
 	present := map[string]bool{}
 	for _, ns := range namespaces {
 		present[ns.Name] = true
-		if ns.Name == SystemNamespace {
-			if err := m.system(ctx, roots); err != nil {
-				errs = append(errs, fmt.Errorf("config of system: %w", err))
+		if ns.Name == PlatformNamespace {
+			if err := m.platform(ctx, roots); err != nil {
+				errs = append(errs, fmt.Errorf("config of garrison: %w", err))
 			}
 		} else if err := m.namespace(ctx, ns.Name, roots); err != nil {
 			errs = append(errs, fmt.Errorf("members of %s: %w", ns.Name, err))
@@ -494,10 +494,10 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 	return m.approvals(ctx, ns, &roster, roots)
 }
 
-// system keeps system/config, which holds the system namespace's agents.
+// platform keeps garrison/config, which holds the garrison namespace's agents.
 // It has no members.yaml: root admins approve and merge its changes.
-func (m *Members) system(ctx context.Context, roots []string) error {
-	ns := SystemNamespace
+func (m *Members) platform(ctx context.Context, roots []string) error {
+	ns := PlatformNamespace
 	teams, err := m.teams(ctx, ns, map[string]string{RootTeam: "admin"})
 	if err != nil {
 		return err
@@ -505,7 +505,7 @@ func (m *Members) system(ctx context.Context, roots []string) error {
 	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
 		files := agents.OperatorFiles()
 		maps.Copy(files, agents.CommanderFiles())
-		if err := m.createConfig(ctx, ns, "The agents of the system namespace; root admins approve changes", "The operator and the commander", files); err != nil {
+		if err := m.createConfig(ctx, ns, "The agents of the garrison namespace; root admins approve changes", "The operator and the commander", files); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made", ns)
@@ -524,7 +524,7 @@ func (m *Members) system(ctx context.Context, roots []string) error {
 // createConfig makes a namespace's config repo with files, in one commit.
 // The repo and its files are two requests: should the files not go in (a
 // push by someone else in between makes Gitea refuse it, as the model list
-// of system/config did once), the repo goes again, so the next pass makes
+// of garrison/config did once), the repo goes again, so the next pass makes
 // it anew instead of finding it there and taking it as set up.
 func (m *Members) createConfig(ctx context.Context, ns, description, message string, files map[string]string) error {
 	g := m.Gitea
@@ -727,7 +727,7 @@ func sameRule(want, have map[string]any) bool {
 
 // approvals posts garrison/approval on every open pull request of config:
 // its agents must be valid, and it needs an approval by Approval. base is
-// members.yaml on main; nil for system, which has none and whose changes
+// members.yaml on main; nil for garrison, which has none and whose changes
 // root admins approve.
 func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots []string) error {
 	g := m.Gitea

@@ -57,7 +57,7 @@ case $LLM in local|cloud) ;; *) echo "LLM must be local or cloud" >&2; exit 2 ;;
 inputs() {
   case $1 in
     base)     ;;
-    install)  echo install.sh installer system control-plane schemas templates go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
+    install)  echo install.sh installer garrison control-plane schemas templates go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
     login)    echo test/e2e/smoke.sh ;;
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
     agent)    echo test/e2e/smoke.sh ;;

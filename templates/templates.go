@@ -1,5 +1,5 @@
 // Package templates embeds what new repos start with: the config repo of a
-// namespace, and what system's adds to it.
+// namespace, and what garrison's adds to it.
 package templates
 
 import (
@@ -11,13 +11,14 @@ import (
 
 // all: keeps the files whose names start with a dot, as .gitea/.
 //
-//go:embed namespace-config system-config all:app
+//go:embed namespace-config garrison-config all:app
 var files embed.FS
 
-// Namespace and System name the template folders.
+// Namespace and Platform name the template folders: every namespace's
+// config, and garrison's on top of it.
 const (
 	Namespace = "namespace-config"
-	System    = "system-config"
+	Platform  = "garrison-config"
 )
 
 // App is the folder of the app templates.

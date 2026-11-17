@@ -55,14 +55,14 @@ func TestAgentThatTurnsPrivateLosesItsAccess(t *testing.T) {
 	}
 }
 
-// In the chat, system's commander goes by "commander", the same agent in
+// In the chat, garrison's commander goes by "commander", the same agent in
 // every channel; every other agent by namespace/name, as each namespace
 // has an operator of its own. The model's ID stays namespace/name.
 func TestTheCommanderGoesByItsNameAlone(t *testing.T) {
 	o := &OpenWebUI{}
 	for _, c := range []struct{ ns, name, id, shown string }{
-		{"system", "commander", "system/commander", "commander"},
-		{"system", "operator", "system/operator", "system/operator"},
+		{"garrison", "commander", "garrison/commander", "commander"},
+		{"garrison", "operator", "garrison/operator", "garrison/operator"},
 		{"lab", "commander", "lab/commander", "lab/commander"},
 		{"lab", "operator", "lab/operator", "lab/operator"},
 	} {

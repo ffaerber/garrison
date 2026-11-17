@@ -28,7 +28,7 @@ func TestThePlatformsExampleStackIsValid(t *testing.T) {
 	if s.Name != "immich" || len(s.Services) != 3 || s.Environments["main"].Hostname != "immich" {
 		t.Errorf("parsed as %+v", s)
 	}
-	if !strings.Contains(System(Agent{Namespace: "photos", Name: "operator", Prompt: OperatorPrompt}, "example.com"), "Never put an app into system") {
+	if !strings.Contains(System(Agent{Namespace: "photos", Name: "operator", Prompt: OperatorPrompt}, "example.com"), "Never put an app into garrison") {
 		t.Error("the system prompt lacks the platform")
 	}
 }

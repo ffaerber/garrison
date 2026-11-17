@@ -27,5 +27,5 @@ The installer keeps its state in `/etc/garrison` (root only): the admin password
 | Script | Does |
 | --- | --- |
 | `push-repo.sh` | Creates a repo in Gitea and fills it from a directory; `--update` commits changes to an existing one |
-| `control-plane-tree.sh` | Assembles the repo `system/control-plane`: its stack, the source, Dockerfile and build workflow |
+| `control-plane-tree.sh` | Assembles the repo `garrison/control-plane`: its stack, the source, Dockerfile and build workflow |
 | `lib.sh` | Helpers for the `configure.sh` steps of the bootstrap stacks |

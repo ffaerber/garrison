@@ -30,12 +30,12 @@ Open WebUI ──/v1/chat/completions──▶ agent service (control plane)
 | --- | --- | --- |
 | Agent folders | `<namespace>/config/agents/<name>/` | What an agent is: prompt, model, tools, skills |
 | Agent service | Control plane, service `agents` | OpenAI-compatible endpoint for Open WebUI; starts, routes to and stops sandboxes; proxies the LLM and the tools |
-| Sandbox image | `sandbox/` in the control plane's repo, built with it by Gitea Actions and pushed as `system/sandbox` | The harness (Pi) and what agents work with: bash, git, ripgrep, curl, jq; later Chromium, ffmpeg |
+| Sandbox image | `sandbox/` in the control plane's repo, built with it by Gitea Actions and pushed as `garrison/sandbox` | The harness (Pi) and what agents work with: bash, git, ripgrep, curl, jq; later Chromium, ffmpeg |
 | Gateway | Control plane, service `gateway` | The tools, as today, acting as the person |
 
 ## Agent folders
 
-Each namespace keeps its agents in its `config` repo, next to `members.yaml`. `system` gets a `config` repo too, writable by root admins only, so system agents work the same way.
+Each namespace keeps its agents in its `config` repo, next to `members.yaml`. `garrison` gets a `config` repo too, writable by root admins only, so garrison's agents work the same way.
 
 ```
 homepage/config/
@@ -61,7 +61,7 @@ homepage/config/
 
 ```yaml
 description: Makes screenshots and media and keeps the homepage current
-model: openrouter/anthropic/claude-sonnet-5.5   # an enabled model of system/config llm/models.yaml; empty for the default
+model: openrouter/anthropic/claude-sonnet-5.5   # an enabled model of garrison/config llm/models.yaml; empty for the default
 tools:                       # gateway tools this agent may use; `all` for every one, also later ones
   - list_repos
   - read_file
@@ -94,7 +94,7 @@ By default an agent has no rights of its own: every tool call acts as the person
 Rights are per namespace: its people (`members.yaml`) change its repos, everyone signed in reads the public ones, and only its people read the private ones. There are no people of single repos. An agent follows the repos it works on (`repos`, those of its grants, and those its routines watch):
 
 - **All public, or none named** (like the operator): everyone sees the agent and may talk to it, people outside the namespace in a private chat, as only its people read its channel. It acts with each person's rights, so someone outside the namespace gets answers but no changes: proposing fails, as they may not write, unless a grant lets the agent propose for everyone.
-- **One is private**: the agent is private. Only the namespace's people and root admins see it, and it answers only where only they read: a private chat, or the namespace's channel. Elsewhere, e.g. in `system`'s channel, which everyone reads, the agent service refuses it with a note saying where to ask. A repo an agent names that does not exist yet counts as private.
+- **One is private**: the agent is private. Only the namespace's people and root admins see it, and it answers only where only they read: a private chat, or the namespace's channel. Elsewhere, e.g. in `garrison`'s channel, which everyone reads, the agent service refuses it with a note saying where to ask. A repo an agent names that does not exist yet counts as private.
 - `visible: members` makes an agent private even if its repos are public.
 
 The gateway keeps an Open WebUI group per namespace, `garrison <namespace>`, with the people of its `members.yaml` who have signed in to Open WebUI (matched by their email in Gitea). Private agents and the namespace's channel are given to that group; root admins are Open WebUI's admins and see everything. The agent service and the gateway check it again on every request, since Open WebUI is not the only way in: someone who may not use the agent gets a refusal that says why.
@@ -138,7 +138,7 @@ grants:
 
 ### New namespaces and repos
 
-`create_namespace` and `create_repo` act as the person: Gitea lets only root admins make namespaces, and a namespace's admins and root admins make its repos. A new namespace gets its config, its operator and its channel from the gateway within a minute, the person as its first admin. A new repo is empty but for a README, and only for code of an app's own; its files come as a pull request like any other change. Every agent's system prompt (`agents.Platform`) says how the home cloud is laid out, with a full `config/stacks/<name>.yaml` that a test checks the deployer takes, so a request for a new app becomes a namespace if needed and a proposed stack in its config, never a stack in `system` or a secret made by hand.
+`create_namespace` and `create_repo` act as the person: Gitea lets only root admins make namespaces, and a namespace's admins and root admins make its repos. A new namespace gets its config, its operator and its channel from the gateway within a minute, the person as its first admin. A new repo is empty but for a README, and only for code of an app's own; its files come as a pull request like any other change. Every agent's system prompt (`agents.Platform`) says how the home cloud is laid out, with a full `config/stacks/<name>.yaml` that a test checks the deployer takes, so a request for a new app becomes a namespace if needed and a proposed stack in its config, never a stack in `garrison` or a secret made by hand.
 
 ### Proposing and merging
 
@@ -157,7 +157,7 @@ The gateway refuses these whatever an agent folder says, and the approval check 
 
 - Writing to a `config` repo, so an agent never widens its own grants, and so changing `members.yaml`.
 - Changing branch protection, deleting repos, or anything in Gitea's or Open WebUI's settings: there is no tool for it, and the agent's account has no admin rights.
-- Grants on repos of another namespace. Grants in `system` need a root admin's approval, as every change to `system/config` does.
+- Grants on repos of another namespace. Grants in `garrison` need a root admin's approval, as every change to `garrison/config` does.
 - `enabled: false` in `agent.yaml` switches an agent off: at the next sync, seconds after the merge, it leaves Open WebUI and the gateway's catalogue, its tool calls are refused and its account is locked. A turn already running ends at its next tool call.
 
 ## Agents asking agents
@@ -171,19 +171,19 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 - **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and its progress shows in the reasoning, each line under its name.
 - **Private agents** are asked only where they may answer: an agent in the namespace's public channel cannot ask a private one.
 - **Finding them:** `find_agents(in_namespace)`, for the same agents, lists those it may ask for this person here: what each does (`description`), its tools, skills, repos and grants, and which namespace the channel belongs to. Agents it may not ask, the person may not use, or that may not answer here are left out.
-- **Anyone:** `agents: any` lets an agent ask every agent the person may use. Only agents of `system` may have it, which root admins approve; it adds no rights, as the asked agent still acts as the person.
+- **Anyone:** `agents: any` lets an agent ask every agent the person may use. Only agents of `garrison` may have it, which root admins approve; it adds no rights, as the asked agent still acts as the person.
 - **The feed** has each hand-off, for the person and the asked agent's namespace, with its answer; the asked agent's calls are threaded under it.
 - **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
 
 ## The commander
 
-`system/commander` is for when someone does not know which agent to ask. It is written into `system/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI, and every channel's pinned message names it. In the chat it goes by `commander` alone, typed `@commander` in any channel, as it is the same agent everywhere; every other agent is shown as `<namespace>/<agent>`, since each namespace has an operator of its own. Its ID stays `system/commander`. It does no work itself: it calls `find_agents`, then
+`garrison/commander` is for when someone does not know which agent to ask. It is written into `garrison/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI, and every channel's pinned message names it. In the chat it goes by `commander` alone, typed `@commander` in any channel, as it is the same agent everywhere; every other agent is shown as `<namespace>/<agent>`, since each namespace has an operator of its own. Its ID stays `garrison/commander`. It does no work itself: it calls `find_agents`, then
 
 - hands a clear, one-off task (a screenshot, a new repo, why an app does not start) to the agent that fits, with `ask_agent`; in a channel in the background, so that agent posts its answer there itself;
 - for work with back and forth (a feature, a new app), tells the person which agent to talk to, `@<namespace>/<agent>`, and why;
 - asks one question when it cannot tell, and says when no agent fits and what one would need.
 
-Root admins change it like any agent of `system`, by a pull request to its folder.
+Root admins change it like any agent of `garrison`, by a pull request to its folder.
 
 ## Runs without a person
 
@@ -210,7 +210,7 @@ routines:
 - **Who:** a routine acts with the agent's own account, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Tools that need a person's sign-in (`screenshot`, `browse`, `propose_change`) are refused.
 - **Asking:** a routine that needs a choice, a fact or an approval from its owner calls `ask_person`; it ends its turn and goes on, in its sandbox, when the owner replies in the question's thread (see Notifications in [spec.md](spec.md)).
 - **When:** each routine has one of `schedule`, `every`, `on_push` and `on_alert`. The agent service looks every minute.
-  - `on_alert` lists label values an alert of this namespace must have, e.g. `{alertname: ServiceFailing}` or `{alertname: ServiceDown, app: todo}`; `{}` takes every alert of the namespace. The platform's own alerts belong to `system`. The routine starts once per firing, and its task is told the alert's summary, labels and description. If it is still running from an earlier one, Alertmanager's next reminder (every 4 hours) starts it.
+  - `on_alert` lists label values an alert of this namespace must have, e.g. `{alertname: ServiceFailing}` or `{alertname: ServiceDown, app: todo}`; `{}` takes every alert of the namespace. The platform's own alerts belong to `garrison`. The routine starts once per firing, and its task is told the alert's summary, labels and description. If it is still running from an earlier one, Alertmanager's next reminder (every 4 hours) starts it.
   - `schedule` is cron's five fields, minute hour day-of-month month day-of-week (names like `mon-fri` and `dec` work), or `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`. It is read in the home cloud's time zone, `TIMEZONE` in `install.env` (the machine's at install, else UTC). A time a clock change skips runs right after the change. The approval check refuses a schedule that never comes or runs more often than every 10 minutes.
   - A routine with `schedule` first runs at the next time it names after it is first seen; one with `every` one interval after; one with `on_push` when the branch moves after that.
   - When each last ran, and the commit each `on_push` routine last saw, are kept in Postgres (`routine_state` in `garrison`). After a restart, a schedule missed meanwhile runs once, and a push made meanwhile starts its routine. Until the agent service can read that state, no routine runs.
@@ -279,7 +279,7 @@ A container belongs to a chat, not to an agent or a person.
 
 | Layer | Lives in | A change reaches running chats |
 | --- | --- | --- |
-| Sandbox image | `system/sandbox` | At their next turn |
+| Sandbox image | `garrison/sandbox` | At their next turn |
 | Agent definition | `<namespace>/config/agents/` | At their next turn |
 | Tools and platform rules | Gateway, in the control plane | When the gateway is deployed |
 
@@ -295,13 +295,13 @@ A new namespace or repo starts nothing: its agents appear in the model list, and
 
 ## Observability
 
-- The Grafana dashboard **Agents** (`system/grafana/dashboards/agents.json`), built: running sandboxes, by agent and by person, their memory and CPU, and a table of each with its chat; from cAdvisor, which passes on the sandboxes' labels `garrison.agent`, `garrison.person` and `garrison.chat`. Below, what agents did: the agent service's log (turns with person, agent, chat and number of tool calls; Git fetches; agents asking agents; routines) and the gateway's (every tool call with person, agent, tool and what started the run, refusals with why).
+- The Grafana dashboard **Agents** (`garrison/grafana/dashboards/agents.json`), built: running sandboxes, by agent and by person, their memory and CPU, and a table of each with its chat; from cAdvisor, which passes on the sandboxes' labels `garrison.agent`, `garrison.person` and `garrison.chat`. Below, what agents did: the agent service's log (turns with person, agent, chat and number of tool calls; Git fetches; agents asking agents; routines) and the gateway's (every tool call with person, agent, tool and what started the run, refusals with why).
 - What was said stays out of it: a sandbox's output is Pi's conversation, with whatever the agent read, private repos included, so Alloy does not ship sandboxes' logs to Loki, which everyone signed in reads.
 - To come: a `list_sessions` tool that shows the same to the operator agents; whether a sandbox is working or idle.
 
 ## Plan
 
-1. Agent folders: parsing, checks on `config` pull requests, `system/config`, the operator written into new namespaces. Built. The gateway serves an agent its tools and skills (`load_skill`, `read_skill_file`) when a call names it in `X-Garrison-Agent`.
+1. Agent folders: parsing, checks on `config` pull requests, `garrison/config`, the operator written into new namespaces. Built. The gateway serves an agent its tools and skills (`load_skill`, `read_skill_file`) when a call names it in `X-Garrison-Agent`.
 2. Agent service: models list, streaming, chat id, the person's Keycloak token (Open WebUI's `system_oauth`, so no forwarded-user JWT is needed), task requests to the LLM. Built with the loop in its own process: the LLM with the agent's prompt, and its tools from the gateway as the person; tool calls show as reasoning. Open WebUI has no LLM key and no tools any more.
 3. Sandbox image with Pi; one container per chat with its volume, idle stop and resume. Built; requests without a chat id still run in the agent service's process. To come: a dataset per chat, removing unused ones.
 4. LLM and tool proxies; per-agent tool lists enforced; skills. Proxies built, with the per-agent tool lists of step 1. Git built: the agent service serves Git's fetch protocol to sandboxes (`$GARRISON_GIT/<namespace>/<repo>.git`) for the repos the person may read, and the gateway's `propose_patch` applies a patch as the person on a `change/...` branch with a pull request; in Pi it is `propose_workspace_changes`, which proposes a checkout's changes and adds later ones to the same pull request. Several agents work on one repo like people do: each on its own branch, merged by a person. To come: Pi's native skills, Git LFS.

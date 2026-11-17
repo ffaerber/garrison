@@ -16,7 +16,7 @@ import (
 	"garrison/control-plane/internal/hooks"
 )
 
-// Builders gives every namespace other than system the credentials its
+// Builders gives every namespace other than garrison the credentials its
 // pipelines push images with: a build account, <namespace>-builder, in the
 // organisation's team "builders", which may write packages and nothing else,
 // with a token limited to packages. The token and the registry's address
@@ -53,7 +53,7 @@ func (b *Builders) Sync(ctx context.Context) error {
 	present := map[string]bool{}
 	for _, ns := range namespaces {
 		present[ns.Name] = true
-		if ns.Name == SystemNamespace {
+		if ns.Name == PlatformNamespace {
 			continue
 		}
 		if err := b.setup(ctx, ns.Name); err != nil {

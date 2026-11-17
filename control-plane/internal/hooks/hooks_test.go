@@ -100,10 +100,10 @@ func TestRegisterUpdatesExistingHook(t *testing.T) {
 	}))
 	defer srv.Close()
 	g := &Gitea{URL: srv.URL, User: "installer", Password: "pw"}
-	if err := g.Register(context.Background(), "system", "http://control-plane_deployer:8090/hook", []byte("abc")); err != nil {
+	if err := g.Register(context.Background(), "garrison", "http://control-plane_deployer:8090/hook", []byte("abc")); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 || calls[1] != "PATCH /api/v1/orgs/system/hooks/7" {
+	if len(calls) != 2 || calls[1] != "PATCH /api/v1/orgs/garrison/hooks/7" {
 		t.Fatalf("calls %v", calls)
 	}
 	if cfg := sent["config"].(map[string]any); cfg["secret"] != "abc" || cfg["url"] != "http://control-plane_deployer:8090/hook" {
@@ -111,10 +111,10 @@ func TestRegisterUpdatesExistingHook(t *testing.T) {
 	}
 
 	calls = nil
-	if err := g.Register(context.Background(), "system", "http://control-plane_gateway:8080/hook", []byte("abc")); err != nil {
+	if err := g.Register(context.Background(), "garrison", "http://control-plane_gateway:8080/hook", []byte("abc")); err != nil {
 		t.Fatal(err)
 	}
-	if calls[1] != "POST /api/v1/orgs/system/hooks" {
+	if calls[1] != "POST /api/v1/orgs/garrison/hooks" {
 		t.Fatalf("calls %v", calls)
 	}
 }

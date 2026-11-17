@@ -184,7 +184,7 @@ button.danger { color: var(--failed); }
     <a class="title" href="/e/{{$e.ID}}">{{$e.Title}}</a>
     <div class="meta">
       {{if ne $e.Status "info"}}{{if ne $e.Status "ok"}}<span class="status {{$e.Status}}">{{$e.Status}}</span>{{end}}{{end}}
-      {{if $e.Namespace}}<a class="chip" href="/?ns={{$e.Namespace}}">{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}</a>{{else}}<span class="chip">system</span>{{end}}
+      {{if $e.Namespace}}<a class="chip" href="/?ns={{$e.Namespace}}">{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}</a>{{else}}<span class="chip">garrison</span>{{end}}
       {{if $e.Agent}}<span class="chip">{{$e.Agent}}</span>{{end}}
       <span>{{$e.Kind}}</span>
       {{if $e.Detail}}{{if not .This}}<span title="{{$e.Detail}}">· details</span>{{end}}{{end}}
@@ -200,7 +200,7 @@ button.danger { color: var(--failed); }
   <h1>{{$e.Title}}</h1>
   <dl>
     <dt>When</dt><dd><time datetime="{{iso $e.At}}">{{stamp $e.At}}</time> ({{ago $now $e.At}}){{if ne $e.Updated $e.At}}, last changed {{stamp $e.Updated}}{{end}}</dd>
-    <dt>Where</dt><dd>{{if $e.Namespace}}{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}{{else}}the home cloud itself (system){{end}}</dd>
+    <dt>Where</dt><dd>{{if $e.Namespace}}{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}{{else}}the home cloud itself (garrison){{end}}</dd>
     {{if $e.Actor}}<dt>For</dt><dd>{{$e.Actor}}</dd>{{end}}
     {{if $e.Agent}}<dt>Agent</dt><dd>{{$e.Agent}}</dd>{{end}}
     {{if $e.StartedBy}}<dt>Started by</dt><dd>{{$e.StartedBy}}</dd>{{end}}

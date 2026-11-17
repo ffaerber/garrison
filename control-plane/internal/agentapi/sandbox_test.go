@@ -17,7 +17,7 @@ func withSandboxes(t *testing.T, s *Server) *sandboxtest.Docker {
 	d := sandboxtest.New(t)
 	api := httptest.NewServer(s.SandboxHandler())
 	t.Cleanup(api.Close)
-	s.Sandboxes = &sandbox.Manager{Docker: &sandbox.Docker{Addr: d.Addr()}, Image: "registry/system/sandbox:1", Network: "sandboxes", API: api.URL, Memory: 1 << 30, CPUs: 1, Pids: 100}
+	s.Sandboxes = &sandbox.Manager{Docker: &sandbox.Docker{Addr: d.Addr()}, Image: "registry/garrison/sandbox:1", Network: "sandboxes", API: api.URL, Memory: 1 << 30, CPUs: 1, Pids: 100}
 	return d
 }
 
@@ -64,7 +64,7 @@ func TestAChatRunsInItsOwnSandbox(t *testing.T) {
 		t.Errorf("created %d, running %d", d.Created, d.Running())
 	}
 	for _, c := range d.Containers {
-		if c.Image != "registry/system/sandbox:1" || c.Labels[sandbox.Label] != "true" || c.Labels["garrison.person"] != "alice" {
+		if c.Image != "registry/garrison/sandbox:1" || c.Labels[sandbox.Label] != "true" || c.Labels["garrison.person"] != "alice" {
 			t.Errorf("container %+v", c)
 		}
 		for _, e := range c.Env {

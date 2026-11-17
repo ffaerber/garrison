@@ -26,14 +26,14 @@ type Alert struct {
 	GeneratorURL string            `json:"generatorURL"`
 }
 
-// SystemNamespace gets the alerts that name no namespace.
-const SystemNamespace = "system"
+// PlatformNamespace gets the alerts that name no namespace.
+const PlatformNamespace = "garrison"
 
 func (a Alert) namespace() string {
 	if ns := a.Labels["namespace"]; ns != "" {
 		return ns
 	}
-	return SystemNamespace
+	return PlatformNamespace
 }
 
 // AlertHandler takes Alertmanager's webhook, which must send token as its

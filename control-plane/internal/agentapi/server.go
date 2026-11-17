@@ -39,7 +39,7 @@ type Server struct {
 	Agents       Agents
 	Verifier     gateway.Verifier
 	LLM          *LLM    // the LLM when Models is nil
-	Models       *Models // the providers and models of system's config; nil: LLM and DefaultModel
+	Models       *Models // the providers and models of garrison's config; nil: LLM and DefaultModel
 	Gateway      *Gateway
 	Domain       string
 	DefaultModel string // the LLM model of agents that name none, and of Open WebUI's own tasks

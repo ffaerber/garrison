@@ -27,12 +27,12 @@ lab_merge() { gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content
 check "alice signs in to the chat"         chat_login alice
 
 echo "# 1. alice has the commander's operator make the namespace and the repo"
-answer=$(ask_agent system alice "Make a namespace lab for our experiments, and in it the repo example from the template static-web: a small web page we will deploy. You have everything you need; do not ask back.")
+answer=$(ask_agent garrison alice "Make a namespace lab for our experiments, and in it the repo example from the template static-web: a small web page we will deploy. You have everything you need; do not ask back.")
 lab_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/lab")" = 200 ]; }
 example_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/index.html")" = 200 ]; }
 if ! lab_made || ! example_made; then
   printf 'retry the operator did not do both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent system alice "Please go ahead now: create_namespace lab if it is missing, then create_repo example in lab with template static-web.")
+  answer=$(ask_agent garrison alice "Please go ahead now: create_namespace lab if it is missing, then create_repo example in lab with template static-web.")
 fi
 check "it makes the namespace lab, as alice" lab_made
 check "and the repo lab/example from the template" example_made

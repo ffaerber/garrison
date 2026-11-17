@@ -141,8 +141,8 @@ func TestTheApprovalCheckReadsStacks(t *testing.T) {
 	if strings.Contains(got, "todo.yaml") || strings.Contains(got, "good.yaml") {
 		t.Errorf("a good stack has problems:\n%s", got)
 	}
-	if problems, _ := g.stackProblems(context.Background(), "system", "abc"); len(problems) == 0 || !strings.Contains(problems[0], "system holds the platform") {
-		t.Errorf("system: %v", problems)
+	if problems, _ := g.stackProblems(context.Background(), "garrison", "abc"); len(problems) == 0 || !strings.Contains(problems[0], "garrison holds the platform") {
+		t.Errorf("garrison: %v", problems)
 	}
 }
 

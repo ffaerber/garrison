@@ -29,7 +29,7 @@ func (f *fakeGitea) Role(_ context.Context, ns, p string) (string, error) {
 	return map[string]string{"alice": "admin", "bob": "member"}[p], nil
 }
 func (f *fakeGitea) Orgs(context.Context, string) ([]string, error) {
-	return []string{"system", "todo", "media"}, nil
+	return []string{"garrison", "todo", "media"}, nil
 }
 func (f *fakeGitea) Files(_ context.Context, org, repo, dir string) ([]string, error) {
 	var out []string
@@ -81,7 +81,7 @@ func TestTheStore(t *testing.T) {
 	s := &Store{Gitea: g, Run: fakeSOPS(t), Domain: "home.test",
 		Recipients: func(_ context.Context, ns string) ([]string, error) { return []string{pubTodo, pubRecovery}, nil }}
 
-	// Who manages which namespace's secrets: never system's, for now.
+	// Who manages which namespace's secrets: never garrison's, for now.
 	for _, c := range []struct {
 		who  string
 		want []string
@@ -116,13 +116,13 @@ func TestTheStore(t *testing.T) {
 		t.Fatal(g.commits)
 	}
 
-	// Refused: bob, system, bad names and values.
+	// Refused: bob, garrison, bad names and values.
 	for _, c := range []struct {
 		ns, name, value, who string
 		want                 error
 	}{
 		{"todo", "x", "v", "bob", ErrForbidden},
-		{"system", "x", "v", "root", ErrForbidden},
+		{"garrison", "x", "v", "root", ErrForbidden},
 		{"todo", "Bad_Name", "v", "alice", ErrInvalid},
 		{"todo", "../members", "v", "alice", ErrInvalid},
 		{"todo", strings.Repeat("a", 33), "v", "alice", ErrInvalid},

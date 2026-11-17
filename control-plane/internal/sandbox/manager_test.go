@@ -14,7 +14,7 @@ import (
 
 func manager(t *testing.T) (*sandbox.Manager, *sandboxtest.Docker) {
 	d := sandboxtest.New(t)
-	return &sandbox.Manager{Docker: &sandbox.Docker{Addr: d.Addr()}, Image: "reg/system/sandbox:2", Network: "sandboxes", API: "http://agents", Memory: 1 << 30, CPUs: 1, Pids: 100}, d
+	return &sandbox.Manager{Docker: &sandbox.Docker{Addr: d.Addr()}, Image: "reg/garrison/sandbox:2", Network: "sandboxes", API: "http://agents", Memory: 1 << 30, CPUs: 1, Pids: 100}, d
 }
 
 func ask(t *testing.T, m *sandbox.Manager, want sandbox.Want, msg string) string {
@@ -75,7 +75,7 @@ func TestTheImageIsPulledWhenMissing(t *testing.T) {
 	m, d := manager(t)
 	d.Missing = true
 	ask(t, m, sandbox.Want{Key: "k", Person: "alice"}, "hi")
-	if len(d.Pulled) != 1 || d.Pulled[0] != "reg/system/sandbox:2" {
+	if len(d.Pulled) != 1 || d.Pulled[0] != "reg/garrison/sandbox:2" {
 		t.Errorf("pulled %v", d.Pulled)
 	}
 }
@@ -84,7 +84,7 @@ func TestANewImageRestartsTheSandbox(t *testing.T) {
 	m, d := manager(t)
 	w := sandbox.Want{Key: "k", Person: "alice"}
 	ask(t, m, w, "hi")
-	m.Image = "reg/system/sandbox:3"
+	m.Image = "reg/garrison/sandbox:3"
 	ask(t, m, w, "hi")
 	if d.Created != 2 || d.Running() != 1 {
 		t.Errorf("created %d, running %d", d.Created, d.Running())

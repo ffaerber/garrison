@@ -8,6 +8,6 @@
 #   carol  regular user: becomes an admin of the namespace todo in the talk step
 set -euo pipefail
 password=${TEST_PASSWORD:-12345678}
-USER_PASSWORD=$password system/keycloak/add-user.sh alice "alice@$(. /etc/garrison/install.env && echo "$DOMAIN")" --admin
-USER_PASSWORD=$password system/keycloak/add-user.sh bob   "bob@$(. /etc/garrison/install.env && echo "$DOMAIN")"
-USER_PASSWORD=$password system/keycloak/add-user.sh carol "carol@$(. /etc/garrison/install.env && echo "$DOMAIN")"
+USER_PASSWORD=$password garrison/keycloak/add-user.sh alice "alice@$(. /etc/garrison/install.env && echo "$DOMAIN")" --admin
+USER_PASSWORD=$password garrison/keycloak/add-user.sh bob   "bob@$(. /etc/garrison/install.env && echo "$DOMAIN")"
+USER_PASSWORD=$password garrison/keycloak/add-user.sh carol "carol@$(. /etc/garrison/install.env && echo "$DOMAIN")"

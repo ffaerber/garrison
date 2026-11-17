@@ -45,7 +45,7 @@ func TestModelsRouteAndSeed(t *testing.T) {
 	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
-		p := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/system/config")
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/garrison/config")
 		switch {
 		case strings.HasPrefix(p, "/raw/"):
 			if c, ok := files[strings.TrimPrefix(p, "/raw/")]; ok {

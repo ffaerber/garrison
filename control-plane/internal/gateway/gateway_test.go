@@ -18,7 +18,7 @@ import (
 	"garrison/control-plane/internal/agents"
 )
 
-// fakeGitea answers like Gitea: alice may write to system, bob may only read.
+// fakeGitea answers like Gitea: alice may write to garrison, bob may only read.
 type fakeGitea struct {
 	mu      sync.Mutex
 	prs     int
@@ -43,18 +43,18 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	switch {
 	case p == "/orgs":
-		io.WriteString(w, `[{"username":"system","description":"the platform"},{"username":"homepage"}]`)
-	case p == "/orgs/system" || p == "/orgs/homepage":
+		io.WriteString(w, `[{"username":"garrison","description":"the platform"},{"username":"homepage"}]`)
+	case p == "/orgs/garrison" || p == "/orgs/homepage":
 		io.WriteString(w, "{}")
-	case p == "/orgs/system/repos":
+	case p == "/orgs/garrison/repos":
 		json.NewEncoder(w).Encode([]Repo{{Name: "grafana"}})
-	case p == "/repos/system/grafana" && r.Method == http.MethodGet:
+	case p == "/repos/garrison/grafana" && r.Method == http.MethodGet:
 		fmt.Fprintf(w, `{"permissions":{"push":%v}}`, as == "alice")
-	case p == "/repos/system/grafana/raw/compose.yaml":
+	case p == "/repos/garrison/grafana/raw/compose.yaml":
 		io.WriteString(w, "services: {}\n")
-	case p == "/repos/system/grafana/contents/compose.yaml" && r.Method == http.MethodGet:
+	case p == "/repos/garrison/grafana/contents/compose.yaml" && r.Method == http.MethodGet:
 		io.WriteString(w, `{"sha":"abc"}`)
-	case p == "/repos/system/grafana/contents/compose.yaml":
+	case p == "/repos/garrison/grafana/contents/compose.yaml":
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		if body["branch"] != "main" || body["new_branch"] == "" {
@@ -62,21 +62,21 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, "{}")
-	case p == "/repos/system/grafana/diffpatch":
+	case p == "/repos/garrison/grafana/diffpatch":
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		f.patches = append(f.patches, body)
 		io.WriteString(w, "{}")
-	case p == "/repos/system/grafana/pulls" && r.Method == http.MethodPost:
+	case p == "/repos/garrison/grafana/pulls" && r.Method == http.MethodPost:
 		var body struct{ Head string }
 		json.NewDecoder(r.Body).Decode(&body)
 		f.prs++
 		f.heads = append(f.heads, body.Head)
-		io.WriteString(w, `{"number":7,"html_url":"https://git.example.com/system/grafana/pulls/7"}`)
-	case p == "/repos/system/grafana/pulls":
+		io.WriteString(w, `{"number":7,"html_url":"https://git.example.com/garrison/grafana/pulls/7"}`)
+	case p == "/repos/garrison/grafana/pulls":
 		var out []map[string]any
 		for _, h := range f.heads {
-			out = append(out, map[string]any{"number": 7, "html_url": "https://git.example.com/system/grafana/pulls/7", "head": map[string]any{"ref": h}})
+			out = append(out, map[string]any{"number": 7, "html_url": "https://git.example.com/garrison/grafana/pulls/7", "head": map[string]any{"ref": h}})
 		}
 		json.NewEncoder(w).Encode(out)
 	case strings.HasSuffix(p, "/pulls"):
@@ -238,10 +238,10 @@ func TestMCPHandshake(t *testing.T) {
 func TestEveryoneMayLook(t *testing.T) {
 	m, _ := setup(t)
 	text, isErr := callText(t, m, "tok-bob", "list_namespaces", nil)
-	if isErr || !strings.Contains(text, "system") || !strings.Contains(text, "homepage") {
+	if isErr || !strings.Contains(text, "garrison") || !strings.Contains(text, "homepage") {
 		t.Errorf("list_namespaces = %q", text)
 	}
-	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "system"})
+	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "garrison"})
 	if isErr || !strings.Contains(text, "grafana (commit 0123456789ab)") || strings.Contains(text, "hello") {
 		t.Errorf("list_stacks = %q", text)
 	}
@@ -253,22 +253,22 @@ func TestEveryoneMayLook(t *testing.T) {
 	if isErr || !strings.Contains(text, "deploy-20261113-150405-abc1234\t2026-11-13T15:04:05Z") {
 		t.Errorf("list_snapshots = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"namespace": "system", "stack": "todo"}); !isErr {
+	if text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"namespace": "garrison", "stack": "todo"}); !isErr {
 		t.Errorf("list_snapshots of another namespace's stack = %q", text)
 	}
 	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "homepage", "service": "todo_web"}); isErr {
 		t.Errorf("service_logs of an app = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "system", "service": "grafana_grafana"}); isErr || text != "log line\n" {
+	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "garrison", "service": "grafana_grafana"}); isErr || text != "log line\n" {
 		t.Errorf("service_logs = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "service_usage", map[string]any{"namespace": "system", "stack": "grafana"}); isErr || !strings.Contains(text, "12.5") {
+	if text, isErr = callText(t, m, "tok-bob", "service_usage", map[string]any{"namespace": "garrison", "stack": "grafana"}); isErr || !strings.Contains(text, "12.5") {
 		t.Errorf("service_usage = %q", text)
 	}
 	if text, isErr = callText(t, m, "tok-bob", "query_metrics", map[string]any{"query": "up"}); isErr || !strings.Contains(text, "grafana_grafana") {
 		t.Errorf("query_metrics = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "read_file", map[string]any{"namespace": "system", "repo": "grafana", "path": "compose.yaml"}); isErr || text != "services: {}\n" {
+	if text, isErr = callText(t, m, "tok-bob", "read_file", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "compose.yaml"}); isErr || text != "services: {}\n" {
 		t.Errorf("read_file = %q", text)
 	}
 }
@@ -279,12 +279,12 @@ func TestToolsStayInTheirNamespace(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{"service_logs", map[string]any{"namespace": "system", "service": "hello_web"}},            // not a system stack
-		{"service_logs", map[string]any{"namespace": "system", "service": "grafana_grafana; id"}},  // not a name
-		{"stack_status", map[string]any{"namespace": "homepage", "stack": "grafana"}},              // wrong namespace
-		{"read_file", map[string]any{"namespace": "system", "repo": "grafana", "path": "../../x"}}, // outside the repo
-		{"read_file", map[string]any{"namespace": "../admin", "repo": "grafana", "path": "a"}},     // not a namespace
-		{"query_metrics", map[string]any{"query": "bad("}},                                         // Prometheus refuses
+		{"service_logs", map[string]any{"namespace": "garrison", "service": "hello_web"}},            // not a garrison stack
+		{"service_logs", map[string]any{"namespace": "garrison", "service": "grafana_grafana; id"}},  // not a name
+		{"stack_status", map[string]any{"namespace": "homepage", "stack": "grafana"}},                // wrong namespace
+		{"read_file", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "../../x"}}, // outside the repo
+		{"read_file", map[string]any{"namespace": "../admin", "repo": "grafana", "path": "a"}},       // not a namespace
+		{"query_metrics", map[string]any{"query": "bad("}},                                           // Prometheus refuses
 	} {
 		if text, isErr := callText(t, m, "tok-alice", c.tool, c.args); !isErr {
 			t.Errorf("%s %v accepted: %q", c.tool, c.args, text)
@@ -293,14 +293,14 @@ func TestToolsStayInTheirNamespace(t *testing.T) {
 }
 
 func TestProposalsActAsThePerson(t *testing.T) {
-	args := map[string]any{"namespace": "system", "repo": "grafana", "path": "compose.yaml", "content": "services: {x: {}}\n", "title": "Add x"}
+	args := map[string]any{"namespace": "garrison", "repo": "grafana", "path": "compose.yaml", "content": "services: {x: {}}\n", "title": "Add x"}
 	m, fg := setup(t)
 	text, isErr := callText(t, m, "tok-bob", "propose_change", args)
 	if !isErr || !strings.Contains(text, "not allowed: bob") || fg.prs != 0 {
 		t.Errorf("bob: %q, prs %d", text, fg.prs)
 	}
 	text, isErr = callText(t, m, "tok-alice", "propose_change", args)
-	if isErr || fg.prs != 1 || !strings.HasSuffix(text, "\nhttps://git.example.com/system/grafana/pulls/7") || !strings.Contains(text, "Nothing is changed yet") {
+	if isErr || fg.prs != 1 || !strings.HasSuffix(text, "\nhttps://git.example.com/garrison/grafana/pulls/7") || !strings.Contains(text, "Nothing is changed yet") {
 		t.Errorf("alice: %q, prs %d", text, fg.prs)
 	}
 	for _, s := range fg.sudo {
@@ -312,7 +312,7 @@ func TestProposalsActAsThePerson(t *testing.T) {
 
 func TestPatchesActAsThePersonAndAddUp(t *testing.T) {
 	m, fg := setup(t)
-	args := map[string]any{"namespace": "system", "repo": "grafana", "patch": "diff --git a/x b/x\n", "title": "Add x"}
+	args := map[string]any{"namespace": "garrison", "repo": "grafana", "patch": "diff --git a/x b/x\n", "title": "Add x"}
 	if text, isErr := callText(t, m, "tok-bob", "propose_patch", args); !isErr || !strings.Contains(text, "not allowed") || len(fg.patches) != 0 {
 		t.Fatalf("bob: %q", text)
 	}
@@ -351,7 +351,7 @@ func TestOpenWebUISync(t *testing.T) {
 	var mu sync.Mutex
 	preset := "gpt-oss:120b"
 	models := map[string]owuiModel{
-		"agent-gone": {ID: "agent-gone", Name: "agent-gone"}, "ns-system": {ID: "ns-system", Name: "system"}, "other": {ID: "other"},
+		"agent-gone": {ID: "agent-gone", Name: "agent-gone"}, "ns-garrison": {ID: "ns-garrison", Name: "garrison"}, "other": {ID: "other"},
 		"homepage/old": {ID: "homepage/old", Name: "homepage/old", Meta: map[string]any{AgentMarker: "homepage/old"}},
 		"homepage/marketing": {ID: "homepage/marketing", Name: "homepage/marketing", BaseModelID: &preset, IsActive: true,
 			Meta: map[string]any{AgentMarker: "homepage/marketing", "description": "Media"}},
@@ -530,10 +530,10 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Agents on public repos are for everyone; homepage's channel is for its
-	// group, system's for everyone; the team channel of before is gone.
+	// group, garrison's for everyone; the team channel of before is gone.
 	gid := "g" + GroupPrefix + "homepage"
-	if models["homepage/marketing"].Meta[AccessMarker] != "everyone" || models["system/operator"].Meta[AccessMarker] != "everyone" {
-		t.Errorf("access: %v %v", models["homepage/marketing"].Meta, models["system/operator"].Meta)
+	if models["homepage/marketing"].Meta[AccessMarker] != "everyone" || models["garrison/operator"].Meta[AccessMarker] != "everyone" {
+		t.Errorf("access: %v %v", models["homepage/marketing"].Meta, models["garrison/operator"].Meta)
 	}
 	for _, c := range channels {
 		grants, _ := json.Marshal(c.AccessGrants)
@@ -542,9 +542,9 @@ func TestOpenWebUISync(t *testing.T) {
 			if !strings.Contains(string(grants), `"principal_id":"`+gid+`"`) || strings.Contains(string(grants), `"*"`) {
 				t.Errorf("homepage's channel is for %s", grants)
 			}
-		case "system":
+		case "garrison":
 			if c.AccessGrants != nil && !strings.Contains(string(grants), `"*"`) {
-				t.Errorf("system's channel is for %s", grants)
+				t.Errorf("garrison's channel is for %s", grants)
 			}
 		}
 		if c.Meta[legacyTeamMarker] != nil {
@@ -554,10 +554,10 @@ func TestOpenWebUISync(t *testing.T) {
 	if strings.Join(groupUsers[gid], ",") != "u-alice" {
 		t.Errorf("homepage's group: %v (alice is in it; bob has not signed in to Open WebUI; carol is not in homepage)", groupUsers[gid])
 	}
-	// system has no agents folder: its operator. homepage has its own agents,
+	// garrison has no agents folder: its operator. homepage has its own agents,
 	// of which the broken one is left out.
-	sys, ok := models["system/operator"]
-	if !ok || sys.Name != "system/operator" || models["homepage/marketing"].Name != "homepage/marketing" {
+	sys, ok := models["garrison/operator"]
+	if !ok || sys.Name != "garrison/operator" || models["homepage/marketing"].Name != "homepage/marketing" {
 		t.Fatalf("models = %v", models)
 	}
 	for _, id := range []string{"homepage/operator", "homepage/broken"} {
@@ -574,7 +574,7 @@ func TestOpenWebUISync(t *testing.T) {
 	if _, ok := models["agent-gone"]; ok {
 		t.Error("the agent of a deleted namespace was kept")
 	}
-	if _, ok := models["ns-system"]; ok {
+	if _, ok := models["ns-garrison"]; ok {
 		t.Error("an agent of an earlier version was kept")
 	}
 	if _, ok := models["other"]; !ok {
@@ -582,8 +582,8 @@ func TestOpenWebUISync(t *testing.T) {
 	}
 	// An agent is the agent service's model: an entry without a base model,
 	// which everyone may use. The preset of an earlier version is made again.
-	if sys.BaseModelID != nil || len(sys.AccessGrants) != 1 || sys.Meta[AgentMarker] != "system/operator" {
-		t.Errorf("system/operator = %+v", sys)
+	if sys.BaseModelID != nil || len(sys.AccessGrants) != 1 || sys.Meta[AgentMarker] != "garrison/operator" {
+		t.Errorf("garrison/operator = %+v", sys)
 	}
 	if m := models["homepage/marketing"]; m.BaseModelID != nil || m.Meta["description"] != "Media" {
 		t.Errorf("homepage/marketing = %+v", m)
@@ -598,7 +598,7 @@ func TestOpenWebUISync(t *testing.T) {
 			byNS[ns] = c
 		}
 	}
-	if len(byNS) != 2 || byNS["system"].Name != "system" || byNS["homepage"].Name != "homepage" {
+	if len(byNS) != 2 || byNS["garrison"].Name != "garrison" || byNS["homepage"].Name != "homepage" {
 		t.Errorf("channels = %v", channels)
 	}
 	if _, ok := channels["c-gone"]; ok {
@@ -608,11 +608,11 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Error("a channel the sync does not own was removed")
 	}
 	// A renamed channel is put back.
-	renamed := byNS["system"]
+	renamed := byNS["garrison"]
 	renamed.Name = "renamed-by-an-admin"
 	channels[renamed.ID] = renamed
 	o.Sync(context.Background())
-	if channels[renamed.ID].Name != "system" {
+	if channels[renamed.ID].Name != "garrison" {
 		t.Errorf("renamed channel not put back: %v", channels[renamed.ID])
 	}
 	// The gateway's account says it is not the agent.
@@ -620,18 +620,18 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Errorf("account name = %q", profileName)
 	}
 	// Each namespace channel has the how-to pinned, once.
-	sysID := byNS["system"].ID
+	sysID := byNS["garrison"].ID
 	pinnedHowTos := func() int {
 		n := 0
 		for _, m := range messages[sysID] {
-			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@system/operator") {
+			if m.IsPinned && strings.HasPrefix(m.Content, HowToMarker) && strings.Contains(m.Content, "`@garrison/operator") {
 				n++
 			}
 		}
 		return n
 	}
 	if pinnedHowTos() != 1 {
-		t.Errorf("system channel messages = %+v", messages[sysID])
+		t.Errorf("garrison channel messages = %+v", messages[sysID])
 	}
 	// Someone unpins it: it is pinned again, not posted twice.
 	messages[sysID][0].IsPinned = false
@@ -682,7 +682,7 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	}
 	// A tool the agent lacks is refused before anything happens.
 	_, out := rpcAt(t, m, "/mcp/homepage/reader", "tok-alice", "tools/call", map[string]any{"name": "propose_change", "arguments": map[string]any{
-		"namespace": "system", "repo": "grafana", "path": "compose.yaml", "content": "x", "title": "t"}})
+		"namespace": "garrison", "repo": "grafana", "path": "compose.yaml", "content": "x", "title": "t"}})
 	if out["error"] == nil || fg.prs != 0 {
 		t.Errorf("reader proposed a change: %v, %d pull requests", out, fg.prs)
 	}
@@ -768,8 +768,8 @@ func TestCatalogReadsUnknownAgentsFromGitea(t *testing.T) {
 	if a, ok := c.Lookup(context.Background(), "homepage/marketing"); !ok || a.Description != "Media" {
 		t.Errorf("homepage/marketing before any sync: %+v %v", a, ok)
 	}
-	if _, ok := c.Lookup(context.Background(), "system/operator"); !ok {
-		t.Error("system/operator before any sync")
+	if _, ok := c.Lookup(context.Background(), "garrison/operator"); !ok {
+		t.Error("garrison/operator before any sync")
 	}
 	for _, id := range []string{"homepage/broken", "homepage/nobody", "../x", "nobody"} {
 		if _, ok := c.Lookup(context.Background(), id); ok {
@@ -803,20 +803,20 @@ func TestTheBrowserStaysAtHome(t *testing.T) {
 func TestScreenshotChecksBeforeShooting(t *testing.T) {
 	m, fg := setup(t)
 	// No browser set up: refused, nothing proposed.
-	if text, isErr := callText(t, m, "tok-alice", "screenshot", map[string]any{"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "no browser") {
+	if text, isErr := callText(t, m, "tok-alice", "screenshot", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "no browser") {
 		t.Errorf("without a browser: %q %v", text, isErr)
 	}
 	m.Tools.Browser = &Browser{URL: "http://127.0.0.1:1", Domain: "example.com"}
 	// bob may not write to grafana: refused before the browser runs (which
 	// here would fail differently).
-	if text, isErr := callText(t, m, "tok-bob", "screenshot", map[string]any{"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "not allowed") {
+	if text, isErr := callText(t, m, "tok-bob", "screenshot", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "not allowed") {
 		t.Errorf("bob: %q %v", text, isErr)
 	}
 	for name, args := range map[string]map[string]any{
-		"not a png":     {"namespace": "system", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
-		"too wide":      {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
-		"another site":  {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "https://example.org/", "title": "t"},
-		"internal host": {"namespace": "system", "repo": "grafana", "path": "a.png", "url": "http://gitea_gitea:3000/", "title": "t"},
+		"not a png":     {"namespace": "garrison", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
+		"too wide":      {"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
+		"another site":  {"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://example.org/", "title": "t"},
+		"internal host": {"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "http://gitea_gitea:3000/", "title": "t"},
 	} {
 		if text, isErr := callText(t, m, "tok-alice", "screenshot", args); !isErr {
 			t.Errorf("%s: accepted: %q", name, text)
@@ -840,13 +840,13 @@ func TestALargePatchGetsThrough(t *testing.T) {
 	m, fg := setup(t)
 	patch := "diff --git a/x b/x\n" + strings.Repeat("+a line of the file\n", 100000) // about 2 MB
 	code, out := rpc(t, m, "tok-alice", "tools/call", map[string]any{"name": "propose_patch",
-		"arguments": map[string]any{"namespace": "system", "repo": "grafana", "patch": patch, "title": "Add x"}})
+		"arguments": map[string]any{"namespace": "garrison", "repo": "grafana", "patch": patch, "title": "Add x"}})
 	if code != http.StatusOK || out["error"] != nil || len(fg.patches) != 1 {
 		t.Fatalf("%d %v, %d patches reached Gitea", code, out["error"], len(fg.patches))
 	}
 	// Beyond the limit the tool says so itself.
 	patch = strings.Repeat("+", MaxPatch+1)
-	text, isErr := callText(t, m, "tok-alice", "propose_patch", map[string]any{"namespace": "system", "repo": "grafana", "patch": patch, "title": "Add x"})
+	text, isErr := callText(t, m, "tok-alice", "propose_patch", map[string]any{"namespace": "garrison", "repo": "grafana", "patch": patch, "title": "Add x"})
 	if !isErr || !strings.Contains(text, "larger than 8 MB") {
 		t.Errorf("a patch beyond the limit: %.200q", text)
 	}

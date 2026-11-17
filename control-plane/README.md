@@ -1,16 +1,16 @@
 # Control plane
 
-Go. One image, run in Swarm as the stack `control-plane` from the repo `system/control-plane` (`Dockerfile`, `ci/build.yaml`), as seven services:
+Go. One image, run in Swarm as the stack `control-plane` from the repo `garrison/control-plane` (`Dockerfile`, `ci/build.yaml`), as seven services:
 
 | Service | Does |
 | --- | --- |
-| `deployer` | Makes the machine match Git: deploys every repo of `system` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana, snapshots an app's data before each redeploy and carries out restore requests (`restores/*.yaml` in a namespace's config). Later also holds the SOPS key and writes change records. |
+| `deployer` | Makes the machine match Git: deploys every repo of `garrison` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana, snapshots an app's data before each redeploy and carries out restore requests (`restores/*.yaml` in a namespace's config). Later also holds the SOPS key and writes change records. |
 | `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each namespace's agents (from `agents/` in its config repo; each gets only its own tools), their accounts for grants, its channels and Open WebUI group, its members and approval checks, and its build account. Acts as an agent's own account where only a grant allows it (`merge_change`, outsiders' proposals), keeps open proposals up to date, and drives the browser for `screenshot` and `browse`. Changes nothing that runs. |
 | `agents` | The agent service: the OpenAI-compatible API Open WebUI talks to, whose models are the namespaces' agents. Runs each chat with an agent in a sandbox of its own (image from `sandbox/`, built with this one): Pi, the agent harness, with a workspace kept in a volume per chat. Passes on to the sandboxes the LLM, whose key only it holds, and the agent's tools from the gateway, acting as the person chatting. Serves `ask_agent` and runs the agents' routines. |
 | `sandbox-guard` | The Docker API for the agent service, letting through only sandboxes: the sandbox image, labelled, with limits, on the sandboxes network. |
 | `browser` | Headless Chrome for the gateway's `screenshot` tool. Its only network reaches Traefik and the gateway; it loads the installation's pages only, as the person asking. |
 | `guard` | The Docker API for the user runner, letting through only what pipeline jobs need. |
-| `user-runner` | Gitea Actions runner of every namespace other than `system`. |
+| `user-runner` | Gitea Actions runner of every namespace other than `garrison`. |
 
 The same binary is installed on the host as `garrison`: the installer uses it to deploy once before the services exist, and admins use it for `applied`, `validate`, `render` and `apply`.
 
@@ -35,7 +35,7 @@ The same binary is installed on the host as `garrison`: the installer uses it to
 make test
 make build
 bin/garrison validate control-plane/internal/stack/testdata/jellyfin.yaml
-bin/garrison claims -reserved system/platform/reserved-hostnames.yaml STACK.yaml...
+bin/garrison claims -reserved garrison/platform/reserved-hostnames.yaml STACK.yaml...
 bin/garrison render -domain example.com -env dev STACK.yaml
 bin/garrison apply -domain example.com -reserved /etc/garrison/reserved-hostnames.yaml STACK.yaml   # on an installed machine, as root
 ```
@@ -51,7 +51,7 @@ Go runs in a container, so only Docker is needed. `make golden` rewrites the exp
 | Share on the host | `<data root>/<namespace>/shares/<share>` |
 | Swarm secret | `<environment hostname>.<secret>` |
 
-What rendered stacks expect from the system stack is in `system/platform/contracts`.
+What rendered stacks expect from the system stack is in `garrison/platform/contracts`.
 
 ## Not built yet
 

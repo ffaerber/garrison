@@ -105,7 +105,7 @@ func setup(t *testing.T) (*Config, *fakeGitea) {
 	pw := filepath.Join(dir, "pw")
 	os.WriteFile(pw, []byte("secret\n"), 0o600)
 	c := &Config{Domain: "example.com", GiteaURL: srv.URL, User: "admin", PasswordFile: pw,
-		Org: "system", WorkDir: filepath.Join(dir, "work"), Run: f.run}
+		Org: "garrison", WorkDir: filepath.Join(dir, "work"), Run: f.run}
 	return c, f
 }
 

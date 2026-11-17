@@ -21,7 +21,7 @@ func TestGitFetchesOnlyWhatThePersonMayRead(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/repos/homepage/todo":
 			io.WriteString(w, "{}")
-		case "/api/v1/repos/system/control-plane":
+		case "/api/v1/repos/garrison/control-plane":
 			if r.Header.Get("Sudo") != "root" {
 				w.WriteHeader(http.StatusNotFound)
 				return
@@ -60,8 +60,8 @@ func TestGitFetchesOnlyWhatThePersonMayRead(t *testing.T) {
 	}
 	reached = nil
 	for _, c := range []struct{ method, path string }{
-		{"GET", "/git/system/control-plane.git/info/refs?service=git-upload-pack"}, // bob may not read it
-		{"GET", "/git/homepage/todo.git/info/refs?service=git-receive-pack"},       // a push
+		{"GET", "/git/garrison/control-plane.git/info/refs?service=git-upload-pack"}, // bob may not read it
+		{"GET", "/git/homepage/todo.git/info/refs?service=git-receive-pack"},         // a push
 		{"POST", "/git/homepage/todo.git/git-receive-pack"},
 		{"GET", "/git/homepage/todo.git/HEAD"},
 		{"GET", "/git/../todo.git/info/refs?service=git-upload-pack"},

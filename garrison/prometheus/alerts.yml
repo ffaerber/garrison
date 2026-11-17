@@ -1,5 +1,5 @@
 # The home cloud's alerts. Each names the namespace it concerns (apps carry
-# it; the platform's own alerts have none and go to system), and Alertmanager
+# it; the platform's own alerts have none and go to garrison), and Alertmanager
 # hands it to the agent service: it appears in the dashboard's feed for the
 # namespace's people, and starts the routines that wait for it (on_alert in
 # agents/<name>/agent.yaml).

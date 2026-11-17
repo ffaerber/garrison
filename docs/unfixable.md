@@ -4,7 +4,7 @@ Gaps we know of that the platform cannot close itself, usually because Gitea, Op
 
 ## Root admins can switch off "changes only by pull request"
 
-Branch protection keeps everyone, root admins included, from pushing to `main` of a config repo (tested: a Gitea site admin's push to `system/config` is refused, by the API and by `git push`). But a site admin can edit or delete the protection rule itself in Gitea's settings, push, and put it back.
+Branch protection keeps everyone, root admins included, from pushing to `main` of a config repo (tested: a Gitea site admin's push to `garrison/config` is refused, by the API and by `git push`). But a site admin can edit or delete the protection rule itself in Gitea's settings, push, and put it back.
 
 - **Why:** Gitea has no setting that binds its site admins; they can change any repo's settings.
 - **Instead:** the gateway writes the rule back whenever it differs, at its next sync, so the window is short. Keep the group `root-admins` small. To come: an alert when a protection rule changes, and the change records of the deployer.

@@ -228,7 +228,7 @@ func (o *OpenWebUI) HasChannel(ctx context.Context, ns string) (bool, error) {
 type ChannelInfo struct {
 	Namespace string `json:"namespace"` // empty: not a namespace's
 	// Members: only the namespace's people read it. Every namespace's
-	// channel but system's.
+	// channel but garrison's.
 	Members bool `json:"members"`
 }
 
@@ -247,7 +247,7 @@ func (o *OpenWebUI) Channel(ctx context.Context, id string) (ChannelInfo, error)
 			continue
 		}
 		ns, _ := c.Meta[ChannelMarker].(string)
-		return ChannelInfo{Namespace: ns, Members: ns != "" && ns != SystemNamespace}, nil
+		return ChannelInfo{Namespace: ns, Members: ns != "" && ns != PlatformNamespace}, nil
 	}
 	return ChannelInfo{}, nil
 }

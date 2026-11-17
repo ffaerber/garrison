@@ -133,7 +133,7 @@ func setup(t *testing.T, answers ...Message) (*Server, *fakeLLM, *fakeMCP) {
 	s := &Server{
 		Agents: fakeAgents{
 			{Namespace: "homepage", Name: "reader", Description: "Reads", Tools: []string{"read_file"}, Prompt: "You read files."},
-			{Namespace: "system", Name: "operator", Model: "big-model", Prompt: "You operate."},
+			{Namespace: "garrison", Name: "operator", Model: "big-model", Prompt: "You operate."},
 		},
 		Verifier:     fakeVerifier{"tok-alice": {Name: "alice"}},
 		LLM:          &LLM{URL: ls.URL, Key: "llm-key"},
@@ -192,7 +192,7 @@ func TestModelsAreTheAgents(t *testing.T) {
 	s, _, _ := setup(t)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"homepage/reader"`) || !strings.Contains(w.Body.String(), `"id":"system/operator"`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"homepage/reader"`) || !strings.Contains(w.Body.String(), `"id":"garrison/operator"`) {
 		t.Errorf("models: %d %s", w.Code, w.Body)
 	}
 }
@@ -257,7 +257,7 @@ func TestATurnUsesTheAgentsToolsAsThePerson(t *testing.T) {
 
 func TestAnAgentsOwnModel(t *testing.T) {
 	s, llm, _ := setup(t, Message{Role: "assistant", Content: "Fine."})
-	w := post(t, s, "tok-alice", nil, map[string]any{"model": "system/operator", "messages": []any{map[string]any{"role": "user", "content": "Hi"}}})
+	w := post(t, s, "tok-alice", nil, map[string]any{"model": "garrison/operator", "messages": []any{map[string]any{"role": "user", "content": "Hi"}}})
 	var out struct {
 		Choices []struct {
 			Message struct {

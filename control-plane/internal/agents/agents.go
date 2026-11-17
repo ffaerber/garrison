@@ -27,12 +27,12 @@ const (
 	// OperatorName is the agent every namespace has unless its config repo
 	// says otherwise.
 	OperatorName = "operator"
-	// CommanderName is the agent of system that finds the agent for a task.
+	// CommanderName is the agent of garrison that finds the agent for a task.
 	CommanderName = "commander"
-	// SystemNamespace is the platform's own namespace.
-	SystemNamespace = "system"
+	// PlatformNamespace is the platform's own namespace.
+	PlatformNamespace = "garrison"
 	// AnyAgent, as agents: any, lets an agent ask every agent the person may
-	// use. Only system's agents, which root admins approve, may.
+	// use. Only garrison's agents, which root admins approve, may.
 	AnyAgent  = "any"
 	maxPrompt = 32000
 )
@@ -59,11 +59,11 @@ type Agent struct {
 func (a Agent) ID() string { return a.Namespace + "/" + a.Name }
 
 // DisplayName is what people see and type after @ in the chat: the ID,
-// except for system's commander, which is the same agent in every channel
+// except for garrison's commander, which is the same agent in every channel
 // and goes by "commander" alone. Other agents keep their namespace, as each
 // namespace has an operator of its own.
 func (a Agent) DisplayName() string {
-	if a.Namespace == SystemNamespace && a.Name == CommanderName {
+	if a.Namespace == PlatformNamespace && a.Name == CommanderName {
 		return CommanderName
 	}
 	return a.ID()
@@ -406,9 +406,9 @@ var OperatorPrompt = templates.File(templates.Namespace, Dir+"/"+OperatorName+"/
 
 // Platform is how the home cloud works, in every agent's system prompt.
 const Platform = `How the home cloud works:
-- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people. Its agents are folders under agents/ in config (agent.yaml, prompt.md); an agent's model is empty for the default or an enabled model of llm/models.yaml in system/config, as <provider>/<model> (list_models lists them).
-- The namespace system is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into system.
-- A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into system.
+- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people. Its agents are folders under agents/ in config (agent.yaml, prompt.md); an agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
+- The namespace garrison is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into garrison.
+- A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into garrison.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
 - An app with its own code has a repo with it (code, Dockerfile, tests; nothing of the home cloud) and names it as source. Then each branch of that repo named as an environment is deployed at its newest commit (dev as https://dev-<name>.<domain>), with an environment preview each open pull request too (https://pr-<number>-<name>.<domain>), and {{registry}}/<namespace>/<repo>:{{commit}} is the image its pipeline built for that commit.
 - A new app: a namespace for it if it needs one (create_namespace; only root admins may, so ask whether an existing one fits), a repo only for code of its own (create_repo; template static-web gives a web page with its Dockerfile and pipeline, ready to build, and its README the stack to propose), then propose stacks/<name>.yaml in config. Changes to config need the approval of an admin of the namespace; it runs once merged.
@@ -459,15 +459,15 @@ func OperatorFiles() map[string]string {
 	return out
 }
 
-// CommanderPrompt is the commander's prompt.md (templates/system-config): it
+// CommanderPrompt is the commander's prompt.md (templates/garrison-config): it
 // finds the agent for what a person wants, and hands the work over or sends
 // the person there.
-var CommanderPrompt = templates.File(templates.System, Dir+"/"+CommanderName+"/"+PromptFile)
+var CommanderPrompt = templates.File(templates.Platform, Dir+"/"+CommanderName+"/"+PromptFile)
 
-// CommanderFiles are what system's config repo has besides the operator:
-// the commander's folder and llm/README.md (templates/system-config).
+// CommanderFiles are what garrison's config repo has besides the operator:
+// the commander's folder and llm/README.md (templates/garrison-config).
 func CommanderFiles() map[string]string {
-	return templates.Files(templates.System)
+	return templates.Files(templates.Platform)
 }
 
 // System is an agent's whole system prompt: what it is, its prompt.md, its

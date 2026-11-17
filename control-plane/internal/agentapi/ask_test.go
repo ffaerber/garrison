@@ -110,7 +110,7 @@ func TestAnAgentAsksAnother(t *testing.T) {
 func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	s, _, _ := setup(t)
 	s.Agents = fakeAgents{
-		{Namespace: "system", Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}},
+		{Namespace: "garrison", Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}},
 		{Namespace: "homepage", Name: "media", Description: "Makes screenshots", Prompt: "Shoot.", Tools: []string{"screenshot"}, Repos: []string{"site"},
 			Skills: []agents.Skill{{Name: "thumbs", Description: "thumbnails"}},
 			Grants: []agents.Grant{{Repo: "site", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers}}},
@@ -123,14 +123,14 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		text, _ := s.findAgents(context.Background(), c, json.RawMessage(args))
 		return text
 	}
-	c := sandbox.Caller{Agent: "system/commander", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"system/commander"}}}
+	c := sandbox.Caller{Agent: "garrison/commander", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"garrison/commander"}}}
 	got := find(c, `{}`)
 	for _, want := range []string{"- homepage/media: Makes screenshots", "tools: screenshot", "skills: thumbs (thumbnails)", "works on: site", "may autonomous on site into dev, for members", "- todo/operator: Runs todo"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("find_agents lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "system/commander") {
+	if strings.Contains(got, "garrison/commander") {
 		t.Errorf("the commander lists itself:\n%s", got)
 	}
 	if got := find(c, `{"in_namespace":"todo"}`); strings.Contains(got, "homepage/media") || !strings.Contains(got, "todo/operator") {
@@ -147,7 +147,7 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	}
 
 	// It asks any agent, and the feed has the hand-off and its end.
-	_, content := chatIn(t, s, "chat-1", "system/commander", Message{Role: "user",
+	_, content := chatIn(t, s, "chat-1", "garrison/commander", Message{Role: "user",
 		Content: `call ask_agent {"agent":"homepage/media","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
 	if !strings.Contains(content, "homepage/media answers:") {
 		t.Fatalf("content %q", content)
@@ -159,10 +159,10 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		}
 	}
 	if ask == nil || ask.Status != events.StatusOK || ask.Namespace != "homepage" || ask.Agent != "homepage/media" || ask.Actor != "alice" ||
-		ask.StartedBy != "agent system/commander" || !strings.Contains(ask.Title, "system/commander asked homepage/media, for alice: Screenshot the homepage.") {
+		ask.StartedBy != "agent garrison/commander" || !strings.Contains(ask.Title, "garrison/commander asked homepage/media, for alice: Screenshot the homepage.") {
 		t.Errorf("feed: %+v", ask)
 	}
-	if _, content = chatIn(t, s, "chat-1", "system/commander", Message{Role: "user", Content: `call ask_agent {"agent":"system/commander","task":"x","done_when":"y"}`}); !strings.Contains(content, "you do not ask yourself") {
+	if _, content = chatIn(t, s, "chat-1", "garrison/commander", Message{Role: "user", Content: `call ask_agent {"agent":"garrison/commander","task":"x","done_when":"y"}`}); !strings.Contains(content, "you do not ask yourself") {
 		t.Errorf("asked itself: %q", content)
 	}
 }
@@ -298,7 +298,7 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 	defer gitea.Close()
 	s.Gitea = &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
 	s.Poster = &fakePoster{channels: map[string]gateway.ChannelInfo{
-		"homepage": {Namespace: "homepage", Members: true}, "system": {Namespace: "system"}, "shop": {Namespace: "shop", Members: true},
+		"homepage": {Namespace: "homepage", Members: true}, "garrison": {Namespace: "garrison"}, "shop": {Namespace: "shop", Members: true},
 	}}
 	s.Agents = fakeAgents{
 		{Namespace: "homepage", Name: "keeper", Prompt: "Keep.", Repos: []string{"secret"}},
@@ -309,11 +309,11 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 		agent, chat string
 		code        int
 	}{
-		{"homepage/keeper", "channel:system", http.StatusForbidden}, // everyone reads it
-		{"homepage/keeper", "channel:shop", http.StatusForbidden},   // shop's people do
+		{"homepage/keeper", "channel:garrison", http.StatusForbidden}, // everyone reads it
+		{"homepage/keeper", "channel:shop", http.StatusForbidden},     // shop's people do
 		{"homepage/keeper", "channel:homepage", http.StatusOK},
 		{"homepage/keeper", "chat-1", http.StatusOK},
-		{"homepage/desk", "channel:system", http.StatusOK},
+		{"homepage/desk", "channel:garrison", http.StatusOK},
 	} {
 		w := post(t, s, "tok-alice", map[string]string{ChatHeader: c.chat}, map[string]any{"model": c.agent, "stream": true, "messages": []Message{{Role: "user", Content: "hi"}}})
 		if w.Code != c.code {

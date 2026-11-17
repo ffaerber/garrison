@@ -42,7 +42,7 @@ Basic auth in front of such apps was considered: SSO covers the same need, witho
 
 **Idea:**
 
-1. The deployer labels every container it starts with `garrison.namespace`, `garrison.repo`, `garrison.environment` (`main`, `dev`, `pr-7`) and `garrison.commit`; the `system` stacks too, with namespace `system` and the stack as repo.
+1. The deployer labels every container it starts with `garrison.namespace`, `garrison.repo`, `garrison.environment` (`main`, `dev`, `pr-7`) and `garrison.commit`; the `garrison` stacks too, with namespace `garrison` and the stack as repo.
 2. cAdvisor passes these labels on, so Prometheus has them as they are; one rule in Alloy makes them Loki labels, as `stack` and `service` are today.
 3. Then everything of a namespace, of a repo or of its previews is one query. Grafana's Stack dashboard can offer namespace, repo and environment instead of the stack's name; the front end (above) shows a namespace's apps (CPU, memory, errors, restarts) on its page, and a repo's per environment, with their logs next to its pipeline logs and its agents' activity.
 

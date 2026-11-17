@@ -2,17 +2,17 @@
 # (.gitea/workflows/build.yaml), which then sets the tag below by committing
 # here; the running deployer applies that and replaces itself.
 services:
-  # The deployer: deploys every repo of the `system` organisation that holds
+  # The deployer: deploys every repo of the `garrison` organisation that holds
   # a compose.yaml, this one last, and the apps of every other namespace.
   deployer:
-    image: git.${DOMAIN}/system/control-plane:bootstrap
+    image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command:
       - deploy
       - -gitea=http://gitea_gitea:3000
       - -password-file=/run/secrets/admin-password
       # ZFS runs on the host; the deployer reaches it through a short-lived
       # privileged container of its own image.
-      - -host-exec=git.${DOMAIN}/system/control-plane:bootstrap
+      - -host-exec=git.${DOMAIN}/garrison/control-plane:bootstrap
       # Keeps dashboards/*.json of the repos in Grafana.
       - -grafana=http://grafana_grafana:3000
       # Gitea calls this on every push, pull request and finished pipeline
@@ -45,7 +45,7 @@ services:
   # only the agent service calls it, over the system network, with each
   # person's Keycloak token.
   gateway:
-    image: git.${DOMAIN}/system/control-plane:bootstrap
+    image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command:
       - gateway
       - -password-file=/run/secrets/admin-password
@@ -85,11 +85,11 @@ services:
   # token). Sandboxes run under gVisor, as root, and reach the internet only
   # through this service's proxy (port 8072), as far as their agent.yaml says.
   agents:
-    image: git.${DOMAIN}/system/control-plane:bootstrap
+    image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command:
       - agents
       - -password-file=/run/secrets/admin-password
-      - -sandbox-image=git.${DOMAIN}/system/sandbox:bootstrap
+      - -sandbox-image=git.${DOMAIN}/garrison/sandbox:bootstrap
       # The routines' runs go to the feed.
       - -events-db=postgres://garrison@postgres_postgres:5432/garrison
       # Alertmanager's alerts: into the feed, and they start routines.
@@ -102,7 +102,7 @@ services:
     volumes:
       - /etc/garrison/install.env:/etc/garrison/install.env:ro
       - /etc/garrison/llm-api-key:/etc/garrison/llm-api-key:ro
-      # The keys of the providers in llm/providers.yaml of system's config.
+      # The keys of the providers in llm/providers.yaml of garrison's config.
       - /etc/garrison/llm-keys:/etc/garrison/llm-keys:ro
     # Gitea, the gateway and Open WebUI on the system network; Keycloak's keys
     # at its public name through Traefik, there too; the LLM outside; the
@@ -123,13 +123,13 @@ services:
   # (runsc, installed by install.sh), on the sandboxes network, with a volume
   # of their own.
   sandbox-guard:
-    image: git.${DOMAIN}/system/control-plane:bootstrap
+    image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command:
       - guard
       - -listen=:2375
       - -network=garrison-sandboxes
       - -volumes=garrison-agent-
-      - -image=git.${DOMAIN}/system/sandbox
+      - -image=git.${DOMAIN}/garrison/sandbox
       - -label=garrison.sandbox
       - -max-memory=2147483648
       - -runtime=runsc
@@ -145,7 +145,7 @@ services:
   # read (asked of Gitea). Only on the system network, which Traefik shares
   # and apps do not, so nobody but Traefik sets the header naming the person.
   home:
-    image: git.${DOMAIN}/system/control-plane:bootstrap
+    image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command:
       - home
       - -password-file=/run/secrets/admin-password
@@ -196,7 +196,7 @@ services:
 
   # The Docker API for the user runner: only what running jobs needs.
   guard:
-    image: git.${DOMAIN}/system/control-plane:bootstrap
+    image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command: [guard, -listen=:2375, -network=garrison-builds]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

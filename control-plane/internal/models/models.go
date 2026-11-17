@@ -1,5 +1,5 @@
 // Package models reads and writes the LLMs the home cloud's agents use, kept
-// in system's config repo: llm/providers.yaml (the providers and the default
+// in garrison's config repo: llm/providers.yaml (the providers and the default
 // model, changed by root admins) and llm/models.yaml (every model the
 // providers offer, written by the model sync, enabled by hand).
 package models
@@ -21,7 +21,7 @@ import (
 
 const (
 	// Namespace and Repo hold the files.
-	Namespace     = "system"
+	Namespace     = "garrison"
 	Repo          = "config"
 	ProvidersFile = "llm/providers.yaml"
 	ModelsFile    = "llm/models.yaml"
@@ -187,7 +187,7 @@ func Why(p Providers, c Catalog, model string) string {
 	default:
 		return ""
 	}
-	return why + fmt.Sprintf("; empty is the default, %s; the enabled ones: %s (system/config %s)", p.Default, strings.Join(c.Enabled(), ", "), ModelsFile)
+	return why + fmt.Sprintf("; empty is the default, %s; the enabled ones: %s (garrison/config %s)", p.Default, strings.Join(c.Enabled(), ", "), ModelsFile)
 }
 
 // Marshal writes llm/models.yaml: one line per model, sorted.

@@ -1,4 +1,4 @@
-# Installed as .gitea/workflows/build.yaml in the repo system/control-plane.
+# Installed as .gitea/workflows/build.yaml in the repo garrison/control-plane.
 # On every push to main: build the control plane image and the agents'
 # sandbox image, push them to Gitea's registry, and deploy them by committing
 # their tag to compose.yaml in this repo.
@@ -32,12 +32,12 @@ jobs:
           registry=$REGISTRY
           [ -n "$registry" ] || { echo "the organisation variable REGISTRY is not set" >&2; exit 1; }
           tag=$(echo "$SHA" | cut -c1-12)
-          image=$registry/system/control-plane:$tag
-          sandbox=$registry/system/sandbox:$tag
+          image=$registry/garrison/control-plane:$tag
+          sandbox=$registry/garrison/sandbox:$tag
           auth="Authorization: token $TOKEN"
           internal=http://gitea_gitea:3000
 
-          git -c http.extraHeader="$auth" clone -q "$internal/system/control-plane.git" src
+          git -c http.extraHeader="$auth" clone -q "$internal/garrison/control-plane.git" src
           git -C src checkout -q "$SHA"
           docker build -q -f src/control-plane/Dockerfile -t "$image" src
           docker build -q -t "$sandbox" src/sandbox
@@ -50,8 +50,8 @@ jobs:
           git config --global user.email "ci@$registry"
           for attempt in 1 2 3; do
             rm -rf deploy
-            git -c http.extraHeader="$auth" clone -q "$internal/system/control-plane.git" deploy
-            sed -i -E "s#(/system/(control-plane|sandbox):)[A-Za-z0-9._-]+#\1$tag#g" deploy/compose.yaml
+            git -c http.extraHeader="$auth" clone -q "$internal/garrison/control-plane.git" deploy
+            sed -i -E "s#(/garrison/(control-plane|sandbox):)[A-Za-z0-9._-]+#\1$tag#g" deploy/compose.yaml
             git -C deploy add compose.yaml
             if git -C deploy diff --cached --quiet; then echo "already deploys $tag"; exit 0; fi
             git -C deploy commit -q -m "Deploy control plane $tag [skip ci]"

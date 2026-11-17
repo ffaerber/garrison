@@ -22,14 +22,14 @@ import (
 )
 
 // Models sends each model to its provider, as llm/providers.yaml and
-// llm/models.yaml of system's config say, and keeps models.yaml current:
+// llm/models.yaml of garrison's config say, and keeps models.yaml current:
 // the model sync. Until those files exist, the install's one LLM serves.
 type Models struct {
 	Gitea *gateway.Gitea
 	// KeyDir holds a key file per provider, named after it.
 	KeyDir string
 	// The install's LLM (install.env): written as the first provider when
-	// system's config has none, and used until then. Its key is KeyFile
+	// garrison's config has none, and used until then. Its key is KeyFile
 	// when KeyDir has none for it.
 	InstallURL, InstallModel, InstallKey string
 	HTTP                                 *http.Client

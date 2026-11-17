@@ -145,7 +145,7 @@ func TestEscapesAreRefused(t *testing.T) {
 		body         any
 	}{
 		{"POST", "/v1.47/build?t=postgres:17-alpine", nil},
-		{"POST", "/v1.47/images/postgres/tag?repo=git.example.com/system/control-plane", nil},
+		{"POST", "/v1.47/images/postgres/tag?repo=git.example.com/garrison/control-plane", nil},
 		{"POST", "/v1.47/images/x/push", nil},
 		{"POST", "/v1.47/commit?container=job1", nil},
 		{"POST", "/v1.47/images/load", nil},
@@ -212,7 +212,7 @@ func TestVolumeListShowsOnlyJobVolumes(t *testing.T) {
 func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
 	sock, seen := fakeDocker(t)
 	g := New(sock, Policy{Network: "garrison-sandboxes", VolumePrefixes: []string{"garrison-agent-"},
-		Image: "git.example.com/system/sandbox", Label: "garrison.sandbox", MaxMemory: 2 << 30, Runtime: "runsc"})
+		Image: "git.example.com/garrison/sandbox", Label: "garrison.sandbox", MaxMemory: 2 << 30, Runtime: "runsc"})
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return srv, seen
@@ -221,7 +221,7 @@ func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
 func sandboxSpec(change func(c, h map[string]any)) map[string]any {
 	h := map[string]any{"NetworkMode": "garrison-sandboxes", "Memory": 1 << 30, "PidsLimit": 512, "Runtime": "runsc",
 		"Mounts": []map[string]any{{"Type": "volume", "Source": "garrison-agent-1", "Target": "/data"}}}
-	c := map[string]any{"Image": "git.example.com/system/sandbox:abc", "Labels": map[string]string{"garrison.sandbox": "true"}, "HostConfig": h}
+	c := map[string]any{"Image": "git.example.com/garrison/sandbox:abc", "Labels": map[string]string{"garrison.sandbox": "true"}, "HostConfig": h}
 	if change != nil {
 		change(c, h)
 	}
@@ -235,7 +235,7 @@ func TestOnlySandboxesAreCreated(t *testing.T) {
 	}
 	for name, change := range map[string]func(c, h map[string]any){
 		"other image":     func(c, h map[string]any) { c["Image"] = "alpine:3.22" },
-		"lookalike image": func(c, h map[string]any) { c["Image"] = "git.example.com/system/sandbox-evil:1" },
+		"lookalike image": func(c, h map[string]any) { c["Image"] = "git.example.com/garrison/sandbox-evil:1" },
 		"no label":        func(c, h map[string]any) { delete(c, "Labels") },
 		"no memory limit": func(c, h map[string]any) { delete(h, "Memory") },
 		"too much memory": func(c, h map[string]any) { h["Memory"] = 8 << 30 },
@@ -253,7 +253,7 @@ func TestOnlySandboxesAreCreated(t *testing.T) {
 			t.Errorf("%s: %d", name, code)
 		}
 	}
-	if code := do(t, srv, "POST", "/v1.47/images/create?fromImage=git.example.com/system/sandbox&tag=abc", nil); code != http.StatusOK {
+	if code := do(t, srv, "POST", "/v1.47/images/create?fromImage=git.example.com/garrison/sandbox&tag=abc", nil); code != http.StatusOK {
 		t.Errorf("pulling the sandbox image: %d", code)
 	}
 	if code := do(t, srv, "POST", "/v1.47/images/create?fromImage=alpine&tag=3.22", nil); code != http.StatusForbidden {

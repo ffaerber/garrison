@@ -30,6 +30,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 
 	"garrison/control-plane/internal/agentapi"
+	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/dashboards"
 	"garrison/control-plane/internal/events"
@@ -256,7 +257,7 @@ func readEnvFile(file string) ([]string, map[string]string, error) {
 	return env, vars, nil
 }
 
-// deployCmd follows the `system` organisation in Gitea and deploys every repo
+// deployCmd follows the `garrison` organisation in Gitea and deploys every repo
 // in it that holds a compose.yaml. With -once it deploys them all a single time.
 func deployCmd(args []string) error {
 	fs := flag.NewFlagSet("deploy", flag.ExitOnError)
@@ -290,7 +291,7 @@ func deployCmd(args []string) error {
 		User:         vars["ADMIN_USER"],
 		PasswordFile: *passwordFile,
 		CAFile:       etcDir + "/tls.crt",
-		Org:          "system",
+		Org:          agents.PlatformNamespace,
 		Apps:         *apps,
 		WorkDir:      *work,
 		Env:          env,
@@ -613,7 +614,7 @@ func agentsCmd(args []string) error {
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
 	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the install's LLM's API key")
 	keyDir := fs.String("llm-keys", etcDir+"/llm-keys", "the providers' API keys, a file per provider named after it")
-	modelsCheck := fs.Duration("models-check", time.Minute, "how often to look for a changed llm/providers.yaml in system's config")
+	modelsCheck := fs.Duration("models-check", time.Minute, "how often to look for a changed llm/providers.yaml in garrison's config")
 	modelsEvery := fs.Duration("models-every", 24*time.Hour, "how often to ask the providers for their models")
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")

@@ -39,7 +39,7 @@ func TestMetrics(t *testing.T) {
 		`garrison_service_replicas_desired{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 1`,
 		`garrison_service_replicas_running{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 0`,
 		`garrison_service_failed_tasks{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 2`,
-		`garrison_service_replicas_running{namespace="system",app="gitea",environment="main",stack="gitea",service="gitea_gitea"} 1`,
+		`garrison_service_replicas_running{namespace="garrison",app="gitea",environment="main",stack="gitea",service="gitea_gitea"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s in\n%s", want, body)

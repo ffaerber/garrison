@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Creates the local admin account, adds Keycloak as the login source, creates
-# the `system` organisation with one repo per system stack, and prepares Gitea
+# the `garrison` organisation with one repo per system stack, and prepares Gitea
 # Actions: the runner's registration and the credentials the control plane build
 # deploys with.
 set -euo pipefail
@@ -37,7 +37,7 @@ auth=$(docker exec -u git "$(container gitea_gitea)" sh -c '
   echo "$want" > $mark
 ' "$DOMAIN")
 
-# ---------- the system organisation ----------
+# ---------- the garrison organisation ----------
 # A namespace is a Gitea organisation and each of its stacks a repo. The
 # system stack is the namespace `system`. Everyone signed in can read it; only
 # Gitea admins, i.e. root admins, can change it.
@@ -49,16 +49,16 @@ gitea_session "$work"
 gitea_up() { [ "$(gitea_api GET /version)" = 200 ]; }
 wait_for 120 "the Gitea API" gitea_up
 
-if [ "$(gitea_api GET /orgs/system)" != 200 ]; then
-  [ "$(gitea_api POST /orgs '{"username":"system","visibility":"limited"}')" = 201 ] || { echo "could not create the system organisation: $(cat "$work/body")" >&2; exit 1; }
+if [ "$(gitea_api GET /orgs/garrison)" != 200 ]; then
+  [ "$(gitea_api POST /orgs '{"username":"garrison","visibility":"limited"}')" = 201 ] || { echo "could not create the garrison organisation: $(cat "$work/body")" >&2; exit 1; }
 fi
 # Brought back in line on every run: signed-in people only.
-[ "$(gitea_api PATCH /orgs/system '{"visibility":"limited"}')" = 200 ] || { echo "could not set the system organisation's visibility" >&2; exit 1; }
+[ "$(gitea_api PATCH /orgs/garrison '{"visibility":"limited"}')" = 200 ] || { echo "could not set the garrison organisation's visibility" >&2; exit 1; }
 
 # ---------- Actions: runner and build credentials ----------
-# The runner registers for this organisation only (system/runner explains why).
+# The runner registers for this organisation only (garrison/runner explains why).
 if ! docker secret inspect gitea-runner-token >/dev/null 2>&1; then
-  gitea actions generate-runner-token --scope system | tr -d '\r\n' | docker secret create gitea-runner-token - >/dev/null
+  gitea actions generate-runner-token --scope garrison | tr -d '\r\n' | docker secret create gitea-runner-token - >/dev/null
 fi
 # The user runner registers for the whole instance; jobs pick it with
 # runs-on: garrison-user. Only the system runner can reach Docker directly.
@@ -79,31 +79,31 @@ fi
  printf '{"data":"%s"}' "$(cat "$ETC/ci-token")" > "$work/token.json"
  printf '{"data":"%s"}' "$ADMIN_USER" > "$work/user.json")
 for s in PLATFORM_TOKEN:token PLATFORM_USER:user; do
-  status=$(gitea_api PUT "/orgs/system/actions/secrets/${s%%:*}" "@$work/${s#*:}.json")
+  status=$(gitea_api PUT "/orgs/garrison/actions/secrets/${s%%:*}" "@$work/${s#*:}.json")
   case $status in 201|204) ;; *) echo "could not set the organisation secret ${s%%:*}: $status" >&2; exit 1 ;; esac
 done
 rm -f "$work/token.json" "$work/user.json"
 # Not secret: the registry's public name, which builds tag and push images to.
 printf '{"value":"git.%s"}' "$DOMAIN" > "$work/registry.json"
-case $(gitea_api PUT /orgs/system/actions/variables/REGISTRY "@$work/registry.json") in
+case $(gitea_api PUT /orgs/garrison/actions/variables/REGISTRY "@$work/registry.json") in
   204|200|201) ;;
-  *) [ "$(gitea_api POST /orgs/system/actions/variables/REGISTRY "@$work/registry.json")" = 201 ] ||
+  *) [ "$(gitea_api POST /orgs/garrison/actions/variables/REGISTRY "@$work/registry.json")" = 201 ] ||
        { echo "could not set the organisation variable REGISTRY: $(cat "$work/body")" >&2; exit 1; } ;;
 esac
 
 # ---------- one repo per system stack ----------
 # Pushed once; after that Gitea holds the truth and the installer leaves the
 # contents alone.
-for dir in "$ROOT"/system/*/; do
+for dir in "$ROOT"/garrison/*/; do
   name=$(basename "$dir")
   src=$dir
   if [ "$name" = control-plane ]; then
     src=$work/control-plane-tree
     "$ROOT/installer/control-plane-tree.sh" "$src"
   fi
-  printf '  system/%s: %s\n' "$name" "$("$ROOT/installer/push-repo.sh" "system/$name" "$src")"
+  printf '  garrison/%s: %s\n' "$name" "$("$ROOT/installer/push-repo.sh" "garrison/$name" "$src")"
 done
-[ "$(gitea_api PATCH /repos/system/control-plane '{"has_actions":true}')" = 200 ] || { echo "could not enable Actions on system/control-plane" >&2; exit 1; }
+[ "$(gitea_api PATCH /repos/garrison/control-plane '{"has_actions":true}')" = 200 ] || { echo "could not enable Actions on garrison/control-plane" >&2; exit 1; }
 
 if [ "$auth" = updated ]; then
   docker service update --quiet --detach --force gitea_gitea >/dev/null

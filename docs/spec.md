@@ -25,16 +25,16 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 
 ## Core concepts
 
-- **Root (system):** the platform itself and its shared services, the namespace `system`. One per installation.
+- **Root (garrison):** the platform itself and its shared services, the namespace `garrison`. One per installation.
 - **Namespace:** a Gitea organisation: a flat group of stacks with its own members, channel and Docker network. No nesting.
 - **Stack:** one app, possibly several services, described in the platform's stack format in its namespace's config repo, `config/stacks/<name>.yaml`. An app with code of its own names the repo holding it as its source; the repo itself holds nothing of the home cloud. System stacks are plain Compose files, one repo each, because they are the platform itself.
 - **Service:** one container in a stack. Exactly one is the entry point.
 - **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-homepage.domain.com.
-- **Agents:** operator agents (system, namespace) run the cluster; coding agents build apps.
+- **Agents:** operator agents (garrison, namespace) run the cluster; coding agents build apps.
 
 ## System stack
 
-Each component is a repo of the `system` organisation in Gitea, named after its stack. The installer deploys the first six in this order, because each depends on the ones before it; they are what it takes to build and run the deployer. The deployer then deploys every repo of `system`, these included.
+Each component is a repo of the `garrison` organisation in Gitea, named after its stack. The installer deploys the first six in this order, because each depends on the ones before it; they are what it takes to build and run the deployer. The deployer then deploys every repo of `garrison`, these included.
 
 | Order | Repo | Component | Purpose |
 | --- | --- | --- | --- |
@@ -43,14 +43,14 @@ Each component is a repo of the `system` organisation in Gitea, named after its 
 | 3 | `keycloak` | Keycloak | Single sign-on for all people, in the realm `garrison` |
 | 4 | `sso` | Login proxy (oauth2-proxy) | Answers Traefik's login check and sends people without a session to Keycloak |
 | 5 | `gitea` | Gitea + registry | Code, config, history, images |
-| 6 | `runner` | Gitea Actions runner | Builds the platform's own images; serves the `system` organisation only, because its jobs reach the Docker daemon |
-| 7 | `control-plane` | Deployer, gateway, agent service, guards and user runner | The deployer applies Git to the cluster, holds the SOPS key and writes change records; the gateway serves the agents' MCP tools and keeps namespaces' members, channels and build accounts; the agent service runs each chat with an agent in a sandbox of its own (Pi, image `system/sandbox`). Its repo holds its source; Gitea Actions builds its image and the deployer deploys it, replacing itself |
+| 6 | `runner` | Gitea Actions runner | Builds the platform's own images; serves the `garrison` organisation only, because its jobs reach the Docker daemon |
+| 7 | `control-plane` | Deployer, gateway, agent service, guards and user runner | The deployer applies Git to the cluster, holds the SOPS key and writes change records; the gateway serves the agents' MCP tools and keeps namespaces' members, channels and build accounts; the agent service runs each chat with an agent in a sandbox of its own (Pi, image `garrison/sandbox`). Its repo holds its source; Gitea Actions builds its image and the deployer deploys it, replacing itself |
 | — | `grafana`, `prometheus`, `loki` | Grafana; Prometheus, node-exporter, cAdvisor; Loki, Alloy | Dashboards, metrics, logs |
 | — | `openwebui` | Open WebUI | Chat with one agent per namespace (see Chat) |
 | — | | Platform UI | Dashboard |
 | — | | Alertmanager, ntfy | Alerts and phone push |
 
-A repo of `system` without a `compose.yaml` is not deployed: `system/platform` holds the public contracts and Grafana dashboards.
+A repo of `garrison` without a `compose.yaml` is not deployed: `garrison/platform` holds the public contracts and Grafana dashboards.
 
 On the host, not in containers: ZFS, Sanoid for scheduled snapshots, restic for offsite backup.
 
@@ -60,7 +60,7 @@ On the host, not in containers: ZFS, Sanoid for scheduled snapshots, restic for 
 2. The setup wizard opens on a local port, protected by a one-time code printed in the terminal.
 3. The wizard scans hardware and drives, warns if there is no second drive for backups, and asks for: LLM API key, domain, DNS provider token, admin account.
 4. It runs swarm init, creates the ZFS pool, and deploys the system stack in order.
-5. It pushes one repo per system stack into the `system` organisation. Gitea Actions builds the control plane image from `system/control-plane`; the control plane is deployed from it, its deployer takes over, and the bootstrap container removes itself.
+5. It pushes one repo per system stack into the `garrison` organisation. Gitea Actions builds the control plane image from `garrison/control-plane`; the control plane is deployed from it, its deployer takes over, and the bootstrap container removes itself.
 
 Acceptance: on a clean machine, the user reaches the dashboard at their domain with valid TLS and logs in through Keycloak, with no manual steps beyond the wizard.
 
@@ -68,13 +68,13 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 
 | Repository | Scope | Contents | Who writes |
 | --- | --- | --- | --- |
-| System repos | The `system` organisation, one per system stack | `compose.yaml` and the files it uses; for the deployer also its source and build | Root admins, system agent via PR |
-| Platform repo | `system/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, system agent via PR |
-| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `system`), `agents/` and `skills/`, `stacks/` (its apps; not in `system`); later SOPS-encrypted secrets | Namespace admins (root admins in `system`), agents via PR |
+| Platform repos | The `garrison` organisation, one per system stack | `compose.yaml` and the files it uses; for the deployer also its source and build | Root admins, garrison's operator via PR |
+| Platform repo | `garrison/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, garrison's operator via PR |
+| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `garrison`), `agents/` and `skills/`, `stacks/` (its apps; not in `garrison`); later SOPS-encrypted secrets | Namespace admins (root admins in `garrison`), agents via PR |
 | History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Deployer only |
 | App repos | Inside a namespace, one per app with code of its own | Code, Dockerfile, tests, the pipeline that builds its image, numbered migrations | Members, coding agents |
 
-Config files are JSON or YAML, validated by JSON Schema. Every repo, including the system repos and every namespace's config and history, is readable by everyone who is signed in; nothing is readable without signing in. Secret values stay SOPS-encrypted and readable by no one.
+Config files are JSON or YAML, validated by JSON Schema. Every repo, including the platform repos and every namespace's config and history, is readable by everyone who is signed in; nothing is readable without signing in. Secret values stay SOPS-encrypted and readable by no one.
 
 ## Stack format
 
@@ -128,14 +128,14 @@ environments:
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
 - The stack file carries no policy, and lives in the namespace's config repo, so changing how an app runs needs an admin's approval, like `members.yaml`; nobody who can only write an app repo can change it. The deployer and the approval check reject any key the schema does not know.
 - `env` sets environment variables; `{{url}}` and `{{host}}` in a value become the environment's address. An image may say `{{registry}}/<namespace>/<name>:{{commit}}`: the deployer then deploys a commit only once the namespace's pipeline has pushed that image, so a failing pipeline leaves the app at its last good commit.
-- In a namespace other than `system`, every file `config/stacks/<name>.yaml` on `main` is an app named `<name>`. With a `source`, each environment is deployed from the source repo's branch of the same name, at its newest commit, and taken down when the branch is deleted; with `preview`, each open pull request of the source repo gets its environment `pr-<n>`. Without a source, only `main` exists, deployed as the file says. Removing the file takes the app down; a change to it redeploys it.
+- In a namespace other than `garrison`, every file `config/stacks/<name>.yaml` on `main` is an app named `<name>`. With a `source`, each environment is deployed from the source repo's branch of the same name, at its newest commit, and taken down when the branch is deleted; with `preview`, each open pull request of the source repo gets its environment `pr-<n>`. Without a source, only `main` exists, deployed as the file says. Removing the file takes the app down; a change to it redeploys it.
 - The format names no orchestrator; the deployer renders it to Swarm in the MVP.
 
 ## Pipelines
 
 Gitea Actions runs two runners:
 
-- The **system runner** serves only the `system` organisation, which only root admins can change. Its jobs can use Docker, which is root on the machine; it builds the control plane.
+- The **system runner** serves only the `garrison` organisation, which only root admins can change. Its jobs can use Docker, which is root on the machine; it builds the control plane.
 - The **user runner** serves every other namespace. Its jobs are containers on a builds network, where they reach Gitea and BuildKit and nothing else of the platform. It reaches Docker only through the control plane's guard, which refuses anything that would let a job out of its container: privileges, capabilities, devices, security options, host namespaces, host mounts, other networks, and access to containers it did not create. Images are built by BuildKit, never by the host's Docker.
 - **Scheduled jobs** of an app are Gitea Actions workflows `on: schedule` (cron) in its repo, run by the user runner like its pipeline (`runs-on: garrison-user`, Alpine, so `shell: sh`). Gitea starts the default branch's schedules, at most about every two minutes; a workflow is disabled from the repo's Actions tab. Agents on a schedule are routines (below).
 
@@ -143,7 +143,7 @@ Each namespace has a build account, kept by the gateway, which may push that nam
 
 ## Deployer and change history
 
-The deployer watches Gitea and applies merged changes. In the MVP it follows the `system` organisation: every repo there that holds a `compose.yaml` on its default branch is deployed as the stack named after the repo, and a stack whose repo is deleted is taken down. Gitea tells the deployer and the gateway about every push, branch, repo, pull request, review, commit status and finished pipeline run through a webhook on every organisation, signed with a secret each derives from the admin password; they act on it at once, and still check on their own every few seconds in case a call is lost.
+The deployer watches Gitea and applies merged changes. In the MVP it follows the `garrison` organisation: every repo there that holds a `compose.yaml` on its default branch is deployed as the stack named after the repo, and a stack whose repo is deleted is taken down. Gitea tells the deployer and the gateway about every push, branch, repo, pull request, review, commit status and finished pipeline run through a webhook on every organisation, signed with a secret each derives from the admin password; they act on it at once, and still check on their own every few seconds in case a call is lost.
 
 1. **Pre-deploy:** take ZFS snapshots of affected datasets; record running services, versions and config.
 2. **Apply:** decrypt secrets into Swarm secrets, render the stack, deploy, run migrations if present.
@@ -180,7 +180,7 @@ Restore from the History tab rolls back to a change record as a whole: the deplo
 ## Secrets
 
 - **Where:** a namespace's secrets are files in `<namespace>/config/secrets/`, SOPS-encrypted with age. Everyone signed in can read the repos, so they see names and encrypted values, never the values; the same holds for backups, mirrors and the Git history.
-- **Entering:** a namespace's admins and root admins set, replace and delete its secrets in a write-only form, the dashboard's Secrets page. The dashboard encrypts the value with the namespace's public keys, which the deployer gives it, so it can write secrets but never read one, and commits the file to config's `main` as the platform's account, the only one that may push there, with the person as the commit's author; the feed records it. The value is never shown again, only replaced. With sops, a person can also propose an encrypted file by pull request: config's `.sops.yaml` names the keys. The LLM key and DNS token from the setup wizard will be stored the same way in `system`.
+- **Entering:** a namespace's admins and root admins set, replace and delete its secrets in a write-only form, the dashboard's Secrets page. The dashboard encrypts the value with the namespace's public keys, which the deployer gives it, so it can write secrets but never read one, and commits the file to config's `main` as the platform's account, the only one that may push there, with the person as the commit's author; the feed records it. The value is never shown again, only replaced. With sops, a person can also propose an encrypted file by pull request: config's `.sops.yaml` names the keys. The LLM key and DNS token from the setup wizard will be stored the same way in `garrison`.
 - **Use:** an app's `main` environment gets each stored secret its stack file names under `secrets:`, decrypted by the deployer into a Swarm secret named by its version, and is redeployed when one changes. Other environments (`dev`, previews), which run code not yet merged, get generated values, as does every secret with no stored value.
 - **Keys:** one age key per namespace, so a namespace's backup or export opens on its own, and a namespace is rotated or deleted without touching the others. The deployer makes a namespace's key the first time its public half is asked for. The keys live in `/etc/garrison/sops/` (root only), mounted only into the deployer: not Gitea, not the dashboard, not the agents' sandboxes, not the LLM.
 - **Sealed to the machine:** where the machine has a TPM, the keys are sealed to it with `systemd-creds`, so a stolen disk or disk image decrypts nothing, while the machine still starts unattended. Without a TPM they are files readable by root only.
@@ -223,13 +223,13 @@ secrets:
 
 | Agent | Scope | Lifetime | Job |
 | --- | --- | --- | --- |
-| System agent | Root | Long-running | System repos, system alerts, cross-namespace upgrades via PRs into each namespace |
+| System agent | Root | Long-running | Platform repos, platform alerts, cross-namespace upgrades via PRs into each namespace |
 | Namespace agent | One namespace | Long-running | Namespace config, members, stacks, namespace alerts |
 | Coding agent | One repo | Per task, sandboxed | Builds the app with the user, pushes to a branch, replies in thread |
 
 - Agents speak an OpenAI-compatible API (Ollama by default) and use the LLM key from setup. Namespace agents run in Open WebUI with the gateway's MCP tools (see Chat).
 - Coding agents start from an @mention in a Gitea comment (commit, PR, issue) via webhook, or from the team chat. Each task gets a fresh Docker container with the repo checked out, removed when done.
-- A namespace agent that finds a cause above its scope (e.g. a full disk) escalates a request to the system agent.
+- A namespace agent that finds a cause above its scope (e.g. a full disk) escalates a request to garrison's operator.
 - Users can still work locally with their own coding tools and push to the same repos.
 - Agents are folders in each namespace's `config` repo (see Chat). Planned: each chat running in its own sandbox behind an OpenAI-compatible agent service. See [agents.md](agents.md).
 
@@ -251,23 +251,23 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 ## Chat
 
 - Open WebUI, at `chat.<domain>`, is the chat. People sign in through Keycloak; root admins are its admins.
-- Each namespace has a channel there, named after it: its team chat, permanent, which only its people (and root admins) read; `system`'s, the platform's, everyone signed in reads. Outside a namespace, people talk to its agents in private chats. Only admins may change a channel, and the gateway puts back what it set. Mentioning one of the namespace's agents, `@<namespace>/<agent>` (e.g. `@system/operator`), makes it answer in a thread; a pinned message in each channel lists them.
-- A namespace's agents are folders under `agents/` in its repo config: `agent.yaml` (description, model, tools, skills) and `prompt.md`, with skills in the Agent Skills format (`SKILL.md`) under `skills/`. A new config repo gets the operator (from `templates/namespace-config/`, compiled into the control plane, with `tools: all`); a namespace without an `agents/` folder has it too. `system/config` holds the system namespace's agents, and only root admins approve changes to it. See [agents.md](agents.md).
+- Each namespace has a channel there, named after it: its team chat, permanent, which only its people (and root admins) read; `garrison`'s, the platform's, everyone signed in reads. Outside a namespace, people talk to its agents in private chats. Only admins may change a channel, and the gateway puts back what it set. Mentioning one of the namespace's agents, `@<namespace>/<agent>` (e.g. `@garrison/operator`), makes it answer in a thread; a pinned message in each channel lists them.
+- A namespace's agents are folders under `agents/` in its repo config: `agent.yaml` (description, model, tools, skills) and `prompt.md`, with skills in the Agent Skills format (`SKILL.md`) under `skills/`. A new config repo gets the operator (from `templates/namespace-config/`, compiled into the control plane, with `tools: all`); a namespace without an `agents/` folder has it too. `garrison/config` holds the garrison namespace's agents, and only root admins approve changes to it. See [agents.md](agents.md).
 - Open WebUI's one model connection is the agent service, an OpenAI-compatible API in the control plane whose models are the agents, `<namespace>/<agent>`. Open WebUI sends it the person's Keycloak token and the chat's id; it has no LLM key and no tools itself. The agent service runs each turn: the LLM, whose key only it holds, with the agent's prompt and the platform's rules after it, calling the agent's tools at the gateway as the person. Tool calls show as the answer's reasoning. Open WebUI's own tasks (titles, tags) go straight to the LLM.
-- Models: `llm/providers.yaml` in `system/config` lists the LLM providers, OpenAI-compatible APIs (e.g. Ollama's cloud, OpenRouter, a local Ollama), and the default model; `llm/models.yaml` lists every model they offer, each `enabled` or not and, once its provider stops offering it, `gone` with the date. Root admins change both by pull request; everyone signed in reads them, and agents with `list_models`. The install writes the first provider from its answers. The agent service asks each provider for its models once a day and soon after `providers.yaml` changes, and proposes the changed list as a pull request (on a branch `garrison/models-<time>`): new models come turned off, retired ones are marked, and the agents still naming them listed; a provider that cannot be reached keeps its models. An agent names its model as `<provider>/<model>` (a bare name is the default provider's), and the approval check refuses one that is not enabled. The agent service sends each request to the model's provider; an agent whose model is turned off or retired gets the default, and its namespace's feed says so once a day. Each provider's key is a root-only file on the machine, `/etc/garrison/llm-keys/<provider>` (the install's LLM keeps `/etc/garrison/llm-api-key`), read only by the agent service.
+- Models: `llm/providers.yaml` in `garrison/config` lists the LLM providers, OpenAI-compatible APIs (e.g. Ollama's cloud, OpenRouter, a local Ollama), and the default model; `llm/models.yaml` lists every model they offer, each `enabled` or not and, once its provider stops offering it, `gone` with the date. Root admins change both by pull request; everyone signed in reads them, and agents with `list_models`. The install writes the first provider from its answers. The agent service asks each provider for its models once a day and soon after `providers.yaml` changes, and proposes the changed list as a pull request (on a branch `garrison/models-<time>`): new models come turned off, retired ones are marked, and the agents still naming them listed; a provider that cannot be reached keeps its models. An agent names its model as `<provider>/<model>` (a bare name is the default provider's), and the approval check refuses one that is not enabled. The agent service sends each request to the model's provider; an agent whose model is turned off or retired gets the default, and its namespace's feed says so once a day. Each provider's key is a root-only file on the machine, `/etc/garrison/llm-keys/<provider>` (the install's LLM keeps `/etc/garrison/llm-api-key`), read only by the agent service.
 - The gateway serves an agent only the tools its `agent.yaml` lists (plus `load_skill` and `read_skill_file` if it has skills); a call that names no agent of a namespace gets none. It keeps an entry per agent in Open WebUI, for everyone, or only for the namespace's people if the agent works on a private repo, and one channel per namespace, for its people, adding and removing them as folders and organisations come and go. People can also chat with an agent privately.
 - The `garrison/approval` check on config pull requests also checks the agent files: an agent with an unknown tool or skill, or without a prompt, fails it.
 - The gateway is an MCP server. The agent service calls it with the signed-in person's Keycloak access token, so every tool acts with that person's rights: reads and proposals go to Gitea as them. Neither is reachable from outside.
-- Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, propose a change to a file, and take a screenshot of a page. As the person, they make namespaces (root admins only, as Gitea allows) and empty repos (a namespace's admins); everything in a repo still comes as a pull request. Every agent's system prompt says how the home cloud works: namespaces, `system` only for the platform, apps as files in `config/stacks/`, secrets made by the deployer.
+- Agents can list namespaces and stacks, show a stack's tasks and errors, read service logs, show CPU and memory use, run Prometheus queries, read repos, list open changes, propose a change to a file, and take a screenshot of a page. As the person, they make namespaces (root admins only, as Gitea allows) and empty repos (a namespace's admins); everything in a repo still comes as a pull request. Every agent's system prompt says how the home cloud works: namespaces, `garrison` only for the platform, apps as files in `config/stacks/`, secrets made by the deployer.
 - `screenshot` loads a page of the installation in the control plane's headless Chrome, signed in as the person: to private environments and the dashboard the browser sends their Keycloak token, which the sign-in in front of them accepts (Open WebUI's tokens name `sso` as an audience), and Traefik removes it before the request reaches the app. Other pages, which have no sign-in in front to remove it, get no token. The browser's only network reaches Traefik and the gateway, every name it looks up goes to Traefik, and the gateway refuses its requests to other names. Each screenshot gets a fresh browser context. The PNG becomes a pull request, as with `propose_change`.
 - `propose_change` opens a pull request as the person. It cannot merge or deploy: a person allowed to merges in Gitea, and the deployer deploys `main`. The agent always gives the link.
-- Agents with grants have accounts of their own: they propose for people who may not write themselves, and merge with `merge_change` where a grant allows it for the person asking. Agents ask each other with `ask_agent`; `system/commander` finds the agent for a task and hands it over or names it. Agents run routines with nobody watching, and use pages with `browse`; pull requests of an app's source repo get a preview each if its stack has a `preview` environment. See [agents.md](agents.md).
+- Agents with grants have accounts of their own: they propose for people who may not write themselves, and merge with `merge_change` where a grant allows it for the person asking. Agents ask each other with `ask_agent`; `garrison/commander` finds the agent for a task and hands it over or names it. Agents run routines with nobody watching, and use pages with `browse`; pull requests of an app's source repo get a preview each if its stack has a `preview` environment. See [agents.md](agents.md).
 - Not yet: conversational setup on a draft branch.
 
 ## Notifications
 
 - **Sources:** Alertmanager (disk, node, backup, service health), deployer (failed deploys, PRs waiting), agents (task updates), chat (@mentions). Built: Alertmanager's alerts go to the dashboard's feed by namespace and start the agents' `on_alert` routines; see [status.md](status.md).
-- **Routing:** by namespace to its members, its channel and its agent; system alerts to root admins and the system agent.
+- **Routing:** by namespace to its members, its channel and its agent; platform alerts to root admins and garrison's operator.
 - **Delivery:** in-app inbox, plus phone push through ntfy.
 - **Questions from agents:** a routine that needs something only its person can tell it (a choice, a missing fact, an approval) calls `ask_person`. The question is posted in the namespace's channel as a mention of its owner, which Open WebUI tells them of even in a muted channel, and is listed under **Waiting for you** at the top of their dashboard, with a link that opens the question's thread. The run ends its turn and waits, up to 24 hours: the agent service watches the question's thread, and the owner's first reply there is the answer. The run then goes on in the same sandbox, with its workspace and history, and posts what it did in the thread; it may ask again there. Without an answer it stops waiting and says so in the thread. Questions are kept in Postgres (`questions`), so a restart does not lose them, and the feed records each one, waiting, answered or not. Only a routine's own agent asks this way: in a chat the person reads the answer, and an agent another one asked puts its question in its answer. Not yet: phone push (ntfy).
 - People are notified immediately; agents investigate in parallel with read-only rights and follow up with a cause and a proposed fix for a person to approve.

@@ -212,12 +212,12 @@ chmod 600 "$ETC/llm-api-key"
 if [ -n "$LLM_API_KEY" ]; then
   printf '%s' "$LLM_API_KEY" > "$ETC/llm-api-key"
 fi
-# The keys of further LLM providers (llm/providers.yaml in system's config),
+# The keys of further LLM providers (llm/providers.yaml in garrison's config),
 # a file each, named after the provider. The install's LLM keeps the file
 # above.
 mkdir -p "$ETC/llm-keys"
 chmod 700 "$ETC/llm-keys"
-install -m 644 "$ROOT/system/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
+install -m 644 "$ROOT/garrison/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
 
 # The namespaces' secrets are encrypted for their own keys, which the
 # deployer makes here, and for the recovery key. Only its public half stays;
@@ -276,13 +276,13 @@ wait_stack() {
 
 # The installer deploys only what is needed to build and run the deployer:
 # the database, routing, login, Gitea and its Actions runner. Each is a repo of
-# the `system` organisation (see system/). Then the deployer takes over and
+# the `garrison` organisation (see garrison/). Then the deployer takes over and
 # deploys every repo of that organisation, these included.
 BOOTSTRAP="postgres traefik keycloak sso gitea runner"
 
 export DOMAIN ADMIN_USER ADMIN_EMAIL ETC
 for name in $BOOTSTRAP; do
-  dir=$ROOT/system/$name
+  dir=$ROOT/garrison/$name
   say "Deploying $name"
   # Swarm configs cannot change, so their names carry a hash of the stack's
   # files. The deployer computes the same hash (control-plane/internal/system).
@@ -357,7 +357,7 @@ systemctl restart garrison-buildkit
 
 # ---------- control plane ----------
 say "Building the control plane in Gitea"
-# Pushing system/control-plane started its build in Gitea Actions. The build
+# Pushing garrison/control-plane started its build in Gitea Actions. The build
 # pushes the image to Gitea's registry and sets its tag in the repo's
 # compose.yaml; until then the tag is "bootstrap".
 work=$(mktemp -d)
@@ -365,24 +365,24 @@ trap 'rm -rf "$work"' EXIT
 . "$ROOT/installer/lib.sh"
 gitea_session "$work"
 deadline=$((SECONDS + 1800))
-until [ "$(gitea_api GET /repos/system/control-plane/raw/compose.yaml)" = 200 ] && ! grep -q 'system/control-plane:bootstrap' "$work/body"; do
-  gitea_api GET "/repos/system/control-plane/actions/tasks?limit=1" >/dev/null
+until [ "$(gitea_api GET /repos/garrison/control-plane/raw/compose.yaml)" = 200 ] && ! grep -q 'garrison/control-plane:bootstrap' "$work/body"; do
+  gitea_api GET "/repos/garrison/control-plane/actions/tasks?limit=1" >/dev/null
   if grep -q '"status":"failure"' "$work/body"; then
     run=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
-    gitea_api GET "/repos/system/control-plane/actions/runs/$run/jobs" >/dev/null
+    gitea_api GET "/repos/garrison/control-plane/actions/runs/$run/jobs" >/dev/null
     job=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
-    gitea_api GET "/repos/system/control-plane/actions/jobs/$job/logs" >/dev/null
+    gitea_api GET "/repos/garrison/control-plane/actions/jobs/$job/logs" >/dev/null
     grep -vE 'evaluat|Writing entry|Extracting' "$work/body" | tail -n 15 >&2
-    fail "the control plane build failed; see https://git.$DOMAIN/system/control-plane/actions"
+    fail "the control plane build failed; see https://git.$DOMAIN/garrison/control-plane/actions"
   fi
   if [ $SECONDS -ge $deadline ]; then
-    gitea_api GET "/repos/system/control-plane/actions/tasks?limit=3" >/dev/null
+    gitea_api GET "/repos/garrison/control-plane/actions/tasks?limit=3" >/dev/null
     echo "latest builds: $(cat "$work/body")" >&2
     fail "the control plane was not built within 30 minutes"
   fi
   sleep 10
 done
-echo "  built $(grep -oE 'system/control-plane:[A-Za-z0-9._-]+' "$work/body" | head -n1)"
+echo "  built $(grep -oE 'garrison/control-plane:[A-Za-z0-9._-]+' "$work/body" | head -n1)"
 
 say "Handing over to the deployer"
 # The host has the CLI too: it deploys once here, so that failures stop
@@ -404,7 +404,7 @@ for name in $(garrison applied | awk '{ print $1 }'); do
   wait_stack "$name"
 done
 image=$(docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
-case $image in "git.$DOMAIN/system/control-plane:"*) ;; *) fail "the deployer runs $image, not an image built in Gitea" ;; esac
+case $image in "git.$DOMAIN/garrison/control-plane:"*) ;; *) fail "the deployer runs $image, not an image built in Gitea" ;; esac
 echo "  the deployer runs $image"
 
 say "Done"

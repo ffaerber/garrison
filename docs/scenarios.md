@@ -50,9 +50,9 @@ Bob: *@todo/media Make the homepage screenshots of the todo app.*
 
 ## 4d. What the media agent may not do
 
-Bob: *Take a screenshot of the todo app and put it into the namespace system, repo platform.* Then: *Take a screenshot of https://example.org/.*
+Bob: *Take a screenshot of the todo app and put it into the namespace garrison, repo platform.* Then: *Take a screenshot of https://example.org/.*
 
-- Bob may not change `system/platform`: the gateway refuses before the browser runs, and no pull request appears.
+- Bob may not change `garrison/platform`: the gateway refuses before the browser runs, and no pull request appears.
 - The browser loads only the installation's own pages: example.org is refused, and nothing is proposed.
 - Bob's feed lists the refusals among its problems.
 
@@ -133,7 +133,7 @@ Alice makes a private repo `todo/secret` and adds `todo/keeper` with `repos: [se
 - Carol's feed shows the new repo; bob's, as he may not read it, does not.
 
 - Carol, in todo, sees the keeper in Open WebUI; bob, no longer in todo, does not, though he still sees the agents of public repos.
-- Carol mentions the keeper in `system`'s channel, which everyone reads: the agent service refuses it there. In todo's channel, which only todo's people read, it answers her from the repo.
+- Carol mentions the keeper in `garrison`'s channel, which everyone reads: the agent service refuses it there. In todo's channel, which only todo's people read, it answers her from the repo.
 
 ## 6. Alice adds an agent that may only read
 
@@ -155,10 +155,10 @@ Alice: *@todo/operator The quotes app does not work. Find out why and tell me wh
 
 ## 8. Alice has the operator set up a new app, from nothing
 
-Alice, in system's channel: *@system/operator Set up a new app: a namespace photos, and in it the app gallery: traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own.*
+Alice, in garrison's channel: *@garrison/operator Set up a new app: a namespace photos, and in it the app gallery: traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own.*
 
 - The operator makes the namespace `photos`, as alice; within a minute it has its config, with alice as its first admin.
-- It proposes `stacks/gallery.yaml` in `photos/config`, as alice, one the deployer takes. It makes no repo for it, and nothing goes into `system`.
+- It proposes `stacks/gallery.yaml` in `photos/config`, as alice, one the deployer takes. It makes no repo for it, and nothing goes into `garrison`.
 - A root admin who did not write it approves it, the approval check passes, alice merges it; the deployer deploys `gallery`.
 - Bob asks for a namespace of his own: Gitea refuses him, as only root admins make namespaces, and the gateway logs every try as refused.
 
@@ -174,7 +174,7 @@ Alice: *@todo/operator I deleted todos in the todo app by mistake. Bring todo's 
 
 Played by the `journey` step (`test/e2e/smoke.sh journey`, `test/e2e/journey.sh`), after deploy, in a namespace of its own. Alice is its only person, so she pushes and merges in its repos freely.
 
-1. Alice: *@system/operator Make a namespace lab, and in it the repo example from the template static-web.* The namespace and the repo appear, written as alice; lab gets its channel and operator; the pipeline builds main's image.
+1. Alice: *@garrison/operator Make a namespace lab, and in it the repo example from the template static-web.* The namespace and the repo appear, written as alice; lab gets its channel and operator; the pipeline builds main's image.
 2. Alice: *@lab/operator Deploy the app example: propose stacks/example.yaml as its README says, with main and dev, both public.* A pull request on `lab/config` that the deployer takes; a root admin approves it, alice merges it in Gitea, and `https://example.<domain>` shows the page on white.
 3. Alice makes the branch `dev` in Gitea. Nobody merges anything: the stack names `dev`, so the deployer deploys it at `https://dev-example.<domain>`, from the image main's build made of the same commit.
 4. Alice: *@lab/operator Change the background of the page to #2e7d32 on dev.* A pull request into `dev` that changes `index.html` alone; alice merges it, its pipeline builds it, dev-example turns green, and example on main stays white.
@@ -193,5 +193,5 @@ Played by the `ui` step (`test/e2e/smoke.sh ui`, `test/ui/`): Playwright's Chrom
 7. **People and main:** the operator proposes bob as a member; the admin approves; alice merges. Bob's edit of `index.html` straight onto main in Gitea's editor is refused; he commits it to a new branch and opens a pull request, whose page offers him no merge until alice approves it; then he merges it and web shows his heading.
 8. **Scheduled agents:** alice adds two routines to the operator's `agent.yaml` in Gitea's editor, on a new branch, scheduled a few minutes ahead in the installation's time zone; the admin approves; she merges. At its time the greeting is posted in shop's channel.
 9. **A routine's question:** at its time the other routine asks bob whether the shop opens on Sundays. His dashboard lists it under Waiting for you; its link opens the question's thread; he answers in the question's thread; the routine goes on with his answer, in the thread, and the dashboard no longer lists it.
-10. **The commander, by its short name:** in shop's channel bob types `@commander`, picks it from the list and asks which agent changes the page of web; it answers in the thread, naming `shop/operator`. It is `system/commander`, the same agent in every channel.
+10. **The commander, by its short name:** in shop's channel bob types `@commander`, picks it from the list and asks which agent changes the page of web; it answers in the thread, naming `shop/operator`. It is `garrison/commander`, the same agent in every channel.
 11. **A scheduled job of the app:** alice adds `.gitea/workflows/nightly.yaml` to `web` in Gitea's editor, a workflow on a cron schedule that runs on shop's runner with no agent in it, on a new branch; bob approves; she merges. Within minutes the repo's Actions tab lists a run started by the schedule, which succeeded, and its log has the job's output. She disables the workflow from the tab's menu, and it runs no more.

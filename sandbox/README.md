@@ -1,6 +1,6 @@
 # Agent sandbox
 
-The image every chat with an agent runs in: one container per chat and agent, started by the agent service (`control-plane/internal/sandbox`) through the sandbox guard. Built with the control plane by its workflow and pushed as `system/sandbox`.
+The image every chat with an agent runs in: one container per chat and agent, started by the agent service (`control-plane/internal/sandbox`) through the sandbox guard. Built with the control plane by its workflow and pushed as `garrison/sandbox`.
 
 | File | Does |
 | --- | --- |

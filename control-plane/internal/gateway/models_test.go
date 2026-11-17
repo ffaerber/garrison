@@ -33,7 +33,7 @@ const testModels = `models:
 func TestModelChecks(t *testing.T) {
 	files := map[string]string{"llm/providers.yaml": testProviders, "llm/models.yaml": testModels}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path, ok := strings.CutPrefix(r.URL.Path, "/api/v1/repos/system/config/raw/")
+		path, ok := strings.CutPrefix(r.URL.Path, "/api/v1/repos/garrison/config/raw/")
 		if c, found := files[path]; ok && found {
 			io.WriteString(w, c)
 			return
@@ -70,13 +70,13 @@ func TestModelChecks(t *testing.T) {
 		t.Errorf("list_models: %v\n%s", err, out)
 	}
 
-	// A broken model list refuses system's own change, not the namespaces'.
+	// A broken model list refuses garrison's own change, not the namespaces'.
 	files["llm/models.yaml"] = "models:\n  \"ollama-cloud/gpt-oss:120b\": {enabled: false}\n"
-	if got, _ := g.modelProblems(ctx, "system", "abc", nil); len(got) != 1 || !strings.Contains(got[0], "must be enabled") {
-		t.Errorf("system: %v", got)
+	if got, _ := g.modelProblems(ctx, "garrison", "abc", nil); len(got) != 1 || !strings.Contains(got[0], "must be enabled") {
+		t.Errorf("garrison: %v", got)
 	}
 	if got, _ := g.modelProblems(ctx, "todo", "abc", list); len(got) != 0 {
-		t.Errorf("todo, with system's list broken: %v", got)
+		t.Errorf("todo, with garrison's list broken: %v", got)
 	}
 
 	// An installation without the files: no checks.
@@ -102,7 +102,7 @@ type fakeRepo struct {
 func (f *fakeRepo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	p := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/system/config")
+	p := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/garrison/config")
 	ref := r.URL.Query().Get("ref")
 	switch {
 	case p == "/pulls" && r.Method == http.MethodGet:
@@ -187,7 +187,7 @@ func TestProposeFiles(t *testing.T) {
 		if content != "" {
 			files = map[string][]byte{"llm/models.yaml": []byte(content)}
 		}
-		link, err := g.ProposeFiles(ctx, "system", "config", "garrison/models", "Models", "body", files)
+		link, err := g.ProposeFiles(ctx, "garrison", "config", "garrison/models", "Models", "body", files)
 		if err != nil {
 			t.Fatal(err)
 		}

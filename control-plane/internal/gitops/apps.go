@@ -28,7 +28,7 @@ import (
 )
 
 // App is one deployed environment of an app: a stack of a namespace other
-// than system, stacks/<name>.yaml in its config repo, deployed from the
+// than garrison, stacks/<name>.yaml in its config repo, deployed from the
 // branch of its source repo named after the environment, or as config says.
 type App struct {
 	Namespace   string `json:"namespace"`

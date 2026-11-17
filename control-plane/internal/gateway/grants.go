@@ -46,13 +46,13 @@ func ServiceKey(adminPassword string) string {
 }
 
 // Role is a person's role in a namespace, from its members.yaml on main:
-// admin, member or "". In system, which has none, root admins are its
+// admin, member or "". In garrison, which has none, root admins are its
 // admins.
 func (g *Gitea) Role(ctx context.Context, ns, person string) (string, error) {
 	if err := validOrg(ns); err != nil {
 		return "", err
 	}
-	if ns == SystemNamespace {
+	if ns == PlatformNamespace {
 		var u struct {
 			IsAdmin bool `json:"is_admin"`
 		}

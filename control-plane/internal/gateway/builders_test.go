@@ -52,7 +52,7 @@ func (f *fakeBuilderGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case p0 == "/orgs":
-		io.WriteString(w, `[{"username":"system"},{"username":"homepage"}]`)
+		io.WriteString(w, `[{"username":"garrison"},{"username":"homepage"}]`)
 	case strings.Contains(p0, "/actions/variables/"):
 		parts := strings.Split(p0, "/")
 		f.variables[parts[2]+"/"+parts[5]] = body["value"].(string)
@@ -135,8 +135,8 @@ func TestBuilders(t *testing.T) {
 	if _, ok := f.users["jo-builder"]; !ok {
 		t.Error("a person whose name ends in -builder was removed")
 	}
-	if _, ok := f.users["system-builder"]; ok {
-		t.Error("system got a build account; it builds on its own runner")
+	if _, ok := f.users["garrison-builder"]; ok {
+		t.Error("garrison got a build account; it builds on its own runner")
 	}
 	team := f.teams["builders"]
 	if units, _ := team["units_map"].(map[string]any); units["repo.packages"] != "write" || len(units) != 1 || team["permission"] != "read" {

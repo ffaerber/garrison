@@ -12,8 +12,8 @@ services:
       GITEA__server__ROOT_URL: https://git.${DOMAIN}/
       GITEA__server__DISABLE_SSH: "true"
       GITEA__security__INSTALL_LOCK: "true"
-      # Builds run on the runner of the system organisation (system/runner) and
-      # on the user runner of every other namespace (system/control-plane).
+      # Builds run on the runner of the garrison organisation (garrison/runner) and
+      # on the user runner of every other namespace (garrison/control-plane).
       GITEA__actions__ENABLED: "true"
       GITEA__repository__DEFAULT_REPO_UNITS: repo.code,repo.releases,repo.issues,repo.pulls,repo.wiki,repo.projects,repo.packages,repo.actions
       # Namespaces are made by root admins only.

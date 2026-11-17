@@ -85,7 +85,7 @@ func write(t *testing.T, dir, name, content string) {
 func TestSync(t *testing.T) {
 	fg := &fakeGrafana{folders: map[string]string{}, version: map[string]int{}, boards: map[string]map[string]any{
 		// Made by hand in Grafana, in the same folder, not from Git: kept.
-		"by-hand": {"folderUid": "ns-system", "dashboard": map[string]any{"uid": "by-hand", "tags": []any{"mine"}}},
+		"by-hand": {"folderUid": "ns-garrison", "dashboard": map[string]any{"uid": "by-hand", "tags": []any{"mine"}}},
 	}}
 	srv := httptest.NewServer(fg)
 	defer srv.Close()
@@ -99,10 +99,10 @@ func TestSync(t *testing.T) {
 	write(t, app, "notadash.json", `{"title":"no panels"}`)
 	repos := map[string]string{"grafana": grafana, "zapp": app, "empty": t.TempDir()}
 
-	if err := g.Sync(context.Background(), "system", repos); err != nil {
+	if err := g.Sync(context.Background(), "garrison", repos); err != nil {
 		t.Fatal(err)
 	}
-	if fg.folders["ns-system"] != "system" {
+	if fg.folders["ns-garrison"] != "garrison" {
 		t.Errorf("folders = %v", fg.folders)
 	}
 	if len(fg.boards) != 3 {
@@ -121,7 +121,7 @@ func TestSync(t *testing.T) {
 
 	// Nothing changed: nothing is sent again.
 	before := fg.posts
-	g.Sync(context.Background(), "system", repos)
+	g.Sync(context.Background(), "garrison", repos)
 	if fg.posts != before {
 		t.Errorf("unchanged dashboards were sent again")
 	}
@@ -129,14 +129,14 @@ func TestSync(t *testing.T) {
 	// Someone edits a Git dashboard in Grafana: the next sync puts it back.
 	fg.boards["garrison-overview"]["dashboard"].(map[string]any)["title"] = "Edited in Grafana"
 	fg.version["garrison-overview"]++
-	g.Sync(context.Background(), "system", repos)
+	g.Sync(context.Background(), "garrison", repos)
 	if fg.boards["garrison-overview"]["dashboard"].(map[string]any)["title"] != "Overview" {
 		t.Error("an edit made in Grafana was not put back")
 	}
 
 	// A file removed from Git disappears from Grafana; the hand-made one stays.
 	os.Remove(filepath.Join(grafana, "dashboards", "noid.json"))
-	g.Sync(context.Background(), "system", repos)
+	g.Sync(context.Background(), "garrison", repos)
 	if _, ok := fg.boards["grafana-noid"]; ok {
 		t.Error("a dashboard removed from Git was kept")
 	}
@@ -146,7 +146,7 @@ func TestSync(t *testing.T) {
 
 	// A changed file is sent again.
 	write(t, grafana, "overview.json", `{"uid":"garrison-overview","title":"Overview 2","panels":[]}`)
-	g.Sync(context.Background(), "system", repos)
+	g.Sync(context.Background(), "garrison", repos)
 	if fg.boards["garrison-overview"]["dashboard"].(map[string]any)["title"] != "Overview 2" {
 		t.Error("a changed dashboard was not updated")
 	}

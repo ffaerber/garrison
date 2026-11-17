@@ -73,8 +73,8 @@ gitea_api() {
   web -u "$ADMIN_USER:$PASSWORD" ${as:+-H "Sudo: $as"} "$@"
 }
 api=https://git.$DOMAIN/api/v1
-# Every system stack is a repo of the system organisation; traefik stands in for them.
-repo=$api/repos/system/traefik
+# Every system stack is a repo of the garrison organisation; traefik stands in for them.
+repo=$api/repos/garrison/traefik
 # until_true SECONDS COMMAND...: retry until the command succeeds.
 until_true() {
   local deadline=$((SECONDS + $1)); shift
@@ -193,8 +193,8 @@ chat_login() {
   done
   return 1
 }
-# system_channel [PERSON]: the id of the channel of the namespace system.
-system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "system"))' 2>/dev/null; }
+# system_channel [PERSON]: the id of the channel of the namespace garrison.
+system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "garrison"))' 2>/dev/null; }
 # mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
 mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
 # mcp ARGS...: the gateway's MCP endpoint, which only Open WebUI reaches.
@@ -280,23 +280,23 @@ for u in alice bob; do
 done
 check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/alice")"
 check "bob is not a Gitea admin"           grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
-check "every system stack is a repo of the system organisation" \
-  bash -c 'for n in postgres traefik keycloak sso gitea runner control-plane grafana prometheus loki; do grep -q "\"full_name\":\"system/$n\"" <<<"$0" || { echo "missing system/$n"; exit 1; }; done' "$(gitea_api "" "$api/orgs/system/repos?limit=50")"
+check "every system stack is a repo of the garrison organisation" \
+  bash -c 'for n in postgres traefik keycloak sso gitea runner control-plane grafana prometheus loki; do grep -q "\"full_name\":\"garrison/$n\"" <<<"$0" || { echo "missing garrison/$n"; exit 1; }; done' "$(gitea_api "" "$api/orgs/garrison/repos?limit=50")"
 check "the traefik repo holds its stack"   test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
-check "alice can administer the system repos"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
-check "alice can change a system repo" \
+check "alice can administer the garrison repos"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
+check "alice can change a garrison repo" \
   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"YWxpY2UK","message":"smoke test","new_branch":"smoke-'$RANDOM$RANDOM'"}' $repo/contents/smoke-test.txt)" = 201
-check "bob can see the system repos, read-only"  grep -q '"permissions":{"admin":false,"push":false,"pull":true}' <<<"$(gitea_api bob $repo)"
+check "bob can see the garrison repos, read-only"  grep -q '"permissions":{"admin":false,"push":false,"pull":true}' <<<"$(gitea_api bob $repo)"
 check "bob can read the system stack"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
-check "bob can see it in the browser too"  test "$(web -b "$tmp/bob.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/system/traefik")" = 200
-check "bob cannot change a system repo" \
+check "bob can see it in the browser too"  test "$(web -b "$tmp/bob.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/garrison/traefik")" = 200
+check "bob cannot change a garrison repo" \
   test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test"}' $repo/contents/bob-was-here.txt)" = 403
 check "bob cannot change it on a new branch either" \
   test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test","new_branch":"bob"}' $repo/contents/bob-was-here.txt)" = 403
 check "bob's change did not land"          test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/bob-was-here.txt)" = 404
 check "bob cannot change the repo's settings" test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"description":"bob"}' $repo)" = 403
-check "someone not signed in cannot read the system repos" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 $repo)\" != 200 ]"
-check "someone not signed in cannot browse it either" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/system/traefik)\" != 200 ]"
+check "someone not signed in cannot read the garrison repos" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 $repo)\" != 200 ]"
+check "someone not signed in cannot browse it either" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $ETC/tls.crt --resolve git.$DOMAIN:443:127.0.0.1 https://git.$DOMAIN/garrison/traefik)\" != 200 ]"
 check "bob cannot make himself admin"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"login_name":"bob","source_id":0,"admin":true}' "https://git.$DOMAIN/api/v1/admin/users/bob")" = 403
 check "bob is still not a Gitea admin"     grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
 
@@ -313,19 +313,19 @@ check "alice is shown as alice"            grep -q '"name":"alice"' <<<"$(chat_a
 check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"$1\""; }
-check "bob has the operator agent of the namespace system" until_true 180 has_agent system/operator
-check "and the commander, which finds the agent for a task" has_agent system/commander
+check "bob has the operator agent of the namespace garrison" until_true 180 has_agent garrison/operator
+check "and the commander, which finds the agent for a task" has_agent garrison/commander
 check "the agents come from the agent service" grep -q '"owned_by":"garrison"' <<<"$(chat_api bob "$chat/api/models")"
 check "Open WebUI has no LLM key" \
   test -z "$(docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" printenv OPENAI_API_KEY)"
 check "the agent service wants a token" \
-  test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"model":"system/operator","messages":[]}' /v1/chat/completions)" = 401
+  test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"model":"garrison/operator","messages":[]}' /v1/chat/completions)" = 401
 check "it refuses a made-up token" \
-  test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{"model":"system/operator","messages":[]}' /v1/chat/completions)" = 401
+  test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' -d '{"model":"garrison/operator","messages":[]}' /v1/chat/completions)" = 401
 check "the agent service is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://agents.$DOMAIN/v1/models")" = 404
-check "system has its config repo with the operator" \
-  test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/config/raw/agents/operator/agent.yaml")" = 200
-check "bob sees the channel of the namespace system" until_true 120 system_channel
+check "garrison has its config repo with the operator" \
+  test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/garrison/config/raw/agents/operator/agent.yaml")" = 200
+check "bob sees the channel of the namespace garrison" until_true 120 system_channel
 cid=$(system_channel)
 check "bob cannot rename it" \
   test "$(chat_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-channel"}' "$chat/api/v1/channels/$cid/update")" = 403
@@ -371,26 +371,26 @@ section_platform() {
 echo "# deployer"
 
 check "the deployer runs in Swarm"       test "$(docker service ls --filter name=control-plane_deployer --format '{{.Replicas}}')" = 1/1
-check "it runs an image built in Gitea"    bash -c "case '$(deployer_image)' in git.$DOMAIN/system/control-plane:bootstrap) exit 1 ;; git.$DOMAIN/system/control-plane:*) exit 0 ;; *) exit 1 ;; esac"
+check "it runs an image built in Gitea"    bash -c "case '$(deployer_image)' in git.$DOMAIN/garrison/control-plane:bootstrap) exit 1 ;; git.$DOMAIN/garrison/control-plane:*) exit 0 ;; *) exit 1 ;; esac"
 tag=$(deployer_image | sed 's/.*://')
-check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/system/container/control-plane/$tag")" = 200
-check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/system/control-plane/actions/tasks?limit=1")"
+check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/garrison/container/control-plane/$tag")" = 200
+check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/garrison/control-plane/actions/tasks?limit=1")"
 check "the runner is up"                 test "$(docker service ls --filter name=runner_runner --format '{{.Replicas}}')" = 1/1
-check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/system/actions/secrets")" = 403
+check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/garrison/actions/secrets")" = 403
 check "the deployer no longer runs on the host" bash -c '! systemctl is-active --quiet garrison-controller'
 check "the deployer deployed grafana, prometheus and loki" \
   bash -c 'a=$(garrison applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
 
 docker stack rm smoke >/dev/null 2>&1 || true
-gitea_api "" -o /dev/null -X DELETE "$api/repos/system/smoke" 2>/dev/null || true
+gitea_api "" -o /dev/null -X DELETE "$api/repos/garrison/smoke" 2>/dev/null || true
 compose=$(printf 'services:\n  web:\n    image: traefik/whoami:v1.11\n' | base64 -w0)
-check "bob cannot add a repo to the system organisation" \
-  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-stack"}' "$api/orgs/system/repos")" = 403
-check "alice adds a repo to the system organisation" \
-  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"smoke","auto_init":true,"default_branch":"main"}' "$api/orgs/system/repos")" = 201
-check "alice gives it a compose.yaml"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"message":"smoke test","branch":"main","content":"'$compose'"}' "$api/repos/system/smoke/contents/compose.yaml")" = 201
+check "bob cannot add a repo to the garrison organisation" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-stack"}' "$api/orgs/garrison/repos")" = 403
+check "alice adds a repo to the garrison organisation" \
+  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"smoke","auto_init":true,"default_branch":"main"}' "$api/orgs/garrison/repos")" = 201
+check "alice gives it a compose.yaml"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"message":"smoke test","branch":"main","content":"'$compose'"}' "$api/repos/garrison/smoke/contents/compose.yaml")" = 201
 check "the deployer deploys it as the stack smoke" until_true 120 smoke_running
-check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$api/repos/system/smoke")" = 204
+check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$api/repos/garrison/smoke")" = 204
 check "the deployer takes the stack down" until_true 120 smoke_gone
 check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx control-plane <<<"$l"'
 
@@ -404,9 +404,9 @@ check "Loki is not reachable from outside" test "$(web -o /dev/null -w '%{http_c
 check "Prometheus and Loki publish no port on the host" bash -c '! (ss -ltn | grep -Eq ":(9090|3100) ")'
 
 echo "# dashboards from Git"
-folder_count() { grafana_api "" "$g/api/search?type=dash-db&folderUIDs=ns-system&tag=git" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
+folder_count() { grafana_api "" "$g/api/search?type=dash-db&folderUIDs=ns-garrison&tag=git" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
 six_dashboards() { [ "$(folder_count)" -ge 6 ]; }
-check "the system folder holds the dashboards from Git" until_true 180 six_dashboards
+check "the garrison folder holds the dashboards from Git" until_true 180 six_dashboards
 sso_login "$tmp/grafana-bob.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-bob.html" bob >/dev/null 2>&1
 check "bob can open the overview"          test "$(grafana_api bob -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/garrison-overview")" = 200
 check "bob cannot change it" \
@@ -422,7 +422,7 @@ def get(path):
     try: return json.loads(out)
     except Exception: return {"status": "error", "error": out[:200]}
 bad = 0
-for f in sorted(glob.glob("system/grafana/dashboards/*.json")):
+for f in sorted(glob.glob("garrison/grafana/dashboards/*.json")):
     d = json.load(open(f))
     for p in d["panels"]:
         for t in p.get("targets", []):
@@ -448,12 +448,12 @@ check "the traffic dashboard has requests" until_true 120 prom_has 'sum(rate(tra
 check "Traefik's metrics are not reachable from outside" bash -c '! (ss -ltn | grep -q ":8082 ")'
 # A dashboard committed to a repo appears; deleting the file removes it.
 smoke_dash=$(printf '{"uid":"smoke-test","title":"Smoke test","panels":[]}' | base64 -w0)
-gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Add a dashboard","branch":"main","content":"'$smoke_dash'"}' "$api/repos/system/platform/contents/dashboards/smoke.json"
+gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Add a dashboard","branch":"main","content":"'$smoke_dash'"}' "$api/repos/garrison/platform/contents/dashboards/smoke.json"
 dash_there() { test "$(grafana_api "" -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/smoke-test")" = 200; }
 dash_gone()  { ! dash_there; }
 check "a dashboard committed by alice appears" until_true 120 dash_there
-sha=$(gitea_api alice "$api/repos/system/platform/contents/dashboards/smoke.json" | grep -o '"sha":"[^"]*"' | head -n1 | cut -d'"' -f4)
-gitea_api alice -o /dev/null -X DELETE -H 'Content-Type: application/json' -d '{"message":"Remove a dashboard","branch":"main","sha":"'$sha'"}' "$api/repos/system/platform/contents/dashboards/smoke.json"
+sha=$(gitea_api alice "$api/repos/garrison/platform/contents/dashboards/smoke.json" | grep -o '"sha":"[^"]*"' | head -n1 | cut -d'"' -f4)
+gitea_api alice -o /dev/null -X DELETE -H 'Content-Type: application/json' -d '{"message":"Remove a dashboard","branch":"main","sha":"'$sha'"}' "$api/repos/garrison/platform/contents/dashboards/smoke.json"
 check "deleting it in Git removes it"      until_true 120 dash_gone
 # An edit made in Grafana is put back.
 overview=$(grafana_api "" "$g/api/dashboards/uid/garrison-overview" | python3 -c 'import json,sys; d=json.load(sys.stdin)["dashboard"]; d["title"]="Edited in Grafana"; print(json.dumps({"dashboard": d, "overwrite": True}))')
@@ -497,13 +497,13 @@ check "rejected stacks were not deployed"  bash -c '! (docker stack ls --format 
 check "hello still answers after the rejected deploys"   status_is 200 hello / 30
 
 echo "# models"
-# The model list in system's config: written from the install's LLM, then
+# The model list in garrison's config: written from the install's LLM, then
 # kept current by the model sync's pull requests. A fake provider, a static
 # file served on this machine, stands in for OpenRouter and the like.
-sys=$api/repos/system/config
+sys=$api/repos/garrison/config
 llm_file() { gitea_api "" "$sys/raw/llm/$1?ref=${2:-main}"; }
 seeded() { llm_file providers.yaml | grep -q '^default: ' && llm_file models.yaml | grep -q 'enabled: true'; }
-check "system's config gets the model list" until_true 180 seeded
+check "garrison's config gets the model list" until_true 180 seeded
 install_model=$(sed -n 's/^LLM_MODEL=//p' $ETC/install.env)
 check "its default is the install's model, enabled" \
   bash -c 'grep -qF "/$1\"" <<<"$2" && grep -qF "/$1\": {enabled: true" <<<"$3"' _ "$install_model" "$(llm_file providers.yaml)" "$(llm_file models.yaml)"
@@ -518,7 +518,7 @@ fake_pid=$!
 fake_url="http://$(hostname -I | awk '{print $1}'):8399/v1"
 llm_file providers.yaml > "$tmp/providers.yaml"
 printf '  fake:\n    url: "%s"\n    include: ["fake-*"]\n' "$fake_url" >> "$tmp/providers.yaml"
-check "alice adds a provider; another root admin approves" set_config system llm/providers.yaml "$tmp/providers.yaml"
+check "alice adds a provider; another root admin approves" set_config garrison llm/providers.yaml "$tmp/providers.yaml"
 
 models_pr() { gitea_api "" "$sys/pulls?state=open&limit=50" | python3 -c '
 import json,sys
@@ -571,7 +571,7 @@ done
 # A model the provider stops offering is marked gone, in the next sync.
 printf '{"object":"list","data":[{"id":"fake-small"}]}' > "$fake/v1/models"
 sed -i 's#include: \["fake-\*"\]#include: ["fake-small", "fake-large"]#' "$tmp/providers.yaml"
-check "alice narrows the provider"         set_config system llm/providers.yaml "$tmp/providers.yaml"
+check "alice narrows the provider"         set_config garrison llm/providers.yaml "$tmp/providers.yaml"
 check "the next sync proposes fake-large as retired" until_true 180 models_pr_with "Retired: fake/fake-large"
 check "with the date it went"              grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: [0-9-]+\}' <<<"$(llm_file models.yaml "$(models_branch)")"
 kill "$fake_pid" 2>/dev/null || true
@@ -596,13 +596,13 @@ admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DO
   "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 cid=$(system_channel)
 : > "$tmp/posted"   # ids of the test's messages; ask runs in a subshell
-# ask PERSON QUESTION: posts in the channel of system, mentioning its agent, as
+# ask PERSON QUESTION: posts in the channel of garrison, mentioning its agent, as
 # the chat page does, and waits for the agent's answer in the message's thread.
 # Prints the answer.
 ask() {
   local who=$1 question=$2 mid i
   mid=$(chat_api "$who" -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:system/operator|system/operator> " + sys.argv[1]}))' "$question")" \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"content": "<@M:garrison/operator|garrison/operator> " + sys.argv[1]}))' "$question")" \
     "$chat/api/v1/channels/$cid/messages/post" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
   echo "$mid" >> "$tmp/posted"
   for i in $(seq 60); do
@@ -610,7 +610,7 @@ ask() {
 import json,sys
 for m in json.load(sys.stdin):
     meta = m.get("meta") or {}
-    if meta.get("model_id") == "system/operator" and meta.get("done"):
+    if meta.get("model_id") == "garrison/operator" and meta.get("done"):
         print(m.get("content") or ""); sys.exit(0)
 sys.exit(1)' && return 0
     sleep 5
@@ -632,10 +632,10 @@ cleanup_channel() {
 # question whose answer shows no sign of the system is asked once more, and
 # the retry is printed so it shows in the log.
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask bob "Which stacks run in the namespace system? Use your tools and list their names." | reply)
+answer=$(ask bob "Which stacks run in the namespace garrison? Use your tools and list their names." | reply)
 if ! grep -qi grafana <<<"$answer"; then
   printf 'retry the agent answered %q; asking again\n' "$(head -c 200 <<<"$answer")"
-  answer=$(ask bob "Which stacks run in the namespace system? Call list_stacks and list their names." | reply)
+  answer=$(ask bob "Which stacks run in the namespace garrison? Call list_stacks and list their names." | reply)
 fi
 check "the agent answers bob in the channel" test -n "$answer"
 check "its answer names grafana"           grep -qi grafana <<<"$answer"
@@ -644,20 +644,20 @@ since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask bob "Show me the last 20 log lines of the service grafana_grafana, and how much memory the stack grafana uses." | reply)
 check "it reads logs for bob"              grep -q "mcp: bob: service_logs" <<<"$(mcp_calls "$since" bob)"
 check "it reads metrics for bob"           grep -qE "mcp: bob: (service_usage|query_metrics)" <<<"$(mcp_calls "$since" bob)"
-answer=$(ask bob "In the namespace system, propose a change to the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob." | reply)
-check "bob's proposal is refused"          bash -c '! grep -q "Agent smoke test bob" <<<"$0"' "$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")"
+answer=$(ask bob "In the namespace garrison, propose a change to the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob." | reply)
+check "bob's proposal is refused"          bash -c '! grep -q "Agent smoke test bob" <<<"$0"' "$(gitea_api "" "$api/repos/garrison/platform/pulls?state=open&limit=50")"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask alice "In the namespace system, propose a change to the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice." | reply)
+answer=$(ask alice "In the namespace garrison, propose a change to the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice." | reply)
 check "the agent proposes alice's change, as alice" grep -q "mcp: alice: propose_change" <<<"$(mcp_calls "$since" alice)"
-prs=$(gitea_api "" "$api/repos/system/platform/pulls?state=open&limit=50")
+prs=$(gitea_api "" "$api/repos/garrison/platform/pulls?state=open&limit=50")
 check "it waits as a pull request by alice" python3 -c 'import json,sys; sys.exit(not any(p["title"].startswith("Agent smoke test alice") and p["user"]["login"] == "alice" for p in json.load(sys.stdin)))' <<<"$prs"
-check "nothing reached main"               test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/platform/contents/agent-alice.txt")" = 404
+check "nothing reached main"               test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/garrison/platform/contents/agent-alice.txt")" = 404
 # On failure the answer is printed, so a model that leaves out the link shows what it said instead.
-links() { grep -q "git.$DOMAIN/system/platform/pulls/" <<<"$1" || { echo "answer: $(tr '\n' ' ' <<<"$1" | head -c 400)"; return 1; }; }
+links() { grep -q "git.$DOMAIN/garrison/platform/pulls/" <<<"$1" || { echo "answer: $(tr '\n' ' ' <<<"$1" | head -c 400)"; return 1; }; }
 check "the answer links the change"        links "$answer"
 # Clean up: close the proposal.
 pr=$(python3 -c 'import json,sys; print(next(p["number"] for p in json.load(sys.stdin) if p["title"].startswith("Agent smoke test alice")))' <<<"$prs" 2>/dev/null)
-[ -n "$pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/system/platform/pulls/$pr"
+[ -n "$pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/garrison/platform/pulls/$pr"
 cleanup_channel
 check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len([m for m in json.load(sys.stdin) if not (m.get(\"content\") or \"\").startswith(\"**How to ask the agent\")]))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
 }
@@ -1190,10 +1190,10 @@ for n in $dpr $ppr; do
 done
 
 echo "# 4d. what the media agent may not do"
-platform_prs() { gitea_api "" "$api/repos/system/platform/pulls?state=all&limit=1" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(l[0]["number"] if l else 0)'; }
+platform_prs() { gitea_api "" "$api/repos/garrison/platform/pulls?state=all&limit=1" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(l[0]["number"] if l else 0)'; }
 before=$(platform_prs)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent todo bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the namespace system, repo platform, as docs/todo.png." media)
+answer=$(ask_agent todo bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the namespace garrison, repo platform, as docs/todo.png." media)
 check "bob gets no screenshot into a repo he may not change" test "$(platform_prs)" = "$before"
 check "the gateway refused every try"      refused_only "$at" bob screenshot "not allowed"
 check "the agent says so"                  test -n "$answer"
@@ -1524,20 +1524,20 @@ fi
 check "a site beyond the registries is refused" refused_site
 
 echo "# 4l. bob asks the commander, which finds the agent for him"
-answer=$(CHANNEL=todo ask_agent system bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
+answer=$(CHANNEL=todo ask_agent garrison bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
 if ! grep -q "todo/media" <<<"$answer"; then
   printf 'retry it named no media agent; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(CHANNEL=todo ask_agent system bob "Please call find_agents and tell me which agent of todo makes screenshots." commander)
+  answer=$(CHANNEL=todo ask_agent garrison bob "Please call find_agents and tell me which agent of todo makes screenshots." commander)
 fi
 check "it names the media agent"           grep -q "todo/media" <<<"$answer"
-handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent system/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
-answer=$(CHANNEL=todo ask_agent system bob "Hand this to the agent of todo that knows its stacks: which stacks does the namespace todo have? Have it answer here." commander)
+handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent garrison/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
+answer=$(CHANNEL=todo ask_agent garrison bob "Hand this to the agent of todo that knows its stacks: which stacks does the namespace todo have? Have it answer here." commander)
 if ! handed; then
   printf 'retry it handed nothing over; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(CHANNEL=todo ask_agent system bob "Please use ask_agent now: ask todo/operator which stacks the namespace todo has." commander)
+  answer=$(CHANNEL=todo ask_agent garrison bob "Please use ask_agent now: ask todo/operator which stacks the namespace todo has." commander)
 fi
 check "it hands a task over, as the feed shows" handed
-check "which the agent finishes"           until_true 300 in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent system/commander' and e['status'] == 'ok'"
+check "which the agent finishes"           until_true 300 in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent garrison/commander' and e['status'] == 'ok'"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)
@@ -1599,9 +1599,9 @@ check "carol, in todo, sees it"        until_true 120 has_model todo/keeper caro
 check "bob, no longer in todo, does not" not_seen todo/keeper bob
 check "he still sees the agents of public repos" has_model todo/developer bob
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-mention system carol todo/keeper "What is in the repo secret?" >/dev/null
+mention garrison carol todo/keeper "What is in the repo secret?" >/dev/null
 refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: todo/keeper: refused in channel:.*: private"; }
-check "it does not answer in system's channel, which everyone reads" until_true 120 refused_here
+check "it does not answer in garrison's channel, which everyone reads" until_true 120 refused_here
 answer=$(ask_agent todo carol "Read README.md of the repo secret of the namespace todo and tell me its first line." keeper)
 check "it answers carol in todo's channel" grep -qi secret <<<"$answer"
 gitea_api "" -o /dev/null -X DELETE "$hp/secret"
@@ -1667,7 +1667,7 @@ check "and the alert resolves"             until_true 300 in_feed carol ns=todo 
 gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
 
 echo "# 8. alice has the operator set up a new app, from nothing"
-answer=$(ask_agent system alice "Set up a new app for us: make a namespace photos for our photo apps, and in it the app gallery, a small web app that shows who is visiting: the image traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own. Propose its stack. You have everything you need; do not ask back.")
+answer=$(ask_agent garrison alice "Set up a new app for us: make a namespace photos for our photo apps, and in it the app gallery, a small web app that shows who is visiting: the image traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own. Propose its stack. You have everything you need; do not ask back.")
 org_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/photos")" = 200 ]; }
 # stack_pr: the open pull request of photos/config by alice that adds stacks/gallery.yaml.
 stack_pr() {
@@ -1679,14 +1679,14 @@ stack_pr() {
 }
 if ! org_made || ! stack_pr >/dev/null; then
   printf 'retry the operator did not do both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent system alice "Please go ahead now: create_namespace photos if it is missing, then propose stacks/gallery.yaml in photos/config with propose_change (image traefik/whoami:v1.11, port 80, entrypoint web, environment main private).")
+  answer=$(ask_agent garrison alice "Please go ahead now: create_namespace photos if it is missing, then propose stacks/gallery.yaml in photos/config with propose_change (image traefik/whoami:v1.11, port 80, entrypoint web, environment main private).")
 fi
 check "it makes the namespace photos, as alice" org_made
 photos_admin() { gitea_api "" "$api/repos/photos/config/raw/members.yaml" | python3 -c 'import sys,yaml; sys.exit(0 if (yaml.safe_load(sys.stdin) or {}).get("admins") == ["alice"] else 1)'; }
 check "with alice as its first admin"      until_true 180 photos_admin
 gpr=$(stack_pr)
 check "it proposes stacks/gallery.yaml in photos' config, as alice" test -n "$gpr"
-check "no repo for it, and nothing in system" bash -c '[ "$0" = 404 ] && [ "$1" = 404 ]' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/system/gallery")"
+check "no repo for it, and nothing in garrison" bash -c '[ "$0" = 404 ] && [ "$1" = 404 ]' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/photos/gallery")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/garrison/gallery")"
 gitea_api "" "$api/repos/photos/config/raw/stacks/gallery.yaml?ref=$(gitea_api "" "$api/repos/photos/config/pulls/${gpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/gallery.yaml"
 check "one the deployer takes"             garrison validate --in photos "$tmp/gallery.yaml"
 check "a root admin who did not write it approves" test "$(gitea_api "" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$api/repos/photos/config/pulls/${gpr:-0}/reviews")" = 200
@@ -1700,7 +1700,7 @@ check "alice merges it"                    test "$(gitea_api alice -o /dev/null 
 gallery_deployed() { garrison applied | grep -q "^app photos/gallery@main gallery "; }
 check "the deployer deploys it"            until_true 300 gallery_deployed
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent system bob "Make me a namespace bobs for my own apps.")
+answer=$(ask_agent garrison bob "Make me a namespace bobs for my own apps.")
 check "bob cannot make a namespace"        test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/bobs")" = 404
 refused_ns() { refused_only "$since" bob create_namespace "only root admins may"; }
 check "the gateway refused every try"      refused_ns

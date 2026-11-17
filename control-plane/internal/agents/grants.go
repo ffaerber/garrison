@@ -216,8 +216,8 @@ func checkAsks(self string, ids []string) []string {
 	for _, id := range ids {
 		switch {
 		case id == AnyAgent:
-			if ns, _, _ := strings.Cut(self, "/"); ns != SystemNamespace {
-				why = append(why, "agents: any is only for the agents of system, which root admins approve; name the agents this one may ask")
+			if ns, _, _ := strings.Cut(self, "/"); ns != PlatformNamespace {
+				why = append(why, "agents: any is only for the agents of garrison, which root admins approve; name the agents this one may ask")
 			} else if len(ids) > 1 {
 				why = append(why, "agents: any stands alone, without other agents")
 			}

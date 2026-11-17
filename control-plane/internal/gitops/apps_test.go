@@ -55,7 +55,7 @@ func (f *fakeApps) api(w http.ResponseWriter, r *http.Request) {
 			for org := range f.repos {
 				out = append(out, map[string]string{"username": org})
 			}
-			out = append(out, map[string]string{"username": "system"})
+			out = append(out, map[string]string{"username": "garrison"})
 		}
 		json.NewEncoder(w).Encode(out)
 	case strings.HasPrefix(p, "/orgs/") && strings.HasSuffix(p, "/repos"):
@@ -195,7 +195,7 @@ func setupApps(t *testing.T) (*Config, *fakeApps) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "repos", "platform"), 0o755)
 	os.WriteFile(filepath.Join(dir, "repos", "platform", "reserved-hostnames.yaml"), []byte("reserved: [grafana]\n"), 0o644)
-	c := &Config{Domain: "example.com", GiteaURL: srv.URL, User: "admin", Org: "system", WorkDir: dir,
+	c := &Config{Domain: "example.com", GiteaURL: srv.URL, User: "admin", Org: "garrison", WorkDir: dir,
 		Run: f.run, HTTP: srv.Client(), password: "pw", waiting: map[string]string{}}
 	return c, f
 }
@@ -314,7 +314,7 @@ func TestNoAppIsDeployedWithoutRegistryCredentials(t *testing.T) {
 func TestAppsThatBreakTheRulesAreNotDeployed(t *testing.T) {
 	for name, c := range map[string]struct{ file, stack string }{
 		"stack named unlike its file": {"todo", "stack: other\n" + todoStack},
-		"stack of another namespace":  {"todo", "namespace: system\n" + todoStack},
+		"stack of another namespace":  {"todo", "namespace: garrison\n" + todoStack},
 		"reserved hostname":           {"grafana", todoStack},
 		"not a valid stack":           {"todo", "source: todo\n"},
 		"source that does not exist":  {"todo", strings.Replace(todoStack, "source: todo", "source: nothing", 1)},

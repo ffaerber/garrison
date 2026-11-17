@@ -48,9 +48,9 @@ type Store struct {
 	Domain     string
 }
 
-// SystemNamespace has no apps of its config: the platform's own secrets
+// PlatformNamespace has no apps of its config: the platform's own secrets
 // are kept elsewhere for now.
-const SystemNamespace = "system"
+const PlatformNamespace = "garrison"
 
 // ConfigRepo is the repo a namespace's secrets are in.
 const ConfigRepo = "config"
@@ -58,7 +58,7 @@ const ConfigRepo = "config"
 // May tells whether person may manage the secrets of ns: its admins and
 // root admins.
 func (s *Store) May(ctx context.Context, ns, person string) (bool, error) {
-	if ns == SystemNamespace || !namespace.MatchString(ns) {
+	if ns == PlatformNamespace || !namespace.MatchString(ns) {
 		return false, nil
 	}
 	admin, err := s.Gitea.IsAdmin(ctx, person)

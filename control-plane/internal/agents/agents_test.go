@@ -80,7 +80,7 @@ func TestTheCommanderLoadsInSystem(t *testing.T) {
 	for p, c := range CommanderFiles() {
 		files[p] = c
 	}
-	got, problems, err := Load(context.Background(), files, SystemNamespace, tools)
+	got, problems, err := Load(context.Background(), files, PlatformNamespace, tools)
 	if err != nil || len(problems) > 0 || len(got) != 2 {
 		t.Fatalf("got %v %v %v", got, problems, err)
 	}
@@ -92,7 +92,7 @@ func TestTheCommanderLoadsInSystem(t *testing.T) {
 	if !c.AsksAny() || len(c.Tools) != 0 || c.Prompt != CommanderPrompt || c.Description == "" {
 		t.Errorf("commander = %+v", c)
 	}
-	if !c.MayAsk("todo/developer") || c.MayAsk("system/commander") {
+	if !c.MayAsk("todo/developer") || c.MayAsk("garrison/commander") {
 		t.Errorf("the commander may ask others, never itself")
 	}
 	if !strings.Contains(files["agents/commander/agent.yaml"], "agents: any") {
@@ -104,10 +104,10 @@ func TestAnyIsForSystemOnly(t *testing.T) {
 	for _, c := range []struct {
 		ns, yaml, want string
 	}{
-		{"todo", "agents: any\n", "only for the agents of system"},
-		{"todo", "agents: [any]\n", "only for the agents of system"},
-		{SystemNamespace, "agents: [any, todo/developer]\n", "stands alone"},
-		{SystemNamespace, "agents: any\n", ""},
+		{"todo", "agents: any\n", "only for the agents of garrison"},
+		{"todo", "agents: [any]\n", "only for the agents of garrison"},
+		{PlatformNamespace, "agents: [any, todo/developer]\n", "stands alone"},
+		{PlatformNamespace, "agents: any\n", ""},
 	} {
 		files := mapFiles{"agents/x/agent.yaml": c.yaml, "agents/x/prompt.md": "p"}
 		got, problems, err := Load(context.Background(), files, c.ns, tools)

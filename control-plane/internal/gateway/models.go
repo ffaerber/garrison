@@ -14,14 +14,14 @@ import (
 )
 
 // LLM is the home cloud's models: llm/providers.yaml and llm/models.yaml of
-// system's config repo.
+// garrison's config repo.
 type LLM struct {
 	Providers models.Providers
 	Catalog   models.Catalog
 	Problems  []string
 }
 
-// LLM reads the model files of system's config at ref; ok is false if they
+// LLM reads the model files of garrison's config at ref; ok is false if they
 // are not there yet (an installation from before them, until the agent
 // service writes them).
 func (g *Gitea) LLM(ctx context.Context, ref string) (LLM, bool, error) {
@@ -57,7 +57,7 @@ func (g *Gitea) LLM(ctx context.Context, ref string) (LLM, bool, error) {
 }
 
 // modelProblems are the agents of a namespace that name a model agents may
-// not use. The models are system's at ref for system's own pull requests,
+// not use. The models are garrison's at ref for garrison's own pull requests,
 // which may change them, and on main for the others.
 func (g *Gitea) modelProblems(ctx context.Context, ns, ref string, list []agents.Agent) ([]string, error) {
 	if ns != models.Namespace {
@@ -71,7 +71,7 @@ func (g *Gitea) modelProblems(ctx context.Context, ns, ref string, list []agents
 		return l.Problems, nil
 	}
 	if len(l.Problems) > 0 {
-		return nil, nil // system's to fix; the agents fall back to the default meanwhile
+		return nil, nil // garrison's to fix; the agents fall back to the default meanwhile
 	}
 	var out []string
 	for _, a := range list {
@@ -89,10 +89,10 @@ func (t *Tools) listModels(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if !ok {
-		return "The home cloud has no model list yet: system/config has no llm/models.yaml. Agents use the default model.", nil
+		return "The home cloud has no model list yet: garrison/config has no llm/models.yaml. Agents use the default model.", nil
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Models of the home cloud, from system/config llm/models.yaml (root admins change it by pull request).\nThe default, for agents whose agent.yaml has model empty: %s\n\nEnabled, for model: in agent.yaml:\n", l.Providers.Default)
+	fmt.Fprintf(&b, "Models of the home cloud, from garrison/config llm/models.yaml (root admins change it by pull request).\nThe default, for agents whose agent.yaml has model empty: %s\n\nEnabled, for model: in agent.yaml:\n", l.Providers.Default)
 	var off, gone []string
 	for _, id := range sortedKeys(l.Catalog) {
 		m := l.Catalog[id]
