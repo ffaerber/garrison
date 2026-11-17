@@ -76,8 +76,8 @@ check("the page lists its name, never its value",
 check("it is in shop's config, encrypted", lambda: "ENC[" in (raw(NS, "config", "secrets/api-token.yaml") or ""))
 alice.snap("secrets")
 
-section("4. alice has shop's operator make the web app; the admin approves; alice merges")
-stack_pr = check("the operator makes the repo from the template and proposes the stack", retry, alice, NS, f"{NS}/operator",
+section("4. alice has the operator, in shop's channel, make the web app; the admin approves; alice merges")
+stack_pr = check("the operator makes the repo from the template and proposes the stack", retry, alice, NS, "operator",
                  f"Make the repo {APP} in {NS} from the template static-web, then propose its stack stacks/{APP}.yaml in {NS}/config "
                  "as its README says, with the environments main and dev, both public (no private). You have everything you need; do not ask back.",
                  f"Please do it now: create_repo {APP} in {NS} with template static-web if it is missing, then propose stacks/{APP}.yaml in "
@@ -97,7 +97,7 @@ alice.snap("web on main")
 section("5. dev: a branch in Gitea, a colour by the operator, a merge into main")
 check("alice makes the branch dev in Gitea", alice.create_branch, NS, APP, "dev")
 check(f"https://dev-{APP}.{DOMAIN} comes up", until, 600, alice.page_shows, f"dev-{APP}", f"<h1>{APP}</h1>", every=10)
-colour_pr = check("the operator proposes a green background for dev", retry, alice, NS, f"{NS}/operator",
+colour_pr = check("the operator proposes a green background for dev", retry, alice, NS, "operator",
                   f"Change the background colour of the page of {NS}/{APP} to #2e7d32, on its branch dev: read index.html there and "
                   "propose it with the new colour, with base dev. Change nothing else. Do not ask back.",
                   f"Please propose it now: index.html of {NS}/{APP} on branch dev, with background-color: #2e7d32 instead of #ffffff, "
@@ -113,7 +113,7 @@ check(f"{APP}, on main, turns green", until, 900, lambda: alice.background(APP) 
 alice.snap("web is green")
 
 section("6. the operator takes a screenshot of the page")
-shot_pr = check("it proposes the screenshot in a pull request", retry, alice, NS, f"{NS}/operator",
+shot_pr = check("it proposes the screenshot in a pull request", retry, alice, NS, "operator",
                 f"Take a screenshot of https://{APP}.{DOMAIN}/ and propose it as docs/{APP}.png in the repo {NS}/{APP}.",
                 f"Please call screenshot now: url https://{APP}.{DOMAIN}/, namespace {NS}, repo {APP}, path docs/{APP}.png.",
                 lambda: newest_pr(NS, APP, "alice", file=f"docs/{APP}.png"))
@@ -132,7 +132,7 @@ alice.snap("screenshot in Gitea")
 gitea(f"/repos/{NS}/{APP}/pulls/{shot_pr or 0}", "PATCH", {"state": "closed"})
 
 section("7. bob joins shop; main of its app then takes only approved pull requests")
-member_pr = check("the operator proposes bob as a member", retry, alice, NS, f"{NS}/operator",
+member_pr = check("the operator proposes bob as a member", retry, alice, NS, "operator",
                   f"Add bob as a member of the namespace {NS}; alice stays its admin. Do not ask back.",
                   f"Please propose members.yaml in {NS}/config now: admins [alice], members [bob].",
                   lambda: newest_pr(NS, "config", "alice", file="members.yaml"))
@@ -151,22 +151,23 @@ check("alice approves it in Gitea", alice.approve, NS, APP, bob_pr or 0)
 check("then bob merges it", bob.merge, NS, APP, bob_pr or 0)
 check("web shows bob's heading", until, 900, alice.page_shows, APP, "bob's web", every=10)
 
-section("8. a scheduled job: alice adds two routines in Gitea's editor")
+section("8. scheduled agents: alice gives the operator two routines in shop, in Gitea's editor")
+# The operator is garrison's; shop's routines.yaml says what it does in shop
+# by itself.
 now = datetime.now(ZONE)
 greet_at, ask_at = now + timedelta(minutes=5), now + timedelta(minutes=6)
-agent_yaml = raw(NS, "config", "agents/operator/agent.yaml") or ""
-agent_yaml = agent_yaml.rstrip() + f"""
-routines:
-  - name: greeting
-    schedule: "{greet_at.minute} {greet_at.hour} * * *"
-    owner: alice
-    task: Say in one sentence that the scheduled greeting of {NS} ran. Change nothing.
-  - name: sundays
-    schedule: "{ask_at.minute} {ask_at.hour} * * *"
-    owner: bob
-    task: "Call ask_person with exactly this question: Should the shop open on Sundays, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
+routines = f"""- agent: operator
+  name: greeting
+  schedule: "{greet_at.minute} {greet_at.hour} * * *"
+  owner: alice
+  task: Say in one sentence that the scheduled greeting of {NS} ran. Change nothing.
+- agent: operator
+  name: sundays
+  schedule: "{ask_at.minute} {ask_at.hour} * * *"
+  owner: bob
+  task: "Call ask_person with exactly this question: Should the shop open on Sundays, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
 """
-alice.edit_file(NS, "config", "agents/operator/agent.yaml", agent_yaml, new_branch="routines", message="Two routines")
+alice.edit_file(NS, "config", "routines.yaml", routines, new_branch="routines", message="Two routines", new=True)
 routines_pr = check("she proposes them", alice.open_pr, NS, "config", "routines", "main", "Two routines")
 check("the admin approves", admin.approve, NS, "config", routines_pr or 0)
 check("the approval check passes", until, 60, lambda: approval(NS, routines_pr or 0) == "success")
@@ -204,7 +205,7 @@ def went_on():
     cid = next(c["id"] for c in bob.owui("/api/v1/channels/") if c["name"] == NS)
     for m in bob.owui(f"/api/v1/channels/{cid}/messages/{question['id']}/thread?limit=50"):
         c = m.get("content") or ""
-        if c.startswith(f"**{NS}/operator**") and "<@U:" not in c and len(c) > 30:
+        if c.startswith("**operator**") and "<@U:" not in c and len(c) > 30:
             return c
     return None
 
@@ -214,12 +215,11 @@ bob.page.goto(f"{CHAT}/channels/{channel_id(bob.page.url)}?thread={question['id'
 bob.snap("the routine went on")
 check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), "Waiting for you" not in bob.page.content())[1])
 
-section("10. the commander, by its short name, in shop's channel")
-# The same agent in every channel: @commander, not @garrison/commander.
+section("10. the commander, by its name, in shop's channel")
+# The same agent in every channel, @commander; here it works in shop.
 said = check("bob types @commander, picks it and asks it", bob.ask, NS, "commander",
-             f"Which agent should I ask to change the page of {NS}/{APP}? Only tell me whom; do not do it yourself.",
-             model="garrison/commander")
-check("it answers, naming shop's operator", lambda: f"{NS}/operator" in (said or ""))
+             f"Which agent should I ask to change the page of {NS}/{APP}? Only tell me whom; do not do it yourself.")
+check("it answers, naming the operator", lambda: "operator" in (said or "").lower())
 bob.snap("asked the commander")
 
 section("11. a scheduled job of the app: a Gitea Actions workflow on a cron schedule")

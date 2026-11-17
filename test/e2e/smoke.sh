@@ -226,11 +226,12 @@ mention() {
   echo "$cid $mid" >> "$tmp/posted"
   echo "$cid $mid"
 }
-# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent of the namespace,
-# its operator by default, in its channel (or $CHANNEL) and prints its answer
-# from the thread.
+# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent, the operator by
+# default, in the namespace's channel (or $CHANNEL), where it works in that
+# namespace, and prints its answer from the thread. The agents are
+# garrison's: their model is garrison/<agent>.
 ask_agent() {
-  local ns=$1 who=$2 question=$3 id=$1/${4:-operator} cid mid i
+  local ns=$1 who=$2 question=$3 id=garrison/${4:-operator} cid mid i
   read -r cid mid <<<"$(mention "${CHANNEL:-$ns}" "$who" "$id" "$question")"
   [ -n "$mid" ] || return 1
   for i in $(seq 72); do
@@ -753,8 +754,8 @@ check "its database has its own dataset"   test "$(zfs get -H -o value quota gar
 check "its password is a generated secret" docker secret inspect todo.db-password
 chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-ns_agent() { web -H "Authorization: Bearer $chat_admin" "$chat/api/models" | grep -q '"id":"todo/operator"'; }
-check "todo has its agent and channel in Open WebUI" until_true 120 ns_agent
+ns_channel() { web -H "Authorization: Bearer $chat_admin" "$chat/api/v1/channels/" | grep -q '"name":"todo"'; }
+check "todo has its channel in Open WebUI, where the agents work in it" until_true 120 ns_channel
 
 echo "# the homepage"
 hp_deployed() { garrison applied | grep -q "^app homepage/homepage@main homepage "; }
@@ -973,8 +974,24 @@ team_has() {
   id=$(gitea_api "" "$api/orgs/todo/teams" | python3 -c 'import json,sys; print(next(t["id"] for t in json.load(sys.stdin) if t["name"]==sys.argv[1]))' "$1")
   gitea_api "" "$api/teams/$id/members" | grep -q "\"login\":\"$2\""
 }
+# The agents are garrison's: alice, a root admin, proposes them in
+# garrison/config, and another root admin approves them. todo gives them
+# rights and routines in its own config (grants.yaml, routines.yaml).
+gc=$api/repos/garrison/config
+gc_approval() { gitea_api "" "$gc/commits/$(gitea_api "" "$gc/pulls/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
+import json,sys
+for s in json.load(sys.stdin).get("statuses") or []:
+    if s["context"] == "garrison/approval": print(s["status"], s["description"]); break'; }
+gc_approval_is() { gc_approval "$1" | grep -q "^$2"; }
+# lands PR: the local admin, a root admin, approves garrison/config's pull
+# request PR, and alice merges it once the approval check passes.
+lands() {
+  [ "$(gitea_api "" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$gc/pulls/$1/reviews")" = 200 ] &&
+    until_true 90 gc_approval_is "$1" success &&
+    [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$gc/pulls/$1/merge")" = 200 ]
+}
 # add_agent BRANCH NAME TOOLS DESCRIPTION PROMPT [SKILLS] [SKILL_FILE...]:
-# alice proposes agents/NAME in todo/config, with the shared skills
+# alice proposes agents/NAME in garrison/config, with the shared skills
 # SKILLS (comma-separated) and the files skills/... given as PATH=FILE;
 # prints the pull request's number.
 add_agent() {
@@ -991,8 +1008,8 @@ for spec in sys.argv[7:]:
     path,_,file=spec.partition("=")
     ops.append({"operation":"create","path":path,"content":b(open(file).read())})
 print(json.dumps({"branch":"main","new_branch":branch,"message":"Add the %s agent" % name,"files":ops}))' "$@")
-  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$files" "$hp/config/contents"
-  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$1"'","base":"main","title":"Add the '"$2"' agent"}' "$hp/config/pulls" |
+  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$files" "$gc/contents"
+  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$1"'","base":"main","title":"Add the '"$2"' agent"}' "$gc/pulls" |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
 }
 # png_size REPO PATH REF: WIDTHxHEIGHT of a PNG in todo/REPO at REF, or none.
@@ -1029,7 +1046,6 @@ can_push() { gitea_api "$1" "$hp/app" | grep -q '"push":true'; }
 cannot_push() { ! can_push "$1"; }
 
 check "todo has its config, alice its first admin" test "$(roster main)" = "admins=alice members="
-not_seen() { ! has_model "$1" "$2"; }
 check "bob may not push to todo's repos yet" cannot_push bob
 nopush=$(printf 'admins: [alice, bob]\nmembers: []\n' | base64 -w0)
 check "nobody changes members.yaml without a pull request" \
@@ -1144,10 +1160,8 @@ SKILL
 mpr=$(add_agent media media 'list_stacks, screenshot' "Makes screenshots of the namespace's apps" \
   "You make screenshots of the namespace's apps for its homepage and docs. Each app answers at https://<stack>.<domain>/; list_stacks shows them. Put each screenshot where the person asks." \
   homepage-screenshots "skills/homepage-screenshots/SKILL.md=$tmp/skill.md")
-check "carol approves the media agent"     test "$(review config carol "$mpr")" = 200
-check "the approval check passes"          until_true 90 approval_is "$mpr" success
-check "alice merges it"                    test "$(merge config alice "$mpr")" = 200
-check "Open WebUI has todo/media"      until_true 120 has_model todo/media
+check "a root admin approves the media agent in garrison, alice merges it" lands "$mpr"
+check "Open WebUI has the media agent"     until_true 120 has_model garrison/media
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 media_from=$at  # the channel's conversation with the media agent begins
@@ -1245,10 +1259,8 @@ check "Loki holds nothing a sandbox printed" bash -c 'grep -q "\"result\":\[\]" 
 echo "# 4f. bob has the developer agent change the app with Git"
 dpr=$(add_agent developer developer 'list_repos, read_file, propose_patch' "Changes the code of the namespace's apps" \
   "You change the code of the namespace's apps. Work in a clone of the repo in your workspace, check what you changed with git diff, and propose it as one pull request.")
-check "carol approves the developer agent" test "$(review config carol "$dpr")" = 200
-check "the approval check passes"          until_true 90 approval_is "$dpr" success
-check "alice merges it"                    test "$(merge config alice "$dpr")" = 200
-check "Open WebUI has todo/developer"  until_true 120 has_model todo/developer
+check "a root admin approves the developer agent, alice merges it" lands "$dpr"
+check "Open WebUI has the developer"       until_true 120 has_model garrison/developer
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo bob "Clone the repo app of the namespace todo into your workspace. Find every place the text 'Our todos' appears (grep -rn) and change it to 'Team todos'. Then propose your changes, titled: Rename the heading to Team todos." developer)
@@ -1307,12 +1319,13 @@ to_main() {
   echo "      alice's merge of #$n: $code: $(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$n/merge" | head -c 300)"
   return 1
 }
-# propose_config BRANCH TITLE PATH=FILE...: alice proposes files in todo/config; prints the pull request's number.
+# propose_config BRANCH TITLE PATH=FILE...: alice proposes files in todo/config
+# (or $REPO, e.g. $gc); prints the pull request's number.
 propose_config() {
-  local branch=$1 title=$2 spec specs=() ops; shift 2
+  local branch=$1 title=$2 repo=${REPO:-$hp/config} spec specs=() ops; shift 2
   for spec in "$@"; do
     # Each with the blob it replaces, if any.
-    specs+=("$spec=$(gitea_api "" "$hp/config/contents/${spec%%=*}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)")
+    specs+=("$spec=$(gitea_api "" "$repo/contents/${spec%%=*}" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)")
   done
   ops=$(python3 -c '
 import base64,json,sys
@@ -1324,31 +1337,35 @@ for spec in sys.argv[3:]:
     if sha: op["sha"]=sha
     ops.append(op)
 print(json.dumps({"branch":"main","new_branch":branch,"message":title,"files":ops}))' "$branch" "$title" "${specs[@]}")
-  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$ops" "$hp/config/contents"
-  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"'"$title"'"}' "$hp/config/pulls" |
+  gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d "$ops" "$repo/contents"
+  gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"'"$branch"'","base":"main","title":"'"$title"'"}' "$repo/pulls" |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
 }
 cat > "$tmp/bad.yaml" <<'YAML'
-description: Changes the code of the namespace's apps
-tools: [list_repos, read_file, propose_patch]
-grants:
-  - {repo: config, level: propose}
+- {agent: developer, repo: config, level: propose}
 YAML
-bad=$(propose_config grant-config "Let the developer change config" "agents/developer/agent.yaml=$tmp/bad.yaml")
+bad=$(propose_config grant-config "Let the developer change config" "grants.yaml=$tmp/bad.yaml")
 check "a grant on config fails the check"  until_true 90 approval_is "$bad" failure
 check "the check says why"                 grep -q 'no agent may have a grant on config' <<<"$(approval "$bad")"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$bad"
+# A root admin's agents in garrison: the developer may merge and ask the
+# tester; the tester browses; the desk takes requests. todo gives them
+# grants and a routine.
 cat > "$tmp/developer.yaml" <<'YAML'
 description: Changes the code of the namespace's apps
 tools: [list_repos, read_file, propose_patch, merge_change]
-agents: [todo/tester]
-grants:
-  - {repo: app, branch: dev, level: autonomous}
-routines:
-  - name: main-moved
-    on_push: {repo: app, branch: main}
-    owner: bob
-    task: Call read_file on stacks/todo.yaml of the repo config of the namespace todo, then say in one sentence which environments it has. Change nothing.
+agents: [tester]
+YAML
+cat > "$tmp/grants.yaml" <<'YAML'
+- {agent: developer, repo: app, branch: dev, level: autonomous}
+- {agent: desk, repo: app, level: propose, for: everyone}
+YAML
+cat > "$tmp/routines.yaml" <<'YAML'
+- agent: developer
+  name: main-moved
+  on_push: {repo: app, branch: main}
+  owner: bob
+  task: Call read_file on stacks/todo.yaml of the repo config of the namespace todo, then say in one sentence which environments it has. Change nothing.
 YAML
 cat > "$tmp/tester.yaml" <<'YAML'
 description: Tries the namespace's apps in the browser
@@ -1359,12 +1376,14 @@ printf 'You try the namespace'"'"'s apps in the browser, as the person you work 
 cat > "$tmp/desk.yaml" <<'YAML'
 description: Takes requests for changes to the namespace's apps from anyone
 tools: [read_file, propose_change, propose_patch]
-grants:
-  - {repo: app, level: propose, for: everyone}
 YAML
 printf 'You take requests for small changes to the namespace'"'"'s apps from anyone, and propose them as pull requests for the namespace'"'"'s people to review.
 ' > "$tmp/desk.md"
-gpr=$(propose_config grants "Give the developer grants; add the tester and the desk"   "agents/developer/agent.yaml=$tmp/developer.yaml" "agents/tester/agent.yaml=$tmp/tester.yaml" "agents/tester/prompt.md=$tmp/tester.md"   "agents/desk/agent.yaml=$tmp/desk.yaml" "agents/desk/prompt.md=$tmp/desk.md")
+apr=$(REPO=$gc propose_config agents "The developer merges and asks the tester; add the tester and the desk" \
+  "agents/developer/agent.yaml=$tmp/developer.yaml" "agents/tester/agent.yaml=$tmp/tester.yaml" "agents/tester/prompt.md=$tmp/tester.md" \
+  "agents/desk/agent.yaml=$tmp/desk.yaml" "agents/desk/prompt.md=$tmp/desk.md")
+check "a root admin approves the agents, alice merges them" lands "$apr"
+gpr=$(propose_config grants "Give the developer and the desk grants; the developer's routine" "grants.yaml=$tmp/grants.yaml" "routines.yaml=$tmp/routines.yaml")
 check "carol approves the grants"          test "$(review config carol "$gpr")" = 200
 check "the approval check passes"          until_true 90 approval_is "$gpr" success
 check "alice merges them"                  test "$(merge config alice "$gpr")" = 200
@@ -1374,7 +1393,7 @@ collaborates() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/$2/collab
 check "it may write to app"               until_true 60 collaborates agent-todo-developer app
 check "and to nothing else"                test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/collaborators/agent-todo-developer")" = 404
 check "the tester, without grants, gets none" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/users/agent-todo-tester")" = 404
-check "Open WebUI has todo/tester"     until_true 120 has_model todo/tester
+check "Open WebUI has the tester"          until_true 120 has_model garrison/tester
 routines_seen=$SECONDS
 
 echo "# 4h. bob has the developer change dev and merge it there"
@@ -1432,7 +1451,7 @@ routine_post() {
 import json,sys
 for m in json.load(sys.stdin):
     c = m.get("content") or ""
-    if c.startswith("**todo/developer**") and "Routine main-moved, for bob" in c:
+    if c.startswith("**developer**") and "Routine main-moved, for bob" in c:
         print(m["id"]); sys.exit(0)
 sys.exit(1)'
 }
@@ -1444,20 +1463,21 @@ check "the feed has the run, for todo's people" in_feed carol ns=todo "e['kind']
 if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
 
 echo "# 4j2. a routine asks its person, and goes on with the answer"
-cat > "$tmp/asker.yaml" <<'YAML'
-description: Asks before it decides
-tools: [list_repos]
-routines:
-  - name: colour
-    on_push: {repo: app, branch: main}
-    owner: bob
-    task: "Call ask_person with exactly this question: Which colour should the header of todo be, blue or green? Then end your turn. When you have the answer, reply with one sentence that names the colour chosen."
-YAML
+printf 'description: Asks before it decides\ntools: [list_repos]\n' > "$tmp/asker.yaml"
 printf 'You ask before you decide anything, and say plainly what was decided.\n' > "$tmp/asker.md"
-apr=$(propose_config asker "Add the asker" "agents/asker/agent.yaml=$tmp/asker.yaml" "agents/asker/prompt.md=$tmp/asker.md")
-check "carol approves the asker"           test "$(review config carol "$apr")" = 200
-check "the approval check passes"          until_true 90 approval_is "$apr" success
-check "alice merges it"                    test "$(merge config alice "$apr")" = 200
+apr=$(REPO=$gc propose_config asker "Add the asker" "agents/asker/agent.yaml=$tmp/asker.yaml" "agents/asker/prompt.md=$tmp/asker.md")
+check "a root admin approves the asker, alice merges it" lands "$apr"
+cat >> "$tmp/routines.yaml" <<'YAML'
+- agent: asker
+  name: colour
+  on_push: {repo: app, branch: main}
+  owner: bob
+  task: "Call ask_person with exactly this question: Which colour should the header of todo be, blue or green? Then end your turn. When you have the answer, reply with one sentence that names the colour chosen."
+YAML
+rpr=$(propose_config asker-routine "The asker's routine" "routines.yaml=$tmp/routines.yaml")
+check "carol approves its routine in todo" test "$(review config carol "$rpr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$rpr" success
+check "alice merges it"                    test "$(merge config alice "$rpr")" = 200
 # Its routine must see main before the push, so the push is news to it.
 asker_seen() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/asker/colour'" | grep -q .; }
 check "the routine sees main"              until_true 180 asker_seen
@@ -1468,7 +1488,7 @@ question_post() {
 import json,sys
 for m in json.load(sys.stdin):
     c = m.get("content") or ""
-    if c.startswith("**todo/asker**") and "<@U:" in c and "|bob>" in c and "Reply in this thread" in c:
+    if c.startswith("**asker**") and "<@U:" in c and "|bob>" in c and "Reply in this thread" in c:
         print(m["id"]); sys.exit(0)
 sys.exit(1)'
 }
@@ -1484,7 +1504,7 @@ asker_reply() {
 import json,sys
 for m in json.load(sys.stdin):
     c = m.get("content") or ""
-    if c.startswith("**todo/asker**") and "<@U:" not in c and len(c) > len("**todo/asker**") + 2:
+    if c.startswith("**asker**") and "<@U:" not in c and len(c) > len("**asker**") + 2:
         print(c); sys.exit(0)
 sys.exit(1)'
 }
@@ -1498,11 +1518,9 @@ check "bob's dashboard no longer lists it" until_true 60 not_waiting
 echo "# 4k. an agent installs what it needs, from the package registries"
 printf 'description: Tries things out with the tools it needs\ntools: [list_repos]\ninternet: packages\n' > "$tmp/builder.yaml"
 printf 'You try things out in your sandbox, installing the tools a task needs. Show the commands you ran and what they printed.\n' > "$tmp/builder.md"
-bpr=$(propose_config builder "Add the builder" "agents/builder/agent.yaml=$tmp/builder.yaml" "agents/builder/prompt.md=$tmp/builder.md")
-check "carol approves the builder"         test "$(review config carol "$bpr")" = 200
-check "the approval check passes"          until_true 90 approval_is "$bpr" success
-check "alice merges it"                    test "$(merge config alice "$bpr")" = 200
-check "Open WebUI has todo/builder"    until_true 120 has_model todo/builder
+bpr=$(REPO=$gc propose_config builder "Add the builder" "agents/builder/agent.yaml=$tmp/builder.yaml" "agents/builder/prompt.md=$tmp/builder.md")
+check "a root admin approves the builder, alice merges it" lands "$bpr"
+check "Open WebUI has the builder"         until_true 120 has_model garrison/builder
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 installed() { docker exec "$(sandbox_of todo/builder)" python3 -c 'print(6*7)' 2>/dev/null | grep -qx 42; }
 answer=$(ask_agent todo bob "Install Python in your sandbox with: apk add python3. Then run python3 -c 'print(6*7)' and tell me what it printed." builder)
@@ -1523,21 +1541,22 @@ if ! refused_site; then
 fi
 check "a site beyond the registries is refused" refused_site
 
-echo "# 4l. bob asks the commander, which finds the agent for him"
-answer=$(CHANNEL=todo ask_agent garrison bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
-if ! grep -q "todo/media" <<<"$answer"; then
+echo "# 4l. bob asks the commander in todo's channel, which finds the agent for him"
+answer=$(ask_agent todo bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
+if ! grep -qi "media" <<<"$answer"; then
   printf 'retry it named no media agent; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(CHANNEL=todo ask_agent garrison bob "Please call find_agents and tell me which agent of todo makes screenshots." commander)
+  answer=$(ask_agent todo bob "Please call find_agents and tell me which agent makes screenshots." commander)
 fi
-check "it names the media agent"           grep -q "todo/media" <<<"$answer"
-handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent garrison/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
-answer=$(CHANNEL=todo ask_agent garrison bob "Hand this to the agent of todo that knows its stacks: which stacks does the namespace todo have? Have it answer here." commander)
+check "it names the media agent"           grep -qi "media" <<<"$answer"
+# There it works in todo: it hands work to the agents as they work in todo.
+handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
+answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the namespace todo have? Have it answer here." commander)
 if ! handed; then
   printf 'retry it handed nothing over; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(CHANNEL=todo ask_agent garrison bob "Please use ask_agent now: ask todo/operator which stacks the namespace todo has." commander)
+  answer=$(ask_agent todo bob "Please use ask_agent now: ask the operator which stacks the namespace todo has." commander)
 fi
 check "it hands a task over, as the feed shows" handed
-check "which the agent finishes"           until_true 300 in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent garrison/commander' and e['status'] == 'ok'"
+check "which the agent finishes"           until_true 300 in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['status'] == 'ok'"
 
 echo "# 5. alice removes bob"
 since=$(last_pr config)
@@ -1562,7 +1581,9 @@ check "bob can still read everything"      test "$(gitea_api bob -o /dev/null -w
 no_channel() { [ -z "$(channel_of todo bob)" ]; }
 check "bob no longer sees todo's channel" until_true 120 no_channel
 
-echo "# 5b. bob, no longer in todo, asks the desk for a change"
+echo "# 5b. bob, no longer in todo, asks the desk for a change, in a chat of his own"
+# The desk works there in no namespace, but a change to todo's repo goes
+# with the grant todo gives it.
 # ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
 # through Open WebUI's API, and prints its answer.
 ask_private() {
@@ -1571,11 +1592,11 @@ ask_private() {
     "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
 }
 since=$(last_pr app)
-answer=$(ask_private bob todo/desk "In the repo app of the namespace todo, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else.")
+answer=$(ask_private bob garrison/desk "In the repo app of the namespace todo, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else.")
 opr=$(newest_pr app agent-todo-desk "$since")
 if [ -z "$opr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_private bob todo/desk "Please propose that IDEAS.md for todo/app now with propose_change: namespace todo, repo app, path IDEAS.md, content: Dark mode, please.")
+  answer=$(ask_private bob garrison/desk "Please propose that IDEAS.md for todo/app now with propose_change: namespace todo, repo app, path IDEAS.md, content: Dark mode, please.")
   opr=$(newest_pr app agent-todo-desk "$since")
 fi
 check "the desk proposes it with its own account" test -n "$opr"
@@ -1589,35 +1610,47 @@ check "carol's feed shows it"              until_true 60 in_feed carol ns=todo "
 # The dashboard asks Gitea again after at most 20 seconds.
 sleep 21
 check "bob's, out of todo, does not"       not_in_feed bob ns=todo "e['kind'] == 'repo-created' and e['repo'] == 'secret'"
-printf 'description: Knows the repo secret\ntools: [read_file]\nrepos: [secret]\n' > "$tmp/keeper.yaml"
+printf 'description: Knows a namespace'"'"'s repo secret\ntools: [read_file]\n' > "$tmp/keeper.yaml"
 printf 'You answer questions about the namespace'"'"'s repo secret, reading its files.\n' > "$tmp/keeper.md"
-kpr=$(propose_config keeper "Add the keeper" "agents/keeper/agent.yaml=$tmp/keeper.yaml" "agents/keeper/prompt.md=$tmp/keeper.md")
-check "carol approves the keeper"          test "$(review config carol "$kpr")" = 200
-check "the approval check passes"          until_true 90 approval_is "$kpr" success
-check "alice merges it"                    test "$(merge config alice "$kpr")" = 200
-check "carol, in todo, sees it"        until_true 120 has_model todo/keeper carol
-check "bob, no longer in todo, does not" not_seen todo/keeper bob
-check "he still sees the agents of public repos" has_model todo/developer bob
-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-mention garrison carol todo/keeper "What is in the repo secret?" >/dev/null
-refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: todo/keeper: refused in channel:.*: private"; }
-check "it does not answer in garrison's channel, which everyone reads" until_true 120 refused_here
+kpr=$(REPO=$gc propose_config keeper "Add the keeper" "agents/keeper/agent.yaml=$tmp/keeper.yaml" "agents/keeper/prompt.md=$tmp/keeper.md")
+check "a root admin approves the keeper, alice merges it" lands "$kpr"
+# A grant on the private repo makes the keeper, as it works in todo, todo's
+# people's only.
+printf -- '- {agent: keeper, repo: secret, level: propose}\n' >> "$tmp/grants.yaml"
+kgr=$(propose_config keeper-grant "The keeper may propose in secret" "grants.yaml=$tmp/grants.yaml")
+check "carol approves its grant in todo"   test "$(review config carol "$kgr")" = 200
+check "the approval check passes"          until_true 90 approval_is "$kgr" success
+check "alice merges it"                    test "$(merge config alice "$kgr")" = 200
+check "carol sees the keeper"              until_true 120 has_model garrison/keeper carol
 answer=$(ask_agent todo carol "Read README.md of the repo secret of the namespace todo and tell me its first line." keeper)
 check "it answers carol in todo's channel" grep -qi secret <<<"$answer"
+# In garrison's channel, which everyone reads, the commander may not hand
+# work to the keeper as it works in todo.
+at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: garrison/commander may not ask todo/keeper: .*answers only where only todo's people read"; }
+answer=$(ask_agent garrison carol "Use ask_agent to ask todo/keeper for the first line of README.md of the repo secret of the namespace todo." commander)
+if ! refused_here; then
+  printf 'retry the commander asked no keeper; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent garrison carol "Please call ask_agent now with agent todo/keeper, task: the first line of README.md of todo/secret, done_when: the line." commander)
+fi
+check "it does not answer in garrison's channel, which everyone reads" refused_here
 gitea_api "" -o /dev/null -X DELETE "$hp/secret"
 
 echo "# 6. alice adds an agent that may only read"
-check "todo's config has its operator" test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" = 200
+check "todo has no agents of its own; the operator is garrison's" \
+  bash -c '[ "$0" = 404 ] && [ "$1" = 200 ]' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$gc/raw/agents/operator/prompt.md")"
 reader() { add_agent "$1" reader "$2" "Reads the namespace's repos" "You read files of the namespace's repos and explain them."; }
 bad=$(reader reader-bad 'read_file, rm_rf')
-check "an agent with a tool that does not exist fails the check" until_true 90 approval_is "$bad" failure
-check "the check names the tool"           grep -q 'rm_rf' <<<"$(approval "$bad")"
-gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$bad"
+check "an agent with a tool that does not exist fails the check" until_true 90 gc_approval_is "$bad" failure
+check "the check names the tool"           grep -q 'rm_rf' <<<"$(gc_approval "$bad")"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$gc/pulls/$bad"
 good=$(reader reader read_file)
-check "carol approves the reader"          test "$(review config carol "$good")" = 200
-check "the approval check passes"          until_true 90 approval_is "$good" success
-check "alice merges it"                    test "$(merge config alice "$good")" = 200
-check "Open WebUI has todo/reader"     until_true 120 has_model todo/reader
+check "a root admin approves the reader, alice merges it" lands "$good"
+check "Open WebUI has the reader"          until_true 120 has_model garrison/reader
+own=$(REPO=$hp/config propose_config own-agent "An agent of todo's own" "agents/mine/agent.yaml=$tmp/keeper.yaml" "agents/mine/prompt.md=$tmp/keeper.md")
+check "an agent folder in todo fails the check" until_true 90 approval_is "$own" failure
+check "the check says agents are garrison's" grep -q 'agents are defined in garrison/config only' <<<"$(approval "$own")"
+gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/config/pulls/$own"
 since=$(last_pr app)
 answer=$(ask_agent todo alice "Propose a change to the repo app: add a file reader.txt containing hello. Title: Reader test." reader)
 check "the reader answers"                 test -n "$answer"
@@ -1625,9 +1658,8 @@ check "it cannot propose a change"         test -z "$(newest_pr app alice "$sinc
 
 echo "# 7. the operator finds out why an app does not run"
 # First the operator learns to look by itself when an app keeps failing.
-{ gitea_api "" "$hp/config/raw/agents/operator/agent.yaml"
-  printf 'routines:\n  - name: on-failure\n    on_alert: { alertname: ServiceFailing }\n    owner: alice\n    task: An app of todo keeps failing. Find out why from its stack'"'"'s tasks and logs, and say what to change, naming the setting.\n'; } > "$tmp/operator.yaml"
-opr=$(propose_config operator "The operator looks when an app keeps failing" "agents/operator/agent.yaml=$tmp/operator.yaml")
+printf -- '- agent: operator\n  name: on-failure\n  on_alert: { alertname: ServiceFailing }\n  owner: alice\n  task: An app of todo keeps failing. Find out why from its stack'"'"'s tasks and logs, and say what to change, naming the setting.\n' >> "$tmp/routines.yaml"
+opr=$(propose_config operator "The operator looks when an app keeps failing" "routines.yaml=$tmp/routines.yaml")
 check "carol approves the operator's alert routine" test "$(review config carol "$opr")" = 200
 check "the approval check passes"          until_true 90 approval_is "$opr" success
 check "alice merges it"                    test "$(merge config alice "$opr")" = 200
@@ -1649,7 +1681,7 @@ alert_post() {
 import json,sys
 for m in json.load(sys.stdin):
     c = m.get("content") or ""
-    if c.startswith("**todo/operator**") and "Routine on-failure, for alice (the alert ServiceFailing fired" in c:
+    if c.startswith("**operator**") and "Routine on-failure, for alice (the alert ServiceFailing fired" in c:
         print(c); sys.exit(0)
 sys.exit(1)'
 }

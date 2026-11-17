@@ -26,7 +26,7 @@ for p in sorted(json.load(sys.stdin), key=lambda p: -p["number"]):
 lab_merge() { gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$lab/$1/pulls/$2/merge"; }
 check "alice signs in to the chat"         chat_login alice
 
-echo "# 1. alice has the commander's operator make the namespace and the repo"
+echo "# 1. alice has the operator make the namespace and the repo"
 answer=$(ask_agent garrison alice "Make a namespace lab for our experiments, and in it the repo example from the template static-web: a small web page we will deploy. You have everything you need; do not ask back.")
 lab_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/lab")" = 200 ]; }
 example_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/index.html")" = 200 ]; }
@@ -40,16 +40,14 @@ check "with its pipeline"                  test "$(gitea_api "" -o /dev/null -w 
 started_by() { gitea_api "" "$lab/example/commits?sha=main&limit=1" | python3 -c 'import json,sys; print((json.load(sys.stdin)[0].get("author") or {}).get("login", ""))'; }
 check "written as alice"                   test "$(started_by)" = alice
 lab_channel() { channel_of lab alice >/dev/null; }
-# The operator answers once lab is set up, so its channel and operator are
-# there as soon as it has.
+# The operator answers once lab is set up, so its channel is there as soon
+# as it has; there the agents, garrison's, work in lab.
 check "lab has its channel when the operator answers" until_true 5 lab_channel
-lab_operator() { chat_api alice "$chat/api/models" | grep -q '"id":"lab/operator"'; }
-check "and its operator"                   until_true 5 lab_operator
 main1=$(head_of_lab example main)
 built() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/lab/container/example/${1:0:12}")" = 200 ]; }
 check "the pipeline builds main's image"   until_true 900 built "$main1"
 
-echo "# 2. alice has lab's operator propose the stack; the admin approves; alice merges in Gitea"
+echo "# 2. alice has the operator, in lab's channel, propose the stack; the admin approves; alice merges in Gitea"
 answer=$(ask_agent lab alice "Deploy the app example of lab: propose stacks/example.yaml in lab/config as the README of lab/example says, with the environments main and dev, both public (no private). Do not ask back.")
 spr=$(lab_pr config alice main stacks/example.yaml)
 if [ -z "$spr" ]; then
@@ -84,7 +82,7 @@ check "alice makes dev from main"          test "$(gitea_api alice -o /dev/null 
 check "the deployer deploys dev"           until_true 900 deployed dev dev-example
 check "https://dev-example.$DOMAIN shows the page" until_true 300 shows dev-example "<h1>example</h1>"
 
-echo "# 4. alice has lab's operator change the background on dev"
+echo "# 4. alice has the operator, in lab's channel, change the background on dev"
 answer=$(ask_agent lab alice "Change the background colour of the page of lab/example to #2e7d32, on its branch dev: read index.html there and propose it with the new colour, with base dev. Change nothing else. Do not ask back.")
 cpr=$(lab_pr example alice dev index.html)
 if [ -z "$cpr" ]; then

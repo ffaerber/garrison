@@ -223,6 +223,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	if why, err := s.mayAnswer(ctx, c, target); err != nil {
 		return "error: " + err.Error(), true
 	} else if why != "" {
+		log.Printf("agents: %s: %s may not ask %s: %s", who, c.Agent, target.ID(), why)
 		return "not allowed: " + why, true
 	}
 	var b strings.Builder

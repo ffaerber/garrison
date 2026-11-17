@@ -308,11 +308,12 @@ class Person:
         self.snap(f"answer of {agent}")
         return text
 
-    def ask(self, channel: str, agent: str, text: str, seconds: float = 600, model: str | None = None) -> str:
-        """Asks agent, as typed after @ (its name in the chat); model is its
-        ID where that differs (garrison/commander, typed @commander)."""
+    def ask(self, channel: str, agent: str, text: str, seconds: float = 600) -> str:
+        """Asks agent, as typed after @ (its name in the chat) in channel,
+        where it works in that namespace. The agents are garrison's: the
+        model of @operator is garrison/operator."""
         self.channel(channel)
-        return self.answer(self.say(agent, text), model or agent, seconds)
+        return self.answer(self.say(agent, text), "garrison/" + agent, seconds)
 
     def reply(self, message: str, text: str):
         """Replies in the thread of message of the open channel."""
