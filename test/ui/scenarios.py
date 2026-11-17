@@ -213,7 +213,8 @@ def went_on():
 check("the routine goes on with his answer, in the thread", until, 300, went_on, every=5)
 bob.page.goto(f"{CHAT}/channels/{channel_id(bob.page.url)}?thread={question['id'] if question else ''}")
 bob.snap("the routine went on")
-check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), "Waiting for you" not in bob.page.content())[1])
+# The question's link is gone; changes waiting for him may still be listed.
+check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), bob.page.locator("section.waiting a.answer").count() == 0)[1])
 
 section("10. the commander, by its name, in shop's channel")
 # The same agent in every channel, @commander; here it works in shop.

@@ -383,13 +383,14 @@ class Person:
         # The Review button opens its form once the page's script runs; a
         # click before that opens nothing, so it tries again on a fresh page.
         box = p.locator("textarea[name='content']:visible").first
+        # Gitea's page itself is slow at times: that is tried again too.
         for _ in range(4):
-            p.goto(f"{GIT}/{org}/{repo}/pulls/{n}/files", wait_until="domcontentloaded")
-            p.locator(".js-btn-review").first.click()
             try:
+                p.goto(f"{GIT}/{org}/{repo}/pulls/{n}/files", wait_until="domcontentloaded")
+                p.locator(".js-btn-review").first.click()
                 box.wait_for(state="visible", timeout=8000)
                 break
-            except Exception:
+            except Exception:  # noqa: BLE001 - tried again on a fresh page
                 p.wait_for_timeout(2000)
         box.fill("Looks right.")
         p.locator("button[name='type'][value='approve']:visible").click()
