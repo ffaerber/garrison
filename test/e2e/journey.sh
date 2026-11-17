@@ -56,6 +56,7 @@ if [ -z "$spr" ]; then
   spr=$(lab_pr config alice main stacks/example.yaml)
 fi
 check "it proposes stacks/example.yaml, as alice" test -n "$spr"
+check "the answer links its card on the dashboard" grep -q "https://$DOMAIN/c/lab/config/${spr:-0}" <<<"$answer"
 gitea_api "" "$lab/config/raw/stacks/example.yaml?ref=$(gitea_api "" "$lab/config/pulls/${spr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/example.yaml"
 check "one the deployer takes"             garrison validate --in lab "$tmp/example.yaml"
 check "with main and dev, both public"     python3 -c 'import sys,yaml; e=yaml.safe_load(open(sys.argv[1]))["environments"]; sys.exit(0 if set(e) >= {"main","dev"} and not any((v or {}).get("private") for v in e.values()) else 1)' "$tmp/example.yaml"
@@ -66,12 +67,27 @@ import json,sys
 sys.exit(0 if any(s["context"] == "garrison/approval" and s["status"] == "success" for s in json.load(sys.stdin).get("statuses") or []) else 1)'
 }
 check "the approval check passes"          until_true 120 stack_ok
-check "alice merges it in Gitea"           test "$(lab_merge config "${spr:-0}")" = 200
+# alice merges it on its card, the link the operator gave her.
+card() { web -b "$tmp/home-alice.jar" "https://$DOMAIN/c/lab/config/${spr:-0}"; }
+check "alice signs in to her dashboard"    until_true 60 home_login alice
+check "it waits for her there"             bash -c 'web -b "$0" "https://$1/" | grep -q "href=\"/c/lab/config/$2\""' "$tmp/home-alice.jar" "$DOMAIN" "${spr:-0}"
+check "its card says what it changes, in plain words" bash -c 'grep -q "how the app example is deployed" <<<"$0" && grep -q "Merging it deploys it" <<<"$0" && grep -q "value=\"merge\"" <<<"$0"' "$(card)"
+check "a post from another site is refused" test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://example.$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 403
+check "alice merges it on its card"        test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 303
+check "the card says it is merged"         bash -c 'grep -q "It is merged." <<<"$0"' "$(card)"
+# lab_said TEXT...: a message in lab's channel holds every TEXT.
+lab_said() {
+  chat_api alice "$chat/api/v1/channels/$(channel_of lab alice)/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+sys.exit(0 if any(all(t in (m.get("content") or "") for t in sys.argv[1:]) for m in json.load(sys.stdin)) else 1)' "$@"
+}
+check "the operator says in lab's channel that it is merged" until_true 120 lab_said "lab/config#${spr:-0}" "is merged, by alice" "I will say here when it is deployed"
 deployed() { garrison applied | grep -q "^app lab/example@$1 $2 "; }
 check "the deployer deploys main"          until_true 600 deployed main example
 shows() { page "$1" | grep -q "$2"; }
 check "https://example.$DOMAIN shows the page" until_true 300 shows example "<h1>example</h1>"
 check "on white"                           shows example "background-color: #ffffff"
+check "the operator says there that it is live" until_true 120 lab_said "lab/config#${spr:-0}" "is live: https://example.$DOMAIN"
 
 echo "# 3. alice makes the branch dev in Gitea; it deploys at dev-example"
 # Nobody merges for this: the stack names dev as an environment, so the

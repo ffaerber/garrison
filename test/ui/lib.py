@@ -258,12 +258,18 @@ class Person:
         return self.page.evaluate(
             "path => fetch(path, {headers: {Authorization: 'Bearer ' + localStorage.token}}).then(r => r.json())", path)
 
+    def owui_list(self, path: str) -> list:
+        """A list from Open WebUI's API; empty while it answers with an
+        error instead (a {"detail": ...}), so a wait goes on."""
+        out = self.owui(path)
+        return out if isinstance(out, list) else []
+
     def say(self, agent: str, text: str) -> str:
         """In the open channel: types @agent, picks it from the list, types
         text and sends it. Returns the message's id."""
         p = self.page
         cid = channel_id(p.url)
-        before = {m["id"] for m in self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")}
+        before = {m["id"] for m in self.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")}
         option = p.locator("button.selected-command-option-button, button[data-selected='true']").filter(has_text=agent)
         # The page knows the agents there were when it loaded; one of a
         # namespace made since appears after a reload, as for a person.
@@ -285,7 +291,7 @@ class Person:
         p.wait_for_timeout(500)  # the editor swallows keys while it inserts the mention
         p.keyboard.type(" " + text)
         p.keyboard.press("Enter")
-        mine = until(30, lambda: [m for m in self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")
+        mine = until(30, lambda: [m for m in self.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")
                                   if m["id"] not in before and agent in (m.get("content") or "")])
         self.snap(f"asked {agent}")
         return mine[0]["id"]
@@ -297,7 +303,7 @@ class Person:
         cid = channel_id(p.url)
 
         def finished():
-            for m in self.owui(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50"):
+            for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50"):
                 meta = m.get("meta") or {}
                 if meta.get("model_id") == agent and meta.get("done"):
                     return m.get("content") or " "
@@ -338,7 +344,7 @@ class Person:
         # Enter in the thread's box does not send; its button does.
         p.locator("#send-message-button").last.click()
         until(20, lambda: any(text in (m.get("content") or "")
-                              for m in self.owui(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")))
+                              for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")))
         self.snap("replied")
         return True
 

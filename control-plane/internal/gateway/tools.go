@@ -433,6 +433,9 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err := validRepo(a.Repo); err != nil {
 			return "", err
 		}
+		if err := t.checkBindings(ctx, a.Namespace, a.Repo, a.Path, a.Content); err != nil {
+			return "", err
+		}
 		as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, a.Repo)
 		if err != nil {
 			return "", err
@@ -536,6 +539,44 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 	}
 	return fmt.Sprintf("Took the screenshot of %s (page title %q, %d KB) and opened change %s/%s#%d with %s.%s Nothing is changed yet: a person allowed to merge must review and merge it.\n%s",
 		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, blocked, t.links(c)), nil
+}
+
+// overlay is a config repo with one file as proposed.
+type overlay struct {
+	agents.Files
+	path, content string
+}
+
+func (o overlay) Read(ctx context.Context, path string) (string, error) {
+	if path == o.path {
+		return o.content, nil
+	}
+	return o.Files.Read(ctx, path)
+}
+
+// checkBindings refuses a grants.yaml or routines.yaml of a namespace's
+// config that the approval check would refuse anyway: one that is no YAML,
+// names an agent garrison has not, or a schedule that is none. The agent
+// hears why at once and fixes it, instead of a pull request nobody can
+// merge.
+func (t *Tools) checkBindings(ctx context.Context, ns, repo, path, content string) error {
+	if repo != ConfigRepo || ns == PlatformNamespace || (path != agents.GrantsFile && path != agents.RoutinesFile) {
+		return nil
+	}
+	defs, err := t.Gitea.Definitions(ctx)
+	if err != nil {
+		return err
+	}
+	_, _, problems, err := agents.Bindings(ctx, overlay{Files: configFiles{g: t.Gitea, ns: ns, ref: "main"}, path: path, content: content}, defs)
+	if err != nil {
+		return err
+	}
+	// Of this file only: the other one is not being proposed.
+	problems = slices.DeleteFunc(problems, func(s string) bool { return !strings.HasPrefix(s, path+":") })
+	if len(problems) > 0 {
+		return fmt.Errorf("%w: %s would be refused, so nothing was proposed: %s. Fix it and propose it again; put a task or any text with a colon in double quotes", ErrInvalid, path, strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 // links ends a tool's answer about a change it opened: the card on the

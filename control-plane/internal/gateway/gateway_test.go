@@ -317,6 +317,20 @@ func TestProposalsActAsThePerson(t *testing.T) {
 	}
 }
 
+func TestARoutineThatWouldBeRefusedIsNotProposed(t *testing.T) {
+	m, fg := setup(t)
+	for _, c := range []struct{ content, want string }{
+		{"- agent: marketing\n  name: shots\n  schedule: \"0 9 * * *\"\n  owner: alice\n  task: Take a screenshot: then stop.\n", "mapping values are not allowed"},
+		{"- {agent: painter, name: shots, schedule: \"0 9 * * *\", owner: alice, task: x}\n", `there is no agent "painter"`},
+	} {
+		args := map[string]any{"namespace": "homepage", "repo": "config", "path": "routines.yaml", "content": c.content, "title": "Shots"}
+		text, isErr := callText(t, m, "tok-alice", "propose_change", args)
+		if !isErr || !strings.Contains(text, "routines.yaml would be refused, so nothing was proposed") || !strings.Contains(text, c.want) || !strings.Contains(text, "double quotes") || fg.prs != 0 {
+			t.Errorf("%q: %q, prs %d", c.content, text, fg.prs)
+		}
+	}
+}
+
 func TestPatchesActAsThePersonAndAddUp(t *testing.T) {
 	m, fg := setup(t)
 	args := map[string]any{"namespace": "garrison", "repo": "grafana", "patch": "diff --git a/x b/x\n", "title": "Add x"}
