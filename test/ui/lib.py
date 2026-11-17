@@ -336,11 +336,11 @@ class Person:
     # ---------- Gitea ----------
 
     def gitea_form(self, path: str):
-        self.page.goto(f"{GIT}{path}")
+        self.page.goto(f"{GIT}{path}", wait_until="domcontentloaded")
 
     def create_org(self, name: str):
         p = self.page
-        p.goto(f"{GIT}/org/create")
+        p.goto(f"{GIT}/org/create", wait_until="domcontentloaded")
         p.fill("#org_name", name)
         p.locator("input[name='visibility'][value='1']").check(force=True)  # limited: everyone signed in
         p.get_by_role("button", name="Create Organization").click()
@@ -352,7 +352,7 @@ class Person:
     def create_branch(self, org: str, repo: str, branch: str, base: str = "main"):
         """Gitea's branch list: Create branch, from base."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/branches")
+        p.goto(f"{GIT}/{org}/{repo}/branches", wait_until="domcontentloaded")
         # Each branch's row has its "create a branch from here" button.
         row = p.locator("table tr").filter(has_text=re.compile(rf"^\s*{re.escape(base)}\s")).first
         (row.locator(".show-create-branch-modal") if row.count() else p.locator(".show-create-branch-modal")).first.click()
@@ -365,7 +365,7 @@ class Person:
     def approve(self, org: str, repo: str, n: int):
         """Reviews a pull request in Gitea: Files changed, Review, Approve."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}/files")
+        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}/files", wait_until="domcontentloaded")
         p.locator(".js-btn-review").first.click()
         p.locator("textarea[name='content']:visible").first.fill("Looks right.")
         p.locator("button[name='type'][value='approve']:visible").click()
@@ -374,12 +374,14 @@ class Person:
         self.snap(f"approved {org}/{repo}#{n}")
         return True
 
+    # Gitea's pages wait for the document, not for every image and script
+    # of it: one slow avatar once held a page past the timeout.
     def can_merge(self, org: str, repo: str, n: int) -> bool:
         """Whether the pull request's page lets this person merge now. An
         owner is offered to merge "when checks succeed", Gitea's auto-merge:
         that is no merge now."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}")
+        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}", wait_until="domcontentloaded")
         p.wait_for_timeout(1500)
         b = p.get_by_role("button", name=re.compile(r"^\s*Create merge commit\s*$"))
         return b.count() > 0 and b.first.is_enabled() and "enough required approvals" not in p.content()
@@ -387,7 +389,7 @@ class Person:
     def merge(self, org: str, repo: str, n: int):
         """Merges a pull request with its page's button, and confirms."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}")
+        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}", wait_until="domcontentloaded")
         p.get_by_role("button", name="Create merge commit").first.click()
         p.locator("button[name='do'][value='merge']:visible").click()
         until(60, lambda: (gitea(f"/repos/{org}/{repo}/pulls/{n}") or {}).get("merged"))
@@ -400,7 +402,7 @@ class Person:
         def opened():
             return next((x["number"] for x in pulls(org, repo) if x["head"]["ref"] == head and x["base"]["ref"] == base), None)
         for _ in range(2):  # a request the page drops halfway is tried again
-            p.goto(f"{GIT}/{org}/{repo}/compare/{base}...{head}")
+            p.goto(f"{GIT}/{org}/{repo}/compare/{base}...{head}", wait_until="domcontentloaded")
             p.get_by_role("button", name="New Pull Request").click()
             p.fill("form#new-issue #issue_title", title)
             p.locator("form#new-issue").get_by_role("button", name="Create Pull Request").click()
@@ -419,7 +421,7 @@ class Person:
         branch, or to new_branch and on to the new pull request's page.
         Returns where the page ends up."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/_edit/{branch}/{path}")
+        p.goto(f"{GIT}/{org}/{repo}/_edit/{branch}/{path}", wait_until="domcontentloaded")
         editor = p.locator(".monaco-editor textarea").first
         editor.wait_for()
         editor.focus()
