@@ -91,7 +91,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]any, 0, len(list))
 	for _, a := range list {
-		data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "garrison", "name": a.ID()})
+		data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "garrison", "name": a.DisplayName()})
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})
 }

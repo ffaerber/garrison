@@ -84,7 +84,7 @@ func (o *OpenWebUI) want(a agents.Agent, groups map[string]string, private bool)
 	}
 	return owuiModel{
 		ID:   a.ID(),
-		Name: a.ID(),
+		Name: a.DisplayName(),
 		Meta: map[string]any{
 			"description": desc,
 			AgentMarker:   a.ID(),
@@ -424,7 +424,7 @@ const legacyTeamMarker = "garrison_team"
 func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces []Namespace, byNS map[string][]agents.Agent, groups map[string]string) error {
 	commander := ""
 	if slices.ContainsFunc(byNS[SystemNamespace], func(a agents.Agent) bool { return a.Name == agents.CommanderName }) {
-		commander = SystemNamespace + "/" + agents.CommanderName
+		commander = agents.CommanderName
 	}
 	var all []owuiChannel
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {

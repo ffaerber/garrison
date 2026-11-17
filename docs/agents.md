@@ -177,7 +177,7 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 
 ## The commander
 
-`system/commander` is for when someone does not know which agent to ask. It is written into `system/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI, and every channel's pinned message names it. It does no work itself: it calls `find_agents`, then
+`system/commander` is for when someone does not know which agent to ask. It is written into `system/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI, and every channel's pinned message names it. In the chat it goes by `commander` alone, typed `@commander` in any channel, as it is the same agent everywhere; every other agent is shown as `<namespace>/<agent>`, since each namespace has an operator of its own. Its ID stays `system/commander`. It does no work itself: it calls `find_agents`, then
 
 - hands a clear, one-off task (a screenshot, a new repo, why an app does not start) to the agent that fits, with `ask_agent`; in a channel in the background, so that agent posts its answer there itself;
 - for work with back and forth (a feature, a new app), tells the person which agent to talk to, `@<namespace>/<agent>`, and why;

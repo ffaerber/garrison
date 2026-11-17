@@ -54,3 +54,21 @@ func TestAgentThatTurnsPrivateLosesItsAccess(t *testing.T) {
 		t.Errorf("access grants = %s, want only the group g1", grants)
 	}
 }
+
+// In the chat, system's commander goes by "commander", the same agent in
+// every channel; every other agent by namespace/name, as each namespace
+// has an operator of its own. The model's ID stays namespace/name.
+func TestTheCommanderGoesByItsNameAlone(t *testing.T) {
+	o := &OpenWebUI{}
+	for _, c := range []struct{ ns, name, id, shown string }{
+		{"system", "commander", "system/commander", "commander"},
+		{"system", "operator", "system/operator", "system/operator"},
+		{"lab", "commander", "lab/commander", "lab/commander"},
+		{"lab", "operator", "lab/operator", "lab/operator"},
+	} {
+		m := o.want(agents.Agent{Namespace: c.ns, Name: c.name}, nil, false)
+		if m.ID != c.id || m.Name != c.shown {
+			t.Errorf("%s/%s: id %q, name %q", c.ns, c.name, m.ID, m.Name)
+		}
+	}
+}

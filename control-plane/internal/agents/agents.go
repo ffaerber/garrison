@@ -58,6 +58,17 @@ type Agent struct {
 // <namespace>/<agent>.
 func (a Agent) ID() string { return a.Namespace + "/" + a.Name }
 
+// DisplayName is what people see and type after @ in the chat: the ID,
+// except for system's commander, which is the same agent in every channel
+// and goes by "commander" alone. Other agents keep their namespace, as each
+// namespace has an operator of its own.
+func (a Agent) DisplayName() string {
+	if a.Namespace == SystemNamespace && a.Name == CommanderName {
+		return CommanderName
+	}
+	return a.ID()
+}
+
 // AsksAny tells whether a may ask every agent the person may use.
 func (a Agent) AsksAny() bool { return slices.Contains(a.Asks, AnyAgent) }
 

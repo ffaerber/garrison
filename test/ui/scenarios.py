@@ -214,7 +214,15 @@ bob.page.goto(f"{CHAT}/channels/{channel_id(bob.page.url)}?thread={question['id'
 bob.snap("the routine went on")
 check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), "Waiting for you" not in bob.page.content())[1])
 
-section("10. a scheduled job of the app: a Gitea Actions workflow on a cron schedule")
+section("10. the commander, by its short name, in shop's channel")
+# The same agent in every channel: @commander, not @system/commander.
+said = check("bob types @commander, picks it and asks it", bob.ask, NS, "commander",
+             f"Which agent should I ask to change the page of {NS}/{APP}? Only tell me whom; do not do it yourself.",
+             model="system/commander")
+check("it answers, naming shop's operator", lambda: f"{NS}/operator" in (said or ""))
+bob.snap("asked the commander")
+
+section("11. a scheduled job of the app: a Gitea Actions workflow on a cron schedule")
 # Its own job, in the app's repo, on the namespace's runner: no agent in it.
 # Gitea starts scheduled workflows of the default branch, about every two
 # minutes at most; the runner's image is Alpine, so the steps run in sh.

@@ -912,7 +912,7 @@ func TestTheHowToNamesTheCommander(t *testing.T) {
 	o := &OpenWebUI{}
 	list := []agents.Agent{{Namespace: "todo", Name: "operator", Description: "Runs todo"}}
 	for _, l := range [][]agents.Agent{list, nil} {
-		if got := o.howTo(Namespace{Name: "todo"}, l, "system/commander"); !strings.Contains(got, "Not sure which agent fits? Ask `@system/commander`") {
+		if got := o.howTo(Namespace{Name: "todo"}, l, "commander"); !strings.Contains(got, "Not sure which agent fits? Ask `@commander`") {
 			t.Errorf("how-to with a commander:\n%s", got)
 		}
 	}
