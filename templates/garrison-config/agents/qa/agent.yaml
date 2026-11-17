@@ -1,0 +1,4 @@
+# QA: tries the apps in the browser, as the person, and reports. Changes nothing.
+description: Tries the apps in the browser and reports what works and what does not
+model: ""
+tools: [list_stacks, stack_status, service_logs, browse]

@@ -1,0 +1,4 @@
+# The monitor: reads the state, logs and metrics of the apps, and explains what is wrong. Changes nothing.
+description: Watches the apps (state, logs, metrics) and explains what is wrong and what to change
+model: ""
+tools: [list_stacks, stack_status, service_logs, service_usage, query_metrics, list_snapshots, read_file]

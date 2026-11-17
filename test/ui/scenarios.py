@@ -219,7 +219,7 @@ section("10. the commander, by its name, in shop's channel")
 # The same agent in every channel, @commander; here it works in shop.
 said = check("bob types @commander, picks it and asks it", bob.ask, NS, "commander",
              f"Which agent should I ask to change the page of {NS}/{APP}? Only tell me whom; do not do it yourself.")
-check("it answers, naming the operator", lambda: "operator" in (said or "").lower())
+check("it answers, naming the coder or the operator", lambda: any(a in (said or "").lower() for a in ("coder", "operator")))
 bob.snap("asked the commander")
 
 section("11. a scheduled job of the app: a Gitea Actions workflow on a cron schedule")

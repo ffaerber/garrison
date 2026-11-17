@@ -1593,11 +1593,11 @@ check "a site beyond the registries is refused" refused_site
 
 echo "# 4l. bob asks the commander in todo's channel, which finds the agent for him"
 answer=$(ask_agent todo bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
-if ! grep -qi "media" <<<"$answer"; then
-  printf 'retry it named no media agent; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+if ! grep -qiE "media|photographer" <<<"$answer"; then
+  printf 'retry it named no agent for screenshots; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent todo bob "Please call find_agents and tell me which agent makes screenshots." commander)
 fi
-check "it names the media agent"           grep -qi "media" <<<"$answer"
+check "it names an agent for screenshots"  grep -qiE "media|photographer" <<<"$answer"
 # There it works in todo: it hands work to the agents as they work in todo.
 handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
 answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the namespace todo have? Have it answer here." commander)
@@ -1860,7 +1860,7 @@ gitea_api "" "$hp/config/raw/routines.yaml?ref=$(gitea_api "" "$hp/config/pulls/
 check "daily at 9, owned by alice, by one of garrison's agents" python3 -c '
 import sys,yaml
 r = yaml.safe_load(open(sys.argv[1])) or []
-sys.exit(0 if any(str(x.get("schedule","")).split()[:2] == ["0","9"] and x.get("owner") == "alice" and x.get("agent") in ("operator","commander") for x in r) else 1)' "$tmp/cron.yaml"
+sys.exit(0 if any(str(x.get("schedule","")).split()[:2] == ["0","9"] and x.get("owner") == "alice" and x.get("agent") in ("operator","commander","monitor","qa","researcher","coder","reviewer","photographer") for x in r) else 1)' "$tmp/cron.yaml"
 check "keeping the routines there"         python3 -c 'import sys,yaml; sys.exit(0 if len(yaml.safe_load(open(sys.argv[1])) or []) == int(sys.argv[2]) + 1 else 1)' "$tmp/cron.yaml" "${routines_before:-0}"
 cron_ok() {
   gitea_api "" "$hp/config/commits/$(gitea_api "" "$hp/config/pulls/${cpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '

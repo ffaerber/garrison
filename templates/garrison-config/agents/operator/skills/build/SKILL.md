@@ -32,7 +32,7 @@ Do not ask for what you can look up: read the namespace's config, its stacks and
 A routine starts an agent, as it works in the namespace, with a one-shot task. Read the namespace's `routines.yaml` first and propose it with the new entry added; keep the entries already there.
 
 ```yaml
-- agent: operator                    # one of garrison's agents
+- agent: monitor                     # one of garrison's agents
   name: morning-check                # lowercase, unique in the file
   schedule: "0 9 * * *"              # cron: minute hour day-of-month month day-of-week, in the home cloud's time zone
   owner: alice                       # the person asking; a person of the namespace
@@ -43,20 +43,20 @@ A routine starts an agent, as it works in the namespace, with a one-shot task. R
 - Its answer is posted in the namespace's channel.
 - It runs with nobody watching, with the agent's own account: it may change a repo only through a grant with `unattended: true` and the owner in its `for`, with propose_patch or screenshot (and merge_change where the grant's level allows). Propose that grant in the same pull request when the task changes something.
 - Its browser signs in as the agent's own account, so screenshot and browse work, also on private environments. propose_change, create_namespace and create_repo need a person and are refused.
-- The agent must have the tools the task needs: find_agents shows each agent's tools. A screenshot needs one with screenshot.
+- The agent must have the tools the task needs, and no more: pick the one whose role fits. The photographer takes screenshots, the monitor reads logs and metrics (good for checks and `on_alert`), the coder proposes code with propose_patch, qa tries apps in the browser. find_agents shows each agent's tools.
 
 A daily screenshot of the app todo into its repo app, for example, is a grant and a routine in `todo/config`:
 
 ```yaml
 # grants.yaml
-- agent: media
+- agent: photographer
   repo: app
   level: propose
   for: members
   unattended: true
 
 # routines.yaml
-- agent: media
+- agent: photographer
   name: daily-screenshot
   schedule: "0 9 * * *"
   owner: alice

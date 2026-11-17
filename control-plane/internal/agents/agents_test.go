@@ -73,12 +73,45 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	for p, c := range PlatformFiles() {
 		files[p] = c
 	}
-	got, problems := platformOnly(t, files)
-	if len(problems) > 0 || len(got) != 2 {
-		t.Fatalf("got %v %v", got, problems)
+	// The gateway's tools; the gateway's own test checks these are all.
+	all := []string{"list_namespaces", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
+		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
+		"propose_change", "propose_patch", "create_namespace", "create_repo", "merge_change", "browse", "screenshot"}
+	got, problems, err := Load(context.Background(), files, files, PlatformNamespace, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, a := range got {
+		names = append(names, a.Name)
+	}
+	slices.Sort(names)
+	if want := []string{"coder", "commander", "monitor", "operator", "photographer", "qa", "researcher", "reviewer"}; len(problems) > 0 || !slices.Equal(names, want) {
+		t.Fatalf("got %v, want %v; %v", names, want, problems)
+	}
+	// Each has a role of its own, and only the tools it needs: only the
+	// operator has every one, only the researcher the whole internet.
+	for _, a := range got {
+		if a.Description == "" || strings.TrimSpace(a.Prompt) == "" {
+			t.Errorf("%s has no description or prompt", a.Name)
+		}
+		if a.Name != OperatorName && slices.Contains(a.Tools, "create_namespace") {
+			t.Errorf("%s may make namespaces", a.Name)
+		}
+		if (a.Name == "researcher") != a.Internet.All {
+			t.Errorf("%s reaches %s", a.Name, a.Internet)
+		}
+	}
+	for _, write := range []string{"propose_change", "propose_patch", "merge_change", "screenshot"} {
+		for _, name := range []string{"reviewer", "qa", "monitor", "researcher"} {
+			i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == name })
+			if slices.Contains(got[i].Tools, write) {
+				t.Errorf("%s, which changes nothing, has %s", name, write)
+			}
+		}
 	}
 	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == OperatorName })
-	if want := Operator(PlatformNamespace, tools); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
+	if want := Operator(PlatformNamespace, all); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
 		t.Errorf("written operator differs from the built-in one: %+v", got)
 	}
 	// It knows how to turn a wish into garrison's parts.

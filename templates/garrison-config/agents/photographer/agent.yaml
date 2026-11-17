@@ -1,0 +1,4 @@
+# The photographer: screenshots of the apps, proposed into a repo.
+description: Takes screenshots of the apps for docs and homepages and proposes them into a repo
+model: ""
+tools: [list_stacks, list_repos, list_files, screenshot]

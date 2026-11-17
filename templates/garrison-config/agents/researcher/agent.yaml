@@ -1,0 +1,5 @@
+# The researcher: looks things up on the web and answers with sources.
+description: Researches questions on the web (docs, libraries, prices, how-tos) and answers with sources
+model: ""
+tools: []
+internet: all

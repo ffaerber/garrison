@@ -222,3 +222,43 @@ func TestProposeFiles(t *testing.T) {
 		t.Errorf("closed: %s %v %v", link, f.prs, f.branches)
 	}
 }
+
+// The agents a new installation starts with use only tools the gateway has.
+func TestTheShippedAgentsUseRealTools(t *testing.T) {
+	files := shippedFiles(agents.PlatformFiles())
+	got, problems, err := agents.Load(context.Background(), files, files, agents.PlatformNamespace, ToolNames())
+	if err != nil || len(problems) > 0 || len(got) < 3 {
+		t.Fatalf("%d agents, %v %v", len(got), problems, err)
+	}
+}
+
+// shippedFiles serves a template's files as a config repo.
+type shippedFiles map[string]string
+
+func (f shippedFiles) Read(_ context.Context, path string) (string, error) {
+	c, ok := f[path]
+	if !ok {
+		return "", agents.ErrNotExist
+	}
+	return c, nil
+}
+
+func (f shippedFiles) List(_ context.Context, dir string) ([]agents.Entry, error) {
+	seen := map[string]string{}
+	for p := range f {
+		rest, ok := strings.CutPrefix(p, dir+"/")
+		if !ok {
+			continue
+		}
+		name, _, sub := strings.Cut(rest, "/")
+		seen[name] = map[bool]string{true: "dir", false: "file"}[sub]
+	}
+	if len(seen) == 0 {
+		return nil, agents.ErrNotExist
+	}
+	var out []agents.Entry
+	for name, typ := range seen {
+		out = append(out, agents.Entry{Name: name, Type: typ})
+	}
+	return out, nil
+}
