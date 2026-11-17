@@ -1,7 +1,8 @@
 # crud: every kind of thing a namespace holds is made, read, changed and
 # removed the way people do it (Gitea's API as alice, pull requests to
 # config), and the test checks what the platform does about each: Gitea's
-# teams and accounts, Open WebUI's channels, groups and agents, the
+# teams and accounts, Open WebUI's channels, groups and agents (garrison's,
+# with crud's grants and routines), the
 # deployer's stacks, datasets, secrets and hostnames. No LLM. Sourced by
 # smoke.sh, whose helpers it uses; the namespace is crud.
 
@@ -159,45 +160,49 @@ free_main() { [ "$(put_main "alone-$(date +%s%N)")" = 201 ]; }
 check "alone again, she pushes to main freely" until_true 60 free_main
 
 echo "# an agent"
+# The agents are garrison's: alice, a root admin, adds one there, and crud
+# gives it rights and a routine in its own config.
 agent_yaml() { put_file "$1" "description: $2\ntools: [list_stacks, read_file]\n${3:-}"; }
-prompt=$(put_file prompt.md 'You help with the notes of the namespace crud.\n')
-check "an agent without its prompt fails the check" refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a0 'Helps with notes')"
-check "alice adds the agent helper"        change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a1 'Helps with notes')" agents/helper/prompt.md="$prompt"
-check "Open WebUI has crud/helper, for bob too" until_true 120 sees_model bob $ns/helper
-check "alice changes its description"      change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a2 'Helps with the notes, now')"
-check "Open WebUI shows the new one"       until_true 120 model_says $ns/helper 'Helps with the notes, now'
-check "a grant on config fails the check"  refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a3 'Helps with the notes, now' 'grants:\n  - { repo: config, level: propose }\n')"
-check "alice grants it notes"              change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a4 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\n')"
+prompt=$(put_file prompt.md 'You help with the notes of a namespace.\n')
+check "an agent without its prompt fails the check" refused_by_check garrison "" agents/helper/agent.yaml="$(agent_yaml a0 'Helps with notes')"
+check "alice adds the agent helper to garrison" change_config garrison "" agents/helper/agent.yaml="$(agent_yaml a1 'Helps with notes')" agents/helper/prompt.md="$prompt"
+check "Open WebUI has it, as helper, for bob too" until_true 120 sees_model bob garrison/helper
+check "alice changes its description"      change_config garrison "" agents/helper/agent.yaml="$(agent_yaml a2 'Helps with the notes, now')"
+check "Open WebUI shows the new one"       until_true 120 model_says garrison/helper 'Helps with the notes, now'
+check "an agent folder in crud fails the check" refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a3 'Mine')" agents/helper/prompt.md="$prompt"
+check "it says agents are garrison's"      grep -q "agents are defined in garrison/config only" "$tmp/refused.out"
+check "a grant on config fails the check"  refused_by_check $ns "" grants.yaml="$(put_file g3 '- { agent: helper, repo: config, level: propose }\n')"
+check "a grant for an agent garrison lacks fails" refused_by_check $ns "" grants.yaml="$(put_file g0 '- { agent: nobody, repo: notes, level: propose }\n')"
+check "alice grants it notes in crud"      change_config $ns "" grants.yaml="$(put_file g4 '- { agent: helper, repo: notes, level: propose }\n')"
 account() { [ "$(user_status agent-$ns-helper)" = 200 ] && unlocked agent-$ns-helper; }
-check "it gets an account of its own"      until_true 120 account
+check "it gets an account of its own in crud" until_true 120 account
 check "which may write to notes"           until_true 60 collaborator $ns/notes agent-$ns-helper
 check "and to nothing else"                not collaborator crud/config agent-crud-helper
 check "alice makes notes private"          test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"private":true}' "$api/repos/$ns/notes")" = 200
-hidden() { ! sees_model bob $ns/helper; }
-check "so the agent is private: bob no longer sees it" until_true 120 hidden
-check "alice sees it still"                sees_model alice $ns/helper
-check "a private agent reaching the whole internet fails the check" \
-  refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a6 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\ninternet: all\n')"
+# In crud the helper now works on a private repo: it may reach the
+# registries, no more.
+check "alice lets the helper reach the whole internet" change_config garrison "" agents/helper/agent.yaml="$(agent_yaml a6 'Helps with the notes, now' 'internet: all\n')"
+check "then crud's grant on the private repo fails the check" \
+  refused_by_check $ns "" grants.yaml="$(put_file g6 '# notes\n- { agent: helper, repo: notes, level: propose }\n')"
 check "it says the registries are the most" grep -q "internet: packages), no more" "$tmp/refused.out"
-check "the package registries it may reach" change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a7 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\ninternet: packages\n')"
+check "the package registries it may reach" change_config garrison "" agents/helper/agent.yaml="$(agent_yaml a7 'Helps with the notes, now' 'internet: packages\n')"
 check "a routine every five minutes fails the check" \
-  refused_by_check $ns "" agents/helper/agent.yaml="$(agent_yaml a8 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\nroutines:\n  - { name: often, schedule: "*/5 * * * *", owner: alice, task: Look. }\n')"
+  refused_by_check $ns "" routines.yaml="$(put_file r8 '- { agent: helper, name: often, schedule: "*/5 * * * *", owner: alice, task: Look. }\n')"
 check "it says how often it may run"       grep -q "runs more often than every 10m" "$tmp/refused.out"
-check "a routine at 6:30 every morning passes" change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a9 'Helps with the notes, now' 'grants:\n  - { repo: notes, level: propose }\nroutines:\n  - { name: morning, schedule: "30 6 * * *", owner: alice, task: Sum up the notes. }\n')"
+check "a routine at 6:30 every morning passes" change_config $ns "" routines.yaml="$(put_file r9 '- { agent: helper, name: morning, schedule: "30 6 * * *", owner: alice, task: Sum up the notes. }\n')"
 # The agent service keeps when it saw it in Postgres, so a restart does not
 # forget a run that is due.
 kept() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT last IS NOT NULL FROM routine_state WHERE key = '$ns/helper/morning'" | grep -qx t; }
 check "the agent service keeps its state"  until_true 150 kept
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"private":false}' "$api/repos/$ns/notes"
-check "public again, bob sees it again"    until_true 120 sees_model bob $ns/helper
-check "alice takes the grant away"         change_config $ns "" agents/helper/agent.yaml="$(agent_yaml a5 'Helps with the notes, now')"
+check "alice takes its grant and routine away" change_config $ns "" grants.yaml=- routines.yaml=-
 no_collab() { ! collaborator $ns/notes agent-$ns-helper; }
 check "its account may no longer write"    until_true 120 no_collab
 check "and is locked"                      until_true 60 locked agent-$ns-helper
-check "alice removes the agent"            change_config $ns "" agents/helper/agent.yaml=- agents/helper/prompt.md=-
-gone_model() { ! sees_model alice $ns/helper; }
+check "alice removes the agent from garrison" change_config garrison "" agents/helper/agent.yaml=- agents/helper/prompt.md=-
+gone_model() { ! sees_model alice garrison/helper; }
 check "Open WebUI no longer has it"        until_true 120 gone_model
-check "the operator stays"                 sees_model bob $ns/operator
+check "the operator stays"                 sees_model bob garrison/operator
 
 echo "# an app"
 stack_yaml() { put_file "$1" "entrypoint: web\nservices:\n  web:\n    image: traefik/whoami:v1.11\n    port: 80\n    env: { WHOAMI_NAME: $2 }\n    secrets: [token]\n    volumes: { data: { dataset: data, size: $3, path: /data } }\nenvironments:\n  main: {}\n"; }
@@ -226,8 +231,8 @@ check "and its secret"                     docker secret inspect crud.token
 echo "# taking the namespace away"
 check "alice adds the app keep"            change_config $ns "" stacks/keep.yaml="$(stack_yaml k1 kept 1Gi)"
 check "it is deployed"                     until_true 300 says keep 'Name: kept'
-check "and an agent with a grant"          change_config $ns "" agents/keeper/agent.yaml="$(agent_yaml k2 'Keeps notes' 'grants:\n  - { repo: notes, level: propose }\n')" agents/keeper/prompt.md="$prompt"
-keeper() { [ "$(user_status agent-$ns-keeper)" = 200 ] && unlocked agent-$ns-keeper; }
+check "and an agent with a grant there"    change_config $ns "" grants.yaml="$(put_file k2 '- { agent: operator, repo: notes, level: propose }\n')"
+keeper() { [ "$(user_status agent-$ns-operator)" = 200 ] && unlocked agent-$ns-operator; }
 check "with its account"                   until_true 120 keeper
 check "bob cannot delete the namespace"    test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X DELETE "$o")" = 403
 for r in notes config; do gitea_api alice -o /dev/null -X DELETE "$api/repos/$ns/$r"; done
@@ -242,17 +247,15 @@ no_ch() { ! sees_channel alice $ns; }
 check "its channel is removed"             until_true 120 no_ch
 no_group() { ! has_group $ns; }
 check "and its group"                      until_true 120 no_group
-no_models() { ! chat_api alice "$chat/api/models" | grep -q "\"id\":\"$ns/"; }
-check "and its agents"                     until_true 120 no_models
 no_builder() { [ "$(user_status $ns-builder)" = 404 ]; }
 check "its build account is removed"       until_true 120 no_builder
-check "its agents' accounts are locked"    until_true 120 locked agent-$ns-keeper
+check "the agents' accounts there are locked" until_true 120 locked agent-$ns-operator
 
 echo "# the namespace made again"
 check "alice makes crud again"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"crud","visibility":"limited"}' "$api/orgs")" = 201
 check "it gets a fresh config"             until_true 180 first_admin
-check "without the old agents"            test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/$ns/config/contents/agents/keeper")" = 404
+check "without the old grants"             test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/$ns/config/contents/grants.yaml")" = 404
 check "and a new build account"            until_true 120 builder
-check "the old agent's account stays locked" locked agent-$ns-keeper
+check "the old agent's account stays locked" locked agent-$ns-operator
 check "the old app is not back"            not stack_up keep
 }
