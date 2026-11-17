@@ -1462,7 +1462,8 @@ for m in json.load(sys.stdin):
         print(m["id"]); sys.exit(0)
 sys.exit(1)'
 }
-check "its answer is posted in the channel" until_true 600 routine_post ||
+check "its answer is posted in the channel" until_true 600 routine_post
+routine_post >/dev/null ||
   for s in control-plane_agents control-plane_gateway; do docker service logs --since 15m "$s" 2>&1 | grep -E 'main-moved|post: ' | tail -8 | sed 's/^/      /'; done
 check "it read as its own account, for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-developer): todo/developer: [a-z_]* \[routine todo/developer/main-moved\]"' "$mainmoved"
 head_kept() { [ "$(docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/developer/main-moved'")" = "$(gitea_api "" "$hp/app/branches/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])')" ]; }
