@@ -70,7 +70,7 @@ check "the approval check passes"          until_true 120 stack_ok
 # alice merges it on its card, the link the operator gave her.
 card() { web -b "$tmp/home-alice.jar" "https://$DOMAIN/c/lab/config/${spr:-0}"; }
 check "alice signs in to her dashboard"    until_true 60 home_login alice
-waits_for_alice() { web -b "$tmp/home-alice.jar" "https://$DOMAIN/" | grep -q "href=\"/c/lab/config/${spr:-0}\""; }
+waits_for_alice() { local page; page=$(web -b "$tmp/home-alice.jar" "https://$DOMAIN/") && grep -q "href=\"/c/lab/config/${spr:-0}\"" <<<"$page"; }
 check "it waits for her there"             waits_for_alice
 check "its card says what it changes, in plain words" bash -c 'grep -q "how the app example is deployed" <<<"$0" && grep -q "Merging it deploys it" <<<"$0" && grep -q "value=\"merge\"" <<<"$0"' "$(card)"
 check "a post from another site is refused" test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://example.$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 403

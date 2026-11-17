@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -112,11 +113,14 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 		// a step before a tool call shows only at its end, so a step's text
 		// stays in the answer, and the next message's follows a blank line.
 		streamed, wrote := false, false
+		var said strings.Builder
+		var cards []string // "Review it: …" lines of the changes the tools opened
 		say := func(s string) {
 			if !streamed && wrote {
 				out.content("\n\n")
 			}
 			out.content(s)
+			said.WriteString(s)
 			streamed, wrote = true, true
 		}
 		err = pi.Prompt(turn, text, images, func(ev sandbox.Event) {
@@ -164,6 +168,11 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 					cancel()
 				}
 			case "tool_execution_end":
+				if !ev.IsError && ev.Result != nil {
+					for _, c := range ev.Result.Content {
+						cards = append(cards, reviewLine.FindAllString(c.Text, -1)...)
+					}
+				}
 				if ev.IsError && ev.Result != nil {
 					var b strings.Builder
 					for _, c := range ev.Result.Content {
@@ -183,10 +192,34 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 		if err == nil && failure != "" {
 			err = errors.New(failure)
 		}
+		if err == nil {
+			// A change the person is to approve or merge: its card's link
+			// is in the answer, also when the model left it out.
+			for _, line := range missingCards(said.String(), cards) {
+				streamed = false
+				say(line)
+			}
+		}
 		return err
 	})
 	return calls, err
 }
+
+// missingCards are the lines of cards whose link the answer lacks, each
+// once.
+func missingCards(answer string, cards []string) []string {
+	var out []string
+	for _, line := range cards {
+		url := strings.TrimSpace(strings.TrimPrefix(line, "Review it:"))
+		if !strings.Contains(answer, url) && !slices.Contains(out, line) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// reviewLine is how the gateway's tools name a change's card (Tools.links).
+var reviewLine = regexp.MustCompile(`(?m)^Review it: https://\S+/c/[a-z0-9-]+/[A-Za-z0-9._-]+/[0-9]+$`)
 
 // promptFrom is what Pi gets of Open WebUI's request: the newest message
 // with its images, and Open WebUI's own system messages (a channel thread's
