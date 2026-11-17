@@ -50,7 +50,7 @@ func TestMakingNamespacesAndRepos(t *testing.T) {
 	}
 	// The agent answers once the namespace is set up, not before.
 	if out, err := call("alice", "create_namespace", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") ||
-		!strings.Contains(out, "It is ready") || !strings.Contains(out, "@photos/operator") || len(readied) != 1 {
+		!strings.Contains(out, "It is ready") || !strings.Contains(out, "the agents (@operator and the others) work in photos") || len(readied) != 1 {
 		t.Errorf("alice: %q %v %v", out, err, readied)
 	}
 	if _, err := call("bob", "create_namespace", map[string]any{"name": "bobs"}); err == nil || !strings.Contains(err.Error(), "only root admins may") {
