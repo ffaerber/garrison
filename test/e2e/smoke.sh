@@ -1688,7 +1688,7 @@ gitea_api "" -o /dev/null -X DELETE "$hp/secret"
 
 echo "# 6. alice adds an agent that may only read"
 check "todo has no agents of its own; the operator is garrison's" \
-  bash -c '[ "$0" = 404 ] && [ "$1" = 200 ] || { echo "todo: $0, garrison: $1"; false; }' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$gc/raw/agents/operator/prompt.md")"
+  bash -c '[ "$0" = 404 ] && [ "$1" = 200 ] || { echo "todo: $0, garrison: $1"; false; }' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md?ref=main")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$gc/raw/agents/operator/prompt.md?ref=main")"
 reader() { add_agent "$1" reader "$2" "Reads the namespace's repos" "You read files of the namespace's repos and explain them."; }
 bad=$(reader reader-bad 'read_file, rm_rf')
 check "an agent with a tool that does not exist fails the check" until_true 90 gc_approval_is "$bad" failure
