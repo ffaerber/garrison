@@ -545,7 +545,9 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 }
 
 // createConfig makes a namespace's config repo with files, in one commit.
-// The repo and its files are two requests: should the files not go in (a
+// The repo is made empty, without a branch, so nobody can branch off it
+// until the commit with every file is in. The repo and its files are two
+// requests: should the files not go in (a
 // push by someone else in between makes Gitea refuse it, as the model list
 // of garrison/config did once), the repo goes again, so the next pass makes
 // it anew instead of finding it there and taking it as set up.
@@ -553,25 +555,13 @@ func (m *Members) createConfig(ctx context.Context, ns, description, message str
 	g := m.Gitea
 	if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/repos", map[string]any{
 		"name": ConfigRepo, "description": description,
-		"auto_init": true, "default_branch": "main", "private": false,
+		"auto_init": false, "default_branch": "main", "private": false,
 	}, nil); err != nil {
 		return err
 	}
-	// auto_init made a README.md; a file of the same path replaces it.
-	var made []struct {
-		Path string `json:"path"`
-		SHA  string `json:"sha"`
-	}
-	g.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo+"/contents?ref=main", nil, &made)
 	var ops []map[string]string
 	for _, path := range sortedKeys(files) {
-		op := map[string]string{"operation": "create", "path": path, "content": b64(files[path])}
-		for _, f := range made {
-			if f.Path == path {
-				op["operation"], op["sha"] = "update", f.SHA
-			}
-		}
-		ops = append(ops, op)
+		ops = append(ops, map[string]string{"operation": "create", "path": path, "content": b64(files[path])})
 	}
 	var err error
 	for try := range 3 {

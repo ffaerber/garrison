@@ -683,7 +683,8 @@ has_build_account() { gitea_api "" "$api/orgs/todo/actions/secrets" | grep -q '"
 check "the namespace gets its build account" until_true 150 has_build_account
 check "its build account is a member"     test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/todo/members/todo-builder")" = 204
 check "the todo app's source goes to todo/app" installer/push-repo.sh --update todo/app examples/todo/app
-has_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/todo/config")" = 200 ]; }
+# A config repo is there once its files are: members.yaml, on main.
+has_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/${1:-todo}/config/raw/members.yaml?ref=main")" = 200 ]; }
 check "todo has its config"            until_true 120 has_config
 check "alice adds its stack to todo's config" set_stack todo todo examples/todo/config/stacks/todo.yaml
 # The homepage, built meanwhile: one static page, in a namespace of its own,
@@ -693,7 +694,7 @@ check "alice creates the namespace homepage" bash -c "[ $code = 201 ] || [ $code
 hp_builder() { gitea_api "" "$api/orgs/homepage/actions/secrets" | grep -q '"name":"REGISTRY_TOKEN"'; }
 check "it gets its build account"          until_true 150 hp_builder
 check "the homepage's source goes to homepage/app" installer/push-repo.sh --update homepage/app examples/homepage/app
-hp_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/homepage/config")" = 200 ]; }
+hp_config() { has_config homepage; }
 check "homepage has its config"            until_true 120 hp_config
 check "alice adds its stack to homepage's config" set_stack homepage homepage examples/homepage/config/stacks/homepage.yaml
 # head_of BRANCH: the branch's commit, waiting for Gitea to have it.
