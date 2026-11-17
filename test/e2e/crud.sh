@@ -52,7 +52,7 @@ refused_by_check() {
   grep -q "^approval: failure" "$tmp/refused.out" || { cat "$tmp/refused.out"; return 1; }
 }
 # put_file NAME CONTENT: writes CONTENT (printf format) to $tmp/NAME and prints the path.
-put_file() { printf "$2" > "$tmp/$1"; echo "$tmp/$1"; }
+put_file() { printf -- "$2" > "$tmp/$1"; echo "$tmp/$1"; }
 
 not() { ! "$@"; }
 # Gitea
@@ -94,7 +94,7 @@ check "a build account, with its token"    until_true 20 builder
 check "a group in Open WebUI"              until_true 20 has_group $ns
 check "a channel alice sees"               until_true 20 sees_channel alice $ns
 check "but bob, not in it, does not"       not sees_channel bob crud
-check "and its operator, which bob may use too" until_true 20 sees_model bob $ns/operator
+check "and garrison's operator, which bob may use too" until_true 20 sees_model bob garrison/operator
 check "alice opens her dashboard"          until_true 60 home_login alice
 check "whose feed says crud is set up"     until_true 20 in_feed alice ns=$ns "e['kind'] == 'namespace' and e['actor'] == 'alice'"
 check "bob sees the namespace"             grep -q '"username":"crud"' <<<"$(gitea_api bob "$api/orgs?limit=50")"

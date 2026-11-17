@@ -147,7 +147,13 @@ for s in json.load(sys.stdin).get("statuses") or []:
     case $st in success*) break ;; failure*) echo "approval: $st"; return 1 ;; esac
     sleep 2
   done
-  [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$cfg/pulls/$pr/merge")" = 200 ] || { echo "cannot merge #$pr ($st)"; return 1; }
+  # Gitea checks a pull request before it merges it, and says to try again
+  # later until it has.
+  for i in $(seq 15); do
+    [ "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$cfg/pulls/$pr/merge")" = 200 ] && return 0
+    sleep 2
+  done
+  echo "cannot merge #$pr ($st)"; return 1
 }
 # set_stack NS NAME FILE|- [APPROVER]: set_config for config/stacks/NAME.yaml.
 set_stack() { set_config "$1" "stacks/$2.yaml" "$3" "${4:-}"; }
