@@ -36,8 +36,10 @@ A routine starts an agent, as it works in the namespace, with a one-shot task. R
   name: morning-check                # lowercase, unique in the file
   schedule: "0 9 * * *"              # cron: minute hour day-of-month month day-of-week, in the home cloud's time zone
   owner: alice                       # the person asking; a person of the namespace
-  task: Check that todo answers on main and dev, and say in a sentence how it is.
+  task: "Check that todo answers on main and dev, and say in a sentence how it is."
 ```
+
+- Always put the task in double quotes: a task with a colon in it (a time, a URL, "Note: ...") is not valid YAML otherwise. Inside it, write ' instead of ".
 
 - One of `schedule` (cron, or `@daily`, `@hourly`, ...), `every` (`10m` to `168h`), `on_push: {repo: todo, branch: main}` or `on_alert: {alertname: ServiceFailing}`. Not more often than every 10 minutes.
 - Its answer is posted in the namespace's channel.
@@ -60,10 +62,10 @@ A daily screenshot of the app todo into its repo app, for example, is a grant an
   name: daily-screenshot
   schedule: "0 9 * * *"
   owner: alice
-  task: Take a screenshot of https://todo.<domain>/ at 1280x800 and propose it as docs/screenshots/todo.png in the repo app of todo.
+  task: "Take a screenshot of https://todo.<domain>/ at 1280x800 and propose it as docs/screenshots/todo.png in the repo app of todo."
 ```
 - Write the task as you would ask the agent yourself: what to look at, what to do, what to say.
 
 ## After proposing
 
-Give each pull request's link and say who must approve it: an admin of the namespace who did not write it (for garrison, a root admin). Nothing happens until it is merged.
+Before proposing a YAML file, read it once more as YAML: quoted tasks, two-space indents, one `-` per entry. Give each pull request's link and say who must approve it: an admin of the namespace who did not write it (for garrison, a root admin). Nothing happens until it is merged.
