@@ -428,9 +428,14 @@ class Person:
         new pull request's page. Returns where the page ends up."""
         p = self.page
         if new:
-            folder, _, name = path.rpartition("/")
-            p.goto(f"{GIT}/{org}/{repo}/_new/{branch}/{folder}", wait_until="domcontentloaded")
-            p.locator("#file-name").fill(name)
+            # Typed as a person does, from the repo's root: the page makes
+            # each "/" a folder. Filled before its script has started, the
+            # field was reset, and the path became the folder alone.
+            p.goto(f"{GIT}/{org}/{repo}/_new/{branch}/", wait_until="load")
+            p.locator(".monaco-editor textarea").first.wait_for()
+            p.locator("#file-name").click()
+            p.keyboard.type(path)
+            until(10, lambda: p.locator("input[name='tree_path']").input_value() == path, every=0.3)
         else:
             p.goto(f"{GIT}/{org}/{repo}/_edit/{branch}/{path}", wait_until="domcontentloaded")
         editor = p.locator(".monaco-editor textarea").first
@@ -479,6 +484,9 @@ class Person:
         """The Actions tab's menu of a workflow: Disable Workflow."""
         p = self.page
         p.goto(f"{GIT}/{org}/{repo}/actions?workflow={workflow}", wait_until="domcontentloaded")
+        # The tab offers the menu for a workflow it does not have, too.
+        if not p.locator(f"a.item[href^='?workflow={workflow}']").count():
+            raise AssertionError(f"the Actions tab lists no {workflow}")
         p.locator("button.dropdown:has(.octicon-kebab-horizontal)").click()
         p.locator("a.item", has_text="Disable Workflow").click()
         p.wait_for_timeout(2000)
