@@ -533,9 +533,21 @@ func (m *Members) createConfig(ctx context.Context, ns, description, message str
 	}, nil); err != nil {
 		return err
 	}
+	// auto_init made a README.md; a file of the same path replaces it.
+	var made []struct {
+		Path string `json:"path"`
+		SHA  string `json:"sha"`
+	}
+	g.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo+"/contents?ref=main", nil, &made)
 	var ops []map[string]string
 	for _, path := range sortedKeys(files) {
-		ops = append(ops, map[string]string{"operation": "create", "path": path, "content": b64(files[path])})
+		op := map[string]string{"operation": "create", "path": path, "content": b64(files[path])}
+		for _, f := range made {
+			if f.Path == path {
+				op["operation"], op["sha"] = "update", f.SHA
+			}
+		}
+		ops = append(ops, op)
 	}
 	var err error
 	for try := range 3 {

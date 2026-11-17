@@ -308,10 +308,19 @@ func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
 		case p == "/orgs/lab/repos" && r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
 			io.WriteString(w, "{}")
+		case p == "/repos/lab/config/contents" && r.Method == http.MethodGet:
+			io.WriteString(w, `[{"path":"README.md","sha":"abc"}]`)
 		case p == "/repos/lab/config/contents" && failures > 0:
 			failures--
 			http.Error(w, `{"message":"push rejected"}`, http.StatusInternalServerError)
 		case p == "/repos/lab/config/contents":
+			var body struct{ Files []map[string]string }
+			json.NewDecoder(r.Body).Decode(&body)
+			for _, f := range body.Files {
+				if want := map[string]string{"README.md": "update", "members.yaml": "create"}[f["path"]]; f["operation"] != want || (want == "update") != (f["sha"] == "abc") {
+					t.Errorf("file %v", f)
+				}
+			}
 			w.WriteHeader(http.StatusCreated)
 			io.WriteString(w, "{}")
 		case p == "/repos/lab/config" && r.Method == http.MethodDelete:
@@ -322,14 +331,14 @@ func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
 	}))
 	defer srv.Close()
 	m := &Members{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}, RetryWait: time.Millisecond}
-	files := map[string]string{"members.yaml": "admins: [alice]\n"}
+	files := map[string]string{"members.yaml": "admins: [alice]\n", "README.md": "# lab\n"}
 	ctx := context.Background()
 
 	failures = 1
 	if err := m.createConfig(ctx, "lab", "d", "m", files); err != nil {
 		t.Fatalf("second try: %v", err)
 	}
-	if strings.Join(calls, ",") != "POST /orgs/lab/repos,POST /repos/lab/config/contents,POST /repos/lab/config/contents" {
+	if strings.Join(calls, ",") != "POST /orgs/lab/repos,GET /repos/lab/config/contents,POST /repos/lab/config/contents,POST /repos/lab/config/contents" {
 		t.Fatalf("calls: %v", calls)
 	}
 
@@ -337,7 +346,7 @@ func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
 	if err := m.createConfig(ctx, "lab", "d", "m", files); err == nil || !strings.Contains(err.Error(), "taken away again") {
 		t.Fatalf("err: %v", err)
 	}
-	if last := calls[len(calls)-1]; last != "DELETE /repos/lab/config" || len(calls) != 5 {
+	if last := calls[len(calls)-1]; last != "DELETE /repos/lab/config" || len(calls) != 6 {
 		t.Fatalf("calls: %v", calls)
 	}
 }
