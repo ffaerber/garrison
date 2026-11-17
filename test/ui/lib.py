@@ -127,6 +127,12 @@ def pulls(org: str, repo: str, state: str = "open"):
     return gitea(f"/repos/{org}/{repo}/pulls?state={state}&limit=50") or []
 
 
+def runs_of(org: str, repo: str, workflow: str) -> int:
+    """How many runs workflow has had."""
+    runs = gitea(f"/repos/{org}/{repo}/actions/runs?limit=50") or {}
+    return sum(1 for r in runs.get("workflow_runs") or [] if r["path"].split("@")[0] == workflow)
+
+
 def pr_files(org: str, repo: str, n: int):
     return [f["filename"] for f in gitea(f"/repos/{org}/{repo}/pulls/{n}/files") or []]
 
@@ -416,12 +422,17 @@ class Person:
         return until(10, opened)
 
     def edit_file(self, org: str, repo: str, path: str, content: str, branch: str = "main",
-                  new_branch: str | None = None, message: str = "Change it") -> str:
-        """Gitea's web editor: replaces the file's content, then commits to
-        branch, or to new_branch and on to the new pull request's page.
-        Returns where the page ends up."""
+                  new_branch: str | None = None, message: str = "Change it", new: bool = False) -> str:
+        """Gitea's web editor: replaces the file's content (or, new, writes
+        a new file), then commits to branch, or to new_branch and on to the
+        new pull request's page. Returns where the page ends up."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/_edit/{branch}/{path}", wait_until="domcontentloaded")
+        if new:
+            folder, _, name = path.rpartition("/")
+            p.goto(f"{GIT}/{org}/{repo}/_new/{branch}/{folder}", wait_until="domcontentloaded")
+            p.locator("#file-name").fill(name)
+        else:
+            p.goto(f"{GIT}/{org}/{repo}/_edit/{branch}/{path}", wait_until="domcontentloaded")
         editor = p.locator(".monaco-editor textarea").first
         editor.wait_for()
         editor.focus()
@@ -442,6 +453,38 @@ class Person:
         p.wait_for_timeout(3000)
         self.snap(f"edited {path}")
         return p.url
+
+    def scheduled_run(self, org: str, repo: str, workflow: str):
+        """The newest run of workflow that its schedule started, from the
+        repo's Actions tab: opens it and returns its step names and status
+        text, None while there is none."""
+        p = self.page
+        p.goto(f"{GIT}/{org}/{repo}/actions?workflow={workflow}", wait_until="domcontentloaded")
+        runs = p.locator(".flex-item").filter(has_text="Scheduled")
+        if not runs.count():
+            return None
+        runs.first.locator("a[href*='/actions/runs/']").first.click()
+        p.wait_for_url(re.compile(r"/actions/runs/\d+"))
+        p.wait_for_timeout(2000)
+        return p.locator("body").inner_text()
+
+    def run_log(self, step: str) -> str:
+        """Opens a step of the open run and returns its log."""
+        p = self.page
+        p.get_by_text(step).first.click()
+        p.wait_for_timeout(2000)
+        return "\n".join(p.locator(".job-step-logs, .job-log-line").all_inner_texts())
+
+    def disable_workflow(self, org: str, repo: str, workflow: str) -> bool:
+        """The Actions tab's menu of a workflow: Disable Workflow."""
+        p = self.page
+        p.goto(f"{GIT}/{org}/{repo}/actions?workflow={workflow}", wait_until="domcontentloaded")
+        p.locator("button.dropdown:has(.octicon-kebab-horizontal)").click()
+        p.locator("a.item", has_text="Disable Workflow").click()
+        p.wait_for_timeout(2000)
+        p.goto(f"{GIT}/{org}/{repo}/actions?workflow={workflow}", wait_until="domcontentloaded")
+        self.snap(f"disabled {workflow}")
+        return p.locator("a.item", has_text="Enable Workflow").count() > 0
 
     def page_shows(self, name: str, *texts: str) -> bool:
         p = self.page

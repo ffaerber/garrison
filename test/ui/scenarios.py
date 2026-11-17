@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from lib import (CHAT, channel_id, DOMAIN, GIT, HOME, Person, approval, browser, check, done, gitea, newest_pr, pr_files,
-                 raw, section, until)
+                 raw, runs_of, section, until)
 
 NS, APP = os.environ.get("UI_NAMESPACE", "shop"), os.environ.get("UI_APP", "web")
 GREEN = "rgb(46, 125, 50)"  # #2e7d32
@@ -213,5 +213,34 @@ check("the routine goes on with his answer, in the thread", until, 300, went_on,
 bob.page.goto(f"{CHAT}/channels/{channel_id(bob.page.url)}?thread={question['id'] if question else ''}")
 bob.snap("the routine went on")
 check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), "Waiting for you" not in bob.page.content())[1])
+
+section("10. a scheduled job of the app: a Gitea Actions workflow on a cron schedule")
+# Its own job, in the app's repo, on the namespace's runner: no agent in it.
+# Gitea starts scheduled workflows of the default branch, about every two
+# minutes at most; the runner's image is Alpine, so the steps run in sh.
+NIGHTLY = f"""name: nightly
+on:
+  schedule:
+    - cron: "* * * * *"
+defaults:
+  run:
+    shell: sh
+jobs:
+  report:
+    runs-on: garrison-user
+    steps:
+      - run: echo "nightly report of {NS}/{APP}"
+"""
+alice.edit_file(NS, APP, ".gitea/workflows/nightly.yaml", NIGHTLY, new_branch="nightly", message="A nightly report", new=True)
+nightly_pr = check("alice adds the workflow in Gitea's editor and proposes it", alice.open_pr, NS, APP, "nightly", "main", "A nightly report")
+check("bob approves it", bob.approve, NS, APP, nightly_pr or 0)
+check("alice merges it", alice.merge, NS, APP, nightly_pr or 0)
+run_page = check("at its time, the Actions tab shows a scheduled run", until, 300, alice.scheduled_run, NS, APP, "nightly.yaml", every=15)
+check("which succeeded", lambda: "Success" in (run_page or ""))
+check("its log has the job's output", lambda: f"nightly report of {NS}/{APP}" in alice.run_log(f'echo "nightly report of {NS}/{APP}"'))
+alice.snap("scheduled run")
+check("alice disables the workflow in the Actions tab", alice.disable_workflow, NS, APP, "nightly.yaml")
+ran = runs_of(NS, APP, "nightly.yaml")
+check("then it runs no more", lambda: (time.sleep(150), runs_of(NS, APP, "nightly.yaml") == ran)[1])
 
 done()

@@ -137,6 +137,7 @@ Gitea Actions runs two runners:
 
 - The **system runner** serves only the `system` organisation, which only root admins can change. Its jobs can use Docker, which is root on the machine; it builds the control plane.
 - The **user runner** serves every other namespace. Its jobs are containers on a builds network, where they reach Gitea and BuildKit and nothing else of the platform. It reaches Docker only through the control plane's guard, which refuses anything that would let a job out of its container: privileges, capabilities, devices, security options, host namespaces, host mounts, other networks, and access to containers it did not create. Images are built by BuildKit, never by the host's Docker.
+- **Scheduled jobs** of an app are Gitea Actions workflows `on: schedule` (cron) in its repo, run by the user runner like its pipeline (`runs-on: garrison-user`, Alpine, so `shell: sh`). Gitea starts the default branch's schedules, at most about every two minutes; a workflow is disabled from the repo's Actions tab. Agents on a schedule are routines (below).
 
 Each namespace has a build account, kept by the gateway, which may push that namespace's images and nothing else; its token is the organisation's Actions secret. Namespaces are created by root admins only.
 
