@@ -4,8 +4,8 @@
 The UI step of the VM test (test/vm/steps.sh ui, test/ui/scenarios.py)
 clicks through Gitea, Open WebUI and the dashboard as alice and bob, and
 saves a screenshot of each step in bin/ui-shots/, named NNN-<person>-<what>.png.
-This picks the ones the walkthrough shows, makes them smaller, and strings
-some into GIFs, into docs/walkthrough/img/:
+This picks the ones the walkthrough shows and makes them smaller, into
+docs/walkthrough/img/:
 
     python3 docs/walkthrough/make.py [SHOTS]     # SHOTS: bin/ui-shots
 
@@ -73,19 +73,6 @@ STILLS = {
     "jobs-disabled": ("alice-disabled-nightly-yaml", 0),
 }
 
-# Clips: stills in order, each shown for SECONDS.
-SECONDS = 2.5
-CLIPS = {
-    "sign-in": ["sign-in-keycloak", "sign-in-chat", "sign-in-dashboard"],
-    "namespace": ["namespace-form", "namespace-created", "namespace-welcome", "namespace-feed"],
-    "app": ["app-ask", "app-answer", "app-card", "app-merged", "app-live"],
-    "dev": ["dev-branch", "dev-ask", "dev-merged", "dev-to-main", "dev-main-merged", "dev-green"],
-    "members": ["members-ask", "members-approved", "members-refused", "members-proposed", "members-approve", "members-merged"],
-    "routines": ["routines-edit", "routines-proposed", "routines-greeting", "routines-waiting", "routines-reply", "routines-went-on"],
-    "jobs": ["jobs-edit", "jobs-proposed", "jobs-run", "jobs-disabled"],
-}
-
-
 def shots(folder: str) -> dict:
     """{name: [paths, in order]} of NNN-<name>.png."""
     out = {}
@@ -114,23 +101,13 @@ def main():
         sys.exit("missing screenshots:\n  " + "\n  ".join(missing))
     os.makedirs(OUT, exist_ok=True)
     for f in os.listdir(OUT):
-        if f.endswith((".png", ".gif")):
+        if f.endswith((".png", ".gif")):  # .gif: clips of earlier versions
             os.remove(os.path.join(OUT, f))
     for still, path in found.items():
         # 256 colours: the pages are flat, and a third the size.
         smaller(path).quantize(256, method=Image.Quantize.MEDIANCUT).save(os.path.join(OUT, still + ".png"), optimize=True)
-    for clip, stills in CLIPS.items():
-        frames = [smaller(found[s]) for s in stills]
-        height = max(f.height for f in frames)
-        canvas = []
-        for f in frames:
-            c = Image.new("RGB", (WIDTH, height), "white")
-            c.paste(f, (0, 0))
-            canvas.append(c.quantize(128, method=Image.Quantize.MEDIANCUT))
-        canvas[0].save(os.path.join(OUT, clip + ".gif"), save_all=True, append_images=canvas[1:],
-                       duration=int(SECONDS * 1000), loop=0, optimize=True)
     total = sum(os.path.getsize(os.path.join(OUT, f)) for f in os.listdir(OUT))
-    print(f"{len(found)} pictures and {len(CLIPS)} clips in {OUT}, {total // 1024} KiB")
+    print(f"{len(found)} pictures in {OUT}, {total // 1024} KiB")
 
 
 if __name__ == "__main__":

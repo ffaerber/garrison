@@ -4,8 +4,6 @@ alice wants a small web page online. She asks the operator for it in shop's
 channel. The operator makes a repo with the page's code, and proposes how
 to run it. Nothing goes live until she merges.
 
-![From asking to live](img/app.gif)
-
 ## Asking
 
 In shop's channel she types `@`, picks `operator` from the list, and asks:

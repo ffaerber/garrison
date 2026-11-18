@@ -6,8 +6,6 @@ Monday at 8, check the website answers and tell us". Routines are listed in
 routine is a pull request, and nothing runs until it is merged. What a
 routine finds is posted in the namespace's channel.
 
-![Two routines, from proposing to an answer](img/routines.gif)
-
 ## Asking for one
 
 The simplest way is to ask in the channel:

@@ -4,8 +4,6 @@ Everyone has one account, in Keycloak. It signs them in to every part of
 Garrison: the dashboard, Gitea and the chat. After signing in once, the
 other apps don't ask for the password again.
 
-![alice signs in](img/sign-in.gif)
-
 | Address | What it is |
 | --- | --- |
 | `https://garrison.test` | The dashboard: what waits for you, what happened, secrets |

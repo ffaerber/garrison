@@ -5,8 +5,6 @@ app's repo, and runs as its own copy of the app: `main` at
 `https://web.garrison.test`, `dev` at `https://dev-web.garrison.test`.
 Changes go to dev first. When they look right, dev is merged into main.
 
-![dev, then main](img/dev.gif)
-
 ## The branch
 
 alice makes the branch `dev` in Gitea's branch list. Nobody has to merge

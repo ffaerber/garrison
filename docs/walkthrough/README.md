@@ -1,8 +1,7 @@
 # Walkthrough
 
-How Garrison is used, step by step: one page per step, with screenshots and
-short clips. alice and bob are two people of the Garrison installation at
-`garrison.test`. alice makes a namespace `shop`, has the agents build a web
+How Garrison is used, step by step: one page per step, with screenshots.
+alice and bob are two people of the Garrison installation at `garrison.test`. alice makes a namespace `shop`, has the agents build a web
 page there and put it online, works on it on a `dev` branch, lets bob join,
 and has things done on a schedule.
 
@@ -26,13 +25,12 @@ To make them again after a change, see [Making the pictures](#making-the-picture
 ## Making the pictures
 
 The UI step of the VM test saves a screenshot of every step in
-`bin/ui-shots/`; `make.py` picks the ones these pages show and makes the
-clips:
+`bin/ui-shots/`; `make.py` picks the ones these pages show:
 
 ```sh
 test/vm/steps.sh ui                      # the browser test, on a test VM
 python3 docs/walkthrough/make.py         # bin/ui-shots/ -> docs/walkthrough/img/
 ```
 
-`make.py` names the shots it takes in `STILLS` and the clips in `CLIPS`. If
+`make.py` names the shots it takes in `STILLS`. If
 the test no longer takes a shot, `make.py` names it and writes nothing.

@@ -4,8 +4,6 @@ Who belongs to a namespace is in `members.yaml` of its config: its admins
 and its members. A change to it is a pull request like any other. alice asks
 the operator to add bob.
 
-![bob joins, and main takes only approved changes](img/members.gif)
-
 ## Adding bob
 
 > @operator Add bob as a member of the namespace shop; alice stays its admin.

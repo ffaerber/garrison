@@ -4,8 +4,6 @@ A namespace is a group of apps, with its own people, its own chat channel
 and its own settings. In Gitea it is an organisation. alice makes one
 called `shop`.
 
-![alice makes the namespace shop](img/namespace.gif)
-
 ## Making it
 
 alice can make it in Gitea's New Organisation form, or ask in the chat
