@@ -37,14 +37,18 @@ func Apps() []string {
 }
 
 // AppFiles are an app template's files, with {{namespace}} and {{repo}}
-// filled in; nil if there is no such template.
+// filled in; nil if there is no such template. A file stored as NAME.tmpl
+// is NAME in the repo: the template's Go files and go.mod are kept that
+// way so that Go takes them for neither this module's code nor a module
+// of their own, which go:embed would leave out.
 func AppFiles(name, namespace, repo string) map[string]string {
 	if name == "" || strings.ContainsAny(name, "/.") || !slices.Contains(Apps(), name) {
 		return nil
 	}
-	out := Files(App + "/" + name)
-	for p, c := range out {
-		out[p] = strings.NewReplacer("{{namespace}}", namespace, "{{repo}}", repo).Replace(c)
+	out := map[string]string{}
+	fill := strings.NewReplacer("{{namespace}}", namespace, "{{repo}}", repo)
+	for p, c := range Files(App + "/" + name) {
+		out[strings.TrimSuffix(p, ".tmpl")] = fill.Replace(c)
 	}
 	return out
 }

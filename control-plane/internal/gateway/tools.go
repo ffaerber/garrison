@@ -173,7 +173,7 @@ func baseSpecs() []Spec {
 			"repo":        str("lowercase letters, digits and dashes; an app's repo is named after it, e.g. immich"),
 			"description": str("what it holds"),
 			"private":     map[string]any{"type": "boolean", "description": "only the namespace's people may read it; default false"},
-			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: static-web, one static page (index.html) served by nginx on port 8080; empty for nothing"},
+			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: todo, a todo app in Go on Postgres (page.html, main.go, its tests), behind the sign-in; empty for nothing"},
 		}, "namespace", "repo"),
 		spec("merge_change", "Merges a pull request of one of your proposals, with your own account, if one of your grants allows merging into its base branch for the person you talk to and its checks have passed. A merge into a branch that deploys (main, dev) deploys it. If it is refused, say why; do not work around it.", map[string]any{
 			"namespace": nsArg,

@@ -262,8 +262,8 @@ func (f *Followups) welcomeText(ns string) string {
 		where = "on your dashboard, " + strings.TrimSuffix(f.Dashboard, "/") + ", under Waiting for you"
 	}
 	return fmt.Sprintf("Welcome to %[1]s, your new namespace. This is its channel: only its people read it, and here the agents work in %[1]s. Ask me in words, for example:\n\n"+
-		"- `@operator make a repo website in %[1]s from the template static-web, and put it online`\n"+
-		"- `@operator every Monday at 8, check that website answers and tell us here`\n"+
+		"- `@operator make the repo app in %[1]s from the template todo, and put it online as todo`\n"+
+		"- `@operator every Monday at 8, check that todo answers and tell us here`\n"+
 		"- `@operator add bob to %[1]s as a member`\n\n"+
 		"What I propose waits for you %[2]s: it says in plain words what it changes, and you merge it with a click. Nothing changes before.", ns, where)
 }

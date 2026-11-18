@@ -184,7 +184,7 @@ func TestARepoFromATemplate(t *testing.T) {
 	}))
 	defer srv.Close()
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
-	raw, _ := json.Marshal(map[string]any{"namespace": "lab", "repo": "example", "template": "static-web"})
+	raw, _ := json.Marshal(map[string]any{"namespace": "lab", "repo": "example", "template": "todo"})
 	out, err := tools.Call(context.Background(), Person{Name: "alice"}, nil, "create_repo", raw)
 	if err != nil {
 		t.Fatal(err)
@@ -194,12 +194,13 @@ func TestARepoFromATemplate(t *testing.T) {
 		data, _ := base64.StdEncoding.DecodeString(op["content"])
 		got[op["path"]+" "+op["operation"]] = string(data)
 	}
-	if by != "alice" || len(got) != 4 || !strings.Contains(got["index.html create"], "<h1>example</h1>") ||
+	if by != "alice" || len(got) != 9 || !strings.Contains(got["page.html create"], "<h1>Todo</h1>") ||
+		!strings.Contains(got["go.mod create"], "module todo") || got["main.go.tmpl create"] != "" ||
 		!strings.Contains(got[".gitea/workflows/pipeline.yaml create"], "buildctl") || !strings.Contains(got["Dockerfile create"], "EXPOSE 8080") ||
 		!strings.Contains(got["README.md update"], `image: "{{registry}}/lab/example:{{commit}}"`) {
 		t.Errorf("by %s: %v", by, keys(got))
 	}
-	if !strings.Contains(out, "from the template static-web") || !strings.Contains(out, "source: example") {
+	if !strings.Contains(out, "from the template todo") || !strings.Contains(out, "source: example") {
 		t.Errorf("out: %s", out)
 	}
 	raw, _ = json.Marshal(map[string]any{"namespace": "lab", "repo": "other", "template": "../namespace-config"})
