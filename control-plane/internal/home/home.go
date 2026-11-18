@@ -242,7 +242,11 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 	p.Waiting, _ = s.Events.List(r.Context(), events.Query{Visibility: v, Kinds: []string{events.KindQuestion},
 		Actor: v.Person, Status: events.StatusWaiting, Limit: 20})
 	if s.Changes != nil {
-		cards, err := s.Changes.Waiting(r.Context(), v.Person, 10)
+		// The page waits for the changes a few seconds at most: what
+		// agents ask, above them, is shown either way.
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		cards, err := s.Changes.Waiting(ctx, v.Person, 10)
+		cancel()
 		if err != nil {
 			log.Printf("home: %s: waiting changes: %v", v.Person, err)
 		}

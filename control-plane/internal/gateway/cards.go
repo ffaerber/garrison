@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"garrison/control-plane/internal/changes"
@@ -159,19 +160,22 @@ func (g *Gitea) Waiting(ctx context.Context, person string, limit int) ([]change
 	if _, err := g.do(ctx, person, http.MethodGet, "/repos/issues/search?state=open&type=pulls&limit=50", nil, &issues); err != nil {
 		return nil, err
 	}
+	// Which of them are theirs to act on: their own, and others' where
+	// they are an admin.
+	type pick struct {
+		ns, repo string
+		n        int
+	}
 	roles := map[string]string{}
-	var out []changes.Card
+	var picks []pick
 	for _, is := range issues {
-		if len(out) >= limit {
-			break
-		}
 		ns, repo := is.Repository.Owner, is.Repository.Name
 		if is.User.Login != person {
 			role, seen := roles[ns]
 			if !seen {
 				r, err := g.Role(ctx, ns, person)
 				if err != nil {
-					return out, err
+					return nil, err
 				}
 				roles[ns], role = r, r
 			}
@@ -179,9 +183,34 @@ func (g *Gitea) Waiting(ctx context.Context, person string, limit int) ([]change
 				continue
 			}
 		}
-		c, err := g.Card(ctx, person, ns, repo, is.Number)
-		if err != nil {
-			return out, err
+		picks = append(picks, pick{ns, repo, is.Number})
+		if len(picks) >= 2*limit {
+			break // enough, even with some approved already
+		}
+	}
+	// Their cards, a few at a time: each is several requests to Gitea, and
+	// the dashboard waits for them.
+	cards := make([]changes.Card, len(picks))
+	errs := make([]error, len(picks))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 8)
+	for i, p := range picks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			cards[i], errs[i] = g.Card(ctx, person, p.ns, p.repo, p.n)
+		}()
+	}
+	wg.Wait()
+	var out []changes.Card
+	for i, c := range cards {
+		if len(out) >= limit {
+			break
+		}
+		if errs[i] != nil {
+			return out, errs[i]
 		}
 		if !c.Mine && c.Approved {
 			continue // done their part
