@@ -15,8 +15,6 @@ built for main, so `dev-web` comes up within a minute.
 
 ![The branch dev in Gitea](img/dev-branch.png)
 
-![dev-web](img/dev-up.png)
-
 ## A change on dev
 
 She asks the operator for a green background, on dev only:

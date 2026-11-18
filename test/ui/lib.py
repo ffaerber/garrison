@@ -174,6 +174,19 @@ class Person:
         """A screenshot of what the person sees now, into out/."""
         global shot
         shot += 1
+        # Once the page has loaded: Gitea's pages after a click, Open
+        # WebUI's channels and threads after their spinner.
+        p = self.page
+        try:
+            p.wait_for_load_state("networkidle", timeout=5_000)
+        except Exception:  # noqa: BLE001 - Open WebUI keeps a socket open
+            pass
+        if p.url.startswith(f"{CHAT}/channels/"):
+            try:
+                p.locator("#chat-input").last.wait_for(timeout=15_000)
+                p.wait_for_timeout(1_000)
+            except Exception:  # noqa: BLE001 - shot as it is
+                pass
         try:
             self.page.screenshot(path=f"{OUT}/{shot:03d}-{self.name}-{re.sub(r'[^a-z0-9]+', '-', what.lower())[:50]}.png")
         except Exception:  # noqa: BLE001 - a screenshot is no reason to fail

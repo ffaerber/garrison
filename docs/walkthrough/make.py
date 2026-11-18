@@ -43,7 +43,6 @@ STILLS = {
     "app-live": ("alice-web-on-main", 0),
     # 05 dev
     "dev-branch": ("alice-branch-dev", 0),
-    "dev-up": ("alice-dev-web-is-up", 0),
     "dev-ask": ("alice-asked-operator", 1),
     "dev-merged": ("alice-merged-shop-web-1", 0),
     "dev-to-main": ("alice-opened-green-background", 0),
@@ -80,7 +79,7 @@ CLIPS = {
     "sign-in": ["sign-in-keycloak", "sign-in-chat", "sign-in-dashboard"],
     "namespace": ["namespace-form", "namespace-created", "namespace-welcome", "namespace-feed"],
     "app": ["app-ask", "app-answer", "app-card", "app-merged", "app-live"],
-    "dev": ["dev-branch", "dev-up", "dev-ask", "dev-merged", "dev-to-main", "dev-main-merged", "dev-green"],
+    "dev": ["dev-branch", "dev-ask", "dev-merged", "dev-to-main", "dev-main-merged", "dev-green"],
     "members": ["members-ask", "members-approved", "members-refused", "members-proposed", "members-approve", "members-merged"],
     "routines": ["routines-edit", "routines-proposed", "routines-greeting", "routines-waiting", "routines-reply", "routines-went-on"],
     "jobs": ["jobs-edit", "jobs-proposed", "jobs-run", "jobs-disabled"],

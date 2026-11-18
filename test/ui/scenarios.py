@@ -114,7 +114,6 @@ alice.snap("web on main")
 section("5. dev: a branch in Gitea, a colour by the operator, a merge into main")
 check("alice makes the branch dev in Gitea", alice.create_branch, NS, APP, "dev")
 check(f"https://dev-{APP}.{DOMAIN} comes up", until, 600, alice.page_shows, f"dev-{APP}", f"<h1>{APP}</h1>", every=10)
-alice.snap(f"dev-{APP} is up")
 colour_pr = check("the operator proposes a green background for dev", retry, alice, NS, "operator",
                   f"Change the background colour of the page of {NS}/{APP} to #2e7d32, on its branch dev: read index.html there and "
                   "propose it with the new colour, with base dev. Change nothing else. Do not ask back.",
