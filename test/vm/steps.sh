@@ -12,7 +12,7 @@
 #   test/vm/steps.sh --clean       delete the VMs and their snapshots
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #
-# Steps: base, install, login, platform, agent, deploy, talk, journey, ui, crud.
+# Steps: base, install, login, platform, agent, deploy, talk, journey, crud, ui.
 # The agent, talk, journey and ui steps talk to a real LLM: by default Ollama on this computer, which
 # the VM reaches through its gateway (LOCAL_MODEL, default qwen3.8-64k);
 # with LLM=cloud, Ollama's cloud with OLLAMA_API_KEY from this checkout's .env.
@@ -39,10 +39,12 @@ cd "$ROOT"
 #                                 +- 4.2 agent
 #                                 +- 4.3 deploy -+- 5.1 talk
 #                                 |              +- 5.2 journey
-#                                 |              +- 5.3 ui
-#                                 +- 4.4 crud
-STEPS=(base install login platform agent deploy talk journey ui crud)
-declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [ui]=deploy [crud]=login)
+#                                 +- 4.4 crud --- 5.3 ui
+#
+# ui builds the same app as deploy, todo/app in the namespace todo, so the
+# two never share a VM.
+STEPS=(base install login platform agent deploy talk journey crud ui)
+declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [ui]=crud [crud]=login)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [ui]=5.3 [crud]=4.4)
 # Where the tree forks. In parallel runs (the default) the trunk up to here
 # runs in $VM, and each branch from here in its own clone, $VM-<first step>.
@@ -61,7 +63,7 @@ inputs() {
     login)    echo test/e2e/smoke.sh ;;
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
     agent)    echo test/e2e/smoke.sh ;;
-    deploy)   echo test/e2e/smoke.sh examples installer/push-repo.sh ;;
+    deploy)   echo test/e2e/smoke.sh templates/app installer/push-repo.sh ;;
     talk)     echo test/e2e/smoke.sh test/e2e/apps docs/scenarios.md ;;
     journey)  echo test/e2e/smoke.sh test/e2e/journey.sh ;;
     ui)       echo test/e2e/smoke.sh test/ui ;;
@@ -123,7 +125,7 @@ step_agent() {
 }
 
 # A namespace with an app of its own, built by its pipeline on the user
-# runner and deployed by the deployer: todo/app, and homepage/app, left running.
+# runner and deployed by the deployer: todo/app, from the template todo, left running.
 step_deploy() {
   sync_repo
   smoke deploy
@@ -148,7 +150,7 @@ step_journey() {
 }
 
 # The browser scenarios (test/ui): people click and type in Gitea, Open WebUI
-# and the dashboard, from a new namespace to a deployed web app, a
+# and the dashboard, from the namespace todo to its todo app deployed, a
 # screenshot, a scheduled job and a routine's question. Talks to the real
 # LLM. The screenshots of every step land in bin/ui-shots/.
 step_ui() {

@@ -1,5 +1,5 @@
 """The UI scenarios: everything a person does, clicked and typed in Gitea,
-Open WebUI and the dashboard, from a new namespace to a deployed web app, a
+Open WebUI and the dashboard, from the namespace todo to its todo app deployed, a
 screenshot, a scheduled job and a question a routine asks. See
 docs/scenarios.md, "In the browser". Run by test/ui/run.sh.
 """
@@ -12,9 +12,13 @@ from zoneinfo import ZoneInfo
 from lib import (CHAT, channel_id, DOMAIN, GIT, HOME, Person, approval, browser, check, done, gitea, newest_pr, pr_files,
                  raw, runs_of, section, until)
 
-NS, APP = os.environ.get("UI_NAMESPACE", "shop"), os.environ.get("UI_APP", "web")
+# The app is the template todo: the repo REPO, deployed as STACK at
+# https://STACK.<domain>, as the deploy step of the VM test does it.
+NS = os.environ.get("UI_NAMESPACE", "todo")
+REPO, STACK = os.environ.get("UI_REPO", "app"), os.environ.get("UI_STACK", "todo")
+HEADING = "<h1>Todo</h1>"
 GREEN = "rgb(46, 125, 50)"  # #2e7d32
-WHITE = "rgb(255, 255, 255)"
+GREY = "rgb(246, 247, 249)"  # #f6f7f9, the template's --bg
 ZONE = ZoneInfo(os.environ.get("TIMEZONE") or "UTC")
 
 b = browser()
@@ -41,7 +45,7 @@ check("bob signs in to Gitea", bob.sign_in_gitea)
 check("and to Open WebUI", bob.sign_in_chat)
 check("the admin signs in to Gitea", admin.sign_in_gitea)
 
-section("2. alice makes the namespace shop in Gitea's form")
+section(f"2. alice makes the namespace {NS} in Gitea's form")
 check("she fills in New Organisation", alice.create_org, NS)
 check("within seconds it has its config, alice its first admin", until, 20,
       lambda: "alice" in (raw(NS, "config", "members.yaml") or ""))
@@ -71,32 +75,31 @@ def set_up_in_feed():
 
 
 check("alice's dashboard says it is set up", until, 20, set_up_in_feed)
-alice.snap("feed: shop is set up")
+alice.snap(f"feed: {NS} is set up")
 
 section("3. alice sets a secret in the dashboard")
 p = alice.page
 p.goto(f"{HOME}/secrets?ns={NS}")
-check("the Secrets page offers shop", lambda: p.locator("form.setform").count() > 0)
+check(f"the Secrets page offers {NS}", lambda: p.locator("form.setform").count() > 0)
 p.fill("form.setform input[name='name']", "api-token")
 p.fill("form.setform textarea[name='value']", "tok-ui-123456")
 p.locator("form.setform").get_by_role("button", name="Save").click()
 check("she saves it", lambda: "Saved api-token" in p.content())
 check("the page lists its name, never its value",
       lambda: p.locator("#names code", has_text="api-token").count() == 1 and "tok-ui-123456" not in p.content())
-check("it is in shop's config, encrypted", lambda: "ENC[" in (raw(NS, "config", "secrets/api-token.yaml") or ""))
+check(f"it is in {NS}'s config, encrypted", lambda: "ENC[" in (raw(NS, "config", "secrets/api-token.yaml") or ""))
 alice.snap("secrets")
 
-section("4. alice has the operator, in shop's channel, make the web app; alone in shop, she merges it")
+section(f"4. alice has the operator, in {NS}'s channel, make the todo app; alone in {NS}, she merges it")
 stack_pr = check("the operator makes the repo from the template and proposes the stack", retry, alice, NS, "operator",
-                 f"Make the repo {APP} in {NS} from the template static-web, then propose its stack stacks/{APP}.yaml in {NS}/config "
-                 "as its README says, with the environments main and dev, both public (no private). You have everything you need; do not ask back.",
-                 f"Please do it now: create_repo {APP} in {NS} with template static-web if it is missing, then propose stacks/{APP}.yaml in "
-                 f"{NS}/config with propose_change: source {APP}, entrypoint web, service web with image \"{{{{registry}}}}/{NS}/{APP}:{{{{commit}}}}\" "
-                 "and port 8080, environments main: {} and dev: {}.",
-                 lambda: newest_pr(NS, "config", "alice", file=f"stacks/{APP}.yaml"))
-check("the repo has the template's page", lambda: f"<h1>{APP}</h1>" in (raw(NS, APP, "index.html") or ""))
-# alice is shop's only person: nobody else could approve, so her own needs no other approval.
-check("as shop's only person, her own passes the approval check", until, 60, lambda: approval(NS, stack_pr or 0) == "success")
+                 f"Make the repo {REPO} in {NS} from the template todo, then propose its stack stacks/{STACK}.yaml in {NS}/config "
+                 "as its README says, with the environments main and dev. You have everything you need; do not ask back.",
+                 f"Please do it now: create_repo {REPO} in {NS} with template todo if it is missing, then propose stacks/{STACK}.yaml in "
+                 f"{NS}/config with propose_change: the yaml block of the README.md of {NS}/{REPO}, as it is.",
+                 lambda: newest_pr(NS, "config", "alice", file=f"stacks/{STACK}.yaml"))
+check("the repo has the template's todo app", lambda: HEADING in (raw(NS, REPO, "page.html") or ""))
+# alice is the namespace's only person: nobody else could approve, so her own needs no other approval.
+check(f"as {NS}'s only person, her own passes the approval check", until, 60, lambda: approval(NS, stack_pr or 0) == "success")
 
 
 def card_needs_no_approval():
@@ -107,48 +110,49 @@ def card_needs_no_approval():
 check("its card on the dashboard says it needs no other approval", until, 30, card_needs_no_approval)
 alice.snap("card of the stack")
 check("alice merges it with the button", alice.merge, NS, "config", stack_pr or 0)
-check(f"https://{APP}.{DOMAIN} shows the page", until, 900, alice.page_shows, APP, f"<h1>{APP}</h1>", every=10)
-check("on white", lambda: alice.background(APP) == WHITE)
-alice.snap("web on main")
+# Behind the sign-in: alice's browser is signed in to Keycloak, so it passes.
+check(f"https://{STACK}.{DOMAIN} shows her todo list", until, 900, alice.page_shows, STACK, HEADING, "alice", every=10)
+check("on light grey", lambda: alice.background(STACK) == GREY)
+alice.snap("todo on main")
 
 section("5. dev: a branch in Gitea, a colour by the operator, a merge into main")
-check("alice makes the branch dev in Gitea", alice.create_branch, NS, APP, "dev")
-check(f"https://dev-{APP}.{DOMAIN} comes up", until, 600, alice.page_shows, f"dev-{APP}", f"<h1>{APP}</h1>", every=10)
+check("alice makes the branch dev in Gitea", alice.create_branch, NS, REPO, "dev")
+check(f"https://dev-{STACK}.{DOMAIN} comes up", until, 600, alice.page_shows, f"dev-{STACK}", HEADING, every=10)
 colour_pr = check("the operator proposes a green background for dev", retry, alice, NS, "operator",
-                  f"Change the background colour of the page of {NS}/{APP} to #2e7d32, on its branch dev: read index.html there and "
-                  "propose it with the new colour, with base dev. Change nothing else. Do not ask back.",
-                  f"Please propose it now: index.html of {NS}/{APP} on branch dev, with background-color: #2e7d32 instead of #ffffff, "
+                  f"Change the background colour of the todo list of {NS}/{REPO} to #2e7d32, on its branch dev: read page.html there and "
+                  "propose it with --bg: #2e7d32 instead of #f6f7f9, with base dev. Change nothing else. Do not ask back.",
+                  f"Please propose it now: page.html of {NS}/{REPO} on branch dev, with --bg: #2e7d32 instead of --bg: #f6f7f9, "
                   "as a pull request with base dev.",
-                  lambda: newest_pr(NS, APP, "alice", base="dev", file="index.html"))
-check("changing index.html alone", lambda: pr_files(NS, APP, colour_pr or 0) == ["index.html"])
-check("alice merges it into dev", alice.merge, NS, APP, colour_pr or 0)
-check(f"dev-{APP} turns green", until, 900, lambda: alice.background(f"dev-{APP}") == GREEN, every=10)
-check(f"{APP}, on main, is still white", lambda: alice.background(APP) == WHITE)
-main_pr = check("alice opens a pull request from dev to main in Gitea", alice.open_pr, NS, APP, "dev", "main", "Green background")
-check("and merges it", alice.merge, NS, APP, main_pr or 0)
-check(f"{APP}, on main, turns green", until, 900, lambda: alice.background(APP) == GREEN, every=10)
-alice.snap("web is green")
+                  lambda: newest_pr(NS, REPO, "alice", base="dev", file="page.html"))
+check("changing page.html alone", lambda: pr_files(NS, REPO, colour_pr or 0) == ["page.html"])
+check("alice merges it into dev", alice.merge, NS, REPO, colour_pr or 0)
+check(f"dev-{STACK} turns green", until, 900, lambda: alice.background(f"dev-{STACK}") == GREEN, every=10)
+check(f"{STACK}, on main, is still grey", lambda: alice.background(STACK) == GREY)
+main_pr = check("alice opens a pull request from dev to main in Gitea", alice.open_pr, NS, REPO, "dev", "main", "Green background")
+check("and merges it", alice.merge, NS, REPO, main_pr or 0)
+check(f"{STACK}, on main, turns green", until, 900, lambda: alice.background(STACK) == GREEN, every=10)
+alice.snap("todo is green")
 
-section("6. the operator takes a screenshot of the page")
+section("6. the operator takes a screenshot of the todo list")
 shot_pr = check("it proposes the screenshot in a pull request", retry, alice, NS, "operator",
-                f"Take a screenshot of https://{APP}.{DOMAIN}/ and propose it as docs/{APP}.png in the repo {NS}/{APP}.",
-                f"Please call screenshot now: url https://{APP}.{DOMAIN}/, namespace {NS}, repo {APP}, path docs/{APP}.png.",
-                lambda: newest_pr(NS, APP, "alice", file=f"docs/{APP}.png"))
+                f"Take a screenshot of https://{STACK}.{DOMAIN}/ and propose it as docs/{STACK}.png in the repo {NS}/{REPO}.",
+                f"Please call screenshot now: url https://{STACK}.{DOMAIN}/, namespace {NS}, repo {REPO}, path docs/{STACK}.png.",
+                lambda: newest_pr(NS, REPO, "alice", file=f"docs/{STACK}.png"))
 
 
 def png_shows():
     p = alice.page
-    p.goto(f"{GIT}/{NS}/{APP}/pulls/{shot_pr}/files")
-    img = p.locator(f"img[src*='{APP}.png']").first
+    p.goto(f"{GIT}/{NS}/{REPO}/pulls/{shot_pr}/files")
+    img = p.locator(f"img[src*='{STACK}.png']").first
     img.wait_for()
     return p.evaluate("i => i.complete && i.naturalWidth > 300", img.element_handle())
 
 
 check("Gitea shows the image in its files", png_shows)
 alice.snap("screenshot in Gitea")
-gitea(f"/repos/{NS}/{APP}/pulls/{shot_pr or 0}", "PATCH", {"state": "closed"})
+gitea(f"/repos/{NS}/{REPO}/pulls/{shot_pr or 0}", "PATCH", {"state": "closed"})
 
-section("7. bob joins shop; main of its app then takes only approved pull requests")
+section(f"7. bob joins {NS}; main of its app then takes only approved pull requests")
 member_pr = check("the operator proposes bob as a member", retry, alice, NS, "operator",
                   f"Add bob as a member of the namespace {NS}; alice stays its admin. Do not ask back.",
                   f"Please propose members.yaml in {NS}/config now: admins [alice], members [bob].",
@@ -156,20 +160,21 @@ member_pr = check("the operator proposes bob as a member", retry, alice, NS, "op
 check("the admin approves it", admin.approve, NS, "config", member_pr or 0)
 check("the approval check passes", until, 60, lambda: approval(NS, member_pr or 0) == "success")
 check("alice merges it", alice.merge, NS, "config", member_pr or 0)
-check("bob sees shop's channel now", until, 30, lambda: bob.has_channel(NS))
-page_now = (raw(NS, APP, "index.html") or "")
+check(f"bob sees {NS}'s channel now", until, 30, lambda: bob.has_channel(NS))
+page_now = (raw(NS, REPO, "page.html") or "")
+BOBS = "<h1>Our todos</h1>"
 time.sleep(25)  # the members sync puts the rule on main
-edited = bob.edit_file(NS, APP, "index.html", page_now.replace(f"<h1>{APP}</h1>", "<h1>bob's web</h1>"), message="Bob's heading")
-check("bob's edit straight onto main is refused", lambda: "bob's web" not in (raw(NS, APP, "index.html") or ""))
-bob.edit_file(NS, APP, "index.html", page_now.replace(f"<h1>{APP}</h1>", "<h1>bob's web</h1>"), new_branch="bob-heading", message="Bob's heading")
-bob_pr = check("he proposes it instead", bob.open_pr, NS, APP, "bob-heading", "main", "Bob's heading")
-check("his page offers him no merge yet", lambda: not bob.can_merge(NS, APP, bob_pr or 0))
-check("alice approves it in Gitea", alice.approve, NS, APP, bob_pr or 0)
-check("then bob merges it", bob.merge, NS, APP, bob_pr or 0)
-check("web shows bob's heading", until, 900, alice.page_shows, APP, "bob's web", every=10)
+edited = bob.edit_file(NS, REPO, "page.html", page_now.replace(HEADING, BOBS), message="Bob's heading")
+check("bob's edit straight onto main is refused", lambda: BOBS not in (raw(NS, REPO, "page.html") or ""))
+bob.edit_file(NS, REPO, "page.html", page_now.replace(HEADING, BOBS), new_branch="bob-heading", message="Bob's heading")
+bob_pr = check("he proposes it instead", bob.open_pr, NS, REPO, "bob-heading", "main", "Bob's heading")
+check("his page offers him no merge yet", lambda: not bob.can_merge(NS, REPO, bob_pr or 0))
+check("alice approves it in Gitea", alice.approve, NS, REPO, bob_pr or 0)
+check("then bob merges it", bob.merge, NS, REPO, bob_pr or 0)
+check(f"{STACK} shows bob's heading", until, 900, alice.page_shows, STACK, BOBS, every=10)
 
-section("8. scheduled agents: alice gives the operator two routines in shop, in Gitea's editor")
-# The operator is garrison's; shop's routines.yaml says what it does in shop
+section(f"8. scheduled agents: alice gives the operator two routines in {NS}, in Gitea's editor")
+# The operator is garrison's; the namespace's routines.yaml says what it does there
 # by itself.
 now = datetime.now(ZONE)
 greet_at, ask_at = now + timedelta(minutes=5), now + timedelta(minutes=6)
@@ -182,7 +187,7 @@ routines = f"""- agent: operator
   name: sundays
   schedule: "{ask_at.minute} {ask_at.hour} * * *"
   owner: bob
-  task: "Call ask_person with exactly this question: Should the shop open on Sundays, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
+  task: "Call ask_person with exactly this question: Should done todos be cleared every Sunday, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
 """
 alice.edit_file(NS, "config", "routines.yaml", routines, new_branch="routines", message="Two routines", new=True)
 routines_pr = check("she proposes them", alice.open_pr, NS, "config", "routines", "main", "Two routines")
@@ -192,12 +197,12 @@ check("alice merges", alice.merge, NS, "config", routines_pr or 0)
 print(f"info  greeting at {greet_at:%H:%M}, sundays at {ask_at:%H:%M} ({ZONE})", flush=True)
 
 
-check("at its time, the greeting is posted in shop's channel", until, 600, channel_has, alice, "Routine greeting, for alice", every=15)
+check(f"at its time, the greeting is posted in {NS}'s channel", until, 600, channel_has, alice, "Routine greeting, for alice", every=15)
 alice.channel(NS)
 alice.snap("greeting in the channel")
 
 section("9. the routine asks bob; he answers from his dashboard")
-question = check("the other routine asks bob in the channel", until, 600, channel_has, bob, "Should the shop open on Sundays", every=15)
+question = check("the other routine asks bob in the channel", until, 600, channel_has, bob, "Should done todos be cleared every Sunday", every=15)
 check("bob signs in to the dashboard", bob.sign_in_home)
 
 
@@ -210,7 +215,7 @@ check("it waits for him there", until, 30, waiting_for_bob)
 bob.snap("waiting for you")
 bob.page.locator("section.waiting a.answer").first.click()
 check("its link opens the question's thread", lambda: bob.page.wait_for_url(f"{CHAT}/channels/**?thread={question['id'] if question else ''}") or True)
-check("he answers in its thread", bob.reply, question["id"] if question else "", "Yes, open on Sundays.")
+check("he answers in its thread", bob.reply, question["id"] if question else "", "Yes, clear them on Sundays.")
 
 
 def went_on():
@@ -228,10 +233,10 @@ bob.snap("the routine went on")
 # The question's link is gone; changes waiting for him may still be listed.
 check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), bob.page.locator("section.waiting a.answer").count() == 0)[1])
 
-section("10. the commander, by its name, in shop's channel")
-# The same agent in every channel, @commander; here it works in shop.
+section(f"10. the commander, by its name, in {NS}'s channel")
+# The same agent in every channel, @commander; here it works in the namespace.
 said = check("bob types @commander, picks it and asks it", bob.ask, NS, "commander",
-             f"Which agent should I ask to change the page of {NS}/{APP}? Only tell me whom; do not do it yourself.")
+             f"Which agent should I ask to change the todo app of {NS}/{REPO}? Only tell me whom; do not do it yourself.")
 check("it answers, naming the coder or the operator", lambda: any(a in (said or "").lower() for a in ("coder", "operator")))
 bob.snap("asked the commander")
 
@@ -250,18 +255,18 @@ jobs:
   report:
     runs-on: garrison-user
     steps:
-      - run: echo "nightly report of {NS}/{APP}"
+      - run: echo "nightly report of {NS}/{REPO}"
 """
-alice.edit_file(NS, APP, ".gitea/workflows/nightly.yaml", NIGHTLY, new_branch="nightly", message="A nightly report", new=True)
-nightly_pr = check("alice adds the workflow in Gitea's editor and proposes it", alice.open_pr, NS, APP, "nightly", "main", "A nightly report")
-check("bob approves it", bob.approve, NS, APP, nightly_pr or 0)
-check("alice merges it", alice.merge, NS, APP, nightly_pr or 0)
-run_page = check("at its time, the Actions tab shows a scheduled run", until, 300, alice.scheduled_run, NS, APP, "nightly.yaml", every=15)
+alice.edit_file(NS, REPO, ".gitea/workflows/nightly.yaml", NIGHTLY, new_branch="nightly", message="A nightly report", new=True)
+nightly_pr = check("alice adds the workflow in Gitea's editor and proposes it", alice.open_pr, NS, REPO, "nightly", "main", "A nightly report")
+check("bob approves it", bob.approve, NS, REPO, nightly_pr or 0)
+check("alice merges it", alice.merge, NS, REPO, nightly_pr or 0)
+run_page = check("at its time, the Actions tab shows a scheduled run", until, 300, alice.scheduled_run, NS, REPO, "nightly.yaml", every=15)
 check("which succeeded", lambda: "Success" in (run_page or ""))
-check("its log has the job's output", lambda: f"nightly report of {NS}/{APP}" in alice.run_log(f'echo "nightly report of {NS}/{APP}"'))
+check("its log has the job's output", lambda: f"nightly report of {NS}/{REPO}" in alice.run_log(f'echo "nightly report of {NS}/{REPO}"'))
 alice.snap("scheduled run")
-check("alice disables the workflow in the Actions tab", alice.disable_workflow, NS, APP, "nightly.yaml")
-ran = runs_of(NS, APP, "nightly.yaml")
-check("then it runs no more", lambda: (time.sleep(150), runs_of(NS, APP, "nightly.yaml") == ran)[1])
+check("alice disables the workflow in the Actions tab", alice.disable_workflow, NS, REPO, "nightly.yaml")
+ran = runs_of(NS, REPO, "nightly.yaml")
+check("then it runs no more", lambda: (time.sleep(150), runs_of(NS, REPO, "nightly.yaml") == ran)[1])
 
 done()

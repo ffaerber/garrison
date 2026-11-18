@@ -33,7 +33,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo homepage; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo example dev-example; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   args+=(--resolve "$DOMAIN:443:127.0.0.1") # the dashboard
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
@@ -669,6 +669,18 @@ cleanup_channel
 check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len([m for m in json.load(sys.stdin) if not (m.get(\"content\") or \"\").startswith(\"**How to ask the agent\")]))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
 }
 
+# render_todo NS REPO DIR: the template todo as create_repo writes it into
+# NS/REPO, in DIR (NAME.tmpl as NAME, the placeholders filled in), and the
+# stack its README says to propose, in DIR.stack.yaml.
+render_todo() {
+  rm -rf "$3" && cp -r templates/app/todo "$3" || return 1
+  find "$3" -name '*.tmpl' -exec sh -c 'mv "$1" "${1%.tmpl}"' _ {} \;
+  find "$3" -type f -exec sed -i "s/{{namespace}}/$1/g; s/{{repo}}/$2/g" {} +
+  python3 -c '
+import re,sys
+print(re.search(r"```yaml\n(.*?)```", open(sys.argv[1]).read(), re.S).group(1), end="")' "$3/README.md" > "$3.stack.yaml"
+}
+
 # deploy: a namespace with an app of its own, built and deployed by its
 # pipeline on the user runner. Leaves todo/app running.
 section_deploy() {
@@ -682,21 +694,14 @@ check "alice creates the namespace todo" bash -c "[ $code = 201 ] || [ $code = 4
 has_build_account() { gitea_api "" "$api/orgs/todo/actions/secrets" | grep -q '"name":"REGISTRY_TOKEN"'; }
 check "the namespace gets its build account" until_true 150 has_build_account
 check "its build account is a member"     test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/todo/members/todo-builder")" = 204
-check "the todo app's source goes to todo/app" installer/push-repo.sh --update todo/app examples/todo/app
+# The app is the template todo, as create_repo writes it for todo/app, and
+# its stack the one its README tells the agents to propose.
+render_todo todo app "$tmp/todo-app"
+check "the todo app's source goes to todo/app" installer/push-repo.sh --update todo/app "$tmp/todo-app"
 # A config repo is there once its files are: members.yaml, on main.
 has_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/${1:-todo}/config/raw/members.yaml?ref=main")" = 200 ]; }
 check "todo has its config"            until_true 120 has_config
-check "alice adds its stack to todo's config" set_stack todo todo examples/todo/config/stacks/todo.yaml
-# The homepage, built meanwhile: one static page, in a namespace of its own,
-# open to everyone.
-code=$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"homepage","visibility":"limited","description":"My homepage"}' "$api/orgs")
-check "alice creates the namespace homepage" bash -c "[ $code = 201 ] || [ $code = 422 ]"
-hp_builder() { gitea_api "" "$api/orgs/homepage/actions/secrets" | grep -q '"name":"REGISTRY_TOKEN"'; }
-check "it gets its build account"          until_true 150 hp_builder
-check "the homepage's source goes to homepage/app" installer/push-repo.sh --update homepage/app examples/homepage/app
-hp_config() { has_config homepage; }
-check "homepage has its config"            until_true 120 hp_config
-check "alice adds its stack to homepage's config" set_stack homepage homepage examples/homepage/config/stacks/homepage.yaml
+check "alice adds its stack to todo's config" set_stack todo todo "$tmp/todo-app.stack.yaml"
 # head_of BRANCH: the branch's commit, waiting for Gitea to have it.
 head_of() {
   local i sha
@@ -763,12 +768,6 @@ chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOM
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 ns_channel() { web -H "Authorization: Bearer $chat_admin" "$chat/api/v1/channels/" | grep -q '"name":"todo"'; }
 check "todo has its channel in Open WebUI, where the agents work in it" until_true 120 ns_channel
-
-echo "# the homepage"
-hp_deployed() { garrison applied | grep -q "^app homepage/homepage@main homepage "; }
-check "the deployer deploys it as homepage" until_true 900 hp_deployed
-hello() { web "https://homepage.$DOMAIN/" | grep -q "Hello, world"; }
-check "everyone sees it, without signing in" until_true 120 hello
 
 echo "# a dev environment"
 check "alice creates the branch dev" \
@@ -875,7 +874,6 @@ check "and the commit waited for its image" in_feed alice ns=todo "e['kind'] == 
 check "the restore"                        in_feed alice ns=todo "e['kind'] == 'restore' and e['status'] == 'ok'"
 check "the reserved hostname"              in_feed alice view=problems "'reserved' in e['title'] and e['namespace'] == 'todo'"
 check "dev-todo taken down"                in_feed alice ns=todo "e['kind'] == 'undeploy' and 'dev-todo' in e['title']"
-check "the homepage's deploy"              in_feed alice ns=homepage "e['kind'] == 'deploy' and e['status'] == 'ok'"
 check "the system stacks' deploys, for everyone" in_feed alice "" "e['kind'] == 'deploy' and e['namespace'] == '' and 'traefik' in e['title']"
 page_lists() { local page; page=$(feed alice "/?ns=todo") && grep -q "deployed todo/todo@main at ${fixed:0:7}" <<<"$page"; }
 check "its page lists them"                page_lists

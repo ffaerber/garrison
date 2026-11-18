@@ -8,8 +8,17 @@
 section_journey() {
 echo "# journey: lab/example, from nothing to main, through the agents"
 lab=$api/repos/lab
-# page NAME: the page at https://NAME.<domain>.
-page() { web --resolve "$1.$DOMAIN:443:127.0.0.1" "https://$1.$DOMAIN/"; }
+# page NAME: the page at https://NAME.<domain>, as alice: the todo app is
+# behind the sign-in, so she signs in when it asks her to.
+page() {
+  local out
+  out=$(web -b "$tmp/lab-$1.jar" "https://$1.$DOMAIN/")
+  if ! grep -q '<h1>' <<<"$out"; then
+    sso_login "$tmp/lab-$1.jar" "https://$1.$DOMAIN/" "$TEST_PASSWORD" "$tmp/lab-$1.html" alice >/dev/null 2>&1
+    out=$(web -b "$tmp/lab-$1.jar" "https://$1.$DOMAIN/")
+  fi
+  printf '%s' "$out"
+}
 # head_of_lab REPO BRANCH: the commit a branch of lab/REPO is at.
 head_of_lab() { gitea_api "" "$lab/$1/branches/$2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])'; }
 # lab_pr REPO AUTHOR BASE FILE: the newest open pull request of lab/REPO by AUTHOR into BASE that changes FILE.
@@ -27,12 +36,12 @@ lab_merge() { gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content
 check "alice signs in to the chat"         chat_login alice
 
 echo "# 1. alice has the operator make the namespace and the repo"
-answer=$(ask_agent garrison alice "Make a namespace lab for our experiments, and in it the repo example from the template static-web: a small web page we will deploy. You have everything you need; do not ask back.")
+answer=$(ask_agent garrison alice "Make a namespace lab for our experiments, and in it the repo example from the template todo: a todo list we will deploy. You have everything you need; do not ask back.")
 lab_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/lab")" = 200 ]; }
-example_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/index.html")" = 200 ]; }
+example_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/page.html")" = 200 ]; }
 if ! lab_made || ! example_made; then
   printf 'retry the operator did not do both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent garrison alice "Please go ahead now: create_namespace lab if it is missing, then create_repo example in lab with template static-web.")
+  answer=$(ask_agent garrison alice "Please go ahead now: create_namespace lab if it is missing, then create_repo example in lab with template todo.")
 fi
 check "it makes the namespace lab, as alice" lab_made
 check "and the repo lab/example from the template" example_made
@@ -55,18 +64,18 @@ built() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/lab/co
 check "the pipeline builds main's image"   until_true 900 built "$main1"
 
 echo "# 2. alice has the operator, in lab's channel, propose the stack; the admin approves; alice merges in Gitea"
-answer=$(ask_agent lab alice "Deploy the app example of lab: propose stacks/example.yaml in lab/config as the README of lab/example says, with the environments main and dev, both public (no private). Do not ask back.")
+answer=$(ask_agent lab alice "Deploy the app example of lab: propose stacks/example.yaml in lab/config as the README of lab/example says, with the environments main and dev. Do not ask back.")
 spr=$(lab_pr config alice main stacks/example.yaml)
 if [ -z "$spr" ]; then
   printf 'retry the operator proposed no stack; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent lab alice "Please propose stacks/example.yaml in lab/config now with propose_change: source example, entrypoint web, service web with image \"{{registry}}/lab/example:{{commit}}\" and port 8080, environments main: {} and dev: {}.")
+  answer=$(ask_agent lab alice "Please propose stacks/example.yaml in lab/config now with propose_change: the yaml block of the README.md of lab/example, as it is.")
   spr=$(lab_pr config alice main stacks/example.yaml)
 fi
 check "it proposes stacks/example.yaml, as alice" test -n "$spr"
 check "the answer links its card on the dashboard" grep -q "https://$DOMAIN/c/lab/config/${spr:-0}" <<<"$answer"
 gitea_api "" "$lab/config/raw/stacks/example.yaml?ref=$(gitea_api "" "$lab/config/pulls/${spr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/example.yaml"
 check "one the deployer takes"             garrison validate --in lab "$tmp/example.yaml"
-check "with main and dev, both public"     python3 -c 'import sys,yaml; e=yaml.safe_load(open(sys.argv[1]))["environments"]; sys.exit(0 if set(e) >= {"main","dev"} and not any((v or {}).get("private") for v in e.values()) else 1)' "$tmp/example.yaml"
+check "with main and dev, both behind the sign-in" python3 -c 'import sys,yaml; e=yaml.safe_load(open(sys.argv[1]))["environments"]; sys.exit(0 if set(e) >= {"main","dev"} and all((v or {}).get("private") for v in e.values()) else 1)' "$tmp/example.yaml"
 check "a root admin who did not write it approves" test "$(gitea_api "" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$lab/config/pulls/${spr:-0}/reviews")" = 200
 stack_ok() {
   gitea_api "" "$lab/config/commits/$(gitea_api "" "$lab/config/pulls/${spr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
@@ -87,8 +96,8 @@ check "the operator says in lab's channel that it is merged" until_true 120 lab_
 deployed() { garrison applied | grep -q "^app lab/example@$1 $2 "; }
 check "the deployer deploys main"          until_true 600 deployed main example
 shows() { page "$1" | grep -q "$2"; }
-check "https://example.$DOMAIN shows the page" until_true 300 shows example "<h1>example</h1>"
-check "on white"                           shows example "background-color: #ffffff"
+check "https://example.$DOMAIN shows the todo list" until_true 300 shows example "<h1>Todo</h1>"
+check "on its light grey"                  shows example "--bg: #f6f7f9"
 check "the operator says there that it is live" until_true 120 lab_said "lab/config#${spr:-0}" "is live: https://example.$DOMAIN"
 
 echo "# 3. alice makes the branch dev in Gitea; it deploys at dev-example"
@@ -98,22 +107,22 @@ echo "# 3. alice makes the branch dev in Gitea; it deploys at dev-example"
 # pushes and merges in its repos freely.
 check "alice makes dev from main"          test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$lab/example/branches")" = 201
 check "the deployer deploys dev"           until_true 900 deployed dev dev-example
-check "https://dev-example.$DOMAIN shows the page" until_true 300 shows dev-example "<h1>example</h1>"
+check "https://dev-example.$DOMAIN shows the todo list" until_true 300 shows dev-example "<h1>Todo</h1>"
 
 echo "# 4. alice has the operator, in lab's channel, change the background on dev"
-answer=$(ask_agent lab alice "Change the background colour of the page of lab/example to #2e7d32, on its branch dev: read index.html there and propose it with the new colour, with base dev. Change nothing else. Do not ask back.")
-cpr=$(lab_pr example alice dev index.html)
+answer=$(ask_agent lab alice "Change the background colour of the todo list of lab/example to #2e7d32, on its branch dev: read page.html there and propose it with --bg: #2e7d32 instead of #f6f7f9, with base dev. Change nothing else. Do not ask back.")
+cpr=$(lab_pr example alice dev page.html)
 if [ -z "$cpr" ]; then
   printf 'retry the operator proposed no change; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent lab alice "Please propose it now: index.html of lab/example on branch dev, with background-color: #2e7d32 instead of #ffffff, as a pull request with base dev.")
-  cpr=$(lab_pr example alice dev index.html)
+  answer=$(ask_agent lab alice "Please propose it now: page.html of lab/example on branch dev, with --bg: #2e7d32 instead of --bg: #f6f7f9, as a pull request with base dev.")
+  cpr=$(lab_pr example alice dev page.html)
 fi
 check "it proposes it for dev, as alice"   test -n "$cpr"
-changed() { gitea_api "" "$lab/example/pulls/${cpr:-0}/files" | python3 -c 'import json,sys; sys.exit(0 if [f["filename"] for f in json.load(sys.stdin)] == ["index.html"] else 1)'; }
-check "changing index.html alone"          changed
+changed() { gitea_api "" "$lab/example/pulls/${cpr:-0}/files" | python3 -c 'import json,sys; sys.exit(0 if [f["filename"] for f in json.load(sys.stdin)] == ["page.html"] else 1)'; }
+check "changing page.html alone"           changed
 check "alice merges it into dev in Gitea"  test "$(lab_merge example "${cpr:-0}")" = 200
 check "dev-example turns green"            until_true 900 shows dev-example "#2e7d32"
-check "example, on main, is still white"   shows example "background-color: #ffffff"
+check "example, on main, is still grey"    shows example "--bg: #f6f7f9"
 
 echo "# 5. alice proposes dev for main and merges it in Gitea"
 mpr=$(gitea_api alice -X POST -H 'Content-Type: application/json' -d '{"head":"dev","base":"main","title":"Green background"}' "$lab/example/pulls" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')
