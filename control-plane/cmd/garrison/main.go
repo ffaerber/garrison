@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -41,6 +42,7 @@ import (
 	"garrison/control-plane/internal/home"
 	"garrison/control-plane/internal/hooks"
 	"garrison/control-plane/internal/hostnames"
+	"garrison/control-plane/internal/models"
 	"garrison/control-plane/internal/render"
 	"garrison/control-plane/internal/sandbox"
 	"garrison/control-plane/internal/secrets"
@@ -866,6 +868,7 @@ func homeCmd(args []string) error {
 	s := &home.Server{Events: store, Access: g, Changes: g, Domain: vars["DOMAIN"]}
 	if *deployer != "" {
 		s.Secrets = &secrets.Store{Gitea: g, Recipients: secrets.Remote(*deployer), Run: secrets.Runner(apply.Exec), Domain: vars["DOMAIN"]}
+		s.Providers = homeProviders{g}
 	}
 	server := &http.Server{Addr: *listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -893,4 +896,20 @@ func zone(name string) *time.Location {
 		return time.UTC
 	}
 	return loc
+}
+
+// homeProviders is garrison's config for the dashboard's Models page.
+type homeProviders struct{ g *gateway.Gitea }
+
+func (h homeProviders) Providers(ctx context.Context) (models.Providers, models.Catalog, bool, error) {
+	l, ok, err := h.g.LLM(ctx, "main")
+	return l.Providers, l.Catalog, ok, err
+}
+
+func (h homeProviders) ProposeProvider(ctx context.Context, person, name, apiURL string, include []string) (int, error) {
+	c, err := h.g.ProposeProvider(ctx, person, name, apiURL, include, "")
+	if errors.Is(err, gateway.ErrInvalid) {
+		err = fmt.Errorf("%w: %v", models.ErrInvalidProvider, err)
+	}
+	return c.Number, err
 }

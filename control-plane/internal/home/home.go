@@ -37,6 +37,9 @@ type Server struct {
 	Access Access
 	// Secrets, if set, backs the secrets page (secrets.Store).
 	Secrets Secrets
+	// Providers, if set with Secrets, backs the Models page, where root
+	// admins add LLM providers and set their keys.
+	Providers Providers
 	// Changes, if set, backs the cards of pull requests.
 	Changes Changes
 	// MergeWait is how long Approve and merge waits for the checks the
@@ -100,6 +103,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/events/{id}", s.signedIn(s.apiEvent))
 	mux.Handle("GET /secrets", s.signedIn(s.secretsPage))
 	mux.Handle("POST /secrets/{ns}", s.signedIn(s.secretsPost))
+	mux.Handle("GET /models", s.signedIn(s.modelsPage))
+	mux.Handle("POST /models", s.signedIn(s.modelsPost))
 	mux.Handle("GET /c/{ns}/{repo}/{n}", s.signedIn(s.cardPage))
 	mux.Handle("POST /c/{ns}/{repo}/{n}", s.signedIn(s.cardPost))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
@@ -215,10 +220,13 @@ type feedPage struct {
 	Error      string
 	Secrets    *secretsView // the secrets page
 	HasSecrets bool         // the dashboard has a secrets page
+	Models     *modelsView  // the Models page
+	HasModels  bool         // the dashboard has a Models page, and this is a root admin
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, p feedPage) {
 	p.HasSecrets = s.Secrets != nil
+	p.HasModels = s.Secrets != nil && s.Providers != nil && p.All
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := page.ExecuteTemplate(w, name, p); err != nil {
 		log.Printf("home: render %s: %v", name, err)
