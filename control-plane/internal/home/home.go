@@ -39,8 +39,11 @@ type Server struct {
 	Secrets Secrets
 	// Changes, if set, backs the cards of pull requests.
 	Changes Changes
-	Domain  string
-	Now     func() time.Time
+	// MergeWait is how long Approve and merge waits for the checks the
+	// approval starts (garrison/approval); 0: 40 seconds.
+	MergeWait time.Duration
+	Domain    string
+	Now       func() time.Time
 
 	mu    sync.Mutex
 	cache map[string]cached

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/events"
@@ -43,7 +44,7 @@ func (s *Server) cardPage(w http.ResponseWriter, r *http.Request, v events.Visib
 	switch r.URL.Query().Get("done") {
 	case "approve":
 		view.Notice = "You approved it."
-	case "merge":
+	case "merge", "approve_merge":
 		view.Notice = "You merged it."
 	}
 	s.showCard(w, r, v, ns, repo, n, view)
@@ -93,6 +94,21 @@ func (s *Server) cardPost(w http.ResponseWriter, r *http.Request, v events.Visib
 	case "merge":
 		err = s.Changes.Merge(r.Context(), v.Person, ns, repo, n)
 		title = fmt.Sprintf("%s merged %s/%s#%d on the dashboard", v.Person, ns, repo, n)
+	case "approve_merge":
+		// One click for the common case: the person reads the card, agrees,
+		// and wants it in. The approval still counts only if it is theirs to
+		// give; the merge waits for the checks it starts.
+		if err = s.Changes.Approve(r.Context(), v.Person, ns, repo, n); err != nil {
+			break
+		}
+		s.record(r, ns, repo, n, v.Person, fmt.Sprintf("%s approved %s/%s#%d on the dashboard", v.Person, ns, repo, n))
+		if err = s.mergeSoon(r.Context(), v.Person, ns, repo, n); err != nil {
+			log.Printf("home: %s: merge %s/%s#%d after approving: %v", v.Person, ns, repo, n, err)
+			w.WriteHeader(http.StatusConflict)
+			s.showCard(w, r, v, ns, repo, n, &cardView{Notice: "You approved it.", Error: changes.Plain(err) + " Merge it once it can be."})
+			return
+		}
+		title = fmt.Sprintf("%s merged %s/%s#%d on the dashboard", v.Person, ns, repo, n)
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)
 		return
@@ -103,11 +119,42 @@ func (s *Server) cardPost(w http.ResponseWriter, r *http.Request, v events.Visib
 		s.showCard(w, r, v, ns, repo, n, &cardView{Error: changes.Plain(err)})
 		return
 	}
-	// Gitea's own webhook records the review and the merge in the feed; this
-	// says it was done here.
+	s.record(r, ns, repo, n, v.Person, title)
+	http.Redirect(w, r, changes.Path(ns, repo, n)+"?done="+action, http.StatusSeeOther)
+}
+
+// record says in the feed that it was done here; Gitea's own webhook
+// records the review and the merge themselves.
+func (s *Server) record(r *http.Request, ns, repo string, n int, person, title string) {
 	if s.Events != nil {
 		s.Events.Record(r.Context(), events.Event{Source: events.SourceHome, Kind: events.KindPRUpdated, Status: events.StatusOK,
-			Namespace: ns, Repo: repo, PR: n, Actor: v.Person, Audience: events.AudienceMembers, Title: title})
+			Namespace: ns, Repo: repo, PR: n, Actor: person, Audience: events.AudienceMembers, Title: title})
 	}
-	http.Redirect(w, r, changes.Path(ns, repo, n)+"?done="+action, http.StatusSeeOther)
+}
+
+// mergeSoon merges what was just approved. The approval starts checks
+// (garrison/approval is posted again within seconds), so a refusal for
+// missing approvals or checks is tried again for a while.
+func (s *Server) mergeSoon(ctx context.Context, person, ns, repo string, n int) error {
+	wait := s.MergeWait
+	if wait == 0 {
+		wait = 40 * time.Second
+	}
+	step := min(2*time.Second, wait/10)
+	deadline := time.Now().Add(wait)
+	for {
+		err := s.Changes.Merge(ctx, person, ns, repo, n)
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		m := err.Error()
+		if !strings.Contains(m, "enough approvals") && !strings.Contains(m, "status check") && !strings.Contains(m, "try again later") {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(step):
+		}
+	}
 }

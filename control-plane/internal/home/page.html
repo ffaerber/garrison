@@ -246,8 +246,9 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   {{if $c.Checks}}<h2>Checks</h2><ul class="files">{{range $c.Checks}}<li><span class="status {{state .State}}">{{state .State}}</span> {{.Name}}{{if .Detail}}: {{.Detail}}{{end}}</li>{{end}}</ul>{{end}}
   {{if $c.Approvals}}<p class="hint">Approved by {{join $c.Approvals}}.</p>{{end}}
   {{if $c.Open}}<form class="actions" method="post" action="{{card $c}}">
-    {{if not $c.Mine}}{{if not $c.Approved}}<button name="action" value="approve" class="{{if not $c.Ready}}primary{{end}}">Approve</button>{{end}}{{end}}
-    <button name="action" value="merge" class="{{if $c.Ready}}primary{{end}}">Merge</button>
+    {{if and (not $c.Mine) (not $c.Approved) (ne $c.CheckState "failed")}}<button name="action" value="approve_merge" class="primary" title="Approve it and merge it as soon as its checks pass">Approve and merge</button>
+    <button name="action" value="approve">Approve only</button>{{else}}{{if not $c.Mine}}{{if not $c.Approved}}<button name="action" value="approve">Approve</button>{{end}}{{end}}
+    <button name="action" value="merge" class="{{if $c.Ready}}primary{{end}}">Merge</button>{{end}}
     <a class="gitea" href="{{$c.URL}}">See it in Gitea</a>
   </form>{{else}}<p><a class="gitea" href="{{$c.URL}}">See it in Gitea</a></p>{{end}}
 </div>

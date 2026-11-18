@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/events"
@@ -18,6 +19,8 @@ type fakeChanges struct {
 	card     changes.Card
 	approved []string
 	merged   bool
+	// checking: merges refused for running checks, after an approval
+	checking int
 }
 
 func newFakeChanges() *fakeChanges {
@@ -67,6 +70,10 @@ func (f *fakeChanges) Merge(_ context.Context, person, ns, repo string, n int) e
 	if len(f.approved) == 0 {
 		return errors.New("gitea POST /repos/todo/config/pulls/4/merge: 405 Does not have enough approvals")
 	}
+	if f.checking > 0 {
+		f.checking--
+		return errors.New("gitea POST /repos/todo/config/pulls/4/merge: 405 Not all required status checks successful")
+	}
 	f.merged = true
 	return nil
 }
@@ -98,7 +105,7 @@ func TestTheCardSaysItPlainly(t *testing.T) {
 		"what agents do on their own", "what agents may do here (grants)",
 		"Asked by alice through todo/operator.",
 		"waits for an admin of todo who did not write it",
-		`value="approve"`, `value="merge"`, "See it in Gitea",
+		`value="approve_merge"`, "Approve and merge", `value="approve"`, "See it in Gitea",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the card lacks %q", want)
@@ -157,5 +164,34 @@ func TestApproveAndMergeOnTheCard(t *testing.T) {
 	}
 	if strings.Join(said, "|") != "alice merged todo/config#4 on the dashboard|bob approved todo/config#4 on the dashboard" {
 		t.Errorf("the feed has %q", said)
+	}
+}
+
+func TestApproveAndMergeInOneClick(t *testing.T) {
+	s, _ := server()
+	s.MergeWait = 50 * time.Millisecond
+	f := newFakeChanges()
+	f.checking = 2 // the approval check takes a moment
+	s.Changes = f
+	w := post(s, "bob", "https://home.test", "/c/todo/config/4", url.Values{"action": {"approve_merge"}})
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/c/todo/config/4?done=approve_merge" || !f.merged || len(f.approved) != 1 {
+		t.Fatalf("approve and merge: %d %q merged=%v approved=%v", w.Code, w.Header().Get("Location"), f.merged, f.approved)
+	}
+	if body := get(s, "bob", "/c/todo/config/4?done=approve_merge").Body.String(); !strings.Contains(body, "You merged it.") {
+		t.Error("the card does not say it is merged")
+	}
+
+	// Checks that never pass: it is approved, and says what still waits.
+	f = newFakeChanges()
+	f.checking = 1000
+	s.Changes = f
+	w = post(s, "bob", "https://home.test", "/c/todo/config/4", url.Values{"action": {"approve_merge"}})
+	if body := w.Body.String(); w.Code != http.StatusConflict || f.merged || len(f.approved) != 1 ||
+		!strings.Contains(body, "You approved it.") || !strings.Contains(body, "checks have not all passed") {
+		t.Errorf("checks not passing: %d merged=%v\n%s", w.Code, f.merged, body)
+	}
+	// Its author is not offered it.
+	if body := get(s, "alice", "/c/todo/config/4").Body.String(); strings.Contains(body, "approve_merge") {
+		t.Error("alice is offered to approve her own")
 	}
 }
