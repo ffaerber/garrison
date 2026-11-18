@@ -1220,7 +1220,7 @@ check "the agent says so"                  test -n "$answer"
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo bob "Take a screenshot of https://example.org/ and put it into the repo app as docs/screenshots/example.png." media)
-check "a page outside the home cloud is not shot" test -z "$(newest_pr app bob "$since")"
+check "a page outside Garrison is not shot" test -z "$(newest_pr app bob "$since")"
 check "the gateway refused every try"      refused_only "$at" bob screenshot "only pages at"
 check "the feed shows bob the refusals"    until_true 60 home_login bob
 check "among the problems"                 in_feed bob view=problems "e['kind'] == 'screenshot' and e['status'] == 'refused' and e['agent'] == 'todo/media' and e['actor'] == 'bob'"
