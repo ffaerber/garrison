@@ -33,6 +33,7 @@ type fakeGitea struct {
 	// multi-file commits proposed.
 	routines string
 	commits  []map[string]any
+	closed   []string // pull requests closed and branches deleted
 }
 
 func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +61,15 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		f.commits = append(f.commits, body)
+		io.WriteString(w, "{}")
+	case p == "/repos/homepage/config/diffpatch":
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		f.patches = append(f.patches, body)
+		io.WriteString(w, "{}")
+	case strings.HasPrefix(p, "/repos/homepage/config/pulls/") && r.Method == http.MethodPatch,
+		strings.HasPrefix(p, "/repos/homepage/config/branches/") && r.Method == http.MethodDelete:
+		f.closed = append(f.closed, r.Method+" "+path.Base(p))
 		io.WriteString(w, "{}")
 	case p == "/repos/homepage/config/pulls" && r.Method == http.MethodPost:
 		f.prs++
@@ -1036,5 +1046,20 @@ func TestAppendEntry(t *testing.T) {
 		if err != nil || !strings.HasPrefix(got, c.want) || yaml.Unmarshal([]byte(got), &list) != nil || list[len(list)-1]["agent"] != "qa" {
 			t.Errorf("%q: %q %v", c.in, got, err)
 		}
+	}
+}
+
+func TestAPatchedRoutineThatWouldBeRefusedIsTakenBack(t *testing.T) {
+	m, fg := setup(t)
+	fg.routines = "- agent: marketing\n  name: shots\n  schedule: \"0 9 * * *\"\n  owner: alice\n  task: Shoot: then stop.\n"
+	args := map[string]any{"namespace": "homepage", "repo": "config", "patch": "diff --git a/routines.yaml b/routines.yaml\n", "title": "Shots"}
+	text, isErr := callText(t, m, "tok-alice", "propose_patch", args)
+	if !isErr || !strings.Contains(text, "routines.yaml would be refused") || !strings.Contains(text, "taken back") || len(fg.closed) != 2 || fg.closed[0] != "PATCH 9" {
+		t.Fatalf("%q, closed %v", text, fg.closed)
+	}
+	// Other files of the config are not checked here.
+	args["patch"] = "diff --git a/README.md b/README.md\n"
+	if text, isErr := callText(t, m, "tok-alice", "propose_patch", args); isErr || len(fg.closed) != 2 {
+		t.Errorf("README: %q", text)
 	}
 }

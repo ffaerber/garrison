@@ -583,21 +583,30 @@ func (t *Tools) checkBindings(ctx context.Context, ns, repo, path, content strin
 // checkBindingsAt checks the bindings of a namespace's config as f has
 // them; only the problems of paths count, the others are not proposed.
 func (t *Tools) checkBindingsAt(ctx context.Context, f agents.Files, ns string, paths []string) error {
-	defs, err := t.Gitea.Definitions(ctx)
+	problems, err := t.bindingProblems(ctx, f, paths)
 	if err != nil {
 		return err
 	}
-	_, _, problems, err := agents.Bindings(ctx, f, defs)
-	if err != nil {
-		return err
-	}
-	problems = slices.DeleteFunc(problems, func(s string) bool {
-		return !slices.ContainsFunc(paths, func(p string) bool { return strings.HasPrefix(s, p+":") })
-	})
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %s would be refused, so nothing was proposed: %s. Fix it and propose it again; put a task or any text with a colon in double quotes", ErrInvalid, strings.Join(paths, " and "), strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// bindingProblems are what the approval check would refuse in paths of a
+// namespace's config as f has it.
+func (t *Tools) bindingProblems(ctx context.Context, f agents.Files, paths []string) ([]string, error) {
+	defs, err := t.Gitea.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, _, problems, err := agents.Bindings(ctx, f, defs)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(problems, func(s string) bool {
+		return !slices.ContainsFunc(paths, func(p string) bool { return strings.HasPrefix(s, p+":") })
+	}), nil
 }
 
 // links ends a tool's answer about a change it opened: the card on the

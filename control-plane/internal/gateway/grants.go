@@ -430,6 +430,9 @@ func (t *Tools) proposePatch(ctx context.Context, p Person, agent *agents.Agent,
 	if err != nil {
 		return "", err
 	}
+	if err := t.checkPatched(ctx, as, c, branch, a.Branch == "", a.Patch); err != nil {
+		return "", err
+	}
 	by := ""
 	if viaAgent {
 		by = fmt.Sprintf(" It is by the agent's account %s, for %s.", as, p.asker())
@@ -462,4 +465,44 @@ func (g *Gitea) BranchHead(ctx context.Context, org, repo, branch string) (strin
 		return "", nil
 	}
 	return b.Commit.ID, err
+}
+
+var patchedFile = regexp.MustCompile(`(?m)^diff --git a/(\S+) b/(\S+)$`)
+
+// checkPatched checks grants.yaml and routines.yaml of a namespace's config
+// as a patch left them on its branch, as the approval check will. One that
+// would be refused is taken back: a new change is closed and its branch
+// deleted; one added to is left, and the agent hears what to fix.
+func (t *Tools) checkPatched(ctx context.Context, as string, c Change, branch string, fresh bool, patch string) error {
+	if c.Repo != ConfigRepo || c.Namespace == PlatformNamespace {
+		return nil
+	}
+	var paths []string
+	for _, m := range patchedFile.FindAllStringSubmatch(patch, -1) {
+		for _, p := range m[1:] {
+			if (p == agents.GrantsFile || p == agents.RoutinesFile) && !slices.Contains(paths, p) {
+				paths = append(paths, p)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	slices.Sort(paths)
+	problems, err := t.bindingProblems(ctx, configFiles{g: t.Gitea, ns: c.Namespace, ref: branch}, paths)
+	if err != nil || len(problems) == 0 {
+		return err
+	}
+	what := fmt.Sprintf("%s would be refused: %s", strings.Join(paths, " and "), strings.Join(problems, "; "))
+	const hint = "put a task or any text with a colon in double quotes"
+	if !fresh {
+		return fmt.Errorf("%w: change %s/%s#%d holds the patch now, but %s. Fix it with another patch on branch %s; %s", ErrInvalid, c.Namespace, c.Repo, c.Number, what, branch, hint)
+	}
+	err = fmt.Errorf("%w: %s, so the change was taken back. Fix it and propose it again; %s", ErrInvalid, what, hint)
+	repo := fmt.Sprintf("/repos/%s/%s", c.Namespace, c.Repo)
+	if _, cerr := t.Gitea.do(ctx, as, http.MethodPatch, fmt.Sprintf("%s/pulls/%d", repo, c.Number), map[string]string{"state": "closed"}, nil); cerr != nil {
+		return fmt.Errorf("%w (change %s/%s#%d holds it; closing it failed: %v)", err, c.Namespace, c.Repo, c.Number, cerr)
+	}
+	t.Gitea.do(ctx, as, http.MethodDelete, repo+"/branches/"+escapePath(branch), nil, nil)
+	return err
 }
