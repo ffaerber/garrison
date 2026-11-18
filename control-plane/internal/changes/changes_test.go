@@ -41,6 +41,11 @@ func TestWhatACardWaitsFor(t *testing.T) {
 		{Card{Mine: true, Approvals: []string{"bob"}, Checks: []Check{{State: "failure"}}}, "A check failed", false},
 		{Card{Merged: true}, "It is merged", false},
 		{Card{Closed: true}, "closed without merging", false},
+		{Card{Mine: true, NoApproval: true, Checks: passed}, "needs no other approval here: it can be merged", true},
+		{Card{Mine: true, NoApproval: true, Checks: pending}, "its checks are still running", false},
+		{Card{Mine: true, NoApproval: true}, "it can be merged", true},
+		// An agent's account proposed it: its person approves, as the check says.
+		{Card{NoApproval: true, Checks: pending}, "yours, if you may give it", false},
 	} {
 		if got := c.card.Waits(); !strings.Contains(got, c.waits) {
 			t.Errorf("%+v waits: %q, want %q", c.card, got, c.waits)

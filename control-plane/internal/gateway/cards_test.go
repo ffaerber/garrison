@@ -37,6 +37,8 @@ func cardsGitea(t *testing.T, merges *[]string) *httptest.Server {
 			send(map[string]any{"number": 4, "title": "A screenshot every morning", "body": "why", "state": "open",
 				"user": map[string]string{"login": "alice"}, "base": map[string]string{"ref": "main"}, "head": map[string]string{"sha": "abc"},
 				"html_url": "https://git/todo/config/pulls/4"})
+		case "GET /api/v1/repos/todo/config/branch_protections/main":
+			send(map[string]any{"rule_name": "main", "required_approvals": 1})
 		case "GET /api/v1/repos/todo/config/pulls/4/files":
 			send([]map[string]string{{"filename": "routines.yaml", "status": "modified"}})
 		case "GET /api/v1/repos/todo/config/pulls/4/reviews":
@@ -75,7 +77,7 @@ func TestCardsAsThePersonSeesThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A stale approval and one taken back by a request for changes do not count.
-	if c.Title != "A screenshot every morning" || c.Author != "alice" || c.Mine || c.Approved || !slices.Equal(c.Approvals, []string{"frank"}) ||
+	if c.Title != "A screenshot every morning" || c.Author != "alice" || c.Mine || c.Approved || c.NoApproval || !slices.Equal(c.Approvals, []string{"frank"}) ||
 		len(c.Files) != 1 || c.Files[0].Path != "routines.yaml" || c.CheckState() != "running" || c.URL != "https://git/todo/config/pulls/4" {
 		t.Errorf("card: %+v", c)
 	}

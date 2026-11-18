@@ -76,7 +76,7 @@ check("the page lists its name, never its value",
 check("it is in shop's config, encrypted", lambda: "ENC[" in (raw(NS, "config", "secrets/api-token.yaml") or ""))
 alice.snap("secrets")
 
-section("4. alice has the operator, in shop's channel, make the web app; the admin approves; alice merges")
+section("4. alice has the operator, in shop's channel, make the web app; alone in shop, she merges it")
 stack_pr = check("the operator makes the repo from the template and proposes the stack", retry, alice, NS, "operator",
                  f"Make the repo {APP} in {NS} from the template static-web, then propose its stack stacks/{APP}.yaml in {NS}/config "
                  "as its README says, with the environments main and dev, both public (no private). You have everything you need; do not ask back.",
@@ -85,10 +85,8 @@ stack_pr = check("the operator makes the repo from the template and proposes the
                  "and port 8080, environments main: {} and dev: {}.",
                  lambda: newest_pr(NS, "config", "alice", file=f"stacks/{APP}.yaml"))
 check("the repo has the template's page", lambda: f"<h1>{APP}</h1>" in (raw(NS, APP, "index.html") or ""))
-check("the approval check waits for someone else", until, 60, lambda: approval(NS, stack_pr or 0) == "pending")
-check("alice's page offers her no merge yet", lambda: not alice.can_merge(NS, "config", stack_pr or 0))
-check("the admin approves it in Gitea", admin.approve, NS, "config", stack_pr or 0)
-check("the approval check passes", until, 60, lambda: approval(NS, stack_pr or 0) == "success")
+# alice is shop's only person: nobody else could approve, so her own needs no other approval.
+check("as shop's only person, her own passes the approval check", until, 60, lambda: approval(NS, stack_pr or 0) == "success")
 check("alice merges it with the button", alice.merge, NS, "config", stack_pr or 0)
 check(f"https://{APP}.{DOMAIN} shows the page", until, 900, alice.page_shows, APP, f"<h1>{APP}</h1>", every=10)
 check("on white", lambda: alice.background(APP) == WHITE)

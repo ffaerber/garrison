@@ -78,6 +78,33 @@ func TestApproval(t *testing.T) {
 	}
 }
 
+func TestOnePersonApprovesTheirOwn(t *testing.T) {
+	solo := Roster{Admins: []string{"alice"}}
+	roots := []string{"admin"}
+	for _, c := range []struct {
+		name    string
+		head    Roster
+		authors []string
+		ok      bool
+	}{
+		{"her own routine", solo, []string{"alice"}, true},
+		{"she adds bob", Roster{Admins: []string{"alice"}, Members: []string{"bob"}}, []string{"alice"}, true},
+		{"she hands it to bob", Roster{Admins: []string{"bob"}, Members: []string{"alice"}}, []string{"alice"}, false},
+		{"bob's, who is not in it", solo, []string{"bob"}, false},
+		{"a root admin pushed to hers", solo, []string{"alice", "admin"}, false},
+		{"an agent's account's", solo, []string{"agent-lab-operator"}, false},
+	} {
+		if ok, why := Approval(solo, c.head, c.authors, nil, roots); ok != c.ok {
+			t.Errorf("%s: %v (%s)", c.name, ok, why)
+		}
+	}
+	// Two people: the other approves, as before.
+	two := Roster{Admins: []string{"alice"}, Members: []string{"bob"}}
+	if ok, _ := Approval(two, two, []string{"alice"}, nil, roots); ok {
+		t.Error("with two people, alice's own went in unapproved")
+	}
+}
+
 func TestSameRule(t *testing.T) {
 	want := map[string]any{
 		"rule_name": "main", "enable_push": false, "required_approvals": 1,

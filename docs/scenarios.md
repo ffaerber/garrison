@@ -9,8 +9,7 @@ People: **alice** is a root admin and created `todo`; **bob** and **carol** are 
 Alice: *@operator Add carol as an admin and bob as a member of the namespace todo.*
 
 - The agent opens a pull request on `todo/config`, as alice, that lists carol under admins and bob under members.
-- It waits: the approval check is pending. Alice cannot approve her own pull request, and it cannot be merged.
-- A root admin who did not write it approves it; the check passes; alice merges it.
+- Alice cannot approve her own pull request. But she is todo's only person, so nobody else could: her own change, which keeps her its admin, passes the approval check by itself, and alice merges it.
 - Carol joins the team `admins`, bob the team `members`; bob may now push to `todo`'s repos.
 
 ## 2. Bob tries to make himself an admin
@@ -200,7 +199,7 @@ Played by the `ui` step (`test/e2e/smoke.sh ui`, `test/ui/`): Playwright's Chrom
 1. **Signing in:** alice signs in to Gitea through Keycloak, then to Open WebUI and the dashboard without typing her password again; bob and the admin sign in too.
 2. **A namespace in Gitea's form:** alice fills in New Organisation for `shop`. Within seconds Gitea lists its repo `config`, Open WebUI shows its channel in her sidebar (not in bob's), and her dashboard says it is set up.
 3. **A secret:** alice saves `api-token` on the dashboard's Secrets page; the page lists its name and never its value, and `shop/config` has it encrypted.
-4. **An app through the chat:** in shop's channel she types `@operator`, picks it from the list and asks for the repo `web` from the template and its stack. Her pull request page offers no merge while the approval check waits; the admin approves on the Files changed tab; alice merges with the button; `https://web.<domain>` shows the page on white.
+4. **An app through the chat:** in shop's channel she types `@operator`, picks it from the list and asks for the repo `web` from the template and its stack. She is shop's only person, so her own pull request passes the approval check without another approval; alice merges with the button; `https://web.<domain>` shows the page on white.
 5. **dev:** alice makes `dev` in Gitea's branch list; `dev-web` comes up. The operator proposes a green background for dev; she merges it; dev-web turns green while web stays white. She compares dev with main, opens the pull request and merges it: web turns green.
 6. **A screenshot:** the operator takes a screenshot of web and proposes it as `docs/web.png`; Gitea's Files changed tab shows the image.
 7. **People and main:** the operator proposes bob as a member; the admin approves; alice merges. Bob's edit of `index.html` straight onto main in Gitea's editor is refused; he commits it to a new branch and opens a pull request, whose page offers him no merge until alice approves it; then he merges it and web shows his heading.

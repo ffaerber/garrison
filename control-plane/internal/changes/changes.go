@@ -34,6 +34,9 @@ type Card struct {
 	Checks    []Check
 	Merged    bool
 	Closed    bool
+	// NoApproval: the branch it goes into asks for no approval, as main of a
+	// namespace of one person, or a branch without a rule.
+	NoApproval bool
 
 	// For the person looking at it.
 	Mine     bool // they proposed it
@@ -152,6 +155,10 @@ func (c Card) Waits() string {
 	switch {
 	case checks == "failed":
 		return "A check failed: see below. It cannot be merged like this."
+	case c.NoApproval && checks != "running":
+		return "It needs no other approval here: it can be merged."
+	case c.NoApproval && c.Mine:
+		return "It needs no other approval here; its checks are still running."
 	case !c.Mine && !c.Approved:
 		return "It waits for an approval: yours, if you may give it."
 	case len(c.Approvals) == 0:
@@ -166,7 +173,7 @@ func (c Card) Waits() string {
 // failed or running. Gitea decides; this is what the card offers first.
 func (c Card) Ready() bool {
 	s := c.CheckState()
-	return c.Open() && len(c.Approvals) > 0 && (s == "passed" || s == "")
+	return c.Open() && (len(c.Approvals) > 0 || c.NoApproval) && (s == "passed" || s == "")
 }
 
 // Plain turns Gitea's refusal of an approval or a merge into words for the

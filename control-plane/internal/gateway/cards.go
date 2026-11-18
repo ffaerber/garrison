@@ -62,6 +62,21 @@ func (g *Gitea) Card(ctx context.Context, person, ns, repo string, n int) (chang
 	for _, f := range files {
 		c.Files = append(c.Files, changes.File{Path: f.Filename, Status: f.Status})
 	}
+	if c.Open() {
+		// Asked as the platform: people may not read the rules.
+		var rule struct {
+			Required int `json:"required_approvals"`
+		}
+		status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/branch_protections/%s", ns, repo, escapePath(c.Base)), nil, &rule)
+		switch {
+		case status == http.StatusNotFound:
+			c.NoApproval = true
+		case err != nil:
+			return c, err
+		default:
+			c.NoApproval = rule.Required == 0
+		}
+	}
 	approvals, err := g.approvals(ctx, person, base)
 	if err != nil {
 		return c, err

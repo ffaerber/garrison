@@ -108,6 +108,15 @@ func (r Roster) Role(name string) string {
 	return ""
 }
 
+// Only is the roster's one person, if it has exactly one.
+func (r Roster) Only() (string, bool) {
+	all := slices.Concat(r.Admins, r.Members)
+	if len(all) != 1 {
+		return "", false
+	}
+	return all[0], true
+}
+
 // Changed lists the people whose role differs between two rosters.
 func Changed(before, after Roster) []string {
 	var out []string
@@ -127,6 +136,11 @@ func Changed(before, after Roster) []string {
 // could otherwise add to someone else's pull request and approve the result.
 func Approval(base, head Roster, authors []string, approvers, rootAdmins []string) (bool, string) {
 	changed := Changed(base, head)
+	// A namespace of one person has nobody else to approve: its person's own
+	// change goes in, as long as they stay its admin.
+	if only, ok := base.Only(); ok && head.Role(only) == "admin" && !slices.ContainsFunc(authors, func(a string) bool { return a != only }) {
+		return true, only + " is the only person of the namespace and proposed it"
+	}
 	var refused []string
 	for _, a := range approvers {
 		switch {
@@ -494,16 +508,21 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 	} else if err != nil {
 		return err
 	}
-	if err := m.protect(ctx, ns, []string{"admins", RootTeam}); err != nil {
-		return err
-	}
-
 	// Apply members.yaml on main to the teams.
 	var raw string
 	if _, err := g.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo+"/raw/"+MembersFile+"?ref=main", nil, &raw); err != nil {
 		return err
 	}
 	roster, err := ParseRoster([]byte(raw))
+	// One person approves nobody's change but their own: Gitea asks for no
+	// approval, garrison/approval for theirs (see Approval).
+	required := 1
+	if _, alone := roster.Only(); err == nil && alone {
+		required = 0
+	}
+	if err := m.protect(ctx, ns, []string{"admins", RootTeam}, required); err != nil {
+		return err
+	}
 	if err != nil {
 		return err // keep the teams as they are
 	}
@@ -535,7 +554,7 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 	} else if err != nil {
 		return err
 	}
-	if err := m.protect(ctx, ns, []string{RootTeam}); err != nil {
+	if err := m.protect(ctx, ns, []string{RootTeam}, 1); err != nil {
 		return err
 	}
 	if err := m.syncTeam(ctx, ns, RootTeam, teams[RootTeam], roots); err != nil {
@@ -627,7 +646,7 @@ func (m *Members) syncTeam(ctx context.Context, ns, name string, id int64, want 
 // mergers are the teams that approve and merge. Only the platform's own
 // account pushes there: the dashboard's secrets form writes the encrypted
 // secrets an admin sets (secrets.Store), which have no diff to review.
-func (m *Members) protect(ctx context.Context, ns string, mergers []string) error {
+func (m *Members) protect(ctx context.Context, ns string, mergers []string, approvals int) error {
 	rule := map[string]any{
 		"rule_name":                    "main",
 		"enable_push":                  true,
@@ -641,7 +660,7 @@ func (m *Members) protect(ctx context.Context, ns string, mergers []string) erro
 		"enable_approvals_whitelist":   true,
 		"approvals_whitelist_teams":    mergers,
 		"approvals_whitelist_username": []string{},
-		"required_approvals":           1,
+		"required_approvals":           approvals,
 		"enable_status_check":          true,
 		"status_check_contexts":        []string{ApprovalContext},
 		"block_on_rejected_reviews":    true,

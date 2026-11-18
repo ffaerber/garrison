@@ -1069,11 +1069,10 @@ if [ -z "$pr" ]; then
 fi
 check "the agent proposes it, as alice"    test -n "$pr"
 check "it makes carol an admin and bob a member" grep -q "^admins=alice,carol members=bob$" <<<"$(roster "$(head_sha config "$pr")")"
-check "it waits for approval"              until_true 90 approval_is "$pr" pending
 check "alice cannot approve her own change" bash -c '[ "$0" != 200 ]' "$(review config alice "$pr")"
-check "it cannot be merged yet"            bash -c '[ "$0" != 200 ]' "$(merge config alice "$pr")"
-check "a root admin who did not write it approves" test "$(review config "" "$pr")" = 200
-check "the approval check passes"          until_true 90 approval_is "$pr" success
+# alice is todo's only person: nobody else could approve it, so her own
+# change, which keeps her its admin, needs no other approval.
+check "as todo's only person, her own passes the approval check" until_true 90 approval_is "$pr" success
 check "alice merges it"                    test "$(merge config alice "$pr")" = 200
 check "carol joins the admins"             until_true 90 team_has admins carol
 check "bob joins the members"              until_true 90 team_has members bob
