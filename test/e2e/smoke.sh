@@ -1856,9 +1856,9 @@ routine_pr() {
 }
 if ! routine_pr >/dev/null; then
   printf 'retry the operator proposed no routine; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent todo alice "Please go ahead now: load your skill build and propose the routine in todo with add_routine.")
+  answer=$(ask_agent todo alice "Please go ahead now: propose the routine in todo with add_routine.")
 fi
-check "it reads its skill build, as alice" grep -q "mcp: alice: load_skill" <<<"$(mcp_calls "$since" alice)"
+check "it proposes it with add_routine, as alice" grep -Eq "mcp: alice: .*add_routine" <<<"$(mcp_calls "$since" alice)"
 cpr=$(routine_pr)
 check "it proposes a routine in todo's config, as alice" test -n "$cpr"
 gitea_api "" "$hp/config/raw/routines.yaml?ref=$(gitea_api "" "$hp/config/pulls/${cpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' 2>/dev/null)" > "$tmp/cron.yaml"

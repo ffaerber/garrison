@@ -178,7 +178,7 @@ Alice: *@operator I deleted todos in the todo app by mistake. Bring todo's data 
 
 Alice asks the operator, in garrison's channel, to "create an organization". It makes nothing: it says garrison calls those namespaces and asks for the name. Told "family", it makes the namespace family.
 
-In todo's channel, alice asks for "a cron job every day at 9 o'clock" that checks todo answers on main. The operator loads its skill `build` and proposes it with `add_routine`, which adds it to todo's `routines.yaml`: `schedule: "0 9 * * *"`, `owner: alice`, one of garrison's agents, the routines already there kept. Carol approves; the approval check passes. (The test closes it unmerged.)
+In todo's channel, alice asks for "a cron job every day at 9 o'clock" that checks todo answers on main. The operator proposes it with `add_routine`, which adds it to todo's `routines.yaml`: `schedule: "0 9 * * *"`, `owner: alice`, one of garrison's agents, the routines already there kept. Carol approves; the approval check passes. (The test closes it unmerged.)
 
 A daily screenshot is a routine too, with a grant for an agent with `screenshot` (see 4j3): the skill shows the operator both.
 
