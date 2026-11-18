@@ -1,6 +1,6 @@
 # Models
 
-The LLMs the home cloud's agents use. Root admins change these files by pull request.
+The LLMs Garrison's agents use. Root admins change these files by pull request.
 
 - `providers.yaml`: the providers, OpenAI-compatible APIs, and the default model. Written at install from its answers; add one by pull request:
 

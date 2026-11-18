@@ -156,7 +156,7 @@ func baseSpecs() []Spec {
 			"namespace":   nsArg,
 			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. monitor for checks, photographer for screenshots"),
 			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the namespace, e.g. morning-check"),
-			"schedule":    str("when, as cron in the home cloud's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
+			"schedule":    str("when, as cron in Garrison's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
 			"every":       str("how often instead of schedule, 10m to 168h, e.g. 6h"),
 			"task":        str("what the agent does each time, as you would ask it: what to look at, what to do, what to say"),
 			"repo":        str("the namespace's repo the task changes (proposes a screenshot or a patch into), if any"),
@@ -179,14 +179,14 @@ func baseSpecs() []Spec {
 			"repo":      str("repo name"),
 			"number":    map[string]any{"type": "integer", "description": "the pull request's number"},
 		}, "namespace", "repo", "number"),
-		spec("browse", "Uses a page of the home cloud as the person you talk to, signed in as them, one step per call: open a page (url), click an element (click), or type into one (type_into and text, with submit to press Enter). Each call answers with the page as it is then: its text and its links, buttons and fields, numbered. The tab stays open between calls for a few minutes. Only pages at https://<name>.<domain> load. It acts as the person: click nothing that deletes, sends or pays unless they asked for exactly that.", map[string]any{
+		spec("browse", "Uses a page of Garrison as the person you talk to, signed in as them, one step per call: open a page (url), click an element (click), or type into one (type_into and text, with submit to press Enter). Each call answers with the page as it is then: its text and its links, buttons and fields, numbered. The tab stays open between calls for a few minutes. Only pages at https://<name>.<domain> load. It acts as the person: click nothing that deletes, sends or pays unless they asked for exactly that.", map[string]any{
 			"url":       str("the page to open, e.g. https://pr-7-todo.example.com/; empty to act on the open page"),
 			"click":     map[string]any{"type": "integer", "description": "the number of the element to click"},
 			"type_into": map[string]any{"type": "integer", "description": "the number of the field to type into"},
 			"text":      str("what to type"),
 			"submit":    map[string]any{"type": "boolean", "description": "press Enter after typing"},
 		}),
-		spec("screenshot", "Takes a screenshot of a page of the home cloud, signed in as the person asking (in a routine, with nobody watching, as your own account), and proposes it as a PNG file in a repo: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
+		spec("screenshot", "Takes a screenshot of a page of Garrison, signed in as the person asking (in a routine, with nobody watching, as your own account), and proposes it as a PNG file in a repo: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
 			"namespace":   nsArg,
 			"repo":        str("repo the PNG goes into"),
 			"path":        str("file path of the PNG, ending in .png, e.g. docs/screenshots/todo.png"),

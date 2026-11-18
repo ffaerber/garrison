@@ -547,7 +547,7 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 		return err
 	}
 	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
-		if err := m.createConfig(ctx, ns, "The home cloud's agents, for every namespace; root admins approve changes", "The operator and the commander", agents.PlatformFiles()); err != nil {
+		if err := m.createConfig(ctx, ns, "Garrison's agents, for every namespace; root admins approve changes", "The operator and the commander", agents.PlatformFiles()); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made", ns)

@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
-	_ "time/tzdata" // schedules in the home cloud's time zone, whatever the image holds
+	_ "time/tzdata" // schedules in Garrison's time zone, whatever the image holds
 
 	"gopkg.in/yaml.v3"
 
@@ -879,7 +879,7 @@ func homeCmd(args []string) error {
 	return nil
 }
 
-// zone is the home cloud's time zone, TIMEZONE in install.env (e.g.
+// zone is Garrison's time zone, TIMEZONE in install.env (e.g.
 // Europe/Berlin); UTC if unset or unknown.
 func zone(name string) *time.Location {
 	if name == "" {

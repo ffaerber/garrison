@@ -1,5 +1,5 @@
 // Package home serves the dashboard at the installation's domain: for now,
-// the feed of everything that happens in the home cloud and how it was
+// the feed of everything that happens in Garrison and how it was
 // handled. Traefik puts it behind the sign-in, which names the person in
 // a header; each person sees only what they may read.
 package home

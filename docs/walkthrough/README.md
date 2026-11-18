@@ -1,7 +1,7 @@
 # Walkthrough
 
 How Garrison is used, step by step: one page per step, with screenshots and
-short clips. alice and bob are two people of a home cloud at
+short clips. alice and bob are two people of the Garrison installation at
 `garrison.test`. alice makes a namespace `shop`, has the agents build a web
 page there and put it online, works on it on a `dev` branch, lets bob join,
 and has things done on a schedule.

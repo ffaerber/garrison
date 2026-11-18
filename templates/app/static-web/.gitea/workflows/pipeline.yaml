@@ -1,7 +1,7 @@
 # Build and push the image for every push, in one BuildKit build. The
 # deployer deploys each branch the namespace's config names as an
 # environment (main, dev) once its image exists. From the template
-# static-web of the home cloud.
+# static-web of Garrison.
 name: pipeline
 on:
   push:

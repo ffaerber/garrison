@@ -237,7 +237,7 @@ func TestATurnUsesTheAgentsToolsAsThePerson(t *testing.T) {
 	first := llm.requests[0]
 	msgs := first["messages"].([]any)
 	sys := msgs[0].(map[string]any)["content"].(string)
-	if first["model"] != "small-model" || !strings.Contains(sys, `You are reader, an agent of a home cloud at example.com, here working in the namespace "homepage"`) || !strings.Contains(sys, "Rules of the platform") {
+	if first["model"] != "small-model" || !strings.Contains(sys, `You are reader, an agent of Garrison at example.com, here working in the namespace "homepage"`) || !strings.Contains(sys, "Rules of the platform") {
 		t.Errorf("first request: model %v, system %q", first["model"], sys)
 	}
 	if msgs[1].(map[string]any)["content"] != "Here's the thread history: bob: hi" || msgs[2].(map[string]any)["role"] != "user" {

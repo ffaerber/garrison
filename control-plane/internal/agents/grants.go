@@ -60,7 +60,7 @@ type Routine struct {
 	Name     string         `yaml:"name"`
 	Every    time.Duration  `yaml:"-"`
 	Raw      string         `yaml:"every"`
-	Schedule string         `yaml:"schedule"` // cron: minute hour day month weekday, in the home cloud's time zone
+	Schedule string         `yaml:"schedule"` // cron: minute hour day month weekday, in Garrison's time zone
 	Cron     *cron.Schedule `yaml:"-"`
 	OnPush   *Push          `yaml:"on_push"`
 	// OnAlert starts it when an alert of its namespace fires whose labels

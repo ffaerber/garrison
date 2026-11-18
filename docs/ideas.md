@@ -22,7 +22,7 @@ Basic auth in front of such apps was considered: SSO covers the same need, witho
 
 ## A front end of our own, with Gitea's web UI only for root admins
 
-**Problem:** people use Gitea's web UI directly, where they can click around in settings and delete things (see [unfixable.md](unfixable.md)). The home cloud has no front end of its own that shows it as one thing: namespaces, repos, apps, agents.
+**Problem:** people use Gitea's web UI directly, where they can click around in settings and delete things (see [unfixable.md](unfixable.md)). Garrison has no front end of its own that shows it as one thing: namespaces, repos, apps, agents.
 
 **Idea:** the dashboard the spec plans becomes the main front end, and Gitea's web UI is for root admins only.
 

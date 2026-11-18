@@ -5,7 +5,7 @@ How agents are defined, run and updated. Status: steps 1 to 3 of the plan are bu
 ## Goals
 
 1. Agents are files in Git: a prompt, a model, tools and skills, changed by reviewed pull requests like `members.yaml`.
-2. The home cloud has several agents, e.g. an operator and a marketing agent, defined once in `garrison/config` and working in every namespace; a namespace gives them rights and routines there.
+2. Garrison has several agents, e.g. an operator and a marketing agent, defined once in `garrison/config` and working in every namespace; a namespace gives them rights and routines there.
 3. Every chat with an agent is a real agent with its own workspace: files, a shell, a browser, its own history, in a sandbox.
 4. Open WebUI stays the chat; it talks to agents as if they were models.
 5. An agent has the rights of the person talking to it, and holds no secrets. It has more only where its folder grants them, reviewed like a role change, and only for the people of its namespace the grant names.
@@ -36,7 +36,7 @@ Open WebUI ──/v1/chat/completions──▶ agent service (control plane)
 
 ## Agent folders
 
-The agents are the home cloud's: all of them are folders in `garrison/config`, which only root admins change. Namespaces have no agents of their own; each of garrison's agents works in every namespace. Mentioned in a namespace's channel, it works in that namespace: there it is an instance, `<namespace>/<agent>` (e.g. `homepage/marketing`), with the rights and routines that namespace gives it in its own config repo (see Accounts and grants, and Runs without a person). In a private chat, and in `garrison`'s channel, it is garrison's instance and works in whichever namespace the person names.
+The agents are Garrison's: all of them are folders in `garrison/config`, which only root admins change. Namespaces have no agents of their own; each of garrison's agents works in every namespace. Mentioned in a namespace's channel, it works in that namespace: there it is an instance, `<namespace>/<agent>` (e.g. `homepage/marketing`), with the rights and routines that namespace gives it in its own config repo (see Accounts and grants, and Runs without a person). In a private chat, and in `garrison`'s channel, it is garrison's instance and works in whichever namespace the person names.
 
 ```
 garrison/config/
@@ -148,7 +148,7 @@ The same account is in Keycloak, in the realm `garrison`, so the agent can sign 
 
 ### New namespaces and repos
 
-`create_namespace` and `create_repo` act as the person: Gitea lets only root admins make namespaces, and a namespace's admins and root admins make its repos. A new namespace gets its config and its channel from the gateway within a minute, the person as its first admin; the agents work in it at once. A new repo is empty but for a README, and only for code of an app's own; its files come as a pull request like any other change. Every agent's system prompt (`agents.Platform`) says how the home cloud is laid out, with a full `config/stacks/<name>.yaml` that a test checks the deployer takes, so a request for a new app becomes a namespace if needed and a proposed stack in its config, never a stack in `garrison` or a secret made by hand.
+`create_namespace` and `create_repo` act as the person: Gitea lets only root admins make namespaces, and a namespace's admins and root admins make its repos. A new namespace gets its config and its channel from the gateway within a minute, the person as its first admin; the agents work in it at once. A new repo is empty but for a README, and only for code of an app's own; its files come as a pull request like any other change. Every agent's system prompt (`agents.Platform`) says how Garrison is laid out, with a full `config/stacks/<name>.yaml` that a test checks the deployer takes, so a request for a new app becomes a namespace if needed and a proposed stack in its config, never a stack in `garrison` or a secret made by hand.
 
 ### Proposing and merging
 
@@ -207,7 +207,7 @@ Routines: work one of garrison's agents does in a namespace by itself, in `routi
   task: Update the dependencies of todo and propose it.
 - agent: operator
   name: morning
-  schedule: "30 6 * * mon-fri"         # cron, in the home cloud's time zone
+  schedule: "30 6 * * mon-fri"         # cron, in Garrison's time zone
   owner: alice
   task: Sum up what happened in todo yesterday.
 - agent: dev
@@ -227,7 +227,7 @@ Routines: work one of garrison's agents does in a namespace by itself, in `routi
 - **Asking:** a routine that needs a choice, a fact or an approval from its owner calls `ask_person`; it ends its turn and goes on, in its sandbox, when the owner replies in the question's thread (see Notifications in [spec.md](spec.md)).
 - **When:** each routine has one of `schedule`, `every`, `on_push` and `on_alert`. The agent service looks every minute.
   - `on_alert` lists label values an alert of this namespace must have, e.g. `{alertname: ServiceFailing}` or `{alertname: ServiceDown, app: todo}`; `{}` takes every alert of the namespace. The platform's own alerts belong to `garrison`. The routine starts once per firing, and its task is told the alert's summary, labels and description. If it is still running from an earlier one, Alertmanager's next reminder (every 4 hours) starts it.
-  - `schedule` is cron's five fields, minute hour day-of-month month day-of-week (names like `mon-fri` and `dec` work), or `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`. It is read in the home cloud's time zone, `TIMEZONE` in `install.env` (the machine's at install, else UTC). A time a clock change skips runs right after the change. The approval check refuses a schedule that never comes or runs more often than every 10 minutes.
+  - `schedule` is cron's five fields, minute hour day-of-month month day-of-week (names like `mon-fri` and `dec` work), or `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`. It is read in Garrison's time zone, `TIMEZONE` in `install.env` (the machine's at install, else UTC). A time a clock change skips runs right after the change. The approval check refuses a schedule that never comes or runs more often than every 10 minutes.
   - A routine with `schedule` first runs at the next time it names after it is first seen; one with `every` one interval after; one with `on_push` when the branch moves after that.
   - When each last ran, and the commit each `on_push` routine last saw, are kept in Postgres (`routine_state` in `garrison`). After a restart, a schedule missed meanwhile runs once, and a push made meanwhile starts its routine. Until the agent service can read that state, no routine runs.
   - One run of a routine at a time.

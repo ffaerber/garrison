@@ -38,7 +38,7 @@ For `on_push` or `on_alert`, read the namespace's `routines.yaml` first and prop
 ```yaml
 - agent: monitor                     # one of garrison's agents
   name: morning-check                # lowercase, unique in the file
-  schedule: "0 9 * * *"              # cron: minute hour day-of-month month day-of-week, in the home cloud's time zone
+  schedule: "0 9 * * *"              # cron: minute hour day-of-month month day-of-week, in Garrison's time zone
   owner: alice                       # the person asking; a person of the namespace
   task: "Check that todo answers on main and dev, and say in a sentence how it is."
 ```

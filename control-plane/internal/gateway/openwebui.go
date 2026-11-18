@@ -73,7 +73,7 @@ const AccessMarker = "garrison_access"
 func (o *OpenWebUI) want(a agents.Agent, groups map[string]string, private bool) owuiModel {
 	desc := a.Description
 	if desc == "" {
-		desc = "Agent of the home cloud"
+		desc = "Agent of Garrison"
 	}
 	access, grants := "everyone", []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}}
 	if private {
@@ -311,7 +311,7 @@ func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent, commander string) s
 	if ns.Name == PlatformNamespace {
 		where = "here they work in whichever namespace you name"
 	}
-	b.WriteString(HowToMarker + "\n\nType `@` and pick an agent from the list, then your question. The agents are the home cloud's, the same in every channel; " + where + ":\n\n")
+	b.WriteString(HowToMarker + "\n\nType `@` and pick an agent from the list, then your question. The agents are Garrison's, the same in every channel; " + where + ":\n\n")
 	example := list[0]
 	for _, a := range list {
 		desc := a.Description

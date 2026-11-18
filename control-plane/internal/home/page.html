@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{end}}Home cloud</title>
+<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{end}}Garrison</title>
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #e3e6ea; --hover: #f0f2f5;
@@ -113,7 +113,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 </style>
 </head>
 <body>
-<header><div class="bar"><a class="brand" href="/">Home cloud</a>{{if .HasSecrets}}<nav class="nav"><a href="/"{{if not .Secrets}} class="on"{{end}}>Feed</a><a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a></nav>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
+<header><div class="bar"><a class="brand" href="/">Garrison</a>{{if .HasSecrets}}<nav class="nav"><a href="/"{{if not .Secrets}} class="on"{{end}}>Feed</a><a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a></nav>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
 <main>
 {{if .Event}}{{template "event" .}}{{else if .Card}}{{template "card" .Card}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else}}{{template "feed" .}}{{end}}
 </main>
@@ -215,7 +215,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   <h1>{{$e.Title}}</h1>
   <dl>
     <dt>When</dt><dd><time datetime="{{iso $e.At}}">{{stamp $e.At}}</time> ({{ago $now $e.At}}){{if ne $e.Updated $e.At}}, last changed {{stamp $e.Updated}}{{end}}</dd>
-    <dt>Where</dt><dd>{{if $e.Namespace}}{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}{{else}}the home cloud itself (garrison){{end}}</dd>
+    <dt>Where</dt><dd>{{if $e.Namespace}}{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}{{else}}Garrison itself (garrison){{end}}</dd>
     {{if $e.Actor}}<dt>For</dt><dd>{{$e.Actor}}</dd>{{end}}
     {{if $e.Agent}}<dt>Agent</dt><dd>{{$e.Agent}}</dd>{{end}}
     {{if $e.StartedBy}}<dt>Started by</dt><dd>{{$e.StartedBy}}</dd>{{end}}

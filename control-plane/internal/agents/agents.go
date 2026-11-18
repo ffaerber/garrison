@@ -530,19 +530,19 @@ func Operator(namespace string, tools []string) Agent {
 }
 
 // OperatorPrompt is the operator's prompt.md (templates/garrison-config).
-// How the home cloud works is in every agent's system prompt (Platform), so
+// How Garrison works is in every agent's system prompt (Platform), so
 // a garrison made earlier, which keeps its own copy of this file, learns it
 // too.
 var OperatorPrompt = templates.File(templates.Platform, Dir+"/"+OperatorName+"/"+PromptFile)
 
-// Platform is how the home cloud works, in every agent's system prompt.
-const Platform = `How the home cloud works:
+// Platform is how Garrison works, in every agent's system prompt.
+const Platform = `How Garrison works:
 - A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people.
 - The agents are all garrison's, folders under agents/ in garrison/config (agent.yaml, prompt.md), which only root admins change; each works in every namespace, mentioned by its name (@operator) in the namespace's channel. A namespace gives them rights of their own in grants.yaml and routines (work they start by themselves: on a schedule, on a push, on an alert) in routines.yaml of its config, each entry naming the agent. An agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
 - The namespace garrison is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into garrison.
 - A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into garrison.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
-- An app with its own code has a repo with it (code, Dockerfile, tests; nothing of the home cloud) and names it as source. Then each branch of that repo named as an environment is deployed at its newest commit (dev as https://dev-<name>.<domain>), with an environment preview each open pull request too (https://pr-<number>-<name>.<domain>), and {{registry}}/<namespace>/<repo>:{{commit}} is the image its pipeline built for that commit.
+- An app with its own code has a repo with it (code, Dockerfile, tests; nothing of Garrison) and names it as source. Then each branch of that repo named as an environment is deployed at its newest commit (dev as https://dev-<name>.<domain>), with an environment preview each open pull request too (https://pr-<number>-<name>.<domain>), and {{registry}}/<namespace>/<repo>:{{commit}} is the image its pipeline built for that commit.
 - A new app: a namespace for it if it needs one (create_namespace; only root admins may, so ask whether an existing one fits), a repo only for code of its own (create_repo; template static-web gives a web page with its Dockerfile and pipeline, ready to build, and its README the stack to propose), then propose stacks/<name>.yaml in config. Changes to config need the approval of an admin of the namespace; it runs once merged.
 - stacks/<name>.yaml, in full (nothing else is allowed), here config/stacks/immich.yaml of the namespace photos:
     entrypoint: server         # the service that gets the hostname; it needs a port
@@ -595,9 +595,9 @@ func PlatformFiles() map[string]string {
 func System(a Agent, domain string) string {
 	var b strings.Builder
 	if a.Namespace == PlatformNamespace {
-		fmt.Fprintf(&b, "You are %s, an agent of a home cloud at %s. Here you work in no namespace in particular: work in the one the person names (ask if it is unclear) and pass it to every tool that takes one; garrison is the platform itself.\n\n", a.Name, domain)
+		fmt.Fprintf(&b, "You are %s, an agent of Garrison at %s. Here you work in no namespace in particular: work in the one the person names (ask if it is unclear) and pass it to every tool that takes one; garrison is the platform itself.\n\n", a.Name, domain)
 	} else {
-		fmt.Fprintf(&b, "You are %s, an agent of a home cloud at %s, here working in the namespace %q. Pass namespace %q to every tool that takes one, unless the person names another.\n\n", a.Name, domain, a.Namespace, a.Namespace)
+		fmt.Fprintf(&b, "You are %s, an agent of Garrison at %s, here working in the namespace %q. Pass namespace %q to every tool that takes one, unless the person names another.\n\n", a.Name, domain, a.Namespace, a.Namespace)
 	}
 	b.WriteString(strings.TrimSpace(a.Prompt))
 	b.WriteString("\n\n" + Platform)

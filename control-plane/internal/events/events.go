@@ -1,4 +1,4 @@
-// Package events keeps the home cloud's feed: one record per thing that
+// Package events keeps Garrison's feed: one record per thing that
 // happened (a push, a pipeline run, a deploy, an agent's change, a routine's
 // run) and how it went. The deployer, the gateway and the agent service
 // record into one Postgres table; the dashboard shows it, to each person only

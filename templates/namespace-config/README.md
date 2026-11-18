@@ -1,6 +1,6 @@
 # config
 
-What this namespace is: who belongs to it, its apps, and what the home cloud's agents may do here. Every change goes by pull request and needs the approval of an admin who did not write it.
+What this namespace is: who belongs to it, its apps, and what Garrison's agents may do here. Every change goes by pull request and needs the approval of an admin who did not write it.
 
 - `members.yaml`: its admins and members.
 - `stacks/<name>.yaml`: its apps, one per file, each deployed at `https://<name>.<domain>`.
@@ -8,7 +8,7 @@ What this namespace is: who belongs to it, its apps, and what the home cloud's a
 
 ## Agents
 
-The agents are the home cloud's, defined in `garrison/config`; each works in every namespace. Mention one by its name in this namespace's channel, e.g. `@operator`, and it works here, with your rights. A namespace has no agents of its own, but it may give them more:
+The agents are Garrison's, defined in `garrison/config`; each works in every namespace. Mention one by its name in this namespace's channel, e.g. `@operator`, and it works here, with your rights. A namespace has no agents of its own, but it may give them more:
 
 `grants.yaml`: rights of an agent's own, here, each for some of this namespace's people:
 
@@ -27,7 +27,7 @@ The agents are the home cloud's, defined in `garrison/config`; each works in eve
 ```yaml
 - agent: operator
   name: morning
-  schedule: "30 6 * * mon-fri"      # cron, in the home cloud's time zone; or every: 6h,
+  schedule: "30 6 * * mon-fri"      # cron, in Garrison's time zone; or every: 6h,
   owner: alice                      # on_push: {repo: web, branch: main}, on_alert: {alertname: ServiceFailing}
   task: Look at the apps' logs of the night and tell us what failed.
 ```

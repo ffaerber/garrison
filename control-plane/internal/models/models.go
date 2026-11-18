@@ -1,4 +1,4 @@
-// Package models reads and writes the LLMs the home cloud's agents use, kept
+// Package models reads and writes the LLMs Garrison's agents use, kept
 // in garrison's config repo: llm/providers.yaml (the providers and the default
 // model, changed by root admins) and llm/models.yaml (every model the
 // providers offer, written by the model sync, enabled by hand).
@@ -179,7 +179,7 @@ func Why(p Providers, c Catalog, model string) string {
 	var why string
 	switch {
 	case !ok:
-		why = fmt.Sprintf("model %s is not a model of the home cloud's providers", full)
+		why = fmt.Sprintf("model %s is not a model of Garrison's providers", full)
 	case m.Gone != "":
 		why = fmt.Sprintf("model %s is retired: its provider stopped offering it on %s", full, m.Gone)
 	case !m.Enabled:
@@ -362,7 +362,7 @@ func ProviderName(raw string) string {
 func Seed(baseURL, model string) []byte {
 	name := ProviderName(baseURL)
 	var b strings.Builder
-	b.WriteString("# The LLM providers of the home cloud's agents: OpenAI-compatible APIs. See README.md.\n")
+	b.WriteString("# The LLM providers of Garrison's agents: OpenAI-compatible APIs. See README.md.\n")
 	b.WriteString("# A provider's key is the file /etc/garrison/llm-keys/<provider> on the machine, never in Git.\n")
 	def, _ := json.Marshal(name + "/" + model)
 	u, _ := json.Marshal(baseURL)

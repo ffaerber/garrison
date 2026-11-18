@@ -233,7 +233,7 @@ func (m *MCP) handle(ctx context.Context, p Person, agent *agents.Agent, req rpc
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "garrison-gateway", "version": "1"},
-			"instructions":    "Tools to look at the home cloud and to propose changes as the person asking. Nothing here merges or deploys: a person merges proposed changes in Gitea.",
+			"instructions":    "Tools to look at Garrison and to propose changes as the person asking. Nothing here merges or deploys: a person merges proposed changes in Gitea.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil

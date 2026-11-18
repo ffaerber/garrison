@@ -13,7 +13,7 @@ import (
 	"garrison/control-plane/internal/models"
 )
 
-// LLM is the home cloud's models: llm/providers.yaml and llm/models.yaml of
+// LLM is Garrison's models: llm/providers.yaml and llm/models.yaml of
 // garrison's config repo.
 type LLM struct {
 	Providers models.Providers
@@ -91,10 +91,10 @@ func (t *Tools) listModels(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if !ok {
-		return "The home cloud has no model list yet: garrison/config has no llm/models.yaml. Agents use the default model.", nil
+		return "Garrison has no model list yet: garrison/config has no llm/models.yaml. Agents use the default model.", nil
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Models of the home cloud, from garrison/config llm/models.yaml (root admins change it by pull request).\nThe default, for agents whose agent.yaml has model empty: %s\n\nEnabled, for model: in agent.yaml:\n", l.Providers.Default)
+	fmt.Fprintf(&b, "Models of Garrison, from garrison/config llm/models.yaml (root admins change it by pull request).\nThe default, for agents whose agent.yaml has model empty: %s\n\nEnabled, for model: in agent.yaml:\n", l.Providers.Default)
 	var off, gone []string
 	for _, id := range sortedKeys(l.Catalog) {
 		m := l.Catalog[id]

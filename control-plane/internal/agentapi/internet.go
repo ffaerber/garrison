@@ -51,7 +51,7 @@ func (p *InternetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if why := p.refuse(r.Context(), c, target); why != "" {
 		log.Printf("agents: internet: %s: %s: %s refused: %s", c.Person, c.Agent, target, why)
-		http.Error(w, "refused by the home cloud: "+why, http.StatusForbidden)
+		http.Error(w, "refused by Garrison: "+why, http.StatusForbidden)
 		return
 	}
 	log.Printf("agents: internet: %s: %s: %s %s", c.Person, c.Agent, r.Method, target)
