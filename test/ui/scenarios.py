@@ -55,6 +55,16 @@ check("Open WebUI shows its channel in alice's sidebar", until, 20, lambda: alic
 check("bob, not in it, does not see it", lambda: not bob.has_channel(NS))
 
 
+def channel_has(person, text):
+    cid = next(c["id"] for c in person.owui("/api/v1/channels/") if c["name"] == NS)
+    return next((m for m in person.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50") if text in (m.get("content") or "")), None)
+
+
+check("the operator welcomes her there, with what to ask", until, 120, channel_has, alice, f"Welcome to {NS}", every=5)
+alice.channel(NS)
+alice.snap("welcome in the channel")
+
+
 def set_up_in_feed():
     alice.page.goto(f"{HOME}/?ns={NS}")
     return f"The namespace {NS} is set up" in alice.page.content()
@@ -87,6 +97,15 @@ stack_pr = check("the operator makes the repo from the template and proposes the
 check("the repo has the template's page", lambda: f"<h1>{APP}</h1>" in (raw(NS, APP, "index.html") or ""))
 # alice is shop's only person: nobody else could approve, so her own needs no other approval.
 check("as shop's only person, her own passes the approval check", until, 60, lambda: approval(NS, stack_pr or 0) == "success")
+
+
+def card_needs_no_approval():
+    alice.page.goto(f"{HOME}/c/{NS}/config/{stack_pr or 0}")
+    return "It needs no other approval here" in alice.page.content()
+
+
+check("its card on the dashboard says it needs no other approval", until, 30, card_needs_no_approval)
+alice.snap("card of the stack")
 check("alice merges it with the button", alice.merge, NS, "config", stack_pr or 0)
 check(f"https://{APP}.{DOMAIN} shows the page", until, 900, alice.page_shows, APP, f"<h1>{APP}</h1>", every=10)
 check("on white", lambda: alice.background(APP) == WHITE)
@@ -95,6 +114,7 @@ alice.snap("web on main")
 section("5. dev: a branch in Gitea, a colour by the operator, a merge into main")
 check("alice makes the branch dev in Gitea", alice.create_branch, NS, APP, "dev")
 check(f"https://dev-{APP}.{DOMAIN} comes up", until, 600, alice.page_shows, f"dev-{APP}", f"<h1>{APP}</h1>", every=10)
+alice.snap(f"dev-{APP} is up")
 colour_pr = check("the operator proposes a green background for dev", retry, alice, NS, "operator",
                   f"Change the background colour of the page of {NS}/{APP} to #2e7d32, on its branch dev: read index.html there and "
                   "propose it with the new colour, with base dev. Change nothing else. Do not ask back.",
@@ -171,11 +191,6 @@ check("the admin approves", admin.approve, NS, "config", routines_pr or 0)
 check("the approval check passes", until, 60, lambda: approval(NS, routines_pr or 0) == "success")
 check("alice merges", alice.merge, NS, "config", routines_pr or 0)
 print(f"info  greeting at {greet_at:%H:%M}, sundays at {ask_at:%H:%M} ({ZONE})", flush=True)
-
-
-def channel_has(person, text):
-    cid = next(c["id"] for c in person.owui("/api/v1/channels/") if c["name"] == NS)
-    return next((m for m in person.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=50") if text in (m.get("content") or "")), None)
 
 
 check("at its time, the greeting is posted in shop's channel", until, 600, channel_has, alice, "Routine greeting, for alice", every=15)

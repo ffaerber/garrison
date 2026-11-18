@@ -2,6 +2,8 @@
 
 A home cloud you run by talking to it, with Git underneath. See [docs/spec.md](docs/spec.md) for the design and [docs/status.md](docs/status.md) for what is built.
 
+To see how it is used, step by step with screenshots, from installing it to agents working on a schedule: [docs/walkthrough](docs/walkthrough/README.md).
+
 | Path | Contents |
 | --- | --- |
 | `install.sh` | The one-command installer |

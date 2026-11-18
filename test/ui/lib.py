@@ -185,6 +185,7 @@ class Person:
         p.wait_for_selector("#username")
         p.fill("#username", self.name)
         p.fill("#password", self.password)
+        self.snap("keycloak")
         p.click("#kc-login")
 
     def sign_in_gitea(self):
@@ -205,6 +206,7 @@ class Person:
             self.keycloak()
         p.wait_for_url(re.compile(rf"^{re.escape(CHAT)}/(?!auth)"))
         self.dismiss()
+        self.snap("chat")
         return True
 
     def sign_in_home(self):
@@ -213,6 +215,7 @@ class Person:
         if p.locator("#username").count():
             self.keycloak()
         p.wait_for_selector(".who")
+        self.snap("dashboard")
         return self.name in p.locator(".who").inner_text()
 
     # ---------- Open WebUI ----------
@@ -235,12 +238,21 @@ class Person:
         # By its address: the link's text gains an unread count.
         cid = next(c["id"] for c in self.owui("/api/v1/channels/") if c["name"] == name)
         link = p.locator(f"a[href$='/channels/{cid}']")
-        # The sidebar renders after the page; its Channels section may be
-        # closed, and opens on a click (a click on an open one closes it).
-        try:
-            link.first.wait_for(timeout=5_000)
-        except Exception:  # noqa: BLE001 - closed
-            p.get_by_text("Channels", exact=True).click()
+        # The sidebar renders after the page, and may not list a channel
+        # made since it loaded. Its Channels section may be closed, and opens
+        # on a click; a click on an open one closes it, so it is clicked only
+        # when no channel at all shows.
+        for attempt in range(6):
+            try:
+                link.first.wait_for(timeout=5_000)
+                break
+            except Exception:  # noqa: BLE001 - not shown (yet)
+                if attempt == 5:
+                    raise
+            if p.locator("a[href*='/channels/']").count():
+                p.reload()  # open, without it
+            elif p.get_by_text("Channels", exact=True).count():
+                p.get_by_text("Channels", exact=True).click()  # closed
         link.first.click()
         p.wait_for_url(f"{CHAT}/channels/**")
         p.wait_for_selector("#chat-input")
@@ -358,6 +370,7 @@ class Person:
         p.goto(f"{GIT}/org/create", wait_until="domcontentloaded")
         p.fill("#org_name", name)
         p.locator("input[name='visibility'][value='1']").check(force=True)  # limited: everyone signed in
+        self.snap("new organisation")
         p.get_by_role("button", name="Create Organization").click()
         # Gitea goes to the organisation's page or its dashboard.
         p.wait_for_url(re.compile(rf"^{re.escape(GIT)}/(org/)?{re.escape(name)}(/|$)"))
