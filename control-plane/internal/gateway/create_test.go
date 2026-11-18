@@ -215,3 +215,20 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+func TestAConfigFileTheDeployerWouldRefuseIsNotProposed(t *testing.T) {
+	valid := "entrypoint: web\nservices:\n  web:\n    image: traefik/whoami:v1.11\n    port: 80\nenvironments:\n  main: {}\n"
+	for _, c := range []struct{ ns, repo, path, content, want string }{
+		{"photos", "config", "stacks/gallery.yaml", valid, ""},
+		{"photos", "config", "config/stacks/gallery.yaml", valid, "propose stacks/gallery.yaml, not config/stacks/gallery.yaml"},
+		{"photos", "config", "stacks/gallery.yaml", "services:\n  web:\n    image: traefik/whoami:v1.11\n", "the deployer would refuse stacks/gallery.yaml"},
+		{"photos", "config", "stacks/gallery", valid, "holds only <name>.yaml files"},
+		{"photos", "config", "README.md", "anything", ""},
+		{"photos", "gallery", "config/stacks/x.yaml", "anything", ""}, // an app's repo: its own business
+	} {
+		err := checkConfigFile(c.ns, c.repo, c.path, c.content)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s/%s %s: %v, want %q", c.ns, c.repo, c.path, err, c.want)
+		}
+	}
+}

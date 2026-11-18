@@ -18,6 +18,7 @@ import (
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/gitops"
+	"garrison/control-plane/internal/stack"
 	"garrison/templates"
 )
 
@@ -447,6 +448,9 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err := validRepo(a.Repo); err != nil {
 			return "", err
 		}
+		if err := checkConfigFile(a.Namespace, a.Repo, a.Path, a.Content); err != nil {
+			return "", err
+		}
 		if err := t.checkBindings(ctx, a.Namespace, a.Repo, a.Path, a.Content); err != nil {
 			return "", err
 		}
@@ -566,6 +570,31 @@ func (o overlay) Read(ctx context.Context, path string) (string, error) {
 		return c, nil
 	}
 	return o.Files.Read(ctx, path)
+}
+
+// checkConfigFile refuses a file of a namespace's config the deployer
+// would not take: one under config/, as if the repo were a folder of
+// itself, or a stack that is not valid. The approval check would refuse
+// the pull request anyway; this way the agent hears why at once.
+func checkConfigFile(ns, repo, path, content string) error {
+	if repo != ConfigRepo {
+		return nil
+	}
+	if rest, ok := strings.CutPrefix(path, ConfigRepo+"/"); ok {
+		return fmt.Errorf("%w: paths are of the repo %s/%s itself, so nothing was proposed: propose %s, not %s", ErrInvalid, ns, ConfigRepo, rest, path)
+	}
+	name, ok := strings.CutPrefix(path, stack.Dir+"/")
+	if !ok || ns == PlatformNamespace {
+		return nil
+	}
+	name, ok = strings.CutSuffix(name, ".yaml")
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return fmt.Errorf("%w: %s/ holds only <name>.yaml files, so nothing was proposed", ErrInvalid, stack.Dir)
+	}
+	if _, err := stack.ParseIn([]byte(content), ns, name); err != nil {
+		return fmt.Errorf("%w: the deployer would refuse %s, so nothing was proposed: %v. Fix it and propose it again", ErrInvalid, path, err)
+	}
+	return nil
 }
 
 // checkBindings refuses a grants.yaml or routines.yaml of a namespace's
