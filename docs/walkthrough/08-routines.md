@@ -10,7 +10,7 @@ routine finds is posted in the namespace's channel.
 
 The simplest way is to ask in the channel:
 
-> @operator every day at 9, check that web answers and tell us here
+> @operator every day at 9, check that todo answers and tell us here
 
 The operator writes the routine into `routines.yaml` and opens a pull
 request, owned by you. If the routine changes a repo, the same pull request
@@ -28,12 +28,12 @@ schedule, in the installation's time zone; `every: 6h` works too:
   name: greeting
   schedule: "0 9 * * *"
   owner: alice
-  task: Say in one sentence that the scheduled greeting of shop ran. Change nothing.
+  task: Say in one sentence that the scheduled greeting of todo ran. Change nothing.
 - agent: operator
   name: sundays
   schedule: "5 9 * * *"
   owner: bob
-  task: "Call ask_person with exactly this question: Should the shop open on Sundays, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
+  task: "Call ask_person with exactly this question: Should done todos be cleared every Sunday, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
 ```
 
 She commits it to a new branch, and Gitea offers to propose it:
@@ -44,9 +44,9 @@ She opens the pull request. Once it is approved, she merges it:
 
 ![The pull request with the routines](img/routines-proposed.png)
 
-At its time, the greeting is posted in shop's channel:
+At its time, the greeting is posted in todo's channel:
 
-![The greeting in shop's channel](img/routines-greeting.png)
+![The greeting in todo's channel](img/routines-greeting.png)
 
 ## A routine that asks
 

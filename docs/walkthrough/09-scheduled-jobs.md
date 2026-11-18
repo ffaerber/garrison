@@ -6,7 +6,7 @@ runner, with no LLM involved. Use it for backups, reports, or cleaning up.
 
 ## Adding it
 
-alice adds `.gitea/workflows/nightly.yaml` to `shop/web` in Gitea's editor,
+alice adds `.gitea/workflows/nightly.yaml` to `todo/app` in Gitea's editor,
 on a new branch:
 
 ```yaml
@@ -19,14 +19,14 @@ defaults:
     shell: sh
 jobs:
   report:
-    runs-on: garrison-user  # shop's runner
+    runs-on: garrison-user  # todo's runner
     steps:
-      - run: echo "nightly report of shop/web"
+      - run: echo "nightly report of todo/app"
 ```
 
 ![The workflow, ready to propose](img/jobs-edit.png)
 
-shop has two people now, so main takes it only as an approved pull request.
+todo has two people now, so main takes it only as an approved pull request.
 bob approves it, and alice merges it:
 
 ![The pull request](img/jobs-proposed.png)

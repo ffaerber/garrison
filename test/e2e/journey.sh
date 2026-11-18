@@ -95,7 +95,7 @@ check "the card says it is merged"         bash -c 'grep -q "It is merged." <<<"
 check "the operator says in lab's channel that it is merged" until_true 120 lab_said "lab/config#${spr:-0}" "is merged, by alice" "I will say here when it is deployed"
 deployed() { garrison applied | grep -q "^app lab/example@$1 $2 "; }
 check "the deployer deploys main"          until_true 600 deployed main example
-shows() { page "$1" | grep -q "$2"; }
+shows() { page "$1" | grep -qF -- "$2"; }
 check "https://example.$DOMAIN shows the todo list" until_true 300 shows example "<h1>Todo</h1>"
 check "on its light grey"                  shows example "--bg: #f6f7f9"
 check "the operator says there that it is live" until_true 120 lab_said "lab/config#${spr:-0}" "is live: https://example.$DOMAIN"
