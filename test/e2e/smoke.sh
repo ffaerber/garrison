@@ -583,6 +583,35 @@ check "the next sync proposes fake-large as retired" until_true 180 models_pr_wi
 check "with the date it went"              grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: [0-9-]+\}' <<<"$(llm_file models.yaml "$(models_branch)")"
 kill "$fake_pid" 2>/dev/null || true
 
+echo "# an LLM provider and its key, on the dashboard's Models page"
+# models_post WHO FIELD=VALUE...: the page's form, as WHO; prints the status and where it leads.
+models_post() {
+  local who=$1 a=(); shift
+  for f in "$@"; do a+=(--data-urlencode "$f"); done
+  web -b "$tmp/home-$who.jar" -o /dev/null -w '%{http_code} %{redirect_url}' -H "Origin: https://$DOMAIN" -X POST "${a[@]}" "https://$DOMAIN/models"
+}
+check "alice signs in to her dashboard"    until_true 60 home_login alice
+check "bob signs in to his"                until_true 60 home_login bob
+check "the Models page is a root admin's"  test "$(feed bob /models -o /dev/null -w '%{http_code}')" = 403
+check "bob may not add a provider"         grep -q '^403' <<<"$(models_post bob action=add name=smoke url=http://127.0.0.1:9/v1 key=tok-bob)"
+check "nor an app's page, for alice"       test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://hello.$DOMAIN" -X POST -d action=add -d name=smoke -d url=http://127.0.0.1:9/v1 -d key=tok "https://$DOMAIN/models")" = 403
+res=$(models_post alice action=add name=smoke url=http://127.0.0.1:9/v1 key=tok-smoke)
+check "alice adds the provider smoke with its key; she lands on its change" grep -q "^303 https://$DOMAIN/c/garrison/config/[0-9]" <<<"$res"
+smoke_pr=${res##*/}
+check "the change adds it to providers.yaml, as alice" python3 -c '
+import json,sys
+p=json.loads(sys.argv[1]); sys.exit(0 if p["user"]["login"] == "alice" else 1)' "$(gitea_api "" "$api/repos/garrison/config/pulls/${smoke_pr:-0}")"
+check "with its URL, without its key"      bash -c 'grep -q "smoke:" <<<"$0" && grep -q "http://127.0.0.1:9/v1" <<<"$0" && ! grep -q tok-smoke <<<"$0"' "$(gitea_api "" "$api/repos/garrison/config/pulls/${smoke_pr:-0}.diff")"
+stored=$(gitea_api "" "$api/repos/garrison/config/raw/secrets/llm-smoke.yaml")
+check "its key is in garrison's config, encrypted" bash -c 'grep -q "ENC\[" <<<"$0" && ! grep -q tok-smoke <<<"$0"' "$stored"
+key_is() { [ "$(cat $ETC/llm-keys/smoke 2>/dev/null)" = "$1" ] && [ "$(stat -c %a $ETC/llm-keys/smoke)" = 600 ]; }
+check "the deployer writes it where the agent service reads it, root only" until_true 90 key_is tok-smoke
+check "the page lists the provider's key, never its value" bash -c 'grep -q "llm-smoke\|key ••••" <<<"$0" && ! grep -q tok-smoke <<<"$0"' "$(feed alice /models)"
+gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/garrison/config/pulls/${smoke_pr:-0}"
+check "alice deletes the key"              grep -q '^303' <<<"$(models_post alice action=delete name=smoke)"
+key_gone() { [ ! -e $ETC/llm-keys/smoke ]; }
+check "and the deployer removes its file"  until_true 90 key_gone
+
 }
 
 # agent: the namespace agents answer in their channels in Open WebUI, when
@@ -665,6 +694,18 @@ check "the answer links the change"        links "$answer"
 # Clean up: close the proposal.
 pr=$(python3 -c 'import json,sys; print(next(p["number"] for p in json.load(sys.stdin) if p["title"].startswith("Agent smoke test alice")))' <<<"$prs" 2>/dev/null)
 [ -n "$pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/garrison/platform/pulls/$pr"
+
+echo "# another LLM provider, through the chat"
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+answer=$(ask alice "Add the LLM provider smoke-chat to Garrison: its API is at http://127.0.0.1:9/v1." | reply)
+check "the agent proposes it, as alice"    grep -q "mcp: alice: add_provider" <<<"$(mcp_calls "$since" alice)"
+provider_pr=$(gitea_api "" "$api/repos/garrison/config/pulls?state=open&limit=50" | python3 -c '
+import json,sys
+print(next((p["number"] for p in json.load(sys.stdin) if p["title"] == "Add the LLM provider smoke-chat" and p["user"]["login"] == "alice"), ""))')
+check "a pull request on providers.yaml, by alice" test -n "$provider_pr"
+models_link() { grep -q "https://$DOMAIN/models?provider=smoke-chat" <<<"$1" || { echo "answer: $(tr '\n' ' ' <<<"$1" | head -c 400)"; return 1; }; }
+check "the answer sends the key to the Models page" models_link "$answer"
+[ -n "$provider_pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/garrison/config/pulls/$provider_pr"
 cleanup_channel
 check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len([m for m in json.load(sys.stdin) if not (m.get(\"content\") or \"\").startswith(\"**How to ask the agent\")]))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
 }
