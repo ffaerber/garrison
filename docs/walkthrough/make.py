@@ -55,7 +55,7 @@ STILLS = {
     # 07 a second person
     "members-ask": ("alice-asked-operator", 3),
     "members-approved": ("admin-approved-todo-config-2", 0),
-    "members-refused": ("bob-edited-index-html", 0),
+    "members-refused": ("bob-edited-page-html", 0),
     "members-proposed": ("bob-opened-bob-s-heading", 0),
     "members-approve": ("alice-approved-todo-app-4", 0),
     "members-merged": ("bob-merged-todo-app-4", 0),
