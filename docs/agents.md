@@ -222,6 +222,7 @@ Routines: work one of garrison's agents does in a namespace by itself, in `routi
   task: Find out why it fails and say what to change.
 ```
 
+- **Asking for one:** people ask the operator in words ("every morning at 9, take a screenshot of todo"); it proposes the routine with `add_routine`, which writes the YAML, keeps the routines there and adds the grant a run needs. Someone allowed approves it, on its card or in Gitea.
 - **Who:** a routine acts with the agent's own account in the namespace, for its owner, who must be in the namespace when it runs (else it posts that it did not run). It uses only grants that say `unattended: true` and have the owner in their `for`; otherwise it reads and reports. Its browser signs in with the agent's account in Keycloak, so `screenshot` and `browse` work, and a screenshot is proposed with the agent's account through such a grant. `propose_change`, `create_namespace` and `create_repo` need a person and are refused.
 - **Asking:** a routine that needs a choice, a fact or an approval from its owner calls `ask_person`; it ends its turn and goes on, in its sandbox, when the owner replies in the question's thread (see Notifications in [spec.md](spec.md)).
 - **When:** each routine has one of `schedule`, `every`, `on_push` and `on_alert`. The agent service looks every minute.

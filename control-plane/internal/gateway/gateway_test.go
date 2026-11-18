@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"garrison/control-plane/internal/agents"
 )
@@ -25,6 +29,10 @@ type fakeGitea struct {
 	sudo    []string
 	heads   []string         // branches of open pull requests
 	patches []map[string]any // diffpatch requests
+	// routines is homepage's routines.yaml, if set; commits are the
+	// multi-file commits proposed.
+	routines string
+	commits  []map[string]any
 }
 
 func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +50,20 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	switch {
+	case p == "/repos/homepage/config" && r.Method == http.MethodGet:
+		fmt.Fprintf(w, `{"permissions":{"push":%v}}`, as == "alice")
+	case p == "/repos/homepage/config/raw/routines.yaml" && f.routines != "":
+		io.WriteString(w, f.routines)
+	case p == "/repos/homepage/config/contents/routines.yaml" && f.routines != "", p == "/repos/homepage/config/contents/grants.yaml":
+		io.WriteString(w, `{"sha":"s-`+path.Base(p)+`"}`)
+	case p == "/repos/homepage/config/contents" && r.Method == http.MethodPost:
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		f.commits = append(f.commits, body)
+		io.WriteString(w, "{}")
+	case p == "/repos/homepage/config/pulls" && r.Method == http.MethodPost:
+		f.prs++
+		io.WriteString(w, `{"number":9,"html_url":"https://git.example.com/homepage/config/pulls/9"}`)
 	case p == "/orgs":
 		io.WriteString(w, `[{"username":"garrison","description":"the platform"},{"username":"homepage"}]`)
 	case p == "/orgs/garrison" || p == "/orgs/homepage":
@@ -946,5 +968,73 @@ func TestTheHowToNamesTheCommander(t *testing.T) {
 	}
 	if got := o.howTo(Namespace{Name: "todo"}, list, ""); strings.Contains(got, "commander") {
 		t.Errorf("how-to without one:\n%s", got)
+	}
+}
+
+func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
+	m, fg := setup(t)
+	fg.routines = "# Ours.\n- agent: operator\n  name: hourly\n  every: 1h\n  owner: alice\n  task: \"Look around.\"\n"
+	args := map[string]any{"namespace": "homepage", "agent": "marketing", "name": "morning-shot", "schedule": "0 9 * * *",
+		"task": "Take a screenshot of https://site.example.com/: then propose it.", "repo": "site"}
+	text, isErr := callText(t, m, "tok-alice", "add_routine", args)
+	if isErr || fg.prs != 1 || len(fg.commits) != 1 || !strings.Contains(text, "the routine morning-shot of marketing, on the schedule 0 9 * * *, for alice") ||
+		!strings.Contains(text, "a grant to propose in homepage/site") {
+		t.Fatalf("%q, prs %d", text, fg.prs)
+	}
+	files := map[string]string{}
+	for _, f := range fg.commits[0]["files"].([]any) {
+		op := f.(map[string]any)
+		raw, _ := base64.StdEncoding.DecodeString(op["content"].(string))
+		files[op["path"].(string)] = string(raw)
+		if op["operation"] != "update" || op["sha"] != "s-"+op["path"].(string) {
+			t.Errorf("%v: not an update of what is there", op)
+		}
+	}
+	var routines []agents.Routine
+	if err := yaml.Unmarshal([]byte(files["routines.yaml"]), &routines); err != nil || len(routines) != 2 || !strings.HasPrefix(files["routines.yaml"], "# Ours.\n") {
+		t.Fatalf("routines.yaml: %v\n%s", err, files["routines.yaml"])
+	}
+	if r := routines[1]; r.Agent != "marketing" || r.Schedule != "0 9 * * *" || r.Owner != "alice" || r.Task != args["task"] {
+		t.Errorf("the routine: %+v", r)
+	}
+	var grants []agents.Grant
+	if err := yaml.Unmarshal([]byte(files["grants.yaml"]), &grants); err != nil || len(grants) != 2 || !grants[1].Unattended || grants[1].Repo != "site" || grants[1].Level != "propose" {
+		t.Errorf("grants.yaml: %v\n%s", err, files["grants.yaml"])
+	}
+
+	// Wrong ones are not proposed: an agent garrison has not, a schedule
+	// that is none, both or neither of schedule and every, no person.
+	for _, bad := range []map[string]any{
+		{"agent": "painter", "schedule": "0 9 * * *"},
+		{"schedule": "at nine"},
+		{"schedule": "0 9 * * *", "every": "1h"},
+		{"schedule": ""},
+	} {
+		a := map[string]any{"namespace": "homepage", "agent": "marketing", "name": "x", "task": "Look."}
+		for k, v := range bad {
+			a[k] = v
+		}
+		if text, isErr := callText(t, m, "tok-alice", "add_routine", a); !isErr || fg.prs != 1 {
+			t.Errorf("%v: %q", bad, text)
+		}
+	}
+	if _, isErr := callText(t, m, "tok-alice", "add_routine", map[string]any{"namespace": "garrison", "agent": "marketing", "name": "x", "task": "x", "every": "1h"}); !isErr {
+		t.Error("a routine in garrison")
+	}
+}
+
+func TestAppendEntry(t *testing.T) {
+	e := grantEntry{Agent: "qa", Repo: "app", Level: "propose", For: "members", Unattended: true}
+	for _, c := range []struct{ in, want string }{
+		{"", "- agent: qa\n"},
+		{"[]\n", "- agent: qa\n"},
+		{"[{agent: coder, repo: app, level: propose}]\n", "- agent: coder\n"},
+		{"# Mine\n- agent: coder\n  repo: app\n  level: propose", "# Mine\n- agent: coder\n  repo: app\n  level: propose\n- agent: qa\n"},
+	} {
+		got, err := appendEntry(c.in, e)
+		var list []map[string]any
+		if err != nil || !strings.HasPrefix(got, c.want) || yaml.Unmarshal([]byte(got), &list) != nil || list[len(list)-1]["agent"] != "qa" {
+			t.Errorf("%q: %q %v", c.in, got, err)
+		}
 	}
 }

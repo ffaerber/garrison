@@ -13,7 +13,7 @@ Find out which parts the wish needs, ask once for what is missing, then make or 
 | code of their own | a repo | `<namespace>/<repo>` | create_repo, from a template (static-web, ...) |
 | it to run, at a hostname | a stack | `<namespace>/config` `stacks/<app>.yaml` | propose_change; an admin approves |
 | an agent to change a repo by itself | a grant | `<namespace>/config` `grants.yaml` | propose_change; an admin approves |
-| something done by itself: daily, hourly, on a push, when an app fails (a cron job) | a routine | `<namespace>/config` `routines.yaml` | propose_change; an admin approves |
+| something done by itself: daily, hourly, on a push, when an app fails (a cron job) | a routine | `<namespace>/config` `routines.yaml` | add_routine (on a schedule or every so often); propose_change for on_push or on_alert; an admin approves |
 
 Agents are garrison's only: a namespace never gets an `agents/` folder. A grant or routine names one of garrison's agents (find_agents lists them).
 
@@ -29,7 +29,11 @@ Do not ask for what you can look up: read the namespace's config, its stacks and
 
 ## A routine (a cron job)
 
-A routine starts an agent, as it works in the namespace, with a one-shot task. Read the namespace's `routines.yaml` first and propose it with the new entry added; keep the entries already there.
+A routine starts an agent, as it works in the namespace, with a one-shot task.
+
+For one on a schedule or every so often, call add_routine: namespace, agent, name, schedule (or every), task, and repo if the task changes a repo (a screenshot or a patch proposed into it). It writes the entry into `routines.yaml`, keeps the entries already there, adds the grant the run needs when you give repo, checks it all, and opens one pull request for the person asking, who owns the routine. Do not write that YAML yourself.
+
+For `on_push` or `on_alert`, read the namespace's `routines.yaml` first and propose it with propose_change, the new entry added and the entries already there kept. The entries look like this:
 
 ```yaml
 - agent: monitor                     # one of garrison's agents
@@ -47,7 +51,7 @@ A routine starts an agent, as it works in the namespace, with a one-shot task. R
 - Its browser signs in as the agent's own account, so screenshot and browse work, also on private environments. propose_change, create_namespace and create_repo need a person and are refused.
 - The agent must have the tools the task needs, and no more: pick the one whose role fits. The photographer takes screenshots, the monitor reads logs and metrics (good for checks and `on_alert`), the coder proposes code with propose_patch, qa tries apps in the browser. find_agents shows each agent's tools.
 
-A daily screenshot of the app todo into its repo app, for example, is a grant and a routine in `todo/config`:
+A daily screenshot of the app todo into its repo app, for example, is add_routine with agent photographer, schedule "0 9 * * *", repo app and the task below; it writes a grant and a routine in `todo/config`:
 
 ```yaml
 # grants.yaml
@@ -68,4 +72,4 @@ A daily screenshot of the app todo into its repo app, for example, is a grant an
 
 ## After proposing
 
-Before proposing a YAML file, read it once more as YAML: quoted tasks, two-space indents, one `-` per entry. Give each pull request's link and say who must approve it: an admin of the namespace who did not write it (for garrison, a root admin). Nothing happens until it is merged.
+Before proposing a YAML file with propose_change, read it once more as YAML: quoted tasks, two-space indents, one `-` per entry. Give each pull request's link and say who must approve it: an admin of the namespace who did not write it (for garrison, a root admin). Nothing happens until it is merged.

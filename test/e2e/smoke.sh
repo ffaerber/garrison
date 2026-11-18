@@ -1857,7 +1857,7 @@ routine_pr() {
 }
 if ! routine_pr >/dev/null; then
   printf 'retry the operator proposed no routine; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent todo alice "Please go ahead now: load your skill build and propose the routine in routines.yaml of todo/config with propose_change, keeping the routines there.")
+  answer=$(ask_agent todo alice "Please go ahead now: load your skill build and propose the routine in todo with add_routine.")
 fi
 check "it reads its skill build, as alice" grep -q "mcp: alice: load_skill" <<<"$(mcp_calls "$since" alice)"
 cpr=$(routine_pr)

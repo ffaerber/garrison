@@ -152,6 +152,17 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "namespace", "repo", "patch", "title"),
+		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the namespace's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes a repo (a screenshot or a patch proposed into it), give repo: the agent then also gets the grant to propose there that a run with nobody watching needs. What each run finds is posted in the namespace's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
+			"namespace":   nsArg,
+			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. monitor for checks, photographer for screenshots"),
+			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the namespace, e.g. morning-check"),
+			"schedule":    str("when, as cron in the home cloud's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
+			"every":       str("how often instead of schedule, 10m to 168h, e.g. 6h"),
+			"task":        str("what the agent does each time, as you would ask it: what to look at, what to do, what to say"),
+			"repo":        str("the namespace's repo the task changes (proposes a screenshot or a patch into), if any"),
+			"title":       str("short title of the change; default names the routine"),
+			"description": str("why"),
+		}, "namespace", "agent", "name", "task"),
 		spec("create_namespace", "Makes a new namespace (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml and its channel, where the agents work in it.", map[string]any{
 			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
 			"description": str("what it is for"),
@@ -202,6 +213,7 @@ type args struct {
 	URL                                                                                    string `json:"url"`
 	Template                                                                               string `json:"template"`
 	FullPage                                                                               bool   `json:"full_page"`
+	Agent, Schedule, Every, Task                                                           string
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp
@@ -220,7 +232,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 	// to its granted repos: only propose_patch, screenshot and merge_change,
 	// which check the grants, change anything then. Its browser signs in
 	// with the agent's account in Keycloak.
-	if p.Unattended && (name == "propose_change" || name == "create_namespace" || name == "create_repo") {
+	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_namespace" || name == "create_repo") {
 		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
 	}
 	if p.Unattended && (name == "screenshot" || name == "browse") && t.Keycloak == nil {
@@ -241,7 +253,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 
 func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name string, a args) (string, error) {
 	switch name {
-	case "propose_change", "propose_patch", "merge_change", "screenshot":
+	case "propose_change", "propose_patch", "merge_change", "screenshot", "add_routine":
 		// A change to a namespace is made with that namespace's grants,
 		// wherever the person asked.
 		there, err := t.instance(ctx, p, agent, a.Namespace)
@@ -426,6 +438,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); to deploy it, propose stacks/%s.yaml in %s/config with source: %s. Nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, a.Repo, a.Namespace, a.Repo, u), nil
 	case "merge_change":
 		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
+	case "add_routine":
+		return t.addRoutine(ctx, p, agent, a)
 	case "propose_change":
 		if err := validOrg(a.Namespace); err != nil {
 			return "", err
@@ -541,15 +555,15 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, blocked, t.links(c)), nil
 }
 
-// overlay is a config repo with one file as proposed.
+// overlay is a config repo with some files as proposed.
 type overlay struct {
 	agents.Files
-	path, content string
+	files map[string]string
 }
 
 func (o overlay) Read(ctx context.Context, path string) (string, error) {
-	if path == o.path {
-		return o.content, nil
+	if c, ok := o.files[path]; ok {
+		return c, nil
 	}
 	return o.Files.Read(ctx, path)
 }
@@ -563,18 +577,25 @@ func (t *Tools) checkBindings(ctx context.Context, ns, repo, path, content strin
 	if repo != ConfigRepo || ns == PlatformNamespace || (path != agents.GrantsFile && path != agents.RoutinesFile) {
 		return nil
 	}
+	return t.checkBindingsAt(ctx, overlay{Files: configFiles{g: t.Gitea, ns: ns, ref: "main"}, files: map[string]string{path: content}}, ns, []string{path})
+}
+
+// checkBindingsAt checks the bindings of a namespace's config as f has
+// them; only the problems of paths count, the others are not proposed.
+func (t *Tools) checkBindingsAt(ctx context.Context, f agents.Files, ns string, paths []string) error {
 	defs, err := t.Gitea.Definitions(ctx)
 	if err != nil {
 		return err
 	}
-	_, _, problems, err := agents.Bindings(ctx, overlay{Files: configFiles{g: t.Gitea, ns: ns, ref: "main"}, path: path, content: content}, defs)
+	_, _, problems, err := agents.Bindings(ctx, f, defs)
 	if err != nil {
 		return err
 	}
-	// Of this file only: the other one is not being proposed.
-	problems = slices.DeleteFunc(problems, func(s string) bool { return !strings.HasPrefix(s, path+":") })
+	problems = slices.DeleteFunc(problems, func(s string) bool {
+		return !slices.ContainsFunc(paths, func(p string) bool { return strings.HasPrefix(s, p+":") })
+	})
 	if len(problems) > 0 {
-		return fmt.Errorf("%w: %s would be refused, so nothing was proposed: %s. Fix it and propose it again; put a task or any text with a colon in double quotes", ErrInvalid, path, strings.Join(problems, "; "))
+		return fmt.Errorf("%w: %s would be refused, so nothing was proposed: %s. Fix it and propose it again; put a task or any text with a colon in double quotes", ErrInvalid, strings.Join(paths, " and "), strings.Join(problems, "; "))
 	}
 	return nil
 }
