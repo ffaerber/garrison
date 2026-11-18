@@ -29,7 +29,7 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 - **Namespace:** a Gitea organisation: a flat group of stacks with its own members, channel and Docker network. No nesting.
 - **Stack:** one app, possibly several services, described in the platform's stack format in its namespace's config repo, `config/stacks/<name>.yaml`. An app with code of its own names the repo holding it as its source; the repo itself holds nothing of Garrison. System stacks are plain Compose files, one repo each, because they are the platform itself.
 - **Service:** one container in a stack. Exactly one is the entry point.
-- **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-homepage.domain.com.
+- **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-todo.domain.com.
 - **Agents:** Garrison's agents, defined once in `garrison` and working in every namespace: the operator runs the cluster and its namespaces; coding agents build apps.
 
 ## System stack
@@ -287,8 +287,8 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 ## MVP acceptance
 
 1. One-command install on fresh Ubuntu ends at a working dashboard with TLS and SSO.
-2. The user creates a namespace "homepage" by chat, adds a member, and approves it with change cards.
-3. A coding agent, mentioned on an issue, builds a site in an empty repo; it appears at dev-homepage.domain.com, and merging dev into main publishes homepage.domain.com.
+2. The user creates a namespace "todo" by chat, adds a member, and approves it with change cards.
+3. A coding agent, mentioned on an issue, changes the todo app in its repo; the change appears at dev-todo.domain.com, and merging dev into main publishes todo.domain.com.
 4. Jellyfin deploys from a stack file with GPU access and a shared media library.
 5. Every deploy has a change record and snapshot; a restore from History works.
 6. A member without admin rights cannot gain them through the agent, nor raise an autonomy level by editing an app repo.

@@ -15,7 +15,7 @@ How agents are defined, run and updated. Status: steps 1 to 3 of the plan are bu
 
 ```
 Open WebUI ──/v1/chat/completions──▶ agent service (control plane)
-  model "homepage/marketing"          │ one container per chat
+  model "todo/marketing"              │ one container per chat
   + chat id, signed user              ▼
                                 ┌─────────────────────────────┐
                                 │ sandbox: Pi (agent harness) │
@@ -36,7 +36,7 @@ Open WebUI ──/v1/chat/completions──▶ agent service (control plane)
 
 ## Agent folders
 
-The agents are Garrison's: all of them are folders in `garrison/config`, which only root admins change. Namespaces have no agents of their own; each of garrison's agents works in every namespace. Mentioned in a namespace's channel, it works in that namespace: there it is an instance, `<namespace>/<agent>` (e.g. `homepage/marketing`), with the rights and routines that namespace gives it in its own config repo (see Accounts and grants, and Runs without a person). In a private chat, and in `garrison`'s channel, it is garrison's instance and works in whichever namespace the person names.
+The agents are Garrison's: all of them are folders in `garrison/config`, which only root admins change. Namespaces have no agents of their own; each of garrison's agents works in every namespace. Mentioned in a namespace's channel, it works in that namespace: there it is an instance, `<namespace>/<agent>` (e.g. `todo/marketing`), with the rights and routines that namespace gives it in its own config repo (see Accounts and grants, and Runs without a person). In a private chat, and in `garrison`'s channel, it is garrison's instance and works in whichever namespace the person names.
 
 ```
 garrison/config/
@@ -59,11 +59,11 @@ garrison/config/
   grants.yaml                   # garrison's own, as in any namespace
   routines.yaml
 
-homepage/config/
+todo/config/
   members.yaml
   stacks/
-  grants.yaml                   # rights of garrison's agents in homepage
-  routines.yaml                 # what they do in homepage by themselves
+  grants.yaml                   # rights of garrison's agents in todo
+  routines.yaml                 # what they do in todo by themselves
 ```
 
 `agent.yaml`:
@@ -104,13 +104,13 @@ Everyone signed in sees garrison's agents in Open WebUI. The gateway keeps an Op
 
 ### The agent's account
 
-Each agent with grants or routines in a namespace gets an account in Gitea for its work there, `agent-<namespace>-<name>` (e.g. `agent-homepage-dev`; a hash where that is longer than Gitea allows), with the full name `Agent <namespace>/<name>`. The gateway makes it, gives it write access to the repos its grants name and to no other repo of the namespace, and locks it, with that access taken away, when the agent is gone, switched off or without grants there. Nobody signs in with it and no token of it exists: the gateway acts as it through Gitea's Sudo, as it acts as people.
+Each agent with grants or routines in a namespace gets an account in Gitea for its work there, `agent-<namespace>-<name>` (e.g. `agent-todo-dev`; a hash where that is longer than Gitea allows), with the full name `Agent <namespace>/<name>`. The gateway makes it, gives it write access to the repos its grants name and to no other repo of the namespace, and locks it, with that access taken away, when the agent is gone, switched off or without grants there. Nobody signs in with it and no token of it exists: the gateway acts as it through Gitea's Sudo, as it acts as people.
 
 The same account is in Keycloak, in the realm `garrison`, so the agent can sign in where a person would: in a routine, with nobody watching, its browser (`screenshot`, `browse`) shows the apps as the agent, also private environments. The gateway makes it with the Gitea account (email `<account>@agents.invalid`, no groups) and disables it when it locks that. It gets the account's tokens through the Keycloak client `agents`, which it sets up itself: password grants only, its tokens naming `sso`, so the sign-in in front of private environments takes them; the gateway's own MCP endpoint does not. The account's password and the client's secret are derived from the admin password, which the gateway holds anyway, so there is no further secret; a password someone changes in Keycloak is set back at the next sign-in.
 
 ### Grants
 
-`grants.yaml` in `homepage/config`:
+`grants.yaml` in `todo/config`:
 
 ```yaml
 - agent: dev              # one of garrison's agents
@@ -143,7 +143,7 @@ The same account is in Keycloak, in the realm `garrison`, so the agent can sign 
 - **Each action is decided at the gateway, in this order:** if the person may do it themselves, it is done as the person, as before. Otherwise, if a grant of the repo's namespace covers the agent, repo, branch and level and the person is in its `for`, it is done with the agent's account there. Otherwise it is refused, and the agent is told which grant would be needed.
 - **Gitea limits the account too:** it may write only to its granted repos. Which branches it may merge into is the gateway's decision, as app repos take pushes from their members and have no branch protection.
 - **`merge` waits for the deployer.** Until the deployer can hold a deploy for a person's approval (not built), every merge to `main` or `dev` deploys, so the approval check refuses `merge` on those branches and asks for `autonomous`, which says what happens.
-- **Pull requests name whom they were for.** The gateway, not the model, writes *Asked by bob through homepage/dev.* into each pull request an agent opens, and *Changes added, asked by alice ...* as a comment on each addition; merges carry the same line. Runs without a person say so: *Asked by bob through homepage/dev, routine homepage/dev/nightly, with nobody watching.* The gateway logs every call with the person, the agent and what started the run.
+- **Pull requests name whom they were for.** The gateway, not the model, writes *Asked by bob through todo/dev.* into each pull request an agent opens, and *Changes added, asked by alice ...* as a comment on each addition; merges carry the same line. Runs without a person say so: *Asked by bob through todo/dev, routine todo/dev/nightly, with nobody watching.* The gateway logs every call with the person, the agent and what started the run.
 - **Someone else's work needs someone else's approval.** A shared channel is one workspace, so one person's turn may carry another's work: bob edits, alice says "merge it". The agent merges a pull request only if everyone it was asked for (its author, if a person, and every *Asked by*) is the person asking now, or if someone who did not ask for it approved it in Gitea. So people can put their own work live through an agent, and never another's unreviewed.
 
 ### New namespaces and repos
@@ -159,7 +159,7 @@ The same account is in Keycloak, in the realm `garrison`, so the agent can sign 
 
 ### Outsiders
 
-With `propose` for `everyone`, someone who is not in the namespace can ask the agent for a change, e.g. in a private chat. The agent's account in that namespace writes the branch, since the person cannot, and the pull request says *Asked by bob (not in shop) through shop/desk.* The namespace's people review and merge it as any pull request. Without that grant, an outsider gets the agent with their own rights: they read what they may read, and proposing fails with the reason.
+With `propose` for `everyone`, someone who is not in the namespace can ask the agent for a change, e.g. in a private chat. The agent's account in that namespace writes the branch, since the person cannot, and the pull request says *Asked by bob (not in todo) through todo/desk.* The namespace's people review and merge it as any pull request. Without that grant, an outsider gets the agent with their own rights: they read what they may read, and proposing fails with the reason.
 
 ### What no grant can lift
 
@@ -174,8 +174,8 @@ The gateway refuses these whatever an agent folder or `grants.yaml` says, and th
 
 A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the agent service to agents with an `agents` list, hands work to another agent: what to do, what bounds it, and what a good answer looks like, as fields, not a paragraph the other agent has to guess from.
 
-- **Whom:** only the agents in the asker's `agents` list, by name, and only those the person may use themselves (`visible`). The approval check checks that they exist. The asked agent works where the asker does: `tester`, asked by `homepage/dev`, is `homepage/tester`; `<namespace>/<agent>` names it as it works in another namespace.
-- **Rights:** the asked agent runs for the same person, with its own tools and the grants of where it works. A grant is always checked against the person who started the chain, never against the asking agent, so no detour adds rights: bob asking `homepage/dev` to ask `shop/dev` is bob asking `shop/dev`. The gateway logs the asked agent's calls as started by `agent homepage/dev`.
+- **Whom:** only the agents in the asker's `agents` list, by name, and only those the person may use themselves (`visible`). The approval check checks that they exist. The asked agent works where the asker does: `tester`, asked by `todo/dev`, is `todo/tester`; `<namespace>/<agent>` names it as it works in another namespace.
+- **Rights:** the asked agent runs for the same person, with its own tools and the grants of where it works. A grant is always checked against the person who started the chain, never against the asking agent, so no detour adds rights: bob asking `todo/dev` to ask `lab/dev` is bob asking `lab/dev`. The gateway logs the asked agent's calls as started by `agent todo/dev`.
 - **Where:** in its own sandbox for the same chat (key: the chat and the asked agent), with its own workspace. The two share work through Git, e.g. a proposal's branch or its preview.
 - **Limits:** at most three agents in one run, and never one twice, so A asking B asking A ends at once. The agent service keeps the chain in the turn's state, not in anything the model writes.
 - **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and its progress shows in the reasoning, each line under its name.
@@ -233,7 +233,7 @@ Routines: work one of garrison's agents does in a namespace by itself, in `routi
   - One run of a routine at a time.
 - **In the feed:** each run is in the dashboard's feed with its answer, for the namespace's people and the owner, and its thread shows what it did.
 - **Where the answer goes:** posted in the namespace's channel, which only its people read, under the agent's name, by the gateway's Open WebUI account.
-- **How the gateway knows:** the agent service and the gateway derive a key from the admin password, which both hold. With it, the agent service tells the gateway what started each run (`person`, `agent <id>`, `routine <id>/<name>`) and, for a routine, its owner instead of a person's token. The gateway logs such calls as `bob (nobody watching, as agent-homepage-dev)`.
+- **How the gateway knows:** the agent service and the gateway derive a key from the admin password, which both hold. With it, the agent service tells the gateway what started each run (`person`, `agent <id>`, `routine <id>/<name>`) and, for a routine, its owner instead of a person's token. The gateway logs such calls as `bob (nobody watching, as agent-todo-dev)`.
 
 ## Previews and browsing
 
@@ -265,7 +265,7 @@ A container belongs to a chat, not to an agent or a person.
 
 | Situation | Containers |
 | --- | --- |
-| Alice and Bob each chat with `homepage/marketing` | 2 |
+| Alice and Bob each chat with `todo/marketing` | 2 |
 | Alice opens a second chat with it | 3 |
 | Alice returns to her first chat the next day | Hers starts again where it left off |
 
