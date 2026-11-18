@@ -81,7 +81,8 @@ func TestTheStore(t *testing.T) {
 	s := &Store{Gitea: g, Run: fakeSOPS(t), Domain: "home.test",
 		Recipients: func(_ context.Context, ns string) ([]string, error) { return []string{pubTodo, pubRecovery}, nil }}
 
-	// Who manages which namespace's secrets: never garrison's, for now.
+	// Who manages which namespace's secrets on the Secrets page: never
+	// garrison's, whose providers' keys are on the Models page.
 	for _, c := range []struct {
 		who  string
 		want []string
@@ -122,7 +123,9 @@ func TestTheStore(t *testing.T) {
 		want                 error
 	}{
 		{"todo", "x", "v", "bob", ErrForbidden},
-		{"garrison", "x", "v", "root", ErrForbidden},
+		{"garrison", "x", "v", "root", ErrPlatformName},
+		{"garrison", "llm-openrouter", "v", "alice", ErrForbidden},
+		{"garrison", "llm-openrouter", "v", "bob", ErrForbidden},
 		{"todo", "Bad_Name", "v", "alice", ErrInvalid},
 		{"todo", "../members", "v", "alice", ErrInvalid},
 		{"todo", strings.Repeat("a", 33), "v", "alice", ErrInvalid},
@@ -132,6 +135,26 @@ func TestTheStore(t *testing.T) {
 		if err := s.Set(ctx, c.ns, c.name, c.value, c.who); !errors.Is(err, c.want) {
 			t.Errorf("%s sets %s/%s: %v, want %v", c.who, c.ns, c.name, err, c.want)
 		}
+	}
+
+	// garrison keeps its providers' keys, set by root admins only.
+	if ok, _ := s.May(ctx, "garrison", "root"); !ok {
+		t.Error("root may not manage garrison's keys")
+	}
+	if ok, _ := s.May(ctx, "garrison", "alice"); ok {
+		t.Error("alice may manage garrison's keys")
+	}
+	if err := s.Set(ctx, "garrison", "llm-openrouter", "sk-or-1", "root"); err != nil {
+		t.Fatal(err)
+	}
+	if enc := g.files["garrison/config/secrets/llm-openrouter.yaml"]; !strings.Contains(enc, "ENC[sk-or-1]") {
+		t.Errorf("garrison's key: %q", enc)
+	}
+	if err := s.Delete(ctx, "garrison", "llm-openrouter", "alice"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("alice deleted garrison's key: %v", err)
+	}
+	if err := s.Delete(ctx, "garrison", "llm-openrouter", "root"); err != nil {
+		t.Fatal(err)
 	}
 
 	// Deleting: only what exists, only by an admin.

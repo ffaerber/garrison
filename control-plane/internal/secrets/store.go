@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"garrison/control-plane/internal/models"
 )
 
 // ErrForbidden: the person may not manage the namespace's secrets.
@@ -48,28 +50,34 @@ type Store struct {
 	Domain     string
 }
 
-// PlatformNamespace has no apps of its config: the platform's own secrets
-// are kept elsewhere for now.
+// PlatformNamespace has no apps of its config. Its secrets are only the
+// LLM providers' API keys, llm-<provider> (models.KeySecret), which root
+// admins set on the dashboard's Models page and the deployer writes to the
+// agent service's key folder.
 const PlatformNamespace = "garrison"
+
+// ErrPlatformName: a secret of garrison that is not a provider's key.
+var ErrPlatformName = fmt.Errorf("%w: garrison keeps only the LLM providers' keys, llm-<provider>, set on the Models page", ErrInvalid)
 
 // ConfigRepo is the repo a namespace's secrets are in.
 const ConfigRepo = "config"
 
 // May tells whether person may manage the secrets of ns: its admins and
-// root admins.
+// root admins; garrison's, its providers' keys, root admins only.
 func (s *Store) May(ctx context.Context, ns, person string) (bool, error) {
-	if ns == PlatformNamespace || !namespace.MatchString(ns) {
+	if !namespace.MatchString(ns) {
 		return false, nil
 	}
 	admin, err := s.Gitea.IsAdmin(ctx, person)
-	if err != nil || admin {
+	if err != nil || admin || ns == PlatformNamespace {
 		return admin, err
 	}
 	role, err := s.Gitea.Role(ctx, ns, person)
 	return role == "admin", err
 }
 
-// Namespaces are those whose secrets person may manage.
+// Namespaces are those whose secrets person may manage on the Secrets page:
+// garrison's are on the Models page.
 func (s *Store) Namespaces(ctx context.Context, person string) ([]string, error) {
 	orgs, err := s.Gitea.Orgs(ctx, person)
 	if err != nil {
@@ -77,6 +85,9 @@ func (s *Store) Namespaces(ctx context.Context, person string) ([]string, error)
 	}
 	var out []string
 	for _, ns := range orgs {
+		if ns == PlatformNamespace {
+			continue
+		}
 		ok, err := s.May(ctx, ns, person)
 		if err != nil {
 			return nil, err
@@ -123,6 +134,9 @@ func (s *Store) Set(ctx context.Context, ns, name, value, person string) error {
 	if !Name.MatchString(name) {
 		return fmt.Errorf("%w: a name is lowercase letters, digits and dashes, up to 32", ErrInvalid)
 	}
+	if _, ok := models.ProviderOf(name); ns == PlatformNamespace && !ok {
+		return ErrPlatformName
+	}
 	if err := CheckValue(value); err != nil {
 		return err
 	}
@@ -154,6 +168,9 @@ func (s *Store) Set(ctx context.Context, ns, name, value, person string) error {
 func (s *Store) Delete(ctx context.Context, ns, name, person string) error {
 	if !Name.MatchString(name) {
 		return fmt.Errorf("%w: no secret is called %q", ErrInvalid, name)
+	}
+	if _, ok := models.ProviderOf(name); ns == PlatformNamespace && !ok {
+		return ErrPlatformName
 	}
 	if ok, err := s.May(ctx, ns, person); err != nil {
 		return err
