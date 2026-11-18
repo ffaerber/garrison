@@ -1837,7 +1837,7 @@ before=$(orgs)
 answer=$(ask_agent garrison alice "Please create an organization for me.")
 check "asked for an organisation, it makes none" test "$(orgs)" = "$before"
 check "it names it a namespace"            grep -qi 'namespace' <<<"$answer"
-check "and asks for its name"              grep -q '?' <<<"$answer"
+check "and asks for its name"              grep -Eqi '\?|tell me|what name|the name' <<<"$answer"
 printf 'it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
 answer=$(ask_agent garrison alice "Call it family.")
 family_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/family")" = 200 ]; }

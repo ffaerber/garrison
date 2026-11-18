@@ -275,7 +275,15 @@ save() {
   fp=$(fingerprint "$step")
   local t0=$SECONDS
   say "Saving snapshot ${NUMBER[$step]} $step"
-  multipass stop "$VM"
+  # A guest that does not power off within Multipass's five minutes (it
+  # happens, with many containers) is forced off once its disks are synced:
+  # without a stop there is no snapshot, and later steps have nothing to
+  # start from.
+  in_vm sudo sync || true
+  if ! multipass stop "$VM"; then
+    say "The VM did not stop; forcing it off"
+    multipass stop --force "$VM"
+  fi
   [ -n "$(snapshot_of "$step")" ] && multipass delete --purge "$VM.$step"
   multipass snapshot "$VM" --name "$step" --comment "$fp" >/dev/null
   multipass start "$VM"
