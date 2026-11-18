@@ -12,9 +12,9 @@ the operator to add bob.
 
 ![alice asks the operator to add bob](img/members-ask.png)
 
-Changing who belongs to a namespace needs someone else's approval, so a
-root admin approves the pull request. Then alice merges it, and within a
-minute bob sees shop's channel.
+alice is still shop's only person, so her own change needs nobody else's
+approval; here a root admin approves it too. Then alice merges it, and
+within a minute bob sees shop's channel.
 
 ![The admin approves](img/members-approved.png)
 

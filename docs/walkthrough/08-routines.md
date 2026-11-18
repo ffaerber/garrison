@@ -38,9 +38,11 @@ schedule, in the installation's time zone; `every: 6h` works too:
   task: "Call ask_person with exactly this question: Should the shop open on Sundays, yes or no? Then end your turn. When you have the answer, say in one sentence what bob decided."
 ```
 
-![routines.yaml in Gitea's editor](img/routines-edit.png)
+She commits it to a new branch, and Gitea offers to propose it:
 
-She proposes it as a pull request. Once it is approved, she merges it:
+![routines.yaml, ready to propose](img/routines-edit.png)
+
+She opens the pull request. Once it is approved, she merges it:
 
 ![The pull request with the routines](img/routines-proposed.png)
 

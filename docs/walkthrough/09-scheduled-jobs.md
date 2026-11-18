@@ -26,7 +26,7 @@ jobs:
       - run: echo "nightly report of shop/web"
 ```
 
-![The workflow in Gitea's editor](img/jobs-edit.png)
+![The workflow, ready to propose](img/jobs-edit.png)
 
 shop has two people now, so main takes it only as an approved pull request.
 bob approves it, and alice merges it:
