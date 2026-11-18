@@ -701,6 +701,11 @@ check "the todo app's source goes to todo/app" installer/push-repo.sh --update t
 # A config repo is there once its files are: members.yaml, on main.
 has_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/${1:-todo}/config/raw/members.yaml?ref=main")" = 200 ]; }
 check "todo has its config"            until_true 120 has_config
+# The talk step's quotes app, which fails for a missing setting: pushed now,
+# while alice is todo's only person. Once it has more, the members sync
+# protects main of every repo, and a push right after making the repo would
+# race it.
+check "the quotes app's source goes to todo/quotes" installer/push-repo.sh --update todo/quotes test/e2e/apps/quotes
 check "alice adds its stack to todo's config" set_stack todo todo "$tmp/todo-app.stack.yaml"
 # head_of BRANCH: the branch's commit, waiting for Gitea to have it.
 head_of() {
@@ -1716,7 +1721,8 @@ opr=$(propose_config operator "The operator looks when an app keeps failing" "ro
 check "carol approves the operator's alert routine" test "$(review config carol "$opr")" = 200
 check "the approval check passes"          until_true 90 approval_is "$opr" success
 check "alice merges it"                    test "$(merge config alice "$opr")" = 200
-check "the quotes app's source goes to todo/quotes" installer/push-repo.sh --update todo/quotes test/e2e/apps/quotes
+# Its source, todo/quotes, was pushed by the deploy step: todo has several
+# people now, so nobody pushes to main of its repos any more.
 check "alice adds its stack, carol approves" set_stack todo quotes test/e2e/apps/stacks/quotes.yaml carol
 quotes_deployed() { garrison applied | grep -q "^app todo/quotes@main quotes "; }
 check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed

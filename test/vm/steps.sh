@@ -63,7 +63,7 @@ inputs() {
     login)    echo test/e2e/smoke.sh ;;
     platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
     agent)    echo test/e2e/smoke.sh ;;
-    deploy)   echo test/e2e/smoke.sh templates/app installer/push-repo.sh ;;
+    deploy)   echo test/e2e/smoke.sh templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
     talk)     echo test/e2e/smoke.sh test/e2e/apps docs/scenarios.md ;;
     journey)  echo test/e2e/smoke.sh test/e2e/journey.sh ;;
     ui)       echo test/e2e/smoke.sh test/ui ;;
