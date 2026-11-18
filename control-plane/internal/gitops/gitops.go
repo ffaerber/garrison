@@ -53,6 +53,7 @@ type Config struct {
 	ClaimsFile   string          // hostname claims; WorkDir/claims.json if empty
 	Events       events.Recorder // optional: the feed, which gets each deploy, removal and failure
 	Keys         *secrets.Keys   // the namespaces' keys, which decrypt stored secrets; nil: apps with them are left alone
+	LLMKeysDir   string          // where the agent service reads the LLM providers' keys, which garrison's config keeps; empty: not written
 
 	password string
 	home     string            // HOME for git, holding the .netrc
@@ -433,6 +434,13 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	if c.Apps {
 		if err := c.listSnapshots(ctx); err != nil {
 			log.Printf("snapshots: %v", err)
+		}
+	}
+	// The providers' keys follow every sync, from garrison's config.
+	if c.LLMKeysDir != "" && c.Keys != nil && checkouts["config"] != "" {
+		if err := syncLLMKeys(ctx, c.Keys, checkouts["config"], c.LLMKeysDir, filepath.Join(c.WorkDir, llmKeysState),
+			func(e events.Event) { c.record(ctx, e) }); err != nil {
+			log.Printf("llm keys: %v", err)
 		}
 	}
 	// Dashboards follow every sync; Grafana may still be starting, so a

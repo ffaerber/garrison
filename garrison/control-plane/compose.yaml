@@ -25,6 +25,9 @@ services:
       # The namespaces' age keys: it decrypts their stored secrets for their
       # apps, and gives the dashboard the public keys at /secrets/<ns>/recipients.
       - -keys=/etc/garrison/sops
+      # The LLM providers' keys set on the dashboard's Models page, kept
+      # encrypted in garrison's config: written here for the agent service.
+      - -llm-keys=/etc/garrison/llm-keys
     secrets:
       - admin-password
       - garrison-db-password
@@ -33,6 +36,7 @@ services:
       - /etc/garrison/install.env:/etc/garrison/install.env:ro
       # Only the deployer has the keys; the installer made the directory.
       - /etc/garrison/sops:/etc/garrison/sops
+      - /etc/garrison/llm-keys:/etc/garrison/llm-keys
       # Shared with the CLI on the host: checkouts, state and lock.
       - /var/lib/garrison/deployer:/var/lib/garrison/deployer
     networks: [system]
