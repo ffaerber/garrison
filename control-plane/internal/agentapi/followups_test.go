@@ -2,6 +2,7 @@ package agentapi
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/gateway"
 )
 
 type fakeCards map[string]changes.Card // ns/repo#n
@@ -119,5 +121,54 @@ func TestAnAgentsOwnMergeIsNotRepeated(t *testing.T) {
 	f.Check(ctx)
 	if p := poster.all(); len(p) != 1 || !strings.Contains(p[0].Text, "is live: https://dev-todo.x") {
 		t.Errorf("posts: %+v", p)
+	}
+}
+
+// failingPoster fails its first posts, as before a channel is made.
+type failingPoster struct {
+	*fakePoster
+	fail int
+}
+
+func (f *failingPoster) Post(ctx context.Context, p gateway.Post) (gateway.Posted, error) {
+	if f.fail > 0 {
+		f.fail--
+		return gateway.Posted{}, errors.New("no channel")
+	}
+	return f.fakePoster.Post(ctx, p)
+}
+
+func TestANewNamespaceIsWelcomed(t *testing.T) {
+	ctx := context.Background()
+	feed := &events.Memory{}
+	poster := &failingPoster{fakePoster: &fakePoster{}, fail: 2}
+	now := time.Now()
+	f := &Followups{Feed: feed, Cards: fakeCards{}, Poster: poster, Dashboard: "https://home.test", Now: func() time.Time { return now }}
+	f.Check(ctx)
+	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK, Namespace: "lab", Actor: "alice", Key: "ns-lab"})
+	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK, Namespace: "gone", Actor: "bob", Key: "ns-gone"})
+	f.Check(ctx) // no channels yet
+	if len(poster.all()) != 0 || len(f.welcomes) != 2 {
+		t.Fatalf("posts %+v, waiting %d", poster.all(), len(f.welcomes))
+	}
+	f.Check(ctx)
+	p := poster.all()
+	if len(p) != 2 || p[0].Agent != "lab/operator" || p[0].Mention != "alice" || !strings.Contains(p[0].Text, "Welcome to lab") ||
+		!strings.Contains(p[0].Text, "on your dashboard, https://home.test, under Waiting for you") || len(f.welcomes) != 0 {
+		t.Fatalf("posts %+v", p)
+	}
+	f.Check(ctx)
+	if len(poster.all()) != 2 {
+		t.Error("welcomed twice")
+	}
+
+	// A channel that never comes: it stops trying.
+	poster.fail = 1000
+	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK, Namespace: "x", Actor: "bob", Key: "ns-x"})
+	f.Check(ctx)
+	now = now.Add(welcomeWait + time.Minute)
+	f.Check(ctx)
+	if len(f.welcomes) != 0 {
+		t.Error("still waiting to welcome")
 	}
 }

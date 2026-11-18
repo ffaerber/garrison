@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/gateway"
@@ -26,11 +27,25 @@ type Followups struct {
 	}
 	Poster Poster
 	Now    func() time.Time
+	// Dashboard is the dashboard's address, https://<domain>, for the
+	// welcome; "": the welcome points to Gitea.
+	Dashboard string
 
-	after   int64
-	started bool
-	waiting []awaited
+	after    int64
+	started  bool
+	waiting  []awaited
+	welcomes []welcome
 }
+
+// welcome is the greeting of a namespace just set up, still to be posted:
+// its channel follows it by moments.
+type welcome struct {
+	ns, person string
+	until      time.Time
+}
+
+// How long a welcome waits for its channel.
+const welcomeWait = 10 * time.Minute
 
 // awaited is a merged change whose deploy is still to come.
 type awaited struct {
@@ -86,7 +101,7 @@ func (f *Followups) Check(ctx context.Context) {
 		f.started = true
 		return
 	}
-	es, err := f.Feed.List(ctx, events.Query{Visibility: all, After: f.after, Kinds: []string{events.KindPRMerged, events.KindDeploy}, Limit: 200})
+	es, err := f.Feed.List(ctx, events.Query{Visibility: all, After: f.after, Kinds: []string{events.KindPRMerged, events.KindDeploy, events.KindNamespace}, Limit: 200})
 	if err != nil {
 		log.Printf("followups: %v", err)
 		return
@@ -102,9 +117,25 @@ func (f *Followups) Check(ctx context.Context) {
 			f.merged(ctx, e)
 		case events.KindDeploy:
 			f.deployed(ctx, e)
+		case events.KindNamespace:
+			if e.Namespace != "" && e.Actor != "" {
+				f.welcomes = append(f.welcomes, welcome{ns: e.Namespace, person: e.Actor, until: f.now().Add(welcomeWait)})
+			}
 		}
 	}
 	now := f.now()
+	pending := f.welcomes[:0]
+	for _, w := range f.welcomes {
+		_, err := f.Poster.Post(ctx, gateway.Post{Agent: w.ns + "/" + agents.OperatorName, Mention: w.person, Text: f.welcomeText(w.ns)})
+		switch {
+		case err == nil:
+		case now.Before(w.until):
+			pending = append(pending, w) // its channel is not there yet
+		default:
+			log.Printf("followups: welcome in %s: %v", w.ns, err)
+		}
+	}
+	f.welcomes = pending
 	kept := f.waiting[:0]
 	for _, w := range f.waiting {
 		if now.Before(w.until) {
@@ -221,4 +252,18 @@ func firstLine(s string) string {
 		line = line[:300] + "…"
 	}
 	return line
+}
+
+// welcomeText greets the person who made a namespace in its channel: what
+// they can ask for, in words, and where what is proposed waits for them.
+func (f *Followups) welcomeText(ns string) string {
+	where := "in Gitea, as a pull request"
+	if f.Dashboard != "" {
+		where = "on your dashboard, " + strings.TrimSuffix(f.Dashboard, "/") + ", under Waiting for you"
+	}
+	return fmt.Sprintf("Welcome to %[1]s, your new namespace. This is its channel: only its people read it, and here the agents work in %[1]s. Ask me in words, for example:\n\n"+
+		"- `@operator make a repo website in %[1]s from the template static-web, and put it online`\n"+
+		"- `@operator every Monday at 8, check that website answers and tell us here`\n"+
+		"- `@operator add bob to %[1]s as a member`\n\n"+
+		"What I propose waits for you %[2]s: it says in plain words what it changes, and you merge it with a click. Nothing changes before.", ns, where)
 }

@@ -43,6 +43,13 @@ lab_channel() { channel_of lab alice >/dev/null; }
 # The operator answers once lab is set up, so its channel is there as soon
 # as it has; there the agents, garrison's, work in lab.
 check "lab has its channel when the operator answers" until_true 5 lab_channel
+# lab_said TEXT...: a message in lab's channel holds every TEXT.
+lab_said() {
+  chat_api alice "$chat/api/v1/channels/$(channel_of lab alice)/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+sys.exit(0 if any(all(t in (m.get("content") or "") for t in sys.argv[1:]) for m in json.load(sys.stdin)) else 1)' "$@"
+}
+check "the operator welcomes alice there, with what to ask" until_true 120 lab_said "Welcome to lab" "@operator" "https://$DOMAIN"
 main1=$(head_of_lab example main)
 built() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/packages/lab/container/example/${1:0:12}")" = 200 ]; }
 check "the pipeline builds main's image"   until_true 900 built "$main1"
@@ -76,12 +83,6 @@ check "its card says what it changes, in plain words" bash -c 'grep -q "how the 
 check "a post from another site is refused" test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://example.$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 403
 check "alice merges it on its card"        test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 303
 check "the card says it is merged"         bash -c 'grep -q "It is merged." <<<"$0"' "$(card)"
-# lab_said TEXT...: a message in lab's channel holds every TEXT.
-lab_said() {
-  chat_api alice "$chat/api/v1/channels/$(channel_of lab alice)/messages?skip=0&limit=50" | python3 -c '
-import json,sys
-sys.exit(0 if any(all(t in (m.get("content") or "") for t in sys.argv[1:]) for m in json.load(sys.stdin)) else 1)' "$@"
-}
 check "the operator says in lab's channel that it is merged" until_true 120 lab_said "lab/config#${spr:-0}" "is merged, by alice" "I will say here when it is deployed"
 deployed() { garrison applied | grep -q "^app lab/example@$1 $2 "; }
 check "the deployer deploys main"          until_true 600 deployed main example
