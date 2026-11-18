@@ -132,6 +132,11 @@ func baseSpecs() []Spec {
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
+		spec("add_provider", "Proposes another LLM provider, an OpenAI-compatible API, in llm/providers.yaml of garrison/config, as a pull request by the person asking; only root admins may. Once merged, its models are listed by the model sync, turned off until a root admin enables them. Never ask for or pass its API key: the person sets it on the dashboard's Models page, whose link the answer gives. If they paste a key into the chat, do not repeat or use it; tell them to replace it at the provider, as the chat keeps it, and to set the new one on that page.", map[string]any{
+			"name":    str("the provider's name in Garrison: lowercase letters, digits and dashes, at most 28, e.g. openrouter"),
+			"url":     str("the API's base URL, the one /chat/completions and /models are under, e.g. https://openrouter.ai/api/v1"),
+			"include": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "optional: only its models matching one of these patterns, e.g. [\"anthropic/*\"]; empty for all"},
+		}, "name", "url"),
 		spec("list_repos", "Lists the repos of a namespace. In garrison, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
 		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "namespace", "repo"),
 		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "namespace", "repo", "path"),
@@ -215,6 +220,7 @@ type args struct {
 	Template                                                                               string `json:"template"`
 	FullPage                                                                               bool   `json:"full_page"`
 	Agent, Schedule, Every, Task                                                           string
+	Include                                                                                []string
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp
@@ -233,7 +239,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 	// to its granted repos: only propose_patch, screenshot and merge_change,
 	// which check the grants, change anything then. Its browser signs in
 	// with the agent's account in Keycloak.
-	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_namespace" || name == "create_repo") {
+	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_namespace" || name == "create_repo" || name == "add_provider") {
 		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
 	}
 	if p.Unattended && (name == "screenshot" || name == "browse") && t.Keycloak == nil {
@@ -360,6 +366,21 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			"\nTo change it, propose a new members.yaml in the repo config. It needs the approval of an admin who did not write the change and whose role it does not change.", nil
 	case "list_models":
 		return t.listModels(ctx)
+	case "add_provider":
+		note := ""
+		if agent != nil {
+			note = askedBy(p, agent, "admin")
+		}
+		c, err := t.Gitea.ProposeProvider(ctx, p.Name, a.Name, a.URL, a.Include, note)
+		if err != nil {
+			return "", err
+		}
+		keys := "the dashboard's Models page"
+		if t.Dashboard != "" {
+			keys = strings.TrimSuffix(t.Dashboard, "/") + "/models?provider=" + url.QueryEscape(a.Name)
+		}
+		return fmt.Sprintf("Opened change %s/%s#%d, which adds the LLM provider %s at %s. Nothing is changed yet: a root admin must review and merge it. Its API key goes on %s, never into this chat: say so, with that link. Once merged, its models come in llm/models.yaml, turned off.\n%s",
+			c.Namespace, c.Repo, c.Number, a.Name, a.URL, keys, t.links(c)), nil
 	case "list_repos":
 		repos, err := t.Gitea.Repos(ctx, p.Name, a.Namespace)
 		if err != nil {

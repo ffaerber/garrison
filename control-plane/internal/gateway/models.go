@@ -119,6 +119,35 @@ func (t *Tools) listModels(ctx context.Context) (string, error) {
 	return b.String(), nil
 }
 
+// ProposeProvider proposes llm/providers.yaml of garrison's config with an
+// LLM provider added, as the person as, who must be a root admin. Its API
+// key is never part of it: the dashboard's Models page keeps that. note, if
+// set, ends the pull request's description (whom it was asked for).
+func (g *Gitea) ProposeProvider(ctx context.Context, as, name, apiURL string, include []string, note string) (Change, error) {
+	if err := models.CheckProvider(name, apiURL, include); err != nil {
+		return Change{}, fmt.Errorf("%w: %s", ErrInvalid, strings.TrimPrefix(err.Error(), models.ErrInvalidProvider.Error()+": "))
+	}
+	if admin, err := g.IsAdmin(ctx, as); err != nil {
+		return Change{}, err
+	} else if !admin {
+		return Change{}, fmt.Errorf("%w: only root admins add LLM providers", ErrForbidden)
+	}
+	var raw string
+	status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s?ref=main", models.Namespace, models.Repo, escapePath(models.ProvidersFile)), nil, &raw)
+	if status == http.StatusNotFound {
+		return Change{}, fmt.Errorf("%w: garrison/config has no %s yet; the agent service writes it once it starts", ErrInvalid, models.ProvidersFile)
+	}
+	if err != nil {
+		return Change{}, err
+	}
+	content, err := models.AddProvider(raw, name, apiURL, include)
+	if err != nil {
+		return Change{}, fmt.Errorf("%w: %s", ErrInvalid, strings.TrimPrefix(err.Error(), models.ErrInvalidProvider.Error()+": "))
+	}
+	desc := fmt.Sprintf("Adds the LLM provider %s, %s, to %s. Once it is merged, the model sync asks it for its models within a minute and proposes them in %s, turned off; enable those agents may use there.\n\nIts API key is not in this change: a root admin sets it on the dashboard's Models page, which keeps it encrypted.", name, apiURL, models.ProvidersFile, models.ModelsFile)
+	return g.Propose(ctx, as, models.Namespace, models.Repo, models.ProvidersFile, string(content), "Add the LLM provider "+name, desc, "", note)
+}
+
 // ProposeFiles proposes files (nil: deletes) for a repo's main branch as a
 // pull request by the platform's account, on a new branch named prefix-<time>:
 // an open pull request of such a branch with the same files is left as it

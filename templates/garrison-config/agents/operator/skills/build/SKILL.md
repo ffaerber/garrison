@@ -13,6 +13,7 @@ Find out which parts the wish needs, ask once for what is missing, then make or 
 | code of their own | a repo | `<namespace>/<repo>` | create_repo, from a template (todo, ...) |
 | it to run, at a hostname | a stack | `<namespace>/config` `stacks/<app>.yaml` | propose_change; an admin approves |
 | an agent to change a repo by itself | a grant | `<namespace>/config` `grants.yaml` | propose_change; an admin approves |
+| another AI provider, for more models | a provider | `garrison/config` `llm/providers.yaml` | add_provider; root admins only. Its API key goes on the dashboard's Models page, never into the chat |
 | something done by itself: daily, hourly, on a push, when an app fails (a cron job) | a routine | `<namespace>/config` `routines.yaml` | add_routine (on a schedule or every so often); propose_change for on_push or on_alert; an admin approves |
 
 Agents are garrison's only: a namespace never gets an `agents/` folder. A grant or routine names one of garrison's agents (find_agents lists them).

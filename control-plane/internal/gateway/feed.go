@@ -23,6 +23,7 @@ var changing = map[string]bool{
 	"screenshot":       true,
 	"create_namespace": true,
 	"create_repo":      true,
+	"add_provider":     true,
 }
 
 var (
