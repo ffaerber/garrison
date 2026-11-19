@@ -466,3 +466,16 @@ print(json.dumps({"branch":"main","new_branch":branch,"message":title,"files":op
 has_account() { gitea_api "" "$api/users/$1" | grep -q '"full_name":"Agent todo/'; }
 # sandbox_of AGENT: the sandbox container of AGENT for todo's channel.
 sandbox_of() { docker ps -q --filter label=garrison.sandbox=true --filter "label=garrison.agent=$1" --filter "label=garrison.chat=channel:$(channel_of todo)" | head -n1; }
+
+# ui_run NAME: the browser scenario test/ui/NAME.py, its checks counted with
+# the others.
+ui_run() {
+  echo "# the browser scenario $1 (test/ui/$1.py), in Playwright's Chromium"
+  test/ui/run.sh "$1" 2>"$tmp/ui.err" | tee "$tmp/ui.out" || true
+  local n
+  n=$(grep -c '^FAIL' "$tmp/ui.out" || true)
+  # done() prints one of these last; without it the script broke off.
+  grep -Eq '^(all checks passed|[0-9]+ check\(s\) failed)' "$tmp/ui.out" ||
+    { echo "FAIL  the browser scenario $1 ran to the end"; tail -15 "$tmp/ui.err"; n=$((n + 1)); }
+  failed=$((failed + n))
+}

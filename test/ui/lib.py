@@ -346,6 +346,51 @@ class Person:
         self.channel(channel)
         return self.answer(self.say(agent, text), "garrison/" + agent, seconds)
 
+    def answers(self, message: str, agent: str) -> list[str]:
+        """The finished answers of agent in the thread of message of the open
+        channel, oldest first."""
+        cid = channel_id(self.page.url)
+        done = [m for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")
+                if (m.get("meta") or {}).get("model_id") == agent and (m.get("meta") or {}).get("done")]
+        return [m.get("content") or " " for m in sorted(done, key=lambda m: m.get("created_at") or 0)]
+
+    def next_answer(self, message: str, agent: str, seen: int, seconds: float = 600) -> str:
+        """The agent's answer after the first seen ones in the thread of
+        message, once finished; shows the thread."""
+        cid = channel_id(self.page.url)
+        text = until(seconds, lambda: (self.answers(message, agent)[seen:] or [None])[-1], every=5)
+        self.page.goto(f"{CHAT}/channels/{cid}?thread={message}")
+        self.page.wait_for_timeout(2000)
+        self.snap(f"answer {seen + 1} of {agent}")
+        return text
+
+    def sidebar_has(self, name: str) -> bool:
+        """Whether Open WebUI's sidebar shows the channel name to the person,
+        as they see it after loading the page."""
+        p = self.page
+        p.goto(f"{CHAT}/")
+        self.dismiss()
+        if p.locator("button[aria-label='Open Sidebar']").first.is_visible():
+            p.locator("button[aria-label='Open Sidebar']").first.click()
+        # Every signed-in person has garrison's channel: once its link shows,
+        # the list is there. The section may be closed; a click opens it.
+        links = p.locator("a[href*='/channels/']")
+        for _ in range(3):
+            try:
+                links.first.wait_for(timeout=8_000)
+                break
+            except Exception:  # noqa: BLE001 - closed, or not rendered yet
+                if p.get_by_text("Channels", exact=True).count():
+                    p.get_by_text("Channels", exact=True).first.click()
+        self.snap(f"sidebar, looking for {name}")
+        return links.filter(has_text=re.compile(rf"^\s*#?\s*{re.escape(name)}\b")).count() > 0
+
+    def reads(self, cid: str) -> bool:
+        """Whether Open WebUI lets the person read the messages of the channel
+        cid, asked by its id as a link to it would."""
+        out = self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=5")
+        return isinstance(out, list)
+
     def reply(self, message: str, text: str):
         """Replies in the thread of message of the open channel."""
         p = self.page

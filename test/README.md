@@ -4,36 +4,65 @@ End-to-end tests on a throwaway Multipass VM. The MVP acceptance list in `docs/s
 
 ```
 make test                        # unit tests, in a container
-test/vm/steps.sh                 # the end-to-end chain, resuming from the newest valid snapshot
-test/vm/steps.sh login           # stop after the step `login`
-test/vm/steps.sh --from install  # rerun from `install`
-test/vm/steps.sh --list          # steps, their snapshots, and whether those are still valid
-test/vm/steps.sh --clean         # delete the VM and its snapshots
+test/vm/steps.sh                 # every scenario that is not green yet, up to JOBS (4) VMs at once
+test/vm/steps.sh routines people # only these, and the fixtures they start from
+test/vm/steps.sh --from install  # rerun from `install`: it and all that grows from it
+test/vm/steps.sh --list          # the tree: each step's kind, state and minutes
+test/vm/steps.sh --clean         # delete the VMs, their snapshots and the green marks
+KEEP=1 test/vm/steps.sh guided   # keep a passing scenario's VM, to look around in it
+JOBS=2 test/vm/steps.sh          # at most 2 VMs at once
 LLM=cloud test/vm/steps.sh       # the agents on Ollama's cloud instead of the local Ollama
 LOCAL_MODEL=nemotron-3.5-lightning:latest test/vm/steps.sh   # another local model
+test/e2e/smoke.sh roles          # in a VM: one scenario, test/e2e/scenarios/roles.sh
 ```
 
 The agents run on Ollama on this computer by default (`qwen3.8-64k`), reached from the VM through its gateway; Ollama must listen on more than localhost (`OLLAMA_HOST=0.0.0.0`). No key is needed.
 
-## The chain
+## The tree
 
-| Step | Does | Starts from |
+A **fixture** is a state scenarios start from; green, it is saved as a snapshot of its own VM. A **scenario** is a test: it runs in a fresh clone of its fixture's VM, which is deleted when it passes and kept, stopped, when it fails (`garrison-test-<scenario>`), so one failure stops nothing else. Up to `JOBS` VMs run at once (8 GB each).
+
+```
+1 base [F] - 2 install [F] - 3 login [F] -+- 4.1 platform
+                                          +- 4.2 crud
+                                          +- 4.3 ui
+                                          +- 4.4 agent [F] --- 5.1 media
+                                          +- 4.5 deploy [F] -+- 5.2 journey
+                                                             +- 5.3 people
+                                                             +- 5.4 team [F] -+- 6.1 roles      6.5 commander
+                                                                              +- 6.2 change     6.6 operator
+                                                                              +- 6.3 marketing  6.7 leaving
+                                                                              +- 6.4 routines   6.8 guided
+```
+
+Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`; the browser scenarios (`ui`, `people`, `guided`) run `test/ui/<step>.py` in Playwright's Chromium, and their screenshots land in `bin/ui-shots/<step>/`. What each scenario plays is in `docs/scenarios.md`.
+
+| Step | Kind | Does |
 | --- | --- | --- |
-| `base` | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` | nothing |
-| `install` | Runs the installer, adds the test people, checks the system stack (`smoke.sh system`) | `base` |
-| `login` | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do (`smoke.sh login`) | `install` |
-| `platform` | The deployer deploying from Gitea, monitoring data, dashboards from Git (every panel's query runs, a committed dashboard appears, an edit in Grafana is put back), app stacks, private environments, hostname claims, the model sync with a fake provider, and the dashboard's Models page: alice adds a provider with its key (bob and other sites may not), it is proposed and its key encrypted in `garrison/config`, the deployer writes the key file and removes it once the key is deleted (`smoke.sh platform`) | `login` |
-| `agent` | Bob and alice mention the agent of `garrison` in its channel in Open WebUI: it answers from the gateway's tools as them, reads logs and metrics, refuses bob's proposal and opens alice's as a pull request, proposes an LLM provider for alice and sends her to the Models page for its key, the scout's command `web` reads a page built by JavaScript and takes a picture of it under gVisor, and deletes its messages afterwards (`smoke.sh agent`). Talks to the real LLM: local Ollama by default, Ollama's cloud with `LLM=cloud` | `login` |
-| `deploy` | Alice creates the namespace `todo` (bob may not); alice and bob each sign in to todo and see only their own todos; it gets a build account; the app template `todo` (`templates/app/todo`) is pushed to `todo/app`, and the stack its README gives to `todo/config`; its pipeline tests, builds and pushes the image on the user runner; the deployer deploys `todo` and a `dev` branch as `dev-todo`, each with its own database; a failing test keeps the last good commit running; a job asking for the host's processes is refused; a reserved hostname is refused; deleting `dev` takes `dev-todo` down. Leaves `todo` running (`smoke.sh deploy`) | `login` |
-| `talk` | The scenarios of `docs/scenarios.md` against the real LLM, in the namespace `todo`: alice adds carol and bob through the agent and a root admin approves; bob tries to make himself an admin or root admin; carol's approval of her own demotion does not count; bob changes the todo app through the agent and carol merges, and it deploys; alice removes bob (`smoke.sh talk`) | `deploy` |
-| `journey` | Scenario 10 of `docs/scenarios.md` against the real LLM: alice has the operator make the namespace `lab` and in it the repo `example` from the template `todo`, proposes its stack, merges it on its card, makes `dev`, has the operator turn dev's background green and merges dev into main (`smoke.sh journey`) | `deploy` |
-| `media` | A namespace's media library and its file browser, as the namespace's README gives it; a fake ComfyUI outside Garrison; alice has `@media` make two pictures and a video in the styles of `media/demo` (ComfyUI gets each style's prompt, size and length in their nodes; each file has its `.json`), then a 9:16 short from them; in the file browser bob looks but may not upload, alice uploads and her agents see it, nobody makes a public link, and nothing past the sign-in gets in; asked about software updates, the commander hands the chain `software-updates` to the sentry, which asks the scout (the real web) and then the coder, who proposes a newer tag for the app's `traefik/whoami:v1.10.0` (`smoke.sh media`). Talks to the real LLM | `agent` |
-| `crud` | Every kind of thing a namespace holds, made, read, changed and removed without the LLM: alice makes the namespace `crud` (config, build account, Open WebUI group, channel and operator follow) and changes it; adds bob as member, makes him admin and removes him (teams, push rights and channel follow); makes, hides and deletes repos; adds an agent, changes it, grants it a repo (its account may write there and nowhere else; a private repo hides it from bob), takes the grant away (its account is locked) and removes it; adds an app, changes its setting and dataset size (snapshot first), removes it (hostname freed, data and secret kept); changes the approval check refuses. Then deletes the namespace with an app and an agent account: the app goes down, its channel, group, agents and build account go, the agent's account is locked; made again, the namespace starts fresh (`smoke.sh crud`) | `login` |
-| `ui` | The browser scenarios of `docs/scenarios.md` (`test/ui`), clicked and typed in Gitea, Open WebUI and the dashboard as alice, bob and the admin: the namespace `todo` and its todo app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. Its screenshots land in `bin/ui-shots/`, where `docs/walkthrough/make.py` takes the walkthrough's pictures from (`smoke.sh ui`) | `crud` |
+| `base` | fixture | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` |
+| `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; the test people; the system stack checked (`system`) |
+| `login` | fixture | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do |
+| `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page |
+| `crud` | scenario | Every kind of thing a namespace holds, made, read, changed and removed without the LLM |
+| `ui` | scenario | In the browser, as alice, bob and the admin: the namespace `todo` and its app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. `docs/walkthrough/make.py` takes the walkthrough's pictures from its screenshots |
+| `agent` | fixture | Bob and alice ask the agents of `garrison` in its channel: logs, metrics, proposals, an LLM provider, the scout's browser under gVisor |
+| `media` | scenario | A namespace's media library and file browser, `@media` with a fake ComfyUI, a short, and the chain `software-updates` |
+| `deploy` | fixture | The namespace `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
+| `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
+| `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
+| `team` | fixture | Carol an admin and bob a member, by a config pull request; the developer, tester and desk in `garrison/config`, with their grants in todo. No LLM |
+| `roles` | scenario | Bob cannot raise his own rights; nobody's approval of their own role change counts; no agent may have a grant on config |
+| `change` | scenario | Bob changes the app through an agent and carol merges; the developer with Git, on dev, with previews the tester tries; an agent installs packages |
+| `marketing` | scenario | The marketing agent's screenshots, its skill, what it may not do, its sandbox, and its routine shooting the app behind the sign-in |
+| `routines` | scenario | A routine runs when main moves, with nobody watching; a routine asks its person and goes on with the answer |
+| `commander` | scenario | The commander finds the agent and hands the work over; the operator asks what it cannot know, then does it |
+| `operator` | scenario | Why an app does not run; a new app from nothing; todo's data back |
+| `leaving` | scenario | Alice removes bob; the desk takes his request; a private repo with a private agent; an agent that may only read |
+| `guided` | scenario | In the browser: bob asks, vaguely, for a blue background; the commander asks which app, and the change goes to the app's code, carol merges and the page turns blue. An address of its own goes to the stack, in todo's config |
 
-Every green step is saved as a VM snapshot named after it. A snapshot stays valid while the files its step depends on, and those of every earlier step, are unchanged; `--list` shows which are. Change the smoke checks and the chain resumes from `install`; change the installer and it resumes from `base`. Restoring a snapshot boots the VM, so every resumed step also tests a restart.
+A fixture's snapshot, or a scenario's green mark (`bin/green/<step>`), stays valid while the files its step depends on, and those of every step on its way from `base`, are unchanged; `--list` shows which are. Change one scenario's file and only it reruns; change `lib.sh` or `smoke.sh` and everything from `login` does; change the installer and everything from `install`. Starting from a snapshot boots the VM, so every step also tests a restart.
 
-Each step copies this checkout into the VM first: tracked and new files, never ignored ones such as `.env`.
+A full run takes about 45 minutes; one scenario, about 2 minutes to clone its fixture plus its own time. Each step copies this checkout into its VM first: tracked and new files, never ignored ones such as `.env`.
 
 ## The test people
 

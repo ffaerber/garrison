@@ -3,11 +3,11 @@
 
 The UI step of the VM test (test/vm/steps.sh ui, test/ui/scenarios.py)
 clicks through Gitea, Open WebUI and the dashboard as alice and bob, and
-saves a screenshot of each step in bin/ui-shots/, named NNN-<person>-<what>.png.
+saves a screenshot of each step in bin/ui-shots/ui/, named NNN-<person>-<what>.png.
 This picks the ones the walkthrough shows and makes them smaller, into
 docs/walkthrough/img/:
 
-    python3 docs/walkthrough/make.py [SHOTS]     # SHOTS: bin/ui-shots
+    python3 docs/walkthrough/make.py [SHOTS]     # SHOTS: bin/ui-shots/ui
 
 Needs Pillow. A screenshot it cannot find is named, and nothing is written.
 """
@@ -89,7 +89,7 @@ def smaller(path: str) -> Image.Image:
 
 
 def main():
-    folder = sys.argv[1] if len(sys.argv) > 1 else "bin/ui-shots"
+    folder = sys.argv[1] if len(sys.argv) > 1 else "bin/ui-shots/ui"
     have = shots(folder)
     found, missing = {}, []
     for still, (name, which) in STILLS.items():

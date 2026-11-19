@@ -44,26 +44,28 @@ cd "$ROOT"
 #                                             +- 4.3 ui
 #                                             +- 4.4 agent [F] --- 5.1 media
 #                                             +- 4.5 deploy [F] -+- 5.2 journey
-#                                                                +- 5.3 team [F] -+- 6.1 roles
+#                                                                +- 5.3 people
+#                                                                +- 5.4 team [F] -+- 6.1 roles
 #                                                                                 +- 6.2 change
 #                                                                                 +- 6.3 marketing
 #                                                                                 +- 6.4 routines
 #                                                                                 +- 6.5 commander
 #                                                                                 +- 6.6 operator
 #                                                                                 +- 6.7 leaving
+#                                                                                 +- 6.8 guided
 #
 # deploy: the namespace todo with its app deployed, alice its only person.
 # team: carol an admin, bob a member, and the agents the scenarios share.
 # Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
 # scenario in a VM of its own, $VM-<step>, cloned from its parent's.
-STEPS=(base install login platform crud ui agent media deploy journey team roles change marketing routines commander operator leaving)
+STEPS=(base install login platform crud ui agent media deploy journey people team roles change marketing routines commander operator leaving guided)
 declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
-  [agent]=login [media]=agent [deploy]=login [journey]=deploy [team]=deploy
-  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team)
+  [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [team]=deploy
+  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
-  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [team]=5.3
-  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7)
+  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [team]=5.4
+  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8)
 FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
 
@@ -82,7 +84,8 @@ inputs() {
     login)    echo "$shared" test/e2e/scenarios/system.sh ;;
     platform) echo "$shared" test/e2e/stacks ;;
     deploy)   echo "$shared" templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
-    ui)       echo "$shared" test/ui ;;
+    ui|people|guided)
+              echo "$shared" test/ui/Dockerfile test/ui/run.sh test/ui/lib.py "test/ui/$1.py" ;;
     media)    echo "$shared" test/e2e/media templates/namespace-config/README.md ;;
     team|roles|change|marketing|routines|commander|operator|leaving)
               echo "$shared" test/e2e/apps ;;
@@ -176,22 +179,28 @@ step_journey() {
   smoke journey
 }
 
-# The browser scenarios (test/ui): people click and type in Gitea, Open WebUI
-# and the dashboard, from the namespace todo to its todo app deployed, a
-# screenshot, a scheduled job and a routine's question. Talks to the real
-# LLM. The screenshots of every step land in bin/ui-shots/.
-step_ui() {
+# The browser scenarios (test/ui/NAME.py): people click and type in Gitea,
+# Open WebUI and the dashboard. ui: from the namespace todo to its todo app
+# deployed, a screenshot, a scheduled job and a routine's question; people:
+# joining and leaving todo, as Open WebUI shows it; guided: vague requests,
+# and the agents asking what is meant. Talk to the real LLM. The screenshots
+# of every step land in bin/ui-shots/NAME/.
+browser_scenario() {
   sync_repo
   put_llm_key
-  local rc=0
-  smoke ui || rc=$?
+  local rc=0 shots=$ROOT/bin/ui-shots/$1
+  smoke "$1" || rc=$?
   in_vm sudo tar -C /var/tmp -cf /home/ubuntu/ui-shots.tar garrison-ui 2>/dev/null &&
     in_vm sudo chmod 644 /home/ubuntu/ui-shots.tar &&
-    multipass transfer "$VM:ui-shots.tar" "$ROOT/bin/ui-shots.tar" &&
-    rm -rf "$ROOT/bin/ui-shots" && mkdir -p "$ROOT/bin/ui-shots" &&
-    tar -C "$ROOT/bin/ui-shots" --strip-components=1 -xf "$ROOT/bin/ui-shots.tar" || true
+    multipass transfer "$VM:ui-shots.tar" "$ROOT/bin/ui-shots-$1.tar" &&
+    rm -rf "$shots" && mkdir -p "$shots" &&
+    tar -C "$shots" --strip-components=1 -xf "$ROOT/bin/ui-shots-$1.tar" || true
+  rm -f "$ROOT/bin/ui-shots-$1.tar"
   return $rc
 }
+step_ui()     { browser_scenario ui; }
+step_people() { browser_scenario people; }
+step_guided() { browser_scenario guided; }
 
 # A namespace's media library and its file browser; @media makes pictures
 # and a video with a fake ComfyUI outside Garrison, then cuts a short.
@@ -275,7 +284,7 @@ fingerprint() {
     prev=$({
       echo "$prev"
       declare -f "step_$s" sync_repo smoke put_llm_key
-      [[ $(declare -f "step_$s") == *scenario* ]] && declare -f scenario
+      [[ $(declare -f "step_$s") == *scenario* ]] && declare -f scenario browser_scenario
       [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL"
       files=$(inputs "$s")
       # Without paths, git ls-files would list the whole repo.

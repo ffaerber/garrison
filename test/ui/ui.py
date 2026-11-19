@@ -1,7 +1,7 @@
 """The UI scenarios: everything a person does, clicked and typed in Gitea,
 Open WebUI and the dashboard, from the namespace todo to its todo app deployed, a
 screenshot, a scheduled job and a question a routine asks. See
-docs/scenarios.md, "In the browser". Run by test/ui/run.sh.
+docs/scenarios.md, "In the browser". Run by test/ui/run.sh ui.
 """
 
 import os

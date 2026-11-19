@@ -4,7 +4,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## Works, tested end to end on a fresh Ubuntu 26.04 VM
 
-`test/vm/steps.sh` runs the end-to-end test as a chain of steps on a Multipass VM (base, install, login, platform, agent), each saved as a VM snapshot when green; see `test/README.md`.
+`test/vm/steps.sh` runs the end-to-end test as a tree on Multipass VMs: fixtures (base, install, login, agent, deploy, team), saved as snapshots, and scenarios, each in a throwaway clone of its fixture, up to four at once; see `test/README.md`.
 
 - `install.sh --answers FILE`: installs Docker and ZFS, initialises Swarm, creates the ZFS pool, generates secrets, deploys the bootstrap stacks in order (Postgres, Traefik, Keycloak, login proxy, Gitea, Actions runner), waits for Gitea Actions to build the control plane, and hands over to its deployer. Safe to run again.
 - Namespaces are Gitea organisations. The system stack is the organisation `garrison`, one repo per stack: `postgres`, `traefik`, `keycloak`, `sso`, `gitea`, `runner`, `control-plane`, `grafana`, `prometheus`, `loki`, and `platform` for contracts. Everyone signed in can read them; only root admins can change them. Gitea shows nothing without signing in.

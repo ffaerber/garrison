@@ -1,14 +1,31 @@
 # Scenarios: talking to the agents
 
-What people can and cannot get done by talking to the agents. The agents are Garrison's, defined in `garrison/config` (root admins approve them) and mentioned by name, `@operator`; in todo's channel they work in todo, with the grants and routines `todo/config` gives them. Each scenario is played against the real model by the `talk` step of `test/vm/steps.sh` (`test/e2e/smoke.sh talk`), in the channel of the namespace `todo`, which holds the todo app (its code in the repo `todo/app`, its stack in `todo/config/stacks/todo.yaml`). The app is Garrison's one example app, the template `todo` (`templates/app/todo`): the deploy step pushes it to `todo/app`, with the stack its README gives. The checks look at what happened (pull requests, their author, the approval check, team membership, push rights, deployments), not at what the agent said.
+What people can and cannot get done by talking to the agents. The agents are Garrison's, defined in `garrison/config` (root admins approve them) and mentioned by name, `@operator`; in todo's channel they work in todo, with the grants and routines `todo/config` gives them. Each scenario is played against the real model by a scenario of `test/vm/steps.sh` (its file `test/e2e/scenarios/<name>.sh`), in the channel of the namespace `todo`, which holds the todo app (its code in the repo `todo/app`, its stack in `todo/config/stacks/todo.yaml`). The app is Garrison's one example app, the template `todo` (`templates/app/todo`): the deploy step pushes it to `todo/app`, with the stack its README gives. The checks look at what happened (pull requests, their author, the approval check, team membership, push rights, deployments), not at what the agent said.
 
 People: **alice** is a root admin and created `todo`; **bob** and **carol** are regular users. Who may change `todo` is in `todo/config/members.yaml`: admins approve and merge changes, members push to its repos. A change to `members.yaml` goes in only by pull request, approved by an admin of the namespace or a root admin who neither wrote it nor has their role changed by it. The gateway checks that rule and posts it as the required status `garrison/approval`.
 
+Each scenario starts from a fixture: `deploy` (todo with its apps deployed, alice its only person) or `team` (carol an admin, bob a member, and the agents developer, tester and desk with their grants, set up without the LLM). Which scenario plays which section:
+
+| Scenario | Sections |
+| --- | --- |
+| `people` | Joining and leaving (in the browser), and 1 |
+| `roles` | 2, 3, and the grant on config of 4g |
+| `change` | 4, 4f, 4h, 4i, 4k |
+| `marketing` | 4b–4e, 4j3 |
+| `routines` | 4j, 4j2 |
+| `commander` | 4l, 9b |
+| `operator` | 7, 8, 9 |
+| `leaving` | 5, 5b, 5c, 6 |
+| `guided` | Vague requests (in the browser) |
+| `journey` | 10 |
+| `ui` | In the browser |
+
 ## 1. Alice adds carol as admin and bob as member
 
-Alice: *@operator Add carol as an admin and bob as a member of the namespace todo.*
+Played by `people`, in the browser (see Joining and leaving). Alice: *@commander Can bob and carol help out here?*
 
-- The agent opens a pull request on `todo/config`, as alice, that lists carol under admins and bob under members.
+- The commander asks back which roles, and proposes nothing until alice answers: *bob as a member, carol as an admin.*
+- Then a pull request on `todo/config`, as alice, lists carol under admins and bob under members.
 - Alice cannot approve her own pull request. But she is todo's only person, so nobody else could: her own change, which keeps her its admin, passes the approval check by itself, and alice merges it.
 - Carol joins the team `admins`, bob the team `members`; bob may now push to `todo`'s repos.
 
@@ -184,7 +201,7 @@ A daily screenshot is a routine too, with a grant for an agent with `screenshot`
 
 ## 10. An app from nothing to main
 
-Played by the `journey` step (`test/e2e/smoke.sh journey`, `test/e2e/journey.sh`), after deploy, in a namespace of its own, with the same todo app under another name. Alice is its only person, so she pushes and merges in its repos freely.
+Played by the `journey` step (`test/e2e/scenarios/journey.sh`), after deploy, in a namespace of its own, with the same todo app under another name. Alice is its only person, so she pushes and merges in its repos freely.
 
 1. Alice: *@operator Make a namespace lab, and in it the repo example from the template todo.* The namespace and the repo appear, written as alice; lab gets its channel, where the agents work in lab, and there the operator welcomes alice, with things to ask for and her dashboard's address; the pipeline builds main's image.
 2. Alice: *@operator Deploy the app example: propose stacks/example.yaml as its README says, with main and dev.* A pull request on `lab/config` that the deployer takes; the operator's answer links its card on the dashboard. A root admin approves it (as lab's only person, alice would not need that); alice's dashboard lists it under Waiting for you, and its card says in plain words that it changes how the app example is deployed and that merging deploys it. A post from another site is refused; alice merges it with the card's button. The operator says in lab's channel, mentioning her, that it is merged and that it will say when it is deployed; `https://example.<domain>`, behind the sign-in, shows alice her todo list on light grey, and the operator posts that it is live, with its address.
@@ -192,9 +209,26 @@ Played by the `journey` step (`test/e2e/smoke.sh journey`, `test/e2e/journey.sh`
 4. Alice: *@operator Change the background of the todo list to #2e7d32 on dev.* A pull request into `dev` that changes `page.html` alone; alice merges it, its pipeline tests and builds it, dev-example turns green, and example on main stays grey.
 5. Alice opens a pull request from `dev` to `main` in Gitea and merges it: example turns green, and her dashboard's feed shows lab's deploys.
 
+## Joining and leaving
+
+Played by `people` (`test/ui/people.py`), in the browser, as alice, bob and carol, from the fixture `deploy`: what each person sees in Open WebUI as people join and leave `todo`.
+
+1. **Before:** alice has todo's channel in her sidebar, with its how-to pinned; bob and carol do not, and Open WebUI refuses bob its messages even by the channel's address.
+2. **Asked vaguely:** alice asks the commander, *Can bob and carol help out here?* It asks back which roles, and proposes nothing yet. She answers in the thread, *bob as a member, carol as an admin*; the change is proposed as her, and she merges it in Gitea (as todo's only person, her own change needs nobody else).
+3. **After joining:** bob and carol find todo's channel in their sidebar, with its how-to and alice's question in its history; bob asks the operator there which stacks todo has, and it answers, working in todo for him.
+4. **Leaving, as vaguely:** alice tells the commander *bob isn't on the project any more*. It asks to confirm, or proposes it at once: a pull request takes bob out of the members and keeps alice and carol admins; carol approves it in Gitea and alice merges it.
+5. **After leaving:** the channel is gone from bob's sidebar and Open WebUI refuses him its messages, even by its address; alice and carol still have it, with its history.
+
+## Vague requests
+
+Played by `guided` (`test/ui/guided.py`), in the browser, as bob and carol, from the fixture `team`. todo has two apps, `todo/app` (the todo list) and `todo/quotes`.
+
+1. Bob: *@commander Please make the background blue.* The commander asks which app, as todo has two, and changes nothing yet. Bob: *The todo list, its page.* A pull request on `todo/app`, as bob, sets the page's background to a blue in `page.html` alone; `todo/config` is left alone. Carol approves and merges it in Gitea, and the todo list turns blue.
+2. Bob: *@commander Can the todo list have its own address, list.<our domain>?* That is the stack's, not the code's: a stack's file name is its address. A pull request on `todo/config`, as bob, changes `stacks/` only, for the address `list`, and the app's code is left alone.
+
 ## In the browser
 
-Played by the `ui` step (`test/e2e/smoke.sh ui`, `test/ui/`): Playwright's Chromium in a container on the machine, one browser per person, everything clicked and typed in Gitea, Open WebUI and the dashboard, signed in through Keycloak's own form. The checks look at the pages, and at Gitea's and Open WebUI's APIs where a page cannot tell (an agent's answer is finished, a pull request was opened). Every step's screenshot, and every failure's, lands in `bin/ui-shots/`. Selectors of Gitea's and Open WebUI's pages live in `test/ui/lib.py` only.
+Played by the `ui` step (`test/e2e/smoke.sh ui`, `test/ui/ui.py`): Playwright's Chromium in a container on the machine, one browser per person, everything clicked and typed in Gitea, Open WebUI and the dashboard, signed in through Keycloak's own form. The checks look at the pages, and at Gitea's and Open WebUI's APIs where a page cannot tell (an agent's answer is finished, a pull request was opened). Every step's screenshot, and every failure's, lands in `bin/ui-shots/<scenario>/`. Selectors of Gitea's and Open WebUI's pages live in `test/ui/lib.py` only.
 
 1. **Signing in:** alice signs in to Gitea through Keycloak, then to Open WebUI and the dashboard without typing her password again; bob and the admin sign in too.
 2. **A namespace in Gitea's form:** alice fills in New Organisation for `todo`. Within seconds Gitea lists its repo `config`, Open WebUI shows its channel in her sidebar (not in bob's), where the operator welcomes her with what to ask, and her dashboard says it is set up.
