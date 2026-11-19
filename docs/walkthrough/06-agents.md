@@ -2,9 +2,8 @@
 
 The agents are the same in every channel; in a namespace's channel they
 work in that namespace. The channel's pinned message lists them: the
-operator runs namespaces and apps, the coder changes code, the browser
-tries apps and takes screenshots, the reviewer reviews pull requests, the monitor watches
-apps, and so on. An agent acts with the rights of the person asking. What
+operator runs namespaces and apps, the coder changes code and reviews pull requests,
+the monitor watches apps, tries them and takes screenshots, and so on. An agent acts with the rights of the person asking. What
 it changes is a pull request, which only people allowed to merge can apply.
 
 ## A screenshot for the repo

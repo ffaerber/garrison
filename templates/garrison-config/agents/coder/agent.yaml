@@ -1,6 +1,7 @@
-# The coder: changes the code of a namespace's apps, as patches.
-description: Changes the code of the apps (features, fixes, dependencies) and proposes it as pull requests
+# The coder: changes the code of a namespace's apps, as patches, and reviews
+# pull requests.
+description: Changes the code of the apps (features, fixes, dependencies) as pull requests, and reviews pull requests (bugs, risks, missing tests)
 model: ""
 tools: [list_namespaces, list_repos, list_files, read_file, list_changes, list_stacks, propose_patch, merge_change]
-agents: [reviewer, browser]
+agents: [monitor]
 internet: [packages]

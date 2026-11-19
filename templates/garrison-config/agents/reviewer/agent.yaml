@@ -1,4 +1,0 @@
-# The reviewer: reads pull requests and says what it finds. Changes nothing.
-description: Reviews pull requests (bugs, risks, missing tests) and changes nothing
-model: ""
-tools: [list_repos, list_files, read_file, list_changes]

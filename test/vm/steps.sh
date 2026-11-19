@@ -168,7 +168,7 @@ step_ui() {
 }
 
 # A namespace's media library and its file browser; @media makes pictures
-# and a video with a fake ComfyUI outside Garrison, @shorts cuts a short.
+# and a video with a fake ComfyUI outside Garrison, then cuts a short.
 # Talks to the real LLM.
 step_media() {
   sync_repo

@@ -54,12 +54,12 @@ sys.exit(0 if pic and vid else 1)' "$tmp/comfy/prompts.jsonl"
 check "alice signs in to her dashboard"    until_true 60 home_login alice
 check "the feed has what it made, for media's people" in_feed alice ns=media "e['kind'] == 'media' and e['agent'] == 'media/media'"
 
-echo "# @shorts cuts a short from them"
-answer=$(ask_agent media alice "Make a short vertical video of at most 15 seconds from the pictures and the video of the project demo. Do not ask back." shorts)
+echo "# @media cuts a short from them"
+answer=$(ask_agent media alice "Make a short vertical video of at most 15 seconds from the pictures and the video of the project demo. Do not ask back." media)
 short() { ls "$lib"/demo/shorts/short-*.mp4 >/dev/null 2>&1; }
 if ! short; then
-  printf 'retry @shorts made none; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." shorts)
+  printf 'retry @media made no short; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." media)
 fi
 check "a short in the library"             short
 sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)

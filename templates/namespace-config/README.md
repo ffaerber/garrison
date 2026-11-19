@@ -8,7 +8,7 @@ What this namespace is: who belongs to it, its apps, and what Garrison's agents 
 
 ## Media
 
-The namespace's media library is the share `media`: a folder of pictures, videos and other files its people and agents share. It exists once a stack mounts it. Then the agents see it at `/data/media` in this namespace's channel and routines, and `@media` makes pictures and videos into it, `@shorts` short videos from them. This file browser, `stacks/files.yaml`, shows it at `https://files.<domain>`: everyone signed in looks and downloads, and this namespace's people (`{{members}}`, from `members.yaml`) upload, rename and delete.
+The namespace's media library is the share `media`: a folder of pictures, videos and other files its people and agents share. It exists once a stack mounts it. Then the agents see it at `/data/media` in this namespace's channel and routines, and `@media` makes pictures, videos and short videos into it. This file browser, `stacks/files.yaml`, shows it at `https://files.<domain>`: everyone signed in looks and downloads, and this namespace's people (`{{members}}`, from `members.yaml`) upload, rename and delete.
 
 ```yaml
 entrypoint: web
