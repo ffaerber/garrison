@@ -87,7 +87,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		names = append(names, a.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"coder", "commander", "media", "monitor", "operator", "researcher"}; len(problems) > 0 || !slices.Equal(names, want) {
+	if want := []string{"coder", "commander", "media", "operator", "researcher", "scout"}; len(problems) > 0 || !slices.Equal(names, want) {
 		t.Fatalf("got %v, want %v; %v", names, want, problems)
 	}
 	// Each has a role of its own, and only the tools it needs: only the

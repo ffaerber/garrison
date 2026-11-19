@@ -9,7 +9,7 @@ An installation starts with these, each with only the tools its role needs:
 | `operator` | Sets up and changes namespaces, repos and apps; every tool |
 | `commander` | Finds the agent for a task and hands it over; no tools of its own |
 | `coder` | Changes code as pull requests (`propose_patch`; `merge_change` where a grant allows) and reviews pull requests; reaches the package registries |
-| `monitor` | Reads state, logs and metrics, tries the apps in the browser, and explains what is wrong; takes screenshots it proposes into a repo, and changes nothing else; fits `on_alert` routines |
+| `scout` | Reads state, logs and metrics, tries the apps in the browser, and explains what is wrong; takes screenshots it proposes into a repo, and changes nothing else; fits `on_alert` routines |
 | `researcher` | Researches on the public web; no access to Garrison's repos |
 | `media` | Makes pictures and videos with ComfyUI in a project's styles (`generate_media`), and cuts short vertical videos from them with ffmpeg, into the namespace's media library; its skill `media-project` says how a project is laid out |
 
