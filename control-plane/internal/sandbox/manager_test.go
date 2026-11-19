@@ -183,3 +183,24 @@ func TestOwnAddress(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+// A namespace's media library is bound at /data/media, with the label the
+// guard checks it against; a sandbox that gains or loses it restarts.
+func TestTheMediaLibraryIsBound(t *testing.T) {
+	m, d := manager(t)
+	w := sandbox.Want{Key: "k", Agent: "media/operator", Person: "alice", Media: "/garrison/ns/media/shares/media"}
+	ask(t, m, w, "hi")
+	for _, c := range d.Containers {
+		if c.Labels[sandbox.NamespaceLabel] != "media" {
+			t.Errorf("labels %v", c.Labels)
+		}
+		if len(c.Mounts) != 2 || c.Mounts[1] != (sandboxtest.Mount{Type: "bind", Source: w.Media, Target: sandbox.MediaTarget}) {
+			t.Errorf("mounts %v", c.Mounts)
+		}
+	}
+	w.Media = ""
+	ask(t, m, w, "hi")
+	if d.Created != 2 || d.Running() != 1 {
+		t.Errorf("created %d, running %d", d.Created, d.Running())
+	}
+}

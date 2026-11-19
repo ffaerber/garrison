@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"sync"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -19,6 +20,13 @@ import (
 // Label marks the containers and volumes of sandboxes; the sandbox guard
 // lets the agent service touch nothing else.
 const Label = "garrison.sandbox"
+
+// NamespaceLabel names the namespace a sandbox works in; the guard binds
+// only that namespace's media library.
+const NamespaceLabel = "garrison.namespace"
+
+// MediaTarget is where the namespace's media library is in a sandbox.
+const MediaTarget = "/data/media"
 
 // Want is the sandbox a turn needs.
 type Want struct {
@@ -29,6 +37,15 @@ type Want struct {
 	Model      string
 	Prompt     string // the system prompt
 	Definition string // changes when the agent's definition does
+	// Media, if set, is the host folder of the namespace's media library,
+	// bound at /data/media; a change restarts the sandbox between turns.
+	Media string
+}
+
+// Namespace is the namespace the agent works in, from Agent.
+func (w Want) Namespace() string {
+	ns, _, _ := strings.Cut(w.Agent, "/")
+	return ns
 }
 
 // Manager starts, reuses and stops the sandboxes.
@@ -147,7 +164,7 @@ func (m *Manager) Turn(ctx context.Context, want Want, run Run, fn func(*Session
 	defer s.turn.Unlock()
 
 	s.mu.Lock()
-	stale := s.pi != nil && (s.want.Definition != want.Definition || s.image != m.Image)
+	stale := s.pi != nil && (s.want.Definition != want.Definition || s.want.Media != want.Media || s.image != m.Image)
 	if s.pi != nil {
 		select {
 		case <-s.pi.Done():
@@ -235,7 +252,8 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	if err != nil {
 		return err
 	}
-	labels := map[string]string{Label: "true", "garrison.chat": want.Chat, "garrison.agent": want.Agent, "garrison.person": want.Person}
+	labels := map[string]string{Label: "true", "garrison.chat": want.Chat, "garrison.agent": want.Agent, "garrison.person": want.Person,
+		NamespaceLabel: want.Namespace()}
 	// A container left from before (this service restarted) is replaced; the
 	// volume, with the workspace and Pi's session, stays.
 	if err := m.Docker.Remove(ctx, s.name); err != nil {
@@ -250,7 +268,7 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	}
 	spec := Spec{
 		Name: s.name, Image: m.Image, Labels: labels, Network: m.Network, Volume: s.name,
-		Memory: m.Memory, CPUs: m.CPUs, Pids: m.Pids, Runtime: m.Runtime,
+		Memory: m.Memory, CPUs: m.CPUs, Pids: m.Pids, Runtime: m.Runtime, Media: want.Media,
 		Env: []string{
 			"GARRISON_API=" + api,
 			"GARRISON_TOKEN=" + token,

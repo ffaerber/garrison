@@ -212,7 +212,8 @@ func TestVolumeListShowsOnlyJobVolumes(t *testing.T) {
 func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
 	sock, seen := fakeDocker(t)
 	g := New(sock, Policy{Network: "garrison-sandboxes", VolumePrefixes: []string{"garrison-agent-"},
-		Image: "git.example.com/garrison/sandbox", Label: "garrison.sandbox", MaxMemory: 2 << 30, Runtime: "runsc"})
+		Image: "git.example.com/garrison/sandbox", Label: "garrison.sandbox", MaxMemory: 2 << 30, Runtime: "runsc",
+		Share: "/garrison/ns/{namespace}/shares/media", ShareTarget: "/data/media", NamespaceLabel: "garrison.namespace"})
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return srv, seen
@@ -370,5 +371,56 @@ func TestANameIsNotRememberedAfterItsContainer(t *testing.T) {
 		if strings.Contains(s, "ab99gitea") || s == "POST /v1.47/containers/ab/exec" {
 			t.Errorf("reached Docker: %s", s)
 		}
+	}
+}
+
+// A sandbox of a namespace's channel may bind that namespace's media
+// library, at /data/media, and nothing else of the host.
+func TestASandboxGetsItsNamespacesMedia(t *testing.T) {
+	srv, _ := sandboxGuard(t)
+	media := func(ns, source, target string, opts map[string]any) func(c, h map[string]any) {
+		return func(c, h map[string]any) {
+			c["Labels"] = map[string]string{"garrison.sandbox": "true", "garrison.namespace": ns}
+			m := map[string]any{"Type": "bind", "Source": source, "Target": target}
+			if opts != nil {
+				m["BindOptions"] = opts
+			}
+			h["Mounts"] = append(h["Mounts"].([]map[string]any), m)
+		}
+	}
+	if code := do(t, srv, "POST", "/v1.47/containers/create?name=garrison-agent-2",
+		sandboxSpec(media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil))); code != http.StatusCreated {
+		t.Fatalf("todo's media: %d", code)
+	}
+	for name, change := range map[string]func(c, h map[string]any){
+		"another namespace's":  media("todo", "/garrison/ns/lab/shares/media", "/data/media", nil),
+		"another share":        media("todo", "/garrison/ns/todo/shares/photos", "/data/media", nil),
+		"another target":       media("todo", "/garrison/ns/todo/shares/media", "/data", nil),
+		"the host's root":      media("todo", "/", "/data/media", nil),
+		"a path out":           media("todo", "/garrison/ns/todo/shares/media/../../../..", "/data/media", nil),
+		"no namespace":         media("", "/garrison/ns//shares/media", "/data/media", nil),
+		"a namespace with dots": media("../x", "/garrison/ns/../x/shares/media", "/data/media", nil),
+		"shared propagation":   media("todo", "/garrison/ns/todo/shares/media", "/data/media", map[string]any{"Propagation": "rshared"}),
+		"twice": func(c, h map[string]any) {
+			media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil)(c, h)
+			media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil)(c, h)
+		},
+		"a bind in Binds": func(c, h map[string]any) {
+			c["Labels"] = map[string]string{"garrison.sandbox": "true", "garrison.namespace": "todo"}
+			h["Binds"] = []string{"/garrison/ns/todo/shares/media:/data/media"}
+		},
+	} {
+		if code := do(t, srv, "POST", "/v1.47/containers/create?name=garrison-agent-3", sandboxSpec(change)); code != http.StatusForbidden {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+}
+
+// The runner's guard, which has no Share, binds nothing.
+func TestAJobBindsNothing(t *testing.T) {
+	srv, _ := setup(t)
+	if code := do(t, srv, "POST", "/v1.47/containers/create", job(map[string]any{
+		"Mounts": []map[string]any{{"Type": "bind", "Source": "/garrison/ns/todo/shares/media", "Target": "/data/media"}}})); code != http.StatusForbidden {
+		t.Errorf("a job's bind: %d", code)
 	}
 }

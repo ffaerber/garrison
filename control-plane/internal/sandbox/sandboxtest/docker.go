@@ -31,12 +31,16 @@ type Docker struct {
 	Pulled     []string
 }
 
+// Mount is one of a container's mounts.
+type Mount struct{ Type, Source, Target string }
+
 // Container is a fake container.
 type Container struct {
 	ID, Name, Image string
 	Runtime, User   string
 	Env             []string
 	Labels          map[string]string
+	Mounts          []Mount
 	Running         bool
 	Removed         bool
 	messages        int
@@ -106,7 +110,10 @@ func (d *Docker) serve(w http.ResponseWriter, r *http.Request) {
 			User       string
 			Env        []string
 			Labels     map[string]string
-			HostConfig struct{ Runtime string }
+			HostConfig struct {
+				Runtime string
+				Mounts  []Mount
+			}
 		}
 		json.NewDecoder(r.Body).Decode(&b)
 		if d.Missing {
@@ -123,7 +130,7 @@ func (d *Docker) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.Created++
-		c := &Container{ID: fmt.Sprintf("c%d", d.Created), Name: name, Image: b.Image, Env: b.Env, Labels: b.Labels, Runtime: b.HostConfig.Runtime, User: b.User}
+		c := &Container{ID: fmt.Sprintf("c%d", d.Created), Name: name, Image: b.Image, Env: b.Env, Labels: b.Labels, Runtime: b.HostConfig.Runtime, User: b.User, Mounts: b.HostConfig.Mounts}
 		d.Containers[name+"#"+c.ID] = c
 		d.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)

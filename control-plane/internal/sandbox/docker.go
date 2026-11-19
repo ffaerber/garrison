@@ -113,6 +113,7 @@ type Spec struct {
 	Labels  map[string]string
 	Network string
 	Volume  string // mounted at /data
+	Media   string // if set, a host folder bound at MediaTarget
 	Memory  int64  // bytes
 	CPUs    float64
 	Pids    int64
@@ -124,9 +125,13 @@ type Spec struct {
 
 // Create creates a container whose stdin stays open for attaching.
 func (d *Docker) Create(ctx context.Context, s Spec) (string, error) {
+	mounts := []map[string]any{{"Type": "volume", "Source": s.Volume, "Target": "/data"}}
+	if s.Media != "" {
+		mounts = append(mounts, map[string]any{"Type": "bind", "Source": s.Media, "Target": MediaTarget})
+	}
 	host := map[string]any{
 		"NetworkMode": s.Network,
-		"Mounts":      []map[string]any{{"Type": "volume", "Source": s.Volume, "Target": "/data"}},
+		"Mounts":      mounts,
 		"Memory":      s.Memory,
 		"NanoCpus":    int64(s.CPUs * 1e9),
 		"PidsLimit":   s.Pids,

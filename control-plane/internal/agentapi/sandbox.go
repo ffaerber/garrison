@@ -85,12 +85,16 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 	if len(a.Asks) > 0 {
 		system += "\n\n" + AskOthers
 	}
+	media := s.media(ctx, a.Namespace)
+	if media != "" {
+		system += MediaLibrary
+	}
 	if len(run.Chain) == 0 {
 		run.Chain = []string{a.ID()}
 	}
 	want := sandbox.Want{
 		Key: key, Chat: chat, Agent: a.ID(), Person: person,
-		Model: model, Prompt: system, Definition: definition(model, system, a),
+		Model: model, Prompt: system, Definition: definition(model, system, a), Media: media,
 	}
 	max := s.MaxToolCalls
 	if max <= 0 {

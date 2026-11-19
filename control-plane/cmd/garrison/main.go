@@ -557,9 +557,13 @@ func guardCmd(args []string) error {
 	label := fs.String("label", "", "the label containers must carry, and are known by, if set")
 	maxMemory := fs.Int64("max-memory", 0, "the largest memory limit a container may ask for; if set, it must ask for one")
 	runtime := fs.String("runtime", "", "the runtime containers must run under, if set, e.g. runsc (gVisor)")
+	share := fs.String("share", "", "the one host folder a container may bind, with {namespace} for the one its -namespace-label names, e.g. /garrison/ns/{namespace}/shares/media; empty: none")
+	shareTarget := fs.String("share-target", "/data/media", "where in the container -share is bound")
+	nsLabel := fs.String("namespace-label", "garrison.namespace", "the label that names a container's namespace, for -share")
 	fs.Parse(args)
 	g := guard.New(*socket, guard.Policy{Network: *network, VolumePrefixes: strings.Split(*volumes, ","),
-		Image: *image, Label: *label, MaxMemory: *maxMemory, Runtime: *runtime})
+		Image: *image, Label: *label, MaxMemory: *maxMemory, Runtime: *runtime,
+		Share: *share, ShareTarget: *shareTarget, NamespaceLabel: *nsLabel})
 	log.Printf("docker guard on %s for %s, containers on %s", *listen, *socket, *network)
 	return (&http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe()
 }
@@ -686,6 +690,7 @@ func agentsCmd(args []string) error {
 		Domain:       domain,
 		DefaultModel: model,
 		Gitea:        g,
+		Media:        g,
 		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
 		Events:       recorder(store),
 	}

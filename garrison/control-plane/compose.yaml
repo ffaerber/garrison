@@ -137,6 +137,9 @@ services:
       - -label=garrison.sandbox
       - -max-memory=2147483648
       - -runtime=runsc
+      # A sandbox in a namespace's channel gets that namespace's media
+      # library, the share media, at /data/media: no other folder of the host.
+      - -share=/garrison/ns/{namespace}/shares/media
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [sandbox-guard]

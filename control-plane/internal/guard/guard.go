@@ -47,6 +47,12 @@ type Policy struct {
 	Label          string   // if set, containers must carry this label as "true", and are owned by it
 	MaxMemory      int64    // if set, containers must set a memory limit up to this and a process limit
 	Runtime        string   // if set, the runtime containers must run under, e.g. runsc (gVisor); else runc
+	// Share, if set, is the one host folder a container may bind, as
+	// <root>/{namespace}/<rest>, e.g. /garrison/ns/{namespace}/shares/media:
+	// only the namespace its NamespaceLabel names, and only at ShareTarget.
+	Share          string
+	ShareTarget    string
+	NamespaceLabel string
 }
 
 // Guard proxies the Docker API on a Unix socket under a Policy.
@@ -78,6 +84,7 @@ func New(socket string, p Policy) *Guard {
 }
 
 var (
+	namespaceName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 	versionPrefix = regexp.MustCompile(`^/v[0-9]+\.[0-9]+`)
 	containerPath = regexp.MustCompile(`^/containers/([^/]+)(/(start|stop|kill|wait|attach|logs|archive|json|resize|exec|restart|top|stats))?$`)
 	execPath      = regexp.MustCompile(`^/exec/([^/]+)/(start|json|resize)$`)
@@ -263,6 +270,12 @@ type createBody struct {
 		Mounts            []struct {
 			Type          string
 			Source        string
+			Target        string
+			BindOptions   *struct {
+				Propagation      string
+				NonRecursive     bool
+				CreateMountpoint bool
+			}
 			VolumeOptions *struct {
 				DriverConfig *struct {
 					Name    string
@@ -315,7 +328,16 @@ func (g *Guard) checkCreate(r *http.Request) error {
 		src, _, _ := strings.Cut(bind, ":")
 		add(strings.HasPrefix(src, "/") || !g.volumeAllowed(src), "mount of "+src)
 	}
+	shares := 0
 	for _, mt := range h.Mounts {
+		if mt.Type == "bind" {
+			shares++
+			add(shares > 1 || !g.shareAllowed(mt.Source, mt.Target, b.Labels), "mount of "+mt.Source)
+			if o := mt.BindOptions; o != nil {
+				add((o.Propagation != "" && o.Propagation != "rprivate" && o.Propagation != "private") || o.CreateMountpoint, "bind options")
+			}
+			continue
+		}
 		add(mt.Type != "volume" && mt.Type != "tmpfs", mt.Type+" mount")
 		add(mt.Type == "volume" && !g.volumeAllowed(mt.Source), "mount of "+mt.Source)
 		// Docker makes a missing volume with these: type=none, o=bind and
@@ -350,6 +372,20 @@ func (g *Guard) checkCreate(r *http.Request) error {
 		return fmt.Errorf("container asks for %s", strings.Join(bad, ", "))
 	}
 	return nil
+}
+
+// shareAllowed tells whether a container labelled labels may bind source
+// at target: Policy.Share, for the namespace its label names, and nothing
+// else.
+func (g *Guard) shareAllowed(source, target string, labels map[string]string) bool {
+	if g.Policy.Share == "" || g.Policy.NamespaceLabel == "" || target != g.Policy.ShareTarget {
+		return false
+	}
+	ns := labels[g.Policy.NamespaceLabel]
+	if !namespaceName.MatchString(ns) {
+		return false
+	}
+	return source == strings.Replace(g.Policy.Share, "{namespace}", ns, 1)
 }
 
 func (g *Guard) checkExec(r *http.Request) error {

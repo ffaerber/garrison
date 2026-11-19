@@ -49,6 +49,11 @@ type Server struct {
 	MaxToolCalls int              // tool calls per turn in a sandbox; 0: 60
 	Git          *GitProxy        // Git for the sandboxes; nil: none
 	Gitea        *gateway.Gitea   // who may use an agent (visible); nil: everyone
+	// Media reads the namespaces' configs for their media library (the
+	// share media), which their sandboxes get at /data/media; nil: none.
+	Media      MediaFiles
+	DataRoot   string // where the namespaces' datasets are on the host; render.DefaultDataRoot if empty
+	mediaCache mediaCache
 	Poster       Poster           // posts answers no message waits for; nil: none
 	Events       events.Recorder  // the feed, which gets the routines' runs; nil: none
 	Questions    *Questions       // what routines asked people (ask_person); nil: they cannot ask
