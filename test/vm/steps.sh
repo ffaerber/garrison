@@ -8,14 +8,15 @@
 # stop the others, and up to JOBS VMs run at once.
 #
 #   test/vm/steps.sh               every scenario that is not green yet
-#   test/vm/steps.sh talk media    only these, and the fixtures they start from
+#   test/vm/steps.sh routines media  only these, and the fixtures they start from
 #   test/vm/steps.sh --from login  rerun from `login`: it and all that grows from it
 #   test/vm/steps.sh --list        the tree, and what is green, valid or stale
 #   test/vm/steps.sh --clean       delete the VMs, their snapshots and the green marks
 #   JOBS=2 test/vm/steps.sh        at most 2 VMs at once (default 4)
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #
-# The scenarios that talk to a real LLM (agent, media, talk, journey, ui) use by
+# The scenarios that talk to a real LLM (agent, media, journey, ui, and team
+# and what grows from it) use by
 # default Ollama on this computer, which the VM reaches through its gateway
 # (LOCAL_MODEL, default qwen3.8-64k); with LLM=cloud, Ollama's cloud with
 # OLLAMA_API_KEY from this checkout's .env.
@@ -42,17 +43,28 @@ cd "$ROOT"
 #                                             +- 4.2 crud
 #                                             +- 4.3 ui
 #                                             +- 4.4 agent [F] --- 5.1 media
-#                                             +- 4.5 deploy [F] -+- 5.2 talk
-#                                                                +- 5.3 journey
+#                                             +- 4.5 deploy [F] -+- 5.2 journey
+#                                                                +- 5.3 team [F] -+- 6.1 roles
+#                                                                                 +- 6.2 change
+#                                                                                 +- 6.3 marketing
+#                                                                                 +- 6.4 routines
+#                                                                                 +- 6.5 commander
+#                                                                                 +- 6.6 operator
+#                                                                                 +- 6.7 leaving
 #
+# deploy: the namespace todo with its app deployed, alice its only person.
+# team: carol an admin, bob a member, and the agents the scenarios share.
+# Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
 # scenario in a VM of its own, $VM-<step>, cloned from its parent's.
-STEPS=(base install login platform crud ui agent media deploy talk journey)
+STEPS=(base install login platform crud ui agent media deploy journey team roles change marketing routines commander operator leaving)
 declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
-  [agent]=login [media]=agent [deploy]=login [talk]=deploy [journey]=deploy)
+  [agent]=login [media]=agent [deploy]=login [journey]=deploy [team]=deploy
+  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
-  [agent]=4.4 [media]=5.1 [deploy]=4.5 [talk]=5.2 [journey]=5.3)
-FIXTURES=" base install login agent deploy "
+  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [team]=5.3
+  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7)
+FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
 
 # Which LLM the agents use: local (Ollama on this computer, LOCAL_MODEL) or cloud.
@@ -60,20 +72,21 @@ LLM=${LLM:-local}
 LOCAL_MODEL=${LOCAL_MODEL:-qwen3.8-64k:latest}
 case $LLM in local|cloud) ;; *) echo "LLM must be local or cloud" >&2; exit 2 ;; esac
 
-# Files each step depends on, besides this script's own definition of the step.
+# Files each step depends on, besides this script's own definition of the
+# step: its scenario file, and what every scenario shares.
 inputs() {
+  local shared="test/e2e/smoke.sh test/e2e/lib.sh test/e2e/scenarios/$1.sh"
   case $1 in
     base)     ;;
     install)  echo install.sh installer garrison control-plane schemas templates files sandbox go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
-    login)    echo test/e2e/smoke.sh ;;
-    platform) echo test/e2e/smoke.sh test/e2e/stacks ;;
-    agent)    echo test/e2e/smoke.sh ;;
-    deploy)   echo test/e2e/smoke.sh templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
-    talk)     echo test/e2e/smoke.sh test/e2e/apps docs/scenarios.md ;;
-    journey)  echo test/e2e/smoke.sh test/e2e/journey.sh ;;
-    ui)       echo test/e2e/smoke.sh test/ui ;;
-    crud)     echo test/e2e/smoke.sh test/e2e/crud.sh ;;
-    media)    echo test/e2e/smoke.sh test/e2e/media.sh test/e2e/media templates/namespace-config/README.md ;;
+    login)    echo "$shared" test/e2e/scenarios/system.sh ;;
+    platform) echo "$shared" test/e2e/stacks ;;
+    deploy)   echo "$shared" templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
+    ui)       echo "$shared" test/ui ;;
+    media)    echo "$shared" test/e2e/media templates/namespace-config/README.md ;;
+    team|roles|change|marketing|routines|commander|operator|leaving)
+              echo "$shared" test/e2e/apps ;;
+    *)        echo "$shared" ;;
   esac
 }
 
@@ -137,14 +150,22 @@ step_deploy() {
   smoke deploy
 }
 
-# The scenarios of docs/scenarios.md: people ask the agent of todo to
-# add and remove members, bob tries to raise his own rights, bob changes the
-# app through the agent and carol merges. Talks to the real LLM.
-step_talk() {
+# The fixture team and the scenarios that grow from it (docs/scenarios.md):
+# people ask the agents of todo for changes, rights, screenshots, routines.
+# Talk to the real LLM.
+scenario() {
   sync_repo
   put_llm_key
-  smoke talk
+  smoke "$1"
 }
+step_team()      { scenario team; }
+step_roles()     { scenario roles; }
+step_change()    { scenario change; }
+step_marketing() { scenario marketing; }
+step_routines()  { scenario routines; }
+step_commander() { scenario commander; }
+step_operator()  { scenario operator; }
+step_leaving()   { scenario leaving; }
 
 # Scenario 10 of docs/scenarios.md: alice has the agents make a namespace, a
 # repo from a template and its stack, deploys it, changes it on dev through
@@ -254,6 +275,7 @@ fingerprint() {
     prev=$({
       echo "$prev"
       declare -f "step_$s" sync_repo smoke put_llm_key
+      [[ $(declare -f "step_$s") == *scenario* ]] && declare -f scenario
       [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL"
       files=$(inputs "$s")
       # Without paths, git ls-files would list the whole repo.
@@ -550,7 +572,7 @@ forget() {
 
 list() {
   local s have want state indent kind took
-  printf '%-20s %-9s %-7s %-8s %s\n' STEP KIND STATE TOOK VM
+  printf '%-26s %-9s %-7s %-8s %s\n' STEP KIND STATE TOOK VM
   for s in "${STEPS[@]}"; do
     if is_fixture "$s"; then
       kind=fixture; have=$(VM=$(vm_of "$s") snapshot_of "$s")
@@ -561,7 +583,7 @@ list() {
     if [ -z "$have" ]; then state=none; elif [ "$have" = "$want" ]; then state=green; else state=stale; fi
     took=-; [ -f "$ROOT/bin/times/$s" ] && took=$(minutes "$(cat "$ROOT/bin/times/$s")")
     indent=$(printf '%*s' $(( ($(path "$s" | wc -w) - 1) * 2 )) '')
-    printf '%-20s %-9s %-7s %-8s %s\n' "$indent${NUMBER[$s]} $s" "$kind" "$state" "$took" "$(vm_of "$s")"
+    printf '%-26s %-9s %-7s %-8s %s\n' "$indent${NUMBER[$s]} $s" "$kind" "$state" "$took" "$(vm_of "$s")"
   done
 }
 
