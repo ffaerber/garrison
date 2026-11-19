@@ -1,0 +1,7 @@
+{
+  "3": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 20, "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["12", 0]}},
+  "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["4", 1]}},
+  "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["4", 1]}},
+  "12": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": 480, "height": 848, "length": 25, "batch_size": 1}},
+  "9": {"class_type": "SaveVideo", "inputs": {"video": ["8", 0], "filename_prefix": "ComfyUI"}}
+}

@@ -12,8 +12,8 @@
 #   test/vm/steps.sh --clean       delete the VMs and their snapshots
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #
-# Steps: base, install, login, platform, agent, deploy, talk, journey, crud, ui.
-# The agent, talk, journey and ui steps talk to a real LLM: by default Ollama on this computer, which
+# Steps: base, install, login, platform, agent, media, deploy, talk, journey, crud, ui.
+# The agent, media, talk, journey and ui steps talk to a real LLM: by default Ollama on this computer, which
 # the VM reaches through its gateway (LOCAL_MODEL, default qwen3.8-64k);
 # with LLM=cloud, Ollama's cloud with OLLAMA_API_KEY from this checkout's .env.
 #
@@ -36,16 +36,16 @@ cd "$ROOT"
 # reruns only it and what grows from it.
 #
 #   1 base - 2 install - 3 login -+- 4.1 platform
-#                                 +- 4.2 agent
+#                                 +- 4.2 agent --- 5.4 media
 #                                 +- 4.3 deploy -+- 5.1 talk
 #                                 |              +- 5.2 journey
 #                                 +- 4.4 crud --- 5.3 ui
 #
 # ui builds the same app as deploy, todo/app in the namespace todo, so the
 # two never share a VM.
-STEPS=(base install login platform agent deploy talk journey crud ui)
-declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [ui]=crud [crud]=login)
-declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [ui]=5.3 [crud]=4.4)
+STEPS=(base install login platform agent media deploy talk journey crud ui)
+declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [ui]=crud [media]=agent [crud]=login)
+declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [ui]=5.3 [media]=5.4 [crud]=4.4)
 # Where the tree forks. In parallel runs (the default) the trunk up to here
 # runs in $VM, and each branch from here in its own clone, $VM-<first step>.
 FORK=login
@@ -68,6 +68,7 @@ inputs() {
     journey)  echo test/e2e/smoke.sh test/e2e/journey.sh ;;
     ui)       echo test/e2e/smoke.sh test/ui ;;
     crud)     echo test/e2e/smoke.sh test/e2e/crud.sh ;;
+    media)    echo test/e2e/smoke.sh test/e2e/media.sh test/e2e/media templates/namespace-config/README.md ;;
   esac
 }
 
@@ -164,6 +165,15 @@ step_ui() {
     rm -rf "$ROOT/bin/ui-shots" && mkdir -p "$ROOT/bin/ui-shots" &&
     tar -C "$ROOT/bin/ui-shots" --strip-components=1 -xf "$ROOT/bin/ui-shots.tar" || true
   return $rc
+}
+
+# A namespace's media library and its file browser; @media makes pictures
+# and a video with a fake ComfyUI outside Garrison, @shorts cuts a short.
+# Talks to the real LLM.
+step_media() {
+  sync_repo
+  put_llm_key
+  smoke media
 }
 
 # Every kind of thing a namespace holds, made, read, changed and removed:

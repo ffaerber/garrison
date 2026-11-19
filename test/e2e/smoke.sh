@@ -33,7 +33,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo example dev-example; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo example dev-example files; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   args+=(--resolve "$DOMAIN:443:127.0.0.1") # the dashboard
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
@@ -1933,6 +1933,8 @@ done < "$tmp/posted"
 . test/e2e/crud.sh
 # journey: an app with code of its own, from nothing to main, through the agents.
 . test/e2e/journey.sh
+# media: a media library, its file browser, ComfyUI and the media agents.
+. test/e2e/media.sh
 
 # ui: the same, and more, clicked and typed in the browser (test/ui).
 section_ui() {
@@ -1950,7 +1952,7 @@ section_ui() {
 sections=${*:-system login platform}
 for s in $sections; do
   t0=$SECONDS
-  case $s in system|login|platform|agent|deploy|talk|crud|journey|ui) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
+  case $s in system|login|platform|agent|deploy|talk|crud|journey|ui|media) "section_$s" ;; *) echo "unknown section: $s" >&2; exit 2 ;; esac
   echo "time  section $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
 done
 # Slow checks: each check's time, longest first.

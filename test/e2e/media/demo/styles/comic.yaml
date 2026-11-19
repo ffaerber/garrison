@@ -1,0 +1,12 @@
+# Pictures: a bright comic look.
+workflow: workflows/comic.json
+prompt: "{prompt}, comic style, bold ink lines, flat bright colours"
+negative: photo, blurry, scary
+width: 768
+height: 1024
+nodes:
+  prompt:   { node: "6", input: text }
+  negative: { node: "7", input: text }
+  seed:     { node: "3", input: seed }
+  width:    { node: "5", input: width }
+  height:   { node: "5", input: height }
