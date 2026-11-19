@@ -380,3 +380,33 @@ func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
 		t.Fatalf("calls: %v", calls)
 	}
 }
+
+// A team Gitea made while a repo was being made can lack it: the sync gives
+// it to the team.
+func TestTeamsGetTheReposGiteaLeftOut(t *testing.T) {
+	var added []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		switch {
+		case p == "/orgs/todo/repos" && r.Method == http.MethodGet:
+			io.WriteString(w, `[{"name":"config"},{"name":"app"}]`)
+		case p == "/teams/5/repos" && r.Method == http.MethodGet:
+			io.WriteString(w, `[{"name":"config"}]`)
+		case p == "/teams/6/repos" && r.Method == http.MethodGet:
+			io.WriteString(w, `[{"name":"config"},{"name":"app"}]`)
+		case strings.HasPrefix(p, "/teams/") && r.Method == http.MethodPut:
+			added = append(added, p)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	m := &Members{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
+	if err := m.teamRepos(context.Background(), "todo", map[string]int64{"admins": 5, "members": 6}, "admins", "members", RootTeam); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(added, ",") != "/teams/5/repos/todo/app" {
+		t.Errorf("added: %v", added)
+	}
+}

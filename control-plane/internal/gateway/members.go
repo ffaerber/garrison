@@ -531,10 +531,45 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 			return err
 		}
 	}
+	if err := m.teamRepos(ctx, ns, teams, "admins", "members", RootTeam); err != nil {
+		return err
+	}
 	if err := m.protectApps(ctx, ns, roster); err != nil {
 		return err
 	}
 	return m.approvals(ctx, ns, &roster, roots)
+}
+
+// teamRepos gives the teams named every repo of the namespace they lack.
+// They are made to include all repos, but Gitea misses one made while it
+// makes the team: the team's people could not merge there, and Gitea
+// leaves the team out of that repo's rule (approvals_whitelist_teams), so
+// the rule would differ, and be written again, at every sync.
+func (m *Members) teamRepos(ctx context.Context, ns string, teams map[string]int64, names ...string) error {
+	repos, err := m.Gitea.Repos(ctx, "", ns)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		id, ok := teams[name]
+		if !ok {
+			continue
+		}
+		var have []Repo
+		if _, err := m.Gitea.do(ctx, "", http.MethodGet, fmt.Sprintf("/teams/%d/repos?limit=50", id), nil, &have); err != nil {
+			return err
+		}
+		for _, r := range repos {
+			if slices.ContainsFunc(have, func(h Repo) bool { return h.Name == r.Name }) {
+				continue
+			}
+			if _, err := m.Gitea.do(ctx, "", http.MethodPut, fmt.Sprintf("/teams/%d/repos/%s/%s", id, ns, url.PathEscape(r.Name)), nil, nil); err != nil {
+				return fmt.Errorf("%s/%s for the team %s: %w", ns, r.Name, name, err)
+			}
+			log.Printf("members: the team %s/%s now has %s, which Gitea had left out", ns, name, r.Name)
+		}
+	}
+	return nil
 }
 
 // platform keeps garrison/config, which holds the agents, for every

@@ -1039,6 +1039,20 @@ for s in json.load(sys.stdin).get("statuses") or []:
 approval_is() { approval "$1" | grep -q "^$2"; }
 review() { gitea_api "$2" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$hp/$1/pulls/$3/reviews"; }
 merge() { gitea_api "$2" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$3/merge"; }
+# merges REPO USER PR [REVIEWER]: USER merges, retrying while Gitea still
+# checks the pull request ("try again later"); an approval given meanwhile
+# can go uncounted, so REVIEWER gives it again now and then.
+merges() {
+  local code i
+  for i in $(seq 15); do
+    code=$(merge "$1" "$2" "$3")
+    [ "$code" = 200 ] && return 0
+    [ "$code" = 405 ] && [ -n "${4:-}" ] && [ $((i % 5)) = 0 ] && review "$1" "$4" "$3" >/dev/null
+    sleep 2
+  done
+  echo "      $2's merge of #$3: $code: $(gitea_api "$2" -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$hp/$1/pulls/$3/merge" | head -c 300)"
+  return 1
+}
 team_has() {
   local id
   id=$(gitea_api "" "$api/orgs/todo/teams" | python3 -c 'import json,sys; print(next(t["id"] for t in json.load(sys.stdin) if t["name"]==sys.argv[1]))' "$1")
@@ -1193,7 +1207,7 @@ check "it changes the heading"             grep -q '^+.*Our todos' <<<"$(gitea_a
 # another of them approved.
 check "carol cannot merge it unapproved"   test "$(merge app carol "$tpr")" != 200
 check "carol approves it"                  test "$(review app carol "$tpr")" = 200
-check "and merges it"                      test "$(merge app carol "$tpr")" = 200
+check "and merges it"                      merges app carol "$tpr" carol
 merged=$(gitea_api "" "$hp/app/pulls/$tpr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["merge_commit_sha"])')
 deployed_at() { garrison applied | grep -q "^app todo/todo@main todo $1"; }
 check "its pipeline builds it and the deployer deploys it" until_true 1200 deployed_at "$merged"
