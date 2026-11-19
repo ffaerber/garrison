@@ -393,14 +393,14 @@ func TestASandboxGetsItsNamespacesMedia(t *testing.T) {
 		t.Fatalf("todo's media: %d", code)
 	}
 	for name, change := range map[string]func(c, h map[string]any){
-		"another namespace's":  media("todo", "/garrison/ns/lab/shares/media", "/data/media", nil),
-		"another share":        media("todo", "/garrison/ns/todo/shares/photos", "/data/media", nil),
-		"another target":       media("todo", "/garrison/ns/todo/shares/media", "/data", nil),
-		"the host's root":      media("todo", "/", "/data/media", nil),
-		"a path out":           media("todo", "/garrison/ns/todo/shares/media/../../../..", "/data/media", nil),
-		"no namespace":         media("", "/garrison/ns//shares/media", "/data/media", nil),
+		"another namespace's":   media("todo", "/garrison/ns/lab/shares/media", "/data/media", nil),
+		"another share":         media("todo", "/garrison/ns/todo/shares/photos", "/data/media", nil),
+		"another target":        media("todo", "/garrison/ns/todo/shares/media", "/data", nil),
+		"the host's root":       media("todo", "/", "/data/media", nil),
+		"a path out":            media("todo", "/garrison/ns/todo/shares/media/../../../..", "/data/media", nil),
+		"no namespace":          media("", "/garrison/ns//shares/media", "/data/media", nil),
 		"a namespace with dots": media("../x", "/garrison/ns/../x/shares/media", "/data/media", nil),
-		"shared propagation":   media("todo", "/garrison/ns/todo/shares/media", "/data/media", map[string]any{"Propagation": "rshared"}),
+		"shared propagation":    media("todo", "/garrison/ns/todo/shares/media", "/data/media", map[string]any{"Propagation": "rshared"}),
 		"twice": func(c, h map[string]any) {
 			media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil)(c, h)
 			media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil)(c, h)

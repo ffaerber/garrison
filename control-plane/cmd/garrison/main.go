@@ -694,6 +694,12 @@ func agentsCmd(args []string) error {
 		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
 		Events:       recorder(store),
 	}
+	// ComfyUI, outside Garrison, e.g. http://192.168.1.20:8188: the agents'
+	// generate_media, into their namespace's media library.
+	if u := vars["COMFYUI_URL"]; u != "" {
+		srv.ComfyUI, srv.Styles = &agentapi.ComfyUI{URL: u}, g
+		log.Printf("generate_media uses ComfyUI at %s", u)
+	}
 	srv.Models = &agentapi.Models{
 		Gitea: g, KeyDir: *keyDir, InstallURL: base, InstallModel: model, InstallKey: *keyFile,
 		Events: srv.Events, Domain: domain,

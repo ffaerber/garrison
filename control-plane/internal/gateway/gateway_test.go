@@ -734,7 +734,7 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	if got := names("/mcp/homepage/marketing"); strings.Join(got, ",") != "list_repos,load_skill,read_skill_file" {
 		t.Errorf("marketing's tools = %v", got)
 	}
-	if got := names("/mcp"); len(got) != len(ToolNames())-1 {
+	if got := names("/mcp"); len(got) != len(ToolNames())-1-len(AgentServiceTools) { // no merge_change, nor the agent service's
 		t.Errorf("/mcp tools = %v", got)
 	}
 	// A tool the agent lacks is refused before anything happens.

@@ -32,6 +32,7 @@ const (
 	KindModel         = "model"     // an agent's model cannot be used: it got the default
 	KindQuestion      = "question"  // an agent asks a person and waits for the answer
 	KindNamespace     = "namespace" // a namespace is set up
+	KindMedia         = "media"     // an agent made pictures or videos into a media library
 )
 
 // ApprovalContext is the commit status the gateway's approval check posts.

@@ -283,6 +283,8 @@ func (s *Server) SandboxHandler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", s.sandboxLLM)
 	mux.HandleFunc("GET /tools", s.sandboxTools)
 	mux.HandleFunc("POST /tools/call", s.sandboxCall)
+	mux.HandleFunc("POST /media/generate", s.sandboxGenerate)
+	mux.HandleFunc("GET /media/out/{id}", s.sandboxOutput)
 	if s.Git != nil {
 		mux.Handle("/git/", s.Git.Handler(s.caller))
 	}
@@ -354,6 +356,9 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.mayAskPerson(c) {
 		specs = append(specs, askPersonSpec)
+	}
+	if s.mayGenerate(r.Context(), c) {
+		specs = append(specs, generateSpec)
 	}
 	writeJSON(w, specs)
 }

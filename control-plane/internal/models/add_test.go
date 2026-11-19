@@ -46,8 +46,8 @@ func TestAddProviderFlow(t *testing.T) {
 
 func TestAddProviderRefuses(t *testing.T) {
 	for _, c := range []struct{ name, url string }{
-		{"ollama-cloud", "https://ollama.com/v1"},                // there already
-		{"Open_Router", "https://openrouter.ai/api/v1"},          // not a name
+		{"ollama-cloud", "https://ollama.com/v1"},                 // there already
+		{"Open_Router", "https://openrouter.ai/api/v1"},           // not a name
 		{strings.Repeat("a", 29), "https://openrouter.ai/api/v1"}, // too long for its secret
 		{"x", "ftp://example.com"},
 		{"x", "https://user:key@example.com/v1"},

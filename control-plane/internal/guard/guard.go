@@ -268,10 +268,10 @@ type createBody struct {
 		NetworkMode       string
 		Binds             []string
 		Mounts            []struct {
-			Type          string
-			Source        string
-			Target        string
-			BindOptions   *struct {
+			Type        string
+			Source      string
+			Target      string
+			BindOptions *struct {
 				Propagation      string
 				NonRecursive     bool
 				CreateMountpoint bool

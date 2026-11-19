@@ -54,9 +54,14 @@ type Server struct {
 	Media      MediaFiles
 	DataRoot   string // where the namespaces' datasets are on the host; render.DefaultDataRoot if empty
 	mediaCache mediaCache
-	Poster       Poster           // posts answers no message waits for; nil: none
-	Events       events.Recorder  // the feed, which gets the routines' runs; nil: none
-	Questions    *Questions       // what routines asked people (ask_person); nil: they cannot ask
+	// ComfyUI, if set with Styles, makes pictures and videos for
+	// generate_media; Styles reads the projects' styles as the person.
+	ComfyUI   *ComfyUI
+	Styles    StyleReader
+	outputs   outputs
+	Poster    Poster          // posts answers no message waits for; nil: none
+	Events    events.Recorder // the feed, which gets the routines' runs; nil: none
+	Questions *Questions      // what routines asked people (ask_person); nil: they cannot ask
 }
 
 // Headers Open WebUI's connection fills in for each request.

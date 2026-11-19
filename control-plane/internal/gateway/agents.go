@@ -20,8 +20,13 @@ func ToolNames() []string {
 	for _, s := range baseSpecs() {
 		out = append(out, s.Name)
 	}
-	return out
+	// The agent service's own, which an agent.yaml may name too.
+	return append(out, AgentServiceTools...)
 }
+
+// AgentServiceTools are tools the agent service serves itself, not the
+// gateway: generate_media, which needs the sandbox's media library.
+var AgentServiceTools = []string{"generate_media"}
 
 // Catalog holds the agents as they work in every namespace, as the Open
 // WebUI sync last read them, for the MCP endpoints to look up. An agent it

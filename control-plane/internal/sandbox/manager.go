@@ -11,8 +11,8 @@ import (
 	"net"
 	"net/url"
 	"sort"
-	"sync"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )

@@ -4,6 +4,8 @@
 FROM node:22-alpine3.22
 # What agents work with besides Pi's own tools.
 RUN apk add --no-cache bash git ripgrep fd curl jq
+# Pictures and videos: cutting, joining and captions (the shorts agent).
+RUN apk add --no-cache ffmpeg font-dejavu
 WORKDIR /opt/garrison
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && ln -s /opt/garrison/node_modules/.bin/pi /usr/local/bin/pi

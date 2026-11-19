@@ -13,8 +13,10 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { request } from "node:http";
-import { resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 const api = process.env.GARRISON_API ?? "";
 const token = process.env.GARRISON_TOKEN ?? "";
@@ -70,6 +72,62 @@ function git(cwd: string, ...args: string[]): Promise<string> {
 }
 
 const config = (cwd: string, key: string) => git(cwd, "config", "--get", key).then((s) => s.trim(), () => "");
+
+// The namespace's media library, where generate_media puts what it makes.
+const media = "/data/media";
+
+// download writes a file the agent service holds for this turn to dest.
+function download(path: string, dest: string, signal?: AbortSignal): Promise<void> {
+  return new Promise((ok, fail) => {
+    const req = request(api + path, { headers: { Authorization: `Bearer ${token}` }, signal }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        fail(new Error(`${path}: HTTP ${res.statusCode}`));
+        return;
+      }
+      const tmp = dest + ".part";
+      const out = createWriteStream(tmp);
+      res.pipe(out);
+      out.on("finish", () => rename(tmp, dest).then(ok, fail));
+      out.on("error", fail);
+      res.on("error", fail);
+    });
+    req.on("error", fail);
+    req.end();
+  });
+}
+
+type Made = { id: string; name: string; made: Record<string, unknown> };
+
+// generate makes media with ComfyUI, through the agent service, into
+// /data/media/<project>/, each with a .json of how it was made.
+async function generate(params: { project: string }, signal?: AbortSignal): Promise<string> {
+  const r = await call("/media/generate", params, signal);
+  // 200: { files, error? } (error: what stopped it, after the files made);
+  // otherwise the API's { error: { message } }.
+  let out: { files?: Made[]; error?: string | { message?: string } };
+  try {
+    out = JSON.parse(r.text);
+  } catch {
+    throw new Error(r.text || `HTTP ${r.status}`);
+  }
+  const why = typeof out.error === "string" ? out.error : out.error?.message;
+  if (r.status !== 200) throw new Error(why ?? `HTTP ${r.status}`);
+  const folder = join(media, basename(params.project.split("/").pop() ?? "media"));
+  await mkdir(folder, { recursive: true });
+  const written: string[] = [];
+  for (const f of out.files ?? []) {
+    const dest = join(folder, basename(f.name));
+    await download(`/media/out/${f.id}`, dest, signal);
+    await writeFile(dest + ".json", JSON.stringify(f.made, null, 2) + "\n");
+    written.push(dest);
+  }
+  const list = written.map((p) => `- ${p}`).join("\n");
+  if (why) {
+    throw new Error(written.length ? `${why}\nMade before that:\n${list}` : why);
+  }
+  return `Made ${written.length} file(s) in the media library, each with a .json of how:\n${list}`;
+}
 
 // The changes of a checkout as a pull request.
 type Proposal = { path: string; title: string; description?: string; base?: string };
@@ -134,6 +192,18 @@ export default async function (pi: ExtensionAPI) {
         async execute(_id, params, signal) {
           const text = await proposeWorkspace(params as Proposal, signal);
           return { content: [{ type: "text", text }], details: {} };
+        },
+      });
+      continue;
+    }
+    if (spec.name === "generate_media") {
+      pi.registerTool({
+        name: spec.name,
+        label: spec.name,
+        description: spec.description,
+        parameters: Type.Unsafe(spec.input_schema),
+        async execute(_id, params, signal) {
+          return { content: [{ type: "text", text: await generate(params as { project: string }, signal) }], details: {} };
         },
       });
       continue;
