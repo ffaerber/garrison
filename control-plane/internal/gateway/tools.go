@@ -160,7 +160,7 @@ func baseSpecs() []Spec {
 		}, "namespace", "repo", "patch", "title"),
 		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the namespace's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes a repo (a screenshot or a patch proposed into it), give repo: the agent then also gets the grant to propose there that a run with nobody watching needs. What each run finds is posted in the namespace's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
 			"namespace":   nsArg,
-			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. scout for checks and screenshots"),
+			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots"),
 			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the namespace, e.g. morning-check"),
 			"schedule":    str("when, as cron in Garrison's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
 			"every":       str("how often instead of schedule, 10m to 168h, e.g. 6h"),

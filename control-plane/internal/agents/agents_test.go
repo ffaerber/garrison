@@ -87,11 +87,11 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		names = append(names, a.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"coder", "commander", "media", "operator", "researcher", "scout"}; len(problems) > 0 || !slices.Equal(names, want) {
+	if want := []string{"coder", "commander", "media", "operator", "scout", "sentry"}; len(problems) > 0 || !slices.Equal(names, want) {
 		t.Fatalf("got %v, want %v; %v", names, want, problems)
 	}
 	// Each has a role of its own, and only the tools it needs: only the
-	// operator has every one, only the researcher the whole internet.
+	// operator has every one, only the scout the whole internet.
 	for _, a := range got {
 		if a.Description == "" || strings.TrimSpace(a.Prompt) == "" {
 			t.Errorf("%s has no description or prompt", a.Name)
@@ -99,12 +99,12 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		if a.Name != OperatorName && slices.Contains(a.Tools, "create_namespace") {
 			t.Errorf("%s may make namespaces", a.Name)
 		}
-		if (a.Name == "researcher") != a.Internet.All {
+		if (a.Name == "scout") != a.Internet.All {
 			t.Errorf("%s reaches %s", a.Name, a.Internet)
 		}
 	}
 	for _, write := range []string{"propose_change", "propose_patch", "merge_change", "screenshot"} {
-		for _, name := range []string{"researcher"} {
+		for _, name := range []string{"scout"} {
 			i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == name })
 			if slices.Contains(got[i].Tools, write) {
 				t.Errorf("%s, which changes nothing, has %s", name, write)

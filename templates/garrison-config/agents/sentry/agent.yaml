@@ -1,0 +1,7 @@
+# The sentry: watches the apps from inside (state, logs, metrics) and from
+# outside (the browser, as the person), explains what is wrong, and takes
+# screenshots it proposes into a repo. It changes nothing else.
+description: Watches the apps (state, logs, metrics), tries them in the browser, explains what is wrong, and takes screenshots for docs and homepages
+model: ""
+tools: [list_stacks, stack_status, service_logs, service_usage, query_metrics, list_snapshots, list_repos, list_files, read_file, browse, screenshot]
+agents: [scout]

@@ -37,7 +37,7 @@ For one on a schedule or every so often, call add_routine: namespace, agent, nam
 For `on_push` or `on_alert`, read the namespace's `routines.yaml` first and propose it with propose_change, the new entry added and the entries already there kept. The entries look like this:
 
 ```yaml
-- agent: scout                       # one of garrison's agents
+- agent: sentry                       # one of garrison's agents
   name: morning-check                # lowercase, unique in the file
   schedule: "0 9 * * *"              # cron: minute hour day-of-month month day-of-week, in Garrison's time zone
   owner: alice                       # the person asking; a person of the namespace
@@ -50,20 +50,20 @@ For `on_push` or `on_alert`, read the namespace's `routines.yaml` first and prop
 - Its answer is posted in the namespace's channel.
 - It runs with nobody watching, with the agent's own account: it may change a repo only through a grant with `unattended: true` and the owner in its `for`, with propose_patch or screenshot (and merge_change where the grant's level allows). Propose that grant in the same pull request when the task changes something.
 - Its browser signs in as the agent's own account, so screenshot and browse work, also on private environments. propose_change, create_namespace and create_repo need a person and are refused.
-- The agent must have the tools the task needs, and no more: pick the one whose role fits: the scout reads logs and metrics, tries apps in the browser and takes screenshots (good for checks and `on_alert`), the coder proposes code with propose_patch. find_agents shows each agent's tools.
+- The agent must have the tools the task needs, and no more: pick the one whose role fits: the sentry reads logs and metrics, tries apps in the browser and takes screenshots (good for checks and `on_alert`), the coder proposes code with propose_patch. find_agents shows each agent's tools.
 
-A daily screenshot of the app todo into its repo app, for example, is add_routine with agent scout, schedule "0 9 * * *", repo app and the task below; it writes a grant and a routine in `todo/config`:
+A daily screenshot of the app todo into its repo app, for example, is add_routine with agent sentry, schedule "0 9 * * *", repo app and the task below; it writes a grant and a routine in `todo/config`:
 
 ```yaml
 # grants.yaml
-- agent: scout
+- agent: sentry
   repo: app
   level: propose
   for: members
   unattended: true
 
 # routines.yaml
-- agent: scout
+- agent: sentry
   name: daily-screenshot
   schedule: "0 9 * * *"
   owner: alice

@@ -709,6 +709,21 @@ check "the answer sends the key to the Models page" models_link "$answer"
 [ -n "$provider_pr" ] && gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/garrison/config/pulls/$provider_pr"
 cleanup_channel
 check "the test left no messages in the channel" bash -c '[ "$(python3 -c "import json,sys; print(len([m for m in json.load(sys.stdin) if not (m.get(\"content\") or \"\").startswith(\"**How to ask the agent\")]))" <<<"$0")" = 0 ]' "$(chat_api bob "$chat/api/v1/channels/$cid/messages")"
+
+echo "# the scout's browser, under gVisor"
+# The command web of the sandbox image, as the scout runs it: Chromium
+# under gVisor reads a page built by JavaScript and takes a picture of it.
+# The page comes from a container next to it, so no model and no internet.
+sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
+docker network create smoke-web >/dev/null 2>&1
+docker run -d --rm --name smoke-page --network smoke-web --entrypoint node "$sandbox_image" -e '
+require("http").createServer((q, r) => { r.setHeader("Content-Type", "text/html");
+  r.end("<title>Smoke page</title><p id=p></p><script>document.getElementById(\"p\").textContent = \"built by \" + \"script\"</script>") }).listen(8000)' >/dev/null
+sleep 2
+read_page=$(docker run --rm --runtime=runsc --network smoke-web --entrypoint web "$sandbox_image" read http://smoke-page:8000/ 2>&1)
+check "it reads a page built by JavaScript" bash -c 'grep -q "Title: Smoke page" <<<"$0" && grep -q "built by script" <<<"$0" || { echo "$0" | head -5; exit 1; }' "$read_page"
+check "and takes a picture of it"          bash -c 'docker run --rm --runtime=runsc --network smoke-web --entrypoint sh "$0" -c "web shot http://smoke-page:8000/ /tmp/p.png 390x844 >/dev/null && head -c 8 /tmp/p.png | od -An -c | grep -q P"' "$sandbox_image"
+docker rm -f smoke-page >/dev/null 2>&1; docker network rm smoke-web >/dev/null 2>&1
 }
 
 # render_todo NS REPO DIR: the template todo as create_repo writes it into
@@ -1643,11 +1658,11 @@ check "a site beyond the registries is refused" refused_site
 
 echo "# 4l. bob asks the commander in todo's channel, which finds the agent for him"
 answer=$(ask_agent todo bob "Which agent should I talk to for screenshots of the todo app for its homepage? Only tell me whom; do not do it yourself." commander)
-if ! grep -qiE "scout|marketing" <<<"$answer"; then
+if ! grep -qiE "sentry|marketing" <<<"$answer"; then
   printf 'retry it named no agent for screenshots; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent todo bob "Please call find_agents and tell me which agent makes screenshots." commander)
 fi
-check "it names an agent for screenshots"  grep -qiE "scout|marketing" <<<"$answer"
+check "it names an agent for screenshots"  grep -qiE "sentry|marketing" <<<"$answer"
 # There it works in todo: it hands work to the agents as they work in todo.
 handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
 answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the namespace todo have? Have it answer here." commander)
@@ -1911,7 +1926,7 @@ gitea_api "" "$hp/config/raw/routines.yaml?ref=$(gitea_api "" "$hp/config/pulls/
 check "daily at 9, owned by alice, by one of garrison's agents" python3 -c '
 import sys,yaml
 r = yaml.safe_load(open(sys.argv[1])) or []
-sys.exit(0 if any(str(x.get("schedule","")).split()[:2] == ["0","9"] and x.get("owner") == "alice" and x.get("agent") in ("operator","commander","scout","researcher","coder","media","marketing") for x in r) else 1)' "$tmp/cron.yaml"
+sys.exit(0 if any(str(x.get("schedule","")).split()[:2] == ["0","9"] and x.get("owner") == "alice" and x.get("agent") in ("operator","commander","sentry","scout","coder","media","marketing") for x in r) else 1)' "$tmp/cron.yaml"
 check "keeping the routines there"         python3 -c 'import sys,yaml; sys.exit(0 if len(yaml.safe_load(open(sys.argv[1])) or []) == int(sys.argv[2]) + 1 else 1)' "$tmp/cron.yaml" "${routines_before:-0}"
 cron_ok() {
   gitea_api "" "$hp/config/commits/$(gitea_api "" "$hp/config/pulls/${cpr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')/status" | python3 -c '
