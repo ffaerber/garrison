@@ -123,6 +123,7 @@ environments:
 - A stack claims exactly the hostnames it declares: one per environment, plus `<hostname>-<public>` for each public service. The main environment's hostname is the stack name; every other environment's is `<environment>-<stack>`. The hostname follows from the rule, so `hostname` is optional and must match the rule when given. Nothing is claimed by prefix.
 - The deployer rejects a deploy whose claimed hostnames are already held by another stack or reserved by root. Claims are first come, first served across all namespaces.
 - `dataset` is a ZFS dataset owned by the stack; `share` is a library other stacks in the namespace can read.
+- The share `media` is the namespace's **media library**: once a stack mounts it, the namespace's agents see it at `/data/media` in its channel and routines, and put the pictures and videos they make there. `{{members}}` in a service's env is the namespace's people (admins and members of `members.yaml`, comma-separated); a stack that names it redeploys when they change. The image `garrison/files` (Filebrowser behind `garrison gate`) is the library's file browser: the gate takes only requests with the environment's ingress key, names the signed-in person to Filebrowser, closes public share links, and lets only the people in `GARRISON_WRITERS` change files; everyone signed in looks and downloads.
 - A volume is mounted at `/<volume name>` in the container, so `config` appears at `/config`; `path` overrides this.
 - Each environment is its own copy of the stack with its own data and secrets. `private: true` puts it behind the Keycloak login. Apps share Traefik's network, so one could call another directly and name any person in the login's headers: a private environment's services get an ingress key (`GARRISON_INGRESS_KEY`), which Traefik adds to every request it passes on (`X-Garrison-Ingress`), and an app believes the login's headers only with it.
 - `devices: [gpu]` is rendered to a Swarm generic resource. The installer sets the NVIDIA runtime as Docker's default and advertises the GPU as a generic resource on the node when the hardware scan finds one.
@@ -279,7 +280,7 @@ An inbox collects everything waiting for the user: PRs to approve, previews to r
 
 ## Storage and backup
 
-- ZFS on the main drive, one dataset per stack volume, shared libraries as separate datasets.
+- ZFS on the main drive, one dataset per stack volume, shared libraries as separate datasets; a namespace's media library is its share `media`.
 - Sanoid takes scheduled snapshots; the deployer snapshots before every deploy.
 - A second drive is a dedicated backup drive; snapshots are copied to it regularly. Without it, the dashboard warns until one is added.
 - restic sends the backup drive's contents, encrypted, to cloud storage.
