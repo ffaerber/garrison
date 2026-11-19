@@ -6,6 +6,28 @@ What this namespace is: who belongs to it, its apps, and what Garrison's agents 
 - `stacks/<name>.yaml`: its apps, one per file, each deployed at `https://<name>.<domain>`.
 - `restores/<name>.yaml`: bringing an app's data back from a snapshot.
 
+## Media
+
+The namespace's media library is the share `media`: a folder of pictures, videos and other files its people and agents share. It exists once a stack mounts it. Then the agents see it at `/data/media` in this namespace's channel and routines, and `@media` makes pictures and videos into it, `@shorts` short videos from them. This file browser, `stacks/files.yaml`, shows it at `https://files.<domain>`: everyone signed in looks and downloads, and this namespace's people (`{{members}}`, from `members.yaml`) upload, rename and delete.
+
+```yaml
+entrypoint: web
+services:
+  web:
+    image: "{{registry}}/garrison/files:current"
+    port: 8080
+    env:
+      GARRISON_WRITERS: "{{members}}"
+    volumes:
+      library: { share: media, path: /srv }
+      data: { dataset: files, size: 1Gi, path: /database }
+    resources: { memory: 128Mi }
+environments:
+  main: { private: true }
+```
+
+The address is the file's name, so another namespace names its own, e.g. `stacks/photos-files.yaml`.
+
 ## Agents
 
 The agents are Garrison's, defined in `garrison/config`; each works in every namespace. Mention one by its name in this namespace's channel, e.g. `@operator`, and it works here, with your rights. A namespace has no agents of its own, but it may give them more:

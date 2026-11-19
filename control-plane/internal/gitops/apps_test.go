@@ -598,3 +598,25 @@ func TestOnlyMainGetsStoredSecrets(t *testing.T) {
 		t.Errorf("without keys: %v", err)
 	}
 }
+
+// {{members}} is the namespace's people, from members.yaml: rendered into a
+// service's env, and part of the stack's spec, so a change redeploys it.
+func TestTheNamespacesPeople(t *testing.T) {
+	cfg := t.TempDir()
+	os.WriteFile(filepath.Join(cfg, "members.yaml"), []byte("# who\nadmins: [alice]\nmembers: [bob, alice, \"../x\"]\n"), 0o644)
+	if got := namespacePeople(cfg); strings.Join(got, ",") != "alice,bob" {
+		t.Errorf("people: %v", got)
+	}
+	if got := namespacePeople(t.TempDir()); got != nil {
+		t.Errorf("no members.yaml: %v", got)
+	}
+	c := &Config{Domain: "home.test"}
+	s, err := stack.ParseIn([]byte("entrypoint: web\nservices:\n  web: { image: x/y:1, port: 80, env: { WRITERS: \"{{members}}\" } }\nenvironments:\n  main: {}\n"), "media", "files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := c.options(context.Background(), s, "main", "c1", cfg)
+	if err != nil || strings.Join(o.Members, ",") != "alice,bob" {
+		t.Fatalf("options: %v %v", o.Members, err)
+	}
+}

@@ -35,6 +35,7 @@ import (
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/dashboards"
 	"garrison/control-plane/internal/events"
+	"garrison/control-plane/internal/gate"
 	"garrison/control-plane/internal/gateway"
 	"garrison/control-plane/internal/gitops"
 	"garrison/control-plane/internal/guard"
@@ -63,6 +64,7 @@ const usage = `usage:
   garrison home [-listen ADDR] [-gitea URL] [-events-db URL] ...
   garrison guard [-listen ADDR] [-socket PATH] [-network NAME] [-volumes PREFIXES]
                   [-image REPOSITORY -label LABEL -max-memory BYTES]
+  garrison gate [-listen ADDR] [-upstream URL] [-user-header NAME]   (GARRISON_INGRESS_KEY, GARRISON_WRITERS)
 `
 
 func main() {
@@ -90,6 +92,8 @@ func main() {
 		err = agentsCmd(args)
 	case "guard":
 		err = guardCmd(args)
+	case "gate":
+		err = gateCmd(args)
 	case "home":
 		err = homeCmd(args)
 	default:
@@ -547,6 +551,32 @@ func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *
 // guardCmd serves the Docker API to the user namespaces' Actions runner,
 // letting through only what running jobs needs; with -image and -label, to
 // the agent service, letting through only sandboxes.
+// gateCmd stands in front of an app that believes a header naming the
+// person, e.g. Filebrowser: it takes only what came through the sign-in
+// (GARRISON_INGRESS_KEY), and lets only GARRISON_WRITERS, the namespace's
+// people ({{members}}), change anything.
+func gateCmd(args []string) error {
+	fs := flag.NewFlagSet("gate", flag.ExitOnError)
+	listen := fs.String("listen", ":8080", "address to serve on")
+	upstream := fs.String("upstream", "http://127.0.0.1:8081", "the app, which only the gate reaches")
+	userHeader := fs.String("user-header", "X-Garrison-User", "the header the app reads the person from")
+	readPosts := fs.String("read-posts", "/api/login,/api/renew", "paths everyone signed in may POST to, comma-separated")
+	closed := fs.String("closed", "/api/share,/api/public", "path prefixes nobody reaches, comma-separated: public links would open files past the sign-in")
+	fs.Parse(args)
+	up, err := url.Parse(*upstream)
+	if err != nil {
+		return err
+	}
+	key := os.Getenv(render.IngressKeyEnv)
+	if key == "" {
+		return fmt.Errorf("%s is not set: the gate needs a private environment", render.IngressKeyEnv)
+	}
+	g := &gate.Gate{Upstream: up, Key: key, Header: render.IngressHeader, UserHeader: *userHeader,
+		Writers: gate.Writers(os.Getenv("GARRISON_WRITERS")), ReadPosts: gate.Writers(*readPosts), Closed: gate.Writers(*closed)}
+	log.Printf("gate on %s for %s; %d may change things", *listen, *upstream, len(g.Writers))
+	return (&http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe()
+}
+
 func guardCmd(args []string) error {
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	listen := fs.String("listen", ":2375", "address to serve the guarded Docker API on")

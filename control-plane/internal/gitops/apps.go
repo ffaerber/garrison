@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -64,7 +66,8 @@ func (c *Config) ingressKey(stack string) string {
 // from config's checkout in cfgDir; other environments, which run code not
 // yet merged, get generated values.
 func (c *Config) options(ctx context.Context, s *stack.Stack, env, commit, cfgDir string) (render.Options, error) {
-	o := render.Options{Environment: env, Domain: c.Domain, Commit: commit, IngressKey: c.ingressKey(render.StackName(s, env))}
+	o := render.Options{Environment: env, Domain: c.Domain, Commit: commit, IngressKey: c.ingressKey(render.StackName(s, env)),
+		Members: namespacePeople(cfgDir)}
 	if env != stack.MainEnvironment {
 		return o, nil
 	}
@@ -86,6 +89,33 @@ func (c *Config) options(ctx context.Context, s *stack.Stack, env, commit, cfgDi
 	}
 	return o, nil
 }
+
+// namespacePeople are the admins and members of members.yaml in config's
+// checkout in cfgDir, sorted, each once.
+func namespacePeople(cfgDir string) []string {
+	data, err := os.ReadFile(filepath.Join(cfgDir, "members.yaml"))
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		Admins  []string `yaml:"admins"`
+		Members []string `yaml:"members"`
+	}
+	if yaml.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range slices.Concat(m.Admins, m.Members) {
+		if personName.MatchString(p) && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// personName is what a Gitea user may be called.
+var personName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$`)
 
 // errNoKeys: the deployer on the host, without the namespaces' keys, leaves
 // apps with stored secrets to the one in Swarm.
@@ -375,6 +405,10 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				fail(ns, "", cfgCommit, "%s/config/%s/%s.yaml: %v", ns, stack.Dir, name, err)
 				keepApp(ns, name)
 				continue
+			}
+			// A stack that names {{members}} redeploys when they change.
+			if bytes.Contains(data, []byte("{{members}}")) {
+				data = append(data, []byte("\x00"+strings.Join(namespacePeople(cfgDir), ","))...)
 			}
 			sum := sha256.Sum256(data)
 			fileSpec := hex.EncodeToString(sum[:8])

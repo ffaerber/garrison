@@ -1,6 +1,7 @@
 # Installed as .gitea/workflows/build.yaml in the repo garrison/control-plane.
-# On every push to main: build the control plane image and the agents'
-# sandbox image, push them to Gitea's registry, and deploy them by committing
+# On every push to main: build the control plane image, the agents'
+# sandbox image and the namespaces' file browser (garrison/files, also
+# tagged current, which stacks name), push them to Gitea's registry, and deploy them by committing
 # their tag to compose.yaml in this repo.
 # The running deployer then applies that commit and replaces itself.
 name: build
@@ -34,6 +35,7 @@ jobs:
           tag=$(echo "$SHA" | cut -c1-12)
           image=$registry/garrison/control-plane:$tag
           sandbox=$registry/garrison/sandbox:$tag
+          files=$registry/garrison/files
           auth="Authorization: token $TOKEN"
           internal=http://gitea_gitea:3000
 
@@ -41,10 +43,13 @@ jobs:
           git -C src checkout -q "$SHA"
           docker build -q -f src/control-plane/Dockerfile -t "$image" src
           docker build -q -t "$sandbox" src/sandbox
+          docker build -q -f src/files/Dockerfile -t "$files:$tag" -t "$files:current" src
           echo "$TOKEN" | docker login -u "$USER" --password-stdin "$registry" >/dev/null
           docker push -q "$image"
           docker push -q "$sandbox"
-          echo "built and pushed $image and $sandbox"
+          docker push -q "$files:$tag"
+          docker push -q "$files:current"
+          echo "built and pushed $image, $sandbox and $files:$tag"
 
           git config --global user.name "Control plane build"
           git config --global user.email "ci@$registry"

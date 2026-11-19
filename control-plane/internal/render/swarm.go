@@ -50,6 +50,9 @@ type Options struct {
 	// name (secrets/<name>.yaml in its config, decrypted); every other
 	// secret a service names has a generated value.
 	Secrets map[string]Stored
+	// Members are the namespace's people, its admins and members, for
+	// {{members}} in a service's env: their names, comma-separated.
+	Members []string
 }
 
 // Stored is the value of a stored secret, and its version: a Swarm secret
@@ -188,6 +191,7 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 			for k, v := range svc.Env {
 				v = strings.ReplaceAll(v, "{{url}}", "https://"+host+"/")
 				v = strings.ReplaceAll(v, "{{host}}", host)
+				v = strings.ReplaceAll(v, "{{members}}", strings.Join(o.Members, ","))
 				// docker stack deploy reads $ as interpolation; values are literal.
 				out.Environment[k] = strings.ReplaceAll(v, "$", "$$")
 			}

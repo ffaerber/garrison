@@ -130,3 +130,17 @@ environments:
 		}
 	}
 }
+
+func TestMembersInEnv(t *testing.T) {
+	s, err := stack.ParseIn([]byte("entrypoint: web\nservices:\n  web: { image: x/y:1, port: 80, env: { WRITERS: \"{{members}}\", OTHER: plain } }\nenvironments:\n  main: {}\n"), "media", "files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Swarm(s, Options{Environment: "main", Domain: "home.test", Members: []string{"alice", "bob"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "WRITERS: alice,bob") || !strings.Contains(string(out), "OTHER: plain") {
+		t.Errorf("%s", out)
+	}
+}
