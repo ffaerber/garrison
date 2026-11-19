@@ -607,7 +607,7 @@ stored=$(gitea_api "" "$api/repos/garrison/config/raw/secrets/llm-smoke.yaml")
 check "its key is in garrison's config, encrypted" bash -c 'grep -q "ENC\[" <<<"$0" && ! grep -q tok-smoke <<<"$0"' "$stored"
 key_is() { [ "$(cat $ETC/llm-keys/smoke 2>/dev/null)" = "$1" ] && [ "$(stat -c %a $ETC/llm-keys/smoke)" = 600 ]; }
 check "the deployer writes it where the agent service reads it, root only" until_true 90 key_is tok-smoke
-check "the page lists the provider's key, never its value" bash -c 'grep -q "llm-smoke\|key ••••" <<<"$0" && ! grep -q tok-smoke <<<"$0"' "$(feed alice /models)"
+check "the page lists it, waiting for its change, never its key" bash -c 'grep -q "<code>smoke</code>" <<<"$0" && grep -q "waiting for its change" <<<"$0" && ! grep -q tok-smoke <<<"$0"' "$(feed alice /models)"
 gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$api/repos/garrison/config/pulls/${smoke_pr:-0}"
 check "alice deletes the key"              grep -q '^303' <<<"$(models_post alice action=delete name=smoke)"
 key_gone() { [ ! -e $ETC/llm-keys/smoke ]; }

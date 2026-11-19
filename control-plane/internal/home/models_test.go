@@ -103,6 +103,10 @@ func TestTheModelsPage(t *testing.T) {
 	if keys.values["garrison/llm-openrouter"] != "sk-or-1" || len(prov.proposed) != 1 || prov.proposed[0] != "alice openrouter https://openrouter.ai/api/v1 [anthropic/* openai/gpt-6*]" {
 		t.Errorf("%v %v", keys.values, prov.proposed)
 	}
+	// Until its change is merged, the page lists it as waiting, with its key.
+	if body := get(s, "alice", "/models").Body.String(); !strings.Contains(body, "<code>openrouter</code>") || !strings.Contains(body, "waiting for its change") || strings.Contains(body, "sk-or-1") {
+		t.Errorf("waiting provider:\n%s", body)
+	}
 	es, _ := m.List(context.Background(), events.Query{Visibility: events.Visibility{All: true}, Kinds: []string{events.KindSecret}})
 	if !slices.ContainsFunc(es, func(e events.Event) bool {
 		return strings.Contains(e.Title, "alice set the API key of the LLM provider openrouter") && !strings.Contains(e.Title, "sk-or")

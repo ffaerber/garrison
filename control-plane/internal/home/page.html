@@ -264,7 +264,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 {{else}}
 <div class="panel">
   <ul class="names" id="providers">
-  {{$want := .Provider}}{{range .Providers}}<li{{if eq .Name $want}} class="this"{{end}}><code>{{.Name}}</code> <span class="hint">{{.URL}}{{if .Include}} · only {{range $i, $p := .Include}}{{if $i}}, {{end}}{{$p}}{{end}}{{end}} · {{.Enabled}} of {{.Total}} models on{{if .Default}} · the default's{{end}}</span>
+  {{$want := .Provider}}{{range .Providers}}<li{{if eq .Name $want}} class="this"{{end}}><code>{{.Name}}</code> <span class="hint">{{if .Pending}}waiting for its change to <code>llm/providers.yaml</code> to be merged{{else}}{{.URL}}{{if .Include}} · only {{range $i, $p := .Include}}{{if $i}}, {{end}}{{$p}}{{end}}{{end}} · {{.Enabled}} of {{.Total}} models on{{if .Default}} · the default's{{end}}{{end}}</span>
     {{if .Key}}<span class="hidden" aria-label="key saved">key ••••••••</span>
     <form method="post" action="/models" onsubmit="return confirm('Delete the key of {{.Name}}? The agents that use its models fail until a key is set again.')">
       <input type="hidden" name="action" value="delete"><input type="hidden" name="name" value="{{.Name}}">

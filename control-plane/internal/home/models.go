@@ -35,6 +35,7 @@ type providerRow struct {
 	Key            bool // a key is stored here (else it may be on the machine)
 	Enabled, Total int  // of its models in models.yaml
 	Default        bool // the default model is one of its
+	Pending        bool // its key is saved, but providers.yaml does not list it yet
 }
 
 // modelsView is the Models page.
@@ -84,6 +85,14 @@ func (s *Server) modelsView(ctx context.Context) (*modelsView, error) {
 			}
 		}
 		v.Providers = append(v.Providers, row)
+	}
+	// Keys saved for providers still waiting for their change to be merged.
+	for _, secret := range stored {
+		if name, ok := models.ProviderOf(secret); ok {
+			if _, listed := p.Providers[name]; !listed {
+				v.Providers = append(v.Providers, providerRow{Name: name, Key: true, Pending: true})
+			}
+		}
 	}
 	return v, nil
 }
