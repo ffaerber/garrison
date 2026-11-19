@@ -81,8 +81,13 @@ check "and her agents see it"              test "$(cat "$lib/demo/notes.txt")" =
 check "nobody makes a public link"         test "$(files_api alice -o /dev/null -w '%{http_code}' -X POST "https://files.$DOMAIN/api/share/demo/notes.txt")" = 403
 # Another app could call it past Traefik, naming anyone: without the
 # environment's ingress key the gate takes nothing.
-past() { docker exec "$(docker ps -q -f name=files_web | head -n1)" wget -S -O /dev/null --header 'X-Garrison-User: alice' --header 'X-Auth-Request-Preferred-Username: alice' http://127.0.0.1:8080/api/resources/ 2>&1 | grep -q ' 403 '; }
-check "past the sign-in, it takes nothing" until_true 60 past
+# wget fails on the 403 it is meant to get: its output says which it was.
+past() {
+  local out
+  out=$(docker exec "$(docker ps -q -f name=files_web | head -n1)" wget -S -O /dev/null --header 'X-Garrison-User: alice' --header 'X-Auth-Request-Preferred-Username: alice' http://127.0.0.1:8080/api/resources/ 2>&1)
+  grep -q ' 403 ' <<<"$out"
+}
+check "past the sign-in, it takes nothing" past
 kill $comfy_pid 2>/dev/null || true
 
 echo "# a chain of command: software updates"
