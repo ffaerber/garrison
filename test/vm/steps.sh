@@ -30,6 +30,7 @@
 set -euo pipefail
 
 VM=${VM:-garrison-test}
+BASE_VM=$VM   # VM changes to the VM of each job; names come from this
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
 JOBS=${JOBS:-4}
@@ -346,7 +347,7 @@ settle() {
 is_fixture() { [[ $FIXTURES == *" $1 "* ]]; }
 in_trunk()   { [[ $TRUNK == *" $1 "* ]]; }
 # vm_of STEP: the VM a fixture's snapshot, or a scenario's run, lives in.
-vm_of() { if in_trunk "$1"; then echo "$VM"; else echo "$VM-$1"; fi; }
+vm_of() { if in_trunk "$1"; then echo "$BASE_VM"; else echo "$BASE_VM-$1"; fi; }
 children() { local s; for s in "${STEPS[@]}"; do [ "${PARENT[$s]}" = "$1" ] && echo "$s"; done; return 0; }
 green_of() { cat "$ROOT/bin/green/$1" 2>/dev/null || true; }
 needed() { [[ $NEEDED == *" $1 "* ]]; }
