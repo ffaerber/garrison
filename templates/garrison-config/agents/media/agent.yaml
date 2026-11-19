@@ -1,0 +1,7 @@
+# The media agent: pictures and videos with ComfyUI, in a project's styles,
+# into the namespace's media library.
+description: Makes pictures and videos with ComfyUI in a project's styles, into the namespace's media library
+model: ""
+tools: [generate_media, list_repos, list_files, read_file, list_stacks, propose_change, propose_patch]
+skills: []
+agents: [shorts]

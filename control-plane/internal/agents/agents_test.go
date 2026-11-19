@@ -73,10 +73,11 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	for p, c := range PlatformFiles() {
 		files[p] = c
 	}
-	// The gateway's tools; the gateway's own test checks these are all.
+	// The gateway's tools, and the agent service's generate_media; the
+	// gateway's own test checks these are all.
 	all := []string{"list_namespaces", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_namespace", "create_repo", "merge_change", "browse", "screenshot"}
+		"propose_change", "propose_patch", "create_namespace", "create_repo", "merge_change", "browse", "screenshot", "generate_media"}
 	got, problems, err := Load(context.Background(), files, files, PlatformNamespace, all)
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		names = append(names, a.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"coder", "commander", "monitor", "operator", "photographer", "qa", "researcher", "reviewer"}; len(problems) > 0 || !slices.Equal(names, want) {
+	if want := []string{"coder", "commander", "media", "monitor", "operator", "photographer", "qa", "researcher", "reviewer", "shorts"}; len(problems) > 0 || !slices.Equal(names, want) {
 		t.Fatalf("got %v, want %v; %v", names, want, problems)
 	}
 	// Each has a role of its own, and only the tools it needs: only the

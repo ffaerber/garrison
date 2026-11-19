@@ -14,6 +14,8 @@ An installation starts with these, each with only the tools its role needs:
 | `photographer` | Takes screenshots of the apps and proposes them into a repo |
 | `monitor` | Reads state, logs and metrics and explains what is wrong; changes nothing; fits `on_alert` routines |
 | `researcher` | Researches on the public web; no access to Garrison's repos |
+| `media` | Makes pictures and videos with ComfyUI in a project's styles (`generate_media`), into the namespace's media library; its skill `media-project` says how a project is laid out |
+| `shorts` | Cuts short vertical videos from a project's media with ffmpeg, into the library |
 
 Change them, switch one off (`enabled: false`) or add your own.
 

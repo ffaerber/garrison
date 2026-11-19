@@ -1,0 +1,4 @@
+# The shorts agent: short vertical videos from a project's assets.
+description: Cuts short vertical videos (YouTube shorts, reels) from a project's pictures and videos in the media library
+model: ""
+tools: [list_stacks]
