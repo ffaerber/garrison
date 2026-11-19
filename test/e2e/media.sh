@@ -51,6 +51,7 @@ runs=[json.loads(l) for l in open(sys.argv[1])]
 pic=any(r.get("6",{}).get("inputs",{}).get("text","").endswith(", comic style, bold ink lines, flat bright colours") and r["5"]["inputs"]["width"] == 768 and r["7"]["inputs"]["text"] == "photo, blurry, scary" for r in runs)
 vid=any(r.get("12",{}).get("inputs",{}).get("length") == 49 for r in runs)
 sys.exit(0 if pic and vid else 1)' "$tmp/comfy/prompts.jsonl"
+check "alice signs in to her dashboard"    until_true 60 home_login alice
 check "the feed has what it made, for media's people" in_feed alice ns=media "e['kind'] == 'media' and e['agent'] == 'media/media'"
 
 echo "# @shorts cuts a short from them"

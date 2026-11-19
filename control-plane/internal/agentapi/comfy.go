@@ -457,10 +457,14 @@ func (s *Server) sandboxGenerate(w http.ResponseWriter, r *http.Request) {
 		project, _ = files[0].Made["project"].(string)
 		style, _ = files[0].Made["style"].(string)
 	}
+	made := fmt.Sprintf("%d files", len(files))
+	if len(files) == 1 {
+		made = "1 file"
+	}
 	if s.Events != nil {
 		s.Events.Record(r.Context(), events.Event{Source: events.SourceAgents, Kind: events.KindMedia, Status: events.StatusOK,
 			Namespace: ns, Audience: events.AudienceMembers, Actor: c.Person, Agent: c.Agent, StartedBy: c.Run.StartedBy,
-			Title: fmt.Sprintf("%s made %d files in the style %s of %s for %s", c.Agent, len(files), style, project, c.Person)})
+			Title: fmt.Sprintf("%s made %s in the style %s of %s for %s", c.Agent, made, style, project, c.Person)})
 	}
 	writeJSON(w, map[string]any{"files": files})
 }

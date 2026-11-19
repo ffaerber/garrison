@@ -34,20 +34,20 @@ Bob: *@operator In the repo app of todo, change the heading of page.html from To
 - Carol approves it, then merges it: with three people in `todo`, `main` of its app repos takes only pull requests another of them approved. The pipeline tests, builds and pushes the image, and the deployer deploys it: the todo page shows *Our todos*.
 - Carol's dashboard feed has bob's change through the operator; its thread shows how it was handled: carol's merge and the deploy of the merge commit.
 
-## 4b. Bob asks the media agent for a screenshot
+## 4b. Bob asks the photographer for a screenshot
 
-Alice adds the agent `media` (folder `agents/media` in `garrison/config`, tools `list_stacks` and `screenshot`, the shared skill `homepage-screenshots`); a root admin approves it. Bob: *@media Take a screenshot of https://todo.<domain>/ and put it into the repo app as docs/screenshots/todo.png.*
+Alice adds the agent `photographer` (folder `agents/photographer` in `garrison/config`, tools `list_stacks` and `screenshot`, the shared skill `homepage-screenshots`); a root admin approves it. Bob: *@photographer Take a screenshot of https://todo.<domain>/ and put it into the repo app as docs/screenshots/todo.png.*
 
 - The gateway's browser loads the todo app signed in as bob and the agent opens a pull request on `todo/app`, as bob, holding the PNG.
 - The pull request says it shows the todo app as bob, with the page title *Our todos*, not the sign-in page.
 
-## 4c. The media agent follows its skill
+## 4c. The photographer follows its skill
 
-Bob: *@media Make the homepage screenshots of the todo app.*
+Bob: *@photographer Make the homepage screenshots of the todo app.*
 
 - The agent loads the skill `homepage-screenshots` and follows it: two pull requests, a 1440×900 desktop screenshot and a 390×844 phone screenshot, at the paths the skill names.
 
-## 4d. What the media agent may not do
+## 4d. What the photographer may not do
 
 Bob: *Take a screenshot of the todo app and put it into the namespace garrison, repo platform.* Then: *Take a screenshot of https://example.org/.*
 
@@ -55,11 +55,11 @@ Bob: *Take a screenshot of the todo app and put it into the namespace garrison, 
 - The browser loads only the installation's own pages: example.org is refused, and nothing is proposed.
 - Bob's feed lists the refusals among its problems.
 
-## 4e. The media agent works in a sandbox of its own
+## 4e. The photographer works in a sandbox of its own
 
-The channel's turns with the media agent, `todo/media` as it works in todo, ran in its sandbox: a container of the sandbox image for that channel and agent. Bob: *In your workspace, use bash to write the line 'pelican 42' into notes.txt.* Then its container is removed, as after 15 idle minutes, and bob asks: *Which line did you write into notes.txt just before?*
+The channel's turns with the photographer, `todo/photographer` as it works in todo, ran in its sandbox: a container of the sandbox image for that channel and agent. Bob: *In your workspace, use bash to write the line 'pelican 42' into notes.txt.* Then its container is removed, as after 15 idle minutes, and bob asks: *Which line did you write into notes.txt just before?*
 
-- The sandbox runs under gVisor, as root in gVisor's kernel. It holds no LLM key and no Keycloak token; it cannot reach the internet (the media agent has none), not even around the proxy, nor Gitea or Docker; between turns its own token counts for nothing at the agent service.
+- The sandbox runs under gVisor, as root in gVisor's kernel. It holds no LLM key and no Keycloak token; it cannot reach the internet (the photographer has none), not even around the proxy, nor Gitea or Docker; between turns its own token counts for nothing at the agent service.
 - The file is in the workspace; a new container takes up the chat with the same workspace and conversation, and the agent answers *pelican 42*.
 
 ## 4f. Bob has the developer agent change the app with Git
@@ -103,10 +103,10 @@ Alice's push to `main` (4i) starts the developer's routine `main-moved`.
 
 ## 4j3. A routine takes a screenshot, signed in as the agent
 
-Todo's config gives the media agent a grant on app that routines may use (`level: propose`, `unattended: true`) and a routine, owned by bob, that screenshots https://todo.<domain>/ when the branch `shots` moves. Carol approves, alice merges.
+Todo's config gives the photographer a grant on app that routines may use (`level: propose`, `unattended: true`) and a routine, owned by bob, that screenshots https://todo.<domain>/ when the branch `shots` moves. Carol approves, alice merges.
 
-- The media agent gets its account in Gitea, `agent-todo-media`, and the same account in Keycloak, enabled.
-- Alice pushes to `shots`. The routine runs with nobody watching: its browser signs in as `agent-todo-media`, which the sign-in in front of todo takes, and the agent's account proposes `docs/screenshots/routine.png`: the todo page, *as the agent todo/media*, *Asked by bob through todo/media, routine todo/media/shots, with nobody watching.*
+- The photographer gets its account in Gitea, `agent-todo-photographer`, and the same account in Keycloak, enabled.
+- Alice pushes to `shots`. The routine runs with nobody watching: its browser signs in as `agent-todo-photographer`, which the sign-in in front of todo takes, and the agent's account proposes `docs/screenshots/routine.png`: the todo page, *as the agent todo/photographer*, *Asked by bob through todo/photographer, routine todo/photographer/shots, with nobody watching.*
 
 ## 4k. An agent installs what it needs, from the package registries
 

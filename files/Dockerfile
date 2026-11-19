@@ -18,4 +18,8 @@ FROM filebrowser/filebrowser:v2.32.0
 COPY --from=build /garrison /usr/local/bin/garrison
 COPY files/start.sh /start.sh
 EXPOSE 8080
+# The base image's check asks the port of its config file, which is not
+# where Filebrowser listens here. start.sh stops the container when the
+# gate stops; this asks Filebrowser itself.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s CMD curl -fsS -o /dev/null http://127.0.0.1:8081/health || exit 1
 ENTRYPOINT ["/bin/sh", "/start.sh"]
