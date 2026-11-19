@@ -63,7 +63,9 @@ if ! short; then
 fi
 check "a short in the library"             short
 sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
-size=$(docker run --rm -v "$lib/demo/shorts:/s:ro" --entrypoint sh "$sandbox_image" -c 'ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$(ls /s/short-*.mp4 | head -n1)"' 2>/dev/null)
+# The short with its .json beside it: the finished one.
+size=$(docker run --rm -v "$lib/demo/shorts:/s:ro" --entrypoint sh "$sandbox_image" -c 'f=$(ls /s/short-*.mp4.json | head -n1); ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${f%.json}"' 2>/dev/null)
+check "no empty or broken file left in the library" bash -c '! find "$0" -name "short-*.mp4" -size 0 | grep -q .' "$lib/demo/shorts"
 check "vertical, 9:16"                     python3 -c 'import sys; w,h=map(int,sys.argv[1].split(",")); sys.exit(0 if w*16 == h*9 else 1)' "$size"
 
 echo "# the file browser"

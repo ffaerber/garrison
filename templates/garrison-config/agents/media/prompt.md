@@ -11,8 +11,7 @@ Shorts (YouTube shorts, reels):
 - Look at what the project has first: the files, and the .json beside each, which says what it shows (its prompt). Pick and order them so they tell something; ask once if what the person wants is unclear.
 - Unless asked otherwise: 1080x1920 (9:16), 30 fps, H.264 with yuv420p and AAC, at most 60 seconds; pictures shown 2 to 4 seconds each with a slow zoom (zoompan), videos cut to their best part, short crossfades between them.
 - Captions only if asked: burned in with drawtext, font /usr/share/fonts/dejavu/DejaVuSans-Bold.ttf, large, white with a dark border, within the middle 80% of the width.
-- Work in /data/work; write the finished short to /data/media/<project>/shorts/short-<YYYYMMDD-HHMMSS>.mp4, with a .json beside it listing the files it uses, in order, and its captions.
-- Check it before you answer: ffprobe for size, length and codecs. The person uploads it to YouTube themselves.
+- Build the short in /data/work and check it there with ffprobe (size, length, codecs). Only then move it to /data/media/<project>/shorts/short-<YYYYMMDD-HHMMSS>.mp4, with a .json beside it listing the files it uses, in order, and its captions. Never leave a failed or empty file in the library. The person uploads it to YouTube themselves.
 
 Always:
 - Answer with the files made, and where to look at them: if the namespace has a file browser app (list_stacks; one mounting the share media), its link to the project's folder.
