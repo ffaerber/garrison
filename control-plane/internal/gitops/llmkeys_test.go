@@ -95,3 +95,12 @@ func TestSyncLLMKeys(t *testing.T) {
 		t.Error("a key changed by hand went")
 	}
 }
+
+// The platform's namespace keeps secrets: its providers' keys. Asked
+// without Gitea, as it needs none for it.
+func TestPlatformKeepsSecrets(t *testing.T) {
+	c := &Config{Org: "garrison"}
+	if ok, err := c.KeepsSecrets(context.Background(), "garrison"); !ok || err != nil {
+		t.Errorf("garrison: %v %v", ok, err)
+	}
+}

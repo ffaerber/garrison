@@ -152,6 +152,17 @@ func (c *Config) get(ctx context.Context, path string, out any) error {
 // organisation but its own.
 func (c *Config) Namespaces(ctx context.Context) ([]string, error) { return c.namespaces(ctx) }
 
+// KeepsSecrets tells whether ns keeps secrets the deployer holds keys for:
+// every namespace with apps, and the platform's own, Org, whose secrets are
+// the LLM providers' keys.
+func (c *Config) KeepsSecrets(ctx context.Context, ns string) (bool, error) {
+	if ns == c.Org {
+		return true, nil
+	}
+	nss, err := c.namespaces(ctx)
+	return slices.Contains(nss, ns), err
+}
+
 func (c *Config) namespaces(ctx context.Context) ([]string, error) {
 	var out []string
 	for page := 1; page < 20; page++ {

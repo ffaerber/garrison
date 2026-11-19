@@ -592,12 +592,13 @@ models_post() {
 }
 check "alice signs in to her dashboard"    until_true 60 home_login alice
 check "bob signs in to his"                until_true 60 home_login bob
-check "the Models page is a root admin's"  test "$(feed bob /models -o /dev/null -w '%{http_code}')" = 403
+check "the Models page is a root admin's"  test "$(web -b "$tmp/home-bob.jar" -o /dev/null -w '%{http_code}' "https://$DOMAIN/models")" = 403
 check "bob may not add a provider"         grep -q '^403' <<<"$(models_post bob action=add name=smoke url=http://127.0.0.1:9/v1 key=tok-bob)"
 check "nor an app's page, for alice"       test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://hello.$DOMAIN" -X POST -d action=add -d name=smoke -d url=http://127.0.0.1:9/v1 -d key=tok "https://$DOMAIN/models")" = 403
 res=$(models_post alice action=add name=smoke url=http://127.0.0.1:9/v1 key=tok-smoke)
-check "alice adds the provider smoke with its key; she lands on its change" grep -q "^303 https://$DOMAIN/c/garrison/config/[0-9]" <<<"$res"
-smoke_pr=${res##*/}
+landed() { grep -qE "^303 https://$DOMAIN/c/garrison/config/[0-9]+$" <<<"$res" || { echo "got: $res"; return 1; }; }
+check "alice adds the provider smoke with its key; she lands on its change" landed
+smoke_pr=$(grep -oE '/c/garrison/config/[0-9]+$' <<<"$res" | grep -oE '[0-9]+$')
 check "the change adds it to providers.yaml, as alice" python3 -c '
 import json,sys
 p=json.loads(sys.argv[1]); sys.exit(0 if p["user"]["login"] == "alice" else 1)' "$(gitea_api "" "$api/repos/garrison/config/pulls/${smoke_pr:-0}")"

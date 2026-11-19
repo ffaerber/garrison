@@ -358,10 +358,7 @@ func deployCmd(args []string) error {
 		if keys != nil {
 			// The dashboard asks for a namespace's public keys here, to
 			// encrypt the secrets people set.
-			extra["GET /secrets/{namespace}/recipients"] = keys.Handler(func(ctx context.Context, ns string) (bool, error) {
-				nss, err := c.Namespaces(ctx)
-				return slices.Contains(nss, ns), err
-			})
+			extra["GET /secrets/{namespace}/recipients"] = keys.Handler(c.KeepsSecrets)
 		}
 		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent, extra); err != nil {
 			return err
