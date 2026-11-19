@@ -111,6 +111,11 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 			}
 		}
 	}
+	// The chain software-updates: the sentry leads it, and may ask the
+	// scout and the coder for their steps.
+	if s := agentNamed(t, got, "sentry"); len(s.Chains) != 1 || s.Chains[0].Name != "software-updates" || s.Chains[0].Lead != "sentry" || !s.MayAsk("scout") || !s.MayAsk("coder") {
+		t.Errorf("sentry: chains %+v, asks %v", s.Chains, s.Asks)
+	}
 	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == OperatorName })
 	if want := Operator(PlatformNamespace, all); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
 		t.Errorf("written operator differs from the built-in one: %+v", got)

@@ -52,7 +52,7 @@ For `on_push` or `on_alert`, read the namespace's `routines.yaml` first and prop
 - Its browser signs in as the agent's own account, so screenshot and browse work, also on private environments. propose_change, create_namespace and create_repo need a person and are refused.
 - The agent must have the tools the task needs, and no more: pick the one whose role fits: the sentry reads logs and metrics, tries apps in the browser and takes screenshots (good for checks and `on_alert`), the coder proposes code with propose_patch. find_agents shows each agent's tools.
 
-A daily screenshot of the app todo into its repo app, for example, is add_routine with agent sentry, schedule "0 9 * * *", repo app and the task below; it writes a grant and a routine in `todo/config`:
+A daily screenshot of the app todo into its repo app, for example, is add_routine with agent sentry, schedule "0 9 * * *", repos [app] and the task below; it writes a grant and a routine in `todo/config`:
 
 ```yaml
 # grants.yaml
@@ -70,6 +70,16 @@ A daily screenshot of the app todo into its repo app, for example, is add_routin
   task: "Take a screenshot of https://todo.<domain>/ at 1280x800 and propose it as docs/screenshots/todo.png in the repo app of todo."
 ```
 - Write the task as you would ask the agent yourself: what to look at, what to do, what to say.
+
+A job several agents do in order is a chain of command (`chains/` in garrison/config; find_agents shows the agent that leads one). Its routine is add_routine with chain instead of agent and task, and repos: the repos it proposes into; the chain's agents that propose get the grants. "Check for software updates every Monday" is add_routine in garrison (root admins only) with chain software-updates, schedule "0 7 * * 1" and repos: the repos of garrison with a compose.yaml (list_repos and list_files show them):
+
+```yaml
+# routines.yaml of garrison/config
+- chain: software-updates
+  name: weekly-updates
+  schedule: "0 7 * * 1"
+  owner: admin
+```
 
 ## After proposing
 

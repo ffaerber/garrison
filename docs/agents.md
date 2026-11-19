@@ -185,6 +185,17 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 - **The feed** has each hand-off, for the person and the asked agent's namespace, with its answer; the asked agent's calls are threaded under it.
 - **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
 
+## Chains of command
+
+A chain of command is the order in which agents do one kind of job, written down once: `chains/<name>.yaml` in `garrison/config`, which only root admins change. It has a `description`, a `when` (which requests it is for), a `lead` and 2 to 12 `steps`, each an agent and what it `does`; the lead has the first step.
+
+- **The lead runs it.** It does its own steps and asks each other agent for its step with `ask_agent`, one after another, passing on only what that step needs. Each answers back to the lead; nobody asks the next one. So a run stays commander → lead → one agent at a time, within `MaxChain`. The lead may ask the chain's agents without naming them in its `agents:`.
+- **Every agent knows the order.** The chains are part of each agent's system prompt: the lead gets the whole chain and how to run it, every other agent the chains it is in, its own steps marked, and who comes after it. The commander gets every chain in one line each, and hands a request that matches a chain's `when` to its lead as a whole. `find_agents` names the chains an agent leads.
+- **Routines** run a chain with `chain: <name>` instead of `agent` (its lead runs it); `task` adds to it. `add_routine` with `chain` and `repos` gives the chain's agents that propose (`propose_patch`, `screenshot`) the grants with `unattended: true` on those repos. In `garrison`, only root admins add routines.
+- A chain naming a missing or switched-off agent, or whose first step is not the lead's, is left out; the approval check names why.
+
+`software-updates`, from the template: the sentry lists the images and versions in use (each `garrison` repo's `compose.yaml`, a namespace's `stacks/`), the scout finds the newest releases on the projects' own pages, with only those names and versions, the sentry sorts them (a minor or patch release is proposed, a new major is only reported, with its upgrade notes), the coder proposes one pull request per repo changing only the tag, and the sentry reports. Every Monday: a routine in `garrison` with `chain: software-updates`. Tested in the `media` step: alice asks the commander about updates of a namespace whose app pins `traefik/whoami:v1.10.0`.
+
 ## The commander
 
 The commander is for when someone does not know which agent to ask. It is written into `garrison/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI (`garrison/commander`), and every channel's pinned message names it. Like every agent, it goes by its name, `@commander`, in any channel, and works in the channel's namespace. It does no work itself: it calls `find_agents`, then

@@ -7,6 +7,7 @@ Finding what is wrong:
 - Say what is wrong, what you saw that shows it (quote the log line or the number), and what to change, naming the file and setting, e.g. in stacks/<app>.yaml of the config repo. Others propose the change.
 - When started by an alert, begin with the service the alert names.
 - If everything looks fine, say so in one sentence.
+- Versions: read the tag exactly. gitea/gitea:1.25 follows the line 1.25 and gets its patches when pulled; postgres:17-alpine the major line 17; a tag like 1.25.3 is one release. Never call a new major line a small update.
 - You see Garrison only. For what the public web knows, such as what an error message means or what a new version changed, ask the scout (ask_agent): tell it only what it needs, never secrets, tokens or private data.
 
 Trying an app:

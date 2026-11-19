@@ -137,6 +137,11 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "tools: [rm_rf]\n")
 	case p == "/repos/garrison/config/raw/agents/broken/prompt.md":
 		io.WriteString(w, "x\n")
+	// A chain of command: marketing leads, the operator proposes.
+	case p == "/repos/garrison/config/contents/chains":
+		io.WriteString(w, `[{"name":"shots.yaml","type":"file"},{"name":"README.md","type":"file"}]`)
+	case p == "/repos/garrison/config/raw/chains/shots.yaml":
+		io.WriteString(w, "description: Shots of the site\nwhen: someone asks for shots\nlead: marketing\nsteps:\n  - {agent: marketing, does: Look at the site.}\n  - {agent: operator, does: Propose the shots.}\n")
 	case p == "/repos/homepage/config/raw/grants.yaml":
 		io.WriteString(w, "- {agent: marketing, repo: site, level: propose}\n")
 	case p == "/repos/garrison/config/contents/agents/marketing/skills/thumbnail":
@@ -988,7 +993,7 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 		"task": "Take a screenshot of https://site.example.com/: then propose it.", "repo": "site"}
 	text, isErr := callText(t, m, "tok-alice", "add_routine", args)
 	if isErr || fg.prs != 1 || len(fg.commits) != 1 || !strings.Contains(text, "the routine morning-shot of marketing, on the schedule 0 9 * * *, for alice") ||
-		!strings.Contains(text, "a grant to propose in homepage/site") {
+		!strings.Contains(text, "grants to propose that its runs may use with nobody watching (grants.yaml): marketing in homepage/site.") {
 		t.Fatalf("%q, prs %d", text, fg.prs)
 	}
 	files := map[string]string{}
@@ -1028,8 +1033,43 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 			t.Errorf("%v: %q", bad, text)
 		}
 	}
-	if _, isErr := callText(t, m, "tok-alice", "add_routine", map[string]any{"namespace": "garrison", "agent": "marketing", "name": "x", "task": "x", "every": "1h"}); !isErr {
-		t.Error("a routine in garrison")
+	if text, isErr := callText(t, m, "tok-alice", "add_routine", map[string]any{"namespace": "garrison", "agent": "marketing", "name": "x", "task": "x", "every": "1h"}); !isErr || !strings.Contains(text, "not allowed") {
+		t.Errorf("a routine in garrison, by alice: %q", text)
+	}
+
+	// A chain: its lead runs it, and the grants go to the agents of the
+	// chain that propose, not to the lead, which only looks.
+	fg.commits = nil
+	text, isErr = callText(t, m, "tok-alice", "add_routine", map[string]any{"namespace": "homepage", "chain": "shots", "name": "weekly-shots", "schedule": "0 7 * * 1", "repos": []string{"site", "docs"}})
+	if isErr || fg.prs != 2 || len(fg.commits) != 1 || !strings.Contains(text, "the routine weekly-shots of marketing") ||
+		!strings.Contains(text, "operator in homepage/site, operator in homepage/docs.") {
+		t.Fatalf("a chain: %q, prs %d", text, fg.prs)
+	}
+	files = map[string]string{}
+	for _, f := range fg.commits[0]["files"].([]any) {
+		op := f.(map[string]any)
+		raw, _ := base64.StdEncoding.DecodeString(op["content"].(string))
+		files[op["path"].(string)] = string(raw)
+	}
+	routines = nil
+	if err := yaml.Unmarshal([]byte(files["routines.yaml"]), &routines); err != nil || len(routines) != 2 || routines[1].Chain != "shots" || routines[1].Agent != "" || routines[1].Task != "" {
+		t.Errorf("routines.yaml with a chain: %v\n%s", err, files["routines.yaml"])
+	}
+	grants = nil
+	if err := yaml.Unmarshal([]byte(files["grants.yaml"]), &grants); err != nil || len(grants) != 3 || grants[1].Agent != "operator" || grants[2].Repo != "docs" || !grants[2].Unattended {
+		t.Errorf("grants.yaml with a chain: %v\n%s", err, files["grants.yaml"])
+	}
+	for _, bad := range []map[string]any{
+		{"chain": "nope"},
+		{"chain": "shots", "agent": "operator"},
+	} {
+		a := map[string]any{"namespace": "homepage", "name": "y", "every": "1h"}
+		for k, v := range bad {
+			a[k] = v
+		}
+		if text, isErr := callText(t, m, "tok-alice", "add_routine", a); !isErr || fg.prs != 2 {
+			t.Errorf("%v: %q", bad, text)
+		}
 	}
 }
 

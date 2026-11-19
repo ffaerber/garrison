@@ -60,6 +60,7 @@ type Agent struct {
 	Grants      []Grant  // rights of its own in Namespace (grants.yaml)
 	Routines    []Routine
 	Internet    Internet // what its sandbox reaches through the proxy
+	Chains      []Chain  // the chains of command it is part of; every one for the commander
 }
 
 // ID is the instance: <namespace>/<agent>. Garrison's, garrison/<agent>, is
@@ -277,6 +278,20 @@ func Bindings(ctx context.Context, f Files, defs []Agent) (map[string][]Grant, m
 	for i, r := range rs {
 		at := fmt.Sprintf("%s: [%d]", RoutinesFile, i)
 		r.Agent = NameOf(r.Agent)
+		if r.Chain != "" {
+			c, ok := ChainNamed(defs, r.Chain)
+			switch {
+			case !ok:
+				problems = append(problems, fmt.Sprintf("%s: there is no chain %q in garrison's %s/", at, r.Chain, ChainsDir))
+				continue
+			case r.Agent == "":
+				r.Agent = c.Lead
+			case r.Agent != c.Lead:
+				problems = append(problems, fmt.Sprintf("%s: the chain %s is run by its lead, %s, not %s; leave agent out", at, c.Name, c.Lead, r.Agent))
+				continue
+			}
+			r.Task = strings.TrimSpace("Run the chain " + c.Name + ". " + r.Task)
+		}
 		if why := known(r.Agent); why != "" {
 			problems = append(problems, at+": "+why)
 			continue
@@ -358,7 +373,12 @@ func Definitions(ctx context.Context, f Files, tools []string) (out []Agent, pro
 		}
 		kept = append(kept, a)
 	}
-	return kept, problems, nil
+	chains, why, err := LoadChains(ctx, f, kept)
+	if err != nil {
+		return nil, nil, err
+	}
+	bindChains(kept, chains)
+	return kept, append(problems, why...), nil
 }
 
 func load(ctx context.Context, f Files, namespace, name string, tools []string, shared map[string]Skill) (Agent, []string, error) {
@@ -614,6 +634,7 @@ func System(a Agent, domain string) string {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
 		}
 	}
+	b.WriteString(chainsPrompt(a))
 	merges := slices.Contains(a.Tools, "merge_change") && slices.ContainsFunc(a.Grants, func(g Grant) bool { return Rank(g.Level) >= Rank(LevelMerge) })
 	if len(a.Grants) > 0 {
 		b.WriteString("\nYour grants: rights of your own, in " + a.Namespace + ", each only for requests of the people named:\n")

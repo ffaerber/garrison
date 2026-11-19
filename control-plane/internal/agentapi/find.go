@@ -106,6 +106,11 @@ func describe(b *strings.Builder, a agents.Agent) {
 	if len(a.Asks) > 0 {
 		fmt.Fprintf(b, "  asks: %s\n", strings.Join(a.Asks, ", "))
 	}
+	for _, c := range a.Chains {
+		if c.Lead == a.Name {
+			fmt.Fprintf(b, "  leads the chain %s: %s (for: %s); ask it to run the chain %s\n", c.Name, c.Description, c.When, c.Name)
+		}
+	}
 	for _, g := range a.Grants {
 		where := g.Repo
 		if g.Branch != "" {

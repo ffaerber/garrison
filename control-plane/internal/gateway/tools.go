@@ -158,17 +158,18 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "namespace", "repo", "patch", "title"),
-		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the namespace's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes a repo (a screenshot or a patch proposed into it), give repo: the agent then also gets the grant to propose there that a run with nobody watching needs. What each run finds is posted in the namespace's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
+		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the namespace's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes repos (a screenshot or a patch proposed into them), give repos: the agent then also gets the grant to propose there that a run with nobody watching needs. For a chain of command (find_agents shows which agent leads one), give chain instead of agent: its lead runs it, and every agent of the chain that proposes gets the grants on repos. In garrison, only root admins add routines. What each run finds is posted in the namespace's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
 			"namespace":   nsArg,
-			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots"),
+			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots; leave it out with chain"),
+			"chain":       str("a chain of command the routine runs, e.g. software-updates; its lead runs it"),
 			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the namespace, e.g. morning-check"),
 			"schedule":    str("when, as cron in Garrison's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
 			"every":       str("how often instead of schedule, 10m to 168h, e.g. 6h"),
 			"task":        str("what the agent does each time, as you would ask it: what to look at, what to do, what to say"),
-			"repo":        str("the namespace's repo the task changes (proposes a screenshot or a patch into), if any"),
+			"repos":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the namespace's repos the task changes (proposes a screenshot or a patch into), if any"},
 			"title":       str("short title of the change; default names the routine"),
 			"description": str("why"),
-		}, "namespace", "agent", "name", "task"),
+		}, "namespace", "name"),
 		spec("create_namespace", "Makes a new namespace (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml and its channel, where the agents work in it.", map[string]any{
 			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
 			"description": str("what it is for"),
@@ -219,8 +220,8 @@ type args struct {
 	URL                                                                                    string `json:"url"`
 	Template                                                                               string `json:"template"`
 	FullPage                                                                               bool   `json:"full_page"`
-	Agent, Schedule, Every, Task                                                           string
-	Include                                                                                []string
+	Agent, Schedule, Every, Task, Chain                                                    string
+	Include, Repos                                                                         []string
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp

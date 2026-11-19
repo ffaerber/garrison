@@ -70,7 +70,7 @@ Acceptance: on a clean machine, the user reaches the dashboard at their domain w
 | --- | --- | --- | --- |
 | Platform repos | The `garrison` organisation, one per system stack | `compose.yaml` and the files it uses; for the deployer also its source and build | Root admins, garrison's operator via PR |
 | Platform repo | `garrison/platform` | Grafana dashboards, public contracts (e.g. Traefik label schema) | Root admins, garrison's operator via PR |
-| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `garrison`), `grants.yaml` and `routines.yaml` (what the agents may do and do by themselves there), `stacks/` (its apps; not in `garrison`), `secrets/`; in `garrison` only, `agents/` and `skills/`: every agent of Garrison | Namespace admins (root admins in `garrison`), agents via PR |
+| Config repo | One per namespace, `<namespace>/config` | `members.yaml` (admins and members; not in `garrison`), `grants.yaml` and `routines.yaml` (what the agents may do and do by themselves there), `stacks/` (its apps; not in `garrison`), `secrets/`; in `garrison` only, `agents/`, `skills/` and `chains/`: every agent of Garrison, and the order agents do a job in | Namespace admins (root admins in `garrison`), agents via PR |
 | History repo | One per namespace, `<namespace>/history` | Change records, one per deploy | Deployer only |
 | App repos | Inside a namespace, one per app with code of its own | Code, Dockerfile, tests, the pipeline that builds its image, numbered migrations | Members, coding agents |
 

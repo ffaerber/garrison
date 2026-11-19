@@ -84,4 +84,59 @@ check "nobody makes a public link"         test "$(files_api alice -o /dev/null 
 past() { docker exec "$(docker ps -q -f name=files_web | head -n1)" wget -S -O /dev/null --header 'X-Garrison-User: alice' --header 'X-Auth-Request-Preferred-Username: alice' http://127.0.0.1:8080/api/resources/ 2>&1 | grep -q ' 403 '; }
 check "past the sign-in, it takes nothing" past
 kill $comfy_pid 2>/dev/null || true
+
+echo "# a chain of command: software updates"
+# An app of media pinned to an old release. alice asks the commander about
+# updates; it hands the chain software-updates to its lead, the sentry,
+# which asks the scout (the real web) and then the coder, in that order.
+cat > "$tmp/greeter.yaml" <<'YAML'
+stack: greeter
+namespace: media
+entrypoint: web
+services:
+  web: { image: traefik/whoami:v1.10.0, port: 80 }
+environments:
+  main: {}
+YAML
+check "media runs traefik/whoami:v1.10.0"  set_stack media greeter "$tmp/greeter.yaml"
+asked_from=$(feed alice "/api/events?limit=1" | python3 -c 'import json,sys; e=json.load(sys.stdin); print(e[0]["id"] if e else 0)')
+answer=$(ask_agent media alice "Are there software updates for the apps of the namespace media? If so, have them proposed." commander)
+# update_pr: the open pull request in media/config, by alice, that changes
+# only the tag of whoami in stacks/greeter.yaml to a newer one.
+update_pr() {
+  local n
+  for n in $(gitea_api "" "$api/repos/media/config/pulls?state=open&limit=50" | python3 -c '
+import json,sys
+for p in json.load(sys.stdin):
+    if p["user"]["login"] == "alice": print(p["number"])'); do
+    gitea_api "" "$api/repos/media/config/pulls/$n.diff" | python3 -c '
+import re,sys
+d=sys.stdin.read()
+minus=[l for l in d.splitlines() if l.startswith("-") and not l.startswith("---")]
+plus=[l for l in d.splitlines() if l.startswith("+") and not l.startswith("+++")]
+new=re.findall(r"traefik/whoami:v(\d+)\.(\d+)(?:\.(\d+))?", "\n".join(plus))
+ok = "stacks/greeter.yaml" in d and len(minus) == 1 and len(plus) == 1 and "whoami:v1.10.0" in minus[0] and new and tuple(int(x or 0) for x in new[0]) > (1, 10, 0)
+sys.exit(0 if ok else 1)' && { echo "$n"; return 0; }
+  done
+  return 1
+}
+if ! until_true 900 update_pr >/dev/null; then
+  printf 'retry no update was proposed; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent media alice "Please hand this to the sentry as the chain software-updates says: check stacks/greeter.yaml of media/config (traefik/whoami:v1.10.0) for a newer release, and have the coder propose it." commander)
+fi
+check "an update is proposed: only the tag of whoami, newer" until_true 900 update_pr
+# chain_order: the feed has commander → sentry, then sentry → scout before
+# sentry → coder.
+chain_order() {
+  feed alice "/api/events?limit=500&ns=media" | python3 -c '
+import json,sys
+since=int(sys.argv[1] or 0)
+es=[e for e in json.load(sys.stdin) if e.get("kind") == "ask" and e["id"] > since]
+es.sort(key=lambda e: e["id"])
+order=[(e.get("started_by",""), e.get("agent","")) for e in es]
+def at(pair): return next((i for i,p in enumerate(order) if p == pair), -1)
+lead=at(("agent media/commander","media/sentry")); scout=at(("agent media/sentry","media/scout")); coder=at(("agent media/sentry","media/coder"))
+sys.exit(0 if 0 <= lead < scout < coder else 1)' "$asked_from"
+}
+check "in the chain's order: commander → sentry, then scout, then coder" until_true 60 chain_order
 }

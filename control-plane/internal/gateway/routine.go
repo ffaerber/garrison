@@ -19,12 +19,13 @@ import (
 
 // routineEntry is one routine as add_routine writes it into routines.yaml.
 type routineEntry struct {
-	Agent    string `yaml:"agent"`
+	Agent    string `yaml:"agent,omitempty"`
+	Chain    string `yaml:"chain,omitempty"`
 	Name     string `yaml:"name"`
 	Schedule string `yaml:"schedule,omitempty"`
 	Every    string `yaml:"every,omitempty"`
 	Owner    string `yaml:"owner"`
-	Task     string `yaml:"task"`
+	Task     string `yaml:"task,omitempty"`
 }
 
 // grantEntry is the grant add_routine adds when the routine changes a repo.
@@ -47,17 +48,49 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		return "", err
 	}
 	if a.Namespace == PlatformNamespace {
-		return "", fmt.Errorf("%w: routines are given in a namespace's config, not in garrison's; name the namespace they work in", ErrInvalid)
+		// garrison's own routines, e.g. updates of the platform's software:
+		// root admins only, who alone merge them anyway.
+		if admin, err := t.Gitea.IsAdmin(ctx, p.Name); err != nil {
+			return "", err
+		} else if !admin {
+			return "", fmt.Errorf("%w: only root admins add routines in garrison; name the namespace the routine works in", ErrForbidden)
+		}
 	}
 	name, which := strings.TrimSpace(a.Name), agents.NameOf(strings.TrimSpace(a.Agent))
-	task := strings.TrimSpace(a.Task)
-	if name == "" || which == "" || task == "" {
-		return "", fmt.Errorf("%w: a routine needs agent, name and task", ErrInvalid)
+	task, chainName := strings.TrimSpace(a.Task), strings.TrimSpace(a.Chain)
+	// Who proposes into repos with nobody watching: the agent, or every
+	// agent of the chain that proposes.
+	proposers := []string{which}
+	if chainName != "" {
+		defs, err := t.Gitea.Definitions(ctx)
+		if err != nil {
+			return "", err
+		}
+		c, ok := agents.ChainNamed(defs, chainName)
+		if !ok {
+			return "", fmt.Errorf("%w: there is no chain %q in garrison/config chains/", ErrInvalid, chainName)
+		}
+		if which != "" && which != c.Lead {
+			return "", fmt.Errorf("%w: the chain %s is run by its lead, %s; leave agent out", ErrInvalid, c.Name, c.Lead)
+		}
+		which, proposers = c.Lead, nil
+		for _, n := range c.Agents() {
+			if i := slices.IndexFunc(defs, func(d agents.Agent) bool { return d.Name == n }); i >= 0 &&
+				slices.ContainsFunc(defs[i].Tools, func(t string) bool { return t == "propose_patch" || t == "screenshot" }) {
+				proposers = append(proposers, n)
+			}
+		}
+	}
+	if name == "" || which == "" || (task == "" && chainName == "") {
+		return "", fmt.Errorf("%w: a routine needs a name, and agent and task, or chain", ErrInvalid)
 	}
 	if (a.Schedule == "") == (a.Every == "") {
 		return "", fmt.Errorf("%w: give either schedule (cron, e.g. \"0 9 * * *\" for every day at 9) or every (e.g. 6h), not both", ErrInvalid)
 	}
 	entry := routineEntry{Agent: which, Name: name, Schedule: strings.TrimSpace(a.Schedule), Every: strings.TrimSpace(a.Every), Owner: p.Name, Task: task}
+	if chainName != "" {
+		entry.Agent, entry.Chain = "", chainName
+	}
 
 	main := configFiles{g: t.Gitea, ns: a.Namespace, ref: "main"}
 	files := map[string]string{}
@@ -68,25 +101,42 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 	if files[agents.RoutinesFile], err = appendEntry(routines, entry); err != nil {
 		return "", err
 	}
-	granted := ""
-	if a.Repo != "" {
-		if err := validRepo(a.Repo); err != nil {
-			return "", err
-		}
+	repos := slices.Clone(a.Repos)
+	if a.Repo != "" && !slices.Contains(repos, a.Repo) {
+		repos = append(repos, a.Repo) // as before repos
+	}
+	var gave []string
+	if len(repos) > 0 {
 		grants, err := main.Read(ctx, agents.GrantsFile)
 		if err != nil && !errors.Is(err, agents.ErrNotExist) {
 			return "", err
 		}
 		var have []agents.Grant
 		_ = yaml.Unmarshal([]byte(grants), &have) // a broken file is caught below
-		if !slices.ContainsFunc(have, func(g agents.Grant) bool {
-			return agents.NameOf(g.Agent) == which && g.Repo == a.Repo && g.Unattended
-		}) {
-			if files[agents.GrantsFile], err = appendEntry(grants, grantEntry{Agent: which, Repo: a.Repo, Level: agents.LevelPropose, For: agents.ForMembers, Unattended: true}); err != nil {
+		for _, repo := range repos {
+			if err := validRepo(repo); err != nil {
 				return "", err
 			}
-			granted = fmt.Sprintf(" It also gives %s a grant to propose in %s/%s that its runs may use with nobody watching (grants.yaml).", which, a.Namespace, a.Repo)
+			for _, who := range proposers {
+				if slices.ContainsFunc(have, func(g agents.Grant) bool {
+					return agents.NameOf(g.Agent) == who && g.Repo == repo && g.Unattended
+				}) {
+					continue
+				}
+				if grants, err = appendEntry(grants, grantEntry{Agent: who, Repo: repo, Level: agents.LevelPropose, For: agents.ForMembers, Unattended: true}); err != nil {
+					return "", err
+				}
+				have = append(have, agents.Grant{Agent: who, Repo: repo, Unattended: true})
+				gave = append(gave, who+" in "+a.Namespace+"/"+repo)
+			}
 		}
+		if len(gave) > 0 {
+			files[agents.GrantsFile] = grants
+		}
+	}
+	granted := ""
+	if len(gave) > 0 {
+		granted = fmt.Sprintf(" It also gives grants to propose that its runs may use with nobody watching (grants.yaml): %s.", strings.Join(gave, ", "))
 	}
 	if err := t.checkFiles(ctx, a.Namespace, files); err != nil {
 		return "", err
@@ -114,7 +164,11 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 	if strings.TrimSpace(title) == "" {
 		title = fmt.Sprintf("Routine %s: %s %s", name, which, when)
 	}
-	desc := strings.TrimSpace(a.Description + fmt.Sprintf("\n\n%s runs %s, for %s: %s", which, when, p.Name, task))
+	what := task
+	if chainName != "" {
+		what = strings.TrimSpace("the chain " + chainName + ". " + task)
+	}
+	desc := strings.TrimSpace(a.Description + fmt.Sprintf("\n\n%s runs %s, for %s: %s", which, when, p.Name, what))
 	c, err := t.Gitea.ProposeAs(ctx, as, a.Namespace, ConfigRepo, files, title, desc, newBranch(p, agent, viaAgent), note)
 	if err != nil {
 		return "", err
@@ -146,12 +200,10 @@ func appendEntry(file string, entry any) (string, error) {
 	return strings.TrimRight(file, "\n") + "\n" + string(item), nil
 }
 
-// checkFiles refuses grants.yaml and routines.yaml of a namespace's config,
+// checkFiles refuses grants.yaml and routines.yaml of a namespace's config
+// (garrison's too),
 // as they would be with files, if the approval check would refuse them.
 func (t *Tools) checkFiles(ctx context.Context, ns string, files map[string]string) error {
-	if ns == PlatformNamespace {
-		return nil
-	}
 	return t.checkBindingsAt(ctx, overlay{Files: configFiles{g: t.Gitea, ns: ns, ref: "main"}, files: files}, ns, slices.Sorted(maps.Keys(files)))
 }
 

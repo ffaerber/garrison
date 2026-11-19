@@ -56,7 +56,8 @@ type Grant struct {
 // routines.yaml names it, for its owner: every so often, or when a branch
 // moves.
 type Routine struct {
-	Agent    string         `yaml:"agent"` // which of garrison's agents
+	Agent    string         `yaml:"agent"` // which of garrison's agents; with chain, its lead by default
+	Chain    string         `yaml:"chain"` // a chain of command it runs, from garrison's chains/
 	Name     string         `yaml:"name"`
 	Every    time.Duration  `yaml:"-"`
 	Raw      string         `yaml:"every"`

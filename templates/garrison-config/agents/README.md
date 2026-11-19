@@ -20,4 +20,6 @@ Change them, switch one off (`enabled: false`) or add your own.
 - `prompt.md`: its instructions. The platform adds its own rules after them.
 - `skills/<name>/SKILL.md`: skills of this agent only, in the Agent Skills format.
 
+Several agents doing a job in order, such as software updates, is a chain of command: `chains/` at the top of this repo (see its README).
+
 What an agent may do in a namespace beyond the person's rights, and the work it does there by itself, that namespace gives it in its own `config` repo: `grants.yaml` and `routines.yaml` (see the README there). garrison's own are in this repo, next to this folder.
