@@ -1,54 +1,58 @@
 #!/usr/bin/env bash
-# The end-to-end test as a tree of steps on one Multipass VM. Each green step
-# is saved as a VM snapshot, and a step starts from its parent's snapshot, so
-# a change reruns only the steps it affects, and a failure in one branch
-# does not stop the others.
+# The end-to-end test as a tree of steps on Multipass VMs. A fixture is a
+# state that scenarios start from (Garrison installed, a namespace with its
+# app deployed): green, it is saved as a VM snapshot. A scenario is a test
+# that starts from its fixture: it runs in a clone of the fixture's VM, which
+# is thrown away when it passes and kept, stopped, when it fails. So a change
+# reruns only the fixtures and scenarios it affects, a failure in one does not
+# stop the others, and up to JOBS VMs run at once.
 #
-#   test/vm/steps.sh               run every branch, in parallel, each from its newest valid snapshot
-#   test/vm/steps.sh talk agent    run only the branches up to these steps
-#   test/vm/steps.sh --serial      run the branches one after another in one VM
-#   test/vm/steps.sh --from login  rerun from `login`, ignoring its snapshot and those that grow from it
-#   test/vm/steps.sh --list        show the steps and their snapshots
-#   test/vm/steps.sh --clean       delete the VMs and their snapshots
+#   test/vm/steps.sh               every scenario that is not green yet
+#   test/vm/steps.sh talk media    only these, and the fixtures they start from
+#   test/vm/steps.sh --from login  rerun from `login`: it and all that grows from it
+#   test/vm/steps.sh --list        the tree, and what is green, valid or stale
+#   test/vm/steps.sh --clean       delete the VMs, their snapshots and the green marks
+#   JOBS=2 test/vm/steps.sh        at most 2 VMs at once (default 4)
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #
-# Steps: base, install, login, platform, agent, media, deploy, talk, journey, crud, ui.
-# The agent, media, talk, journey and ui steps talk to a real LLM: by default Ollama on this computer, which
-# the VM reaches through its gateway (LOCAL_MODEL, default qwen3.8-64k);
-# with LLM=cloud, Ollama's cloud with OLLAMA_API_KEY from this checkout's .env.
+# The scenarios that talk to a real LLM (agent, media, talk, journey, ui) use by
+# default Ollama on this computer, which the VM reaches through its gateway
+# (LOCAL_MODEL, default qwen3.8-64k); with LLM=cloud, Ollama's cloud with
+# OLLAMA_API_KEY from this checkout's .env.
 #
-# A snapshot is valid while the files its step depends on, and those of every
-# step on its way from base, are unchanged: each snapshot's comment records a
-# fingerprint of them. Restoring a snapshot boots the VM, so every resumed step also tests
-# a restart.
+# A fixture's snapshot, or a scenario's green mark (bin/green/<step>), is
+# valid while the files its step depends on, and those of every step on its
+# way from base, are unchanged: each records a fingerprint of them. Starting
+# from a snapshot boots the VM, so every step also tests a restart.
 #
-# After a green run, this computer's DNS points at the VM (test/vm/dns.sh) and
-# Keycloak opens in the browser. OPEN=0 skips that.
+# After a green run, this computer's DNS points at the VM with the apps
+# (test/vm/dns.sh) and Keycloak opens in the browser. OPEN=0 skips that.
 set -euo pipefail
 
 VM=${VM:-garrison-test}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
+JOBS=${JOBS:-4}
 cd "$ROOT"
 
-# The steps form a tree: each starts from the snapshot of its parent, so
-# steps that do not depend on each other are not chained, and a change to one
-# reruns only it and what grows from it.
+# The tree. Fixtures [F] are saved as snapshots; the others are scenarios.
 #
-#   1 base - 2 install - 3 login -+- 4.1 platform
-#                                 +- 4.2 agent --- 5.4 media
-#                                 +- 4.3 deploy -+- 5.1 talk
-#                                 |              +- 5.2 journey
-#                                 +- 4.4 crud --- 5.3 ui
+#   1 base [F] - 2 install [F] - 3 login [F] -+- 4.1 platform
+#                                             +- 4.2 crud
+#                                             +- 4.3 ui
+#                                             +- 4.4 agent [F] --- 5.1 media
+#                                             +- 4.5 deploy [F] -+- 5.2 talk
+#                                                                +- 5.3 journey
 #
-# ui builds the same app as deploy, todo/app in the namespace todo, so the
-# two never share a VM.
-STEPS=(base install login platform agent media deploy talk journey crud ui)
-declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [agent]=login [deploy]=login [talk]=deploy [journey]=deploy [ui]=crud [media]=agent [crud]=login)
-declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [agent]=4.2 [deploy]=4.3 [talk]=5.1 [journey]=5.2 [ui]=5.3 [media]=5.4 [crud]=4.4)
-# Where the tree forks. In parallel runs (the default) the trunk up to here
-# runs in $VM, and each branch from here in its own clone, $VM-<first step>.
-FORK=login
+# The trunk (base, install, login) lives in $VM; every other fixture and
+# scenario in a VM of its own, $VM-<step>, cloned from its parent's.
+STEPS=(base install login platform crud ui agent media deploy talk journey)
+declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
+  [agent]=login [media]=agent [deploy]=login [talk]=deploy [journey]=deploy)
+declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
+  [agent]=4.4 [media]=5.1 [deploy]=4.5 [talk]=5.2 [journey]=5.3)
+FIXTURES=" base install login agent deploy "
+TRUNK=" base install login "
 
 # Which LLM the agents use: local (Ollama on this computer, LOCAL_MODEL) or cloud.
 LLM=${LLM:-local}
@@ -240,16 +244,6 @@ descendants() {
   done
 }
 
-# leaves: the steps no other step grows from.
-leaves() {
-  local s t child
-  for s in "${STEPS[@]}"; do
-    child=
-    for t in "${STEPS[@]}"; do [ "${PARENT[$t]}" = "$s" ] && child=1; done
-    [ -z "$child" ] && echo "$s"
-  done
-}
-
 # fingerprint STEP: of the step's definition and inputs, chained with its
 # parent's. Piped straight into sha256sum: no temporary file, so parallel
 # branches cannot collide.
@@ -302,39 +296,6 @@ save() {
   say "Snapshot ${NUMBER[$step]} $step took $((SECONDS - t0))s (stop, snapshot, boot)"
 }
 
-# drop STEP: deletes the snapshots of STEP and of everything that grows from it.
-drop() {
-  local s
-  for s in $(descendants "$1"); do
-    [ -n "$(snapshot_of "$s")" ] && multipass delete --purge "$VM.$s"
-  done
-  return 0
-}
-
-list() {
-  local s have want state indent
-  printf '%-18s %-18s %-18s %-8s %s\n' STEP SNAPSHOT CURRENT STATE VM
-  for s in "${STEPS[@]}"; do
-    local vm=$VM
-    [ -n "$SERIAL" ] || vm=$(branch_vm "$s")
-    have=$(VM=$vm snapshot_of "$s"); want=$(fingerprint "$s")
-    if [ -z "$have" ]; then state=none; elif [ "$have" = "$want" ]; then state=valid; else state=stale; fi
-    indent=$(printf '%*s' $(( ($(path "$s" | wc -w) - 1) * 2 )) '')
-    printf '%-18s %-18s %-18s %-8s %s\n' "$indent${NUMBER[$s]} $s" "${have:--}" "$want" "$state" "$vm"
-  done
-}
-
-# below_fork STEP: whether STEP grows from the fork (is not on the trunk).
-below_fork() { [[ " $(path "$FORK") " != *" $1 "* ]]; }
-
-# branch_vm STEP: the VM a step's snapshot lives in, in parallel runs.
-branch_vm() {
-  local s
-  below_fork "$1" || { echo "$VM"; return; }
-  for s in $(path "$1"); do
-    if [ "${PARENT[$s]}" = "$FORK" ]; then echo "$VM-$s"; return; fi
-  done
-}
 
 # readdress: a clone has a new IP address; the swarm is formed again on it,
 # keeping its services, secrets and configs, and repaired like after a boot.
@@ -379,43 +340,103 @@ settle() {
     exit 1'
 }
 
-# branch TARGET [FORK]: runs the steps from the newest valid snapshot on the
-# way to TARGET up to TARGET, saving each. With FORK, only the steps after
-# FORK are considered, and with none of them valid the VM is taken to be at
-# FORK (a fresh clone). Returns non-zero if a step fails. Called with set +e;
-# each step runs in a subshell with set -e.
-branch() {
-  local target=$1 fork=${2:-} s steps=() resume= rc
-  read -r -a steps <<<"$(path "$target")"
-  if [ -n "$fork" ]; then
-    while [ "${steps[0]}" != "$fork" ]; do steps=("${steps[@]:1}"); done
-    steps=("${steps[@]:1}")
-  fi
+
+# ---------- the tree ----------
+
+is_fixture() { [[ $FIXTURES == *" $1 "* ]]; }
+in_trunk()   { [[ $TRUNK == *" $1 "* ]]; }
+# vm_of STEP: the VM a fixture's snapshot, or a scenario's run, lives in.
+vm_of() { if in_trunk "$1"; then echo "$VM"; else echo "$VM-$1"; fi; }
+children() { local s; for s in "${STEPS[@]}"; do [ "${PARENT[$s]}" = "$1" ] && echo "$s"; done; return 0; }
+green_of() { cat "$ROOT/bin/green/$1" 2>/dev/null || true; }
+needed() { [[ $NEEDED == *" $1 "* ]]; }
+minutes() { printf '%dm%02ds' $(($1 / 60)) $(($1 % 60)); }
+
+# status STEP STATE: records how a step went, for the summary.
+status() {
+  echo "$2" > "$ROOT/bin/state/$1"
+  say "${NUMBER[$1]} $1: $2"
+}
+
+# skip_below STEP: what grows from a failed fixture does not run.
+skip_below() {
+  local c
+  for c in $(children "$1"); do
+    needed "$c" || continue
+    status "$c" "skipped (${NUMBER[$1]} $1 failed)"
+    skip_below "$c"
+  done
+}
+
+# A pool of JOBS slots: a job holds one while its VM runs.
+acquire() {
+  local i
+  while :; do
+    for i in $(seq "$JOBS"); do
+      mkdir "$ROOT/bin/slots/$i" 2>/dev/null && { SLOT=$i; return 0; }
+    done
+    sleep 3
+  done
+}
+release() { rmdir "$ROOT/bin/slots/$SLOT" 2>/dev/null || true; }
+
+# clone_from STEP DEST: DEST becomes a copy of the fixture STEP's VM at its
+# snapshot. One clone at a time per source, which is stopped for it.
+clone_from() {
+  local src; src=$(vm_of "$1")
+  (
+    flock 9
+    multipass stop "$src" >/dev/null 2>&1 || true
+    multipass restore --destructive "$src.$1" >/dev/null
+    multipass clone "$src" --name "$2" >/dev/null
+  ) 9>"$ROOT/bin/lock-$src"
+}
+
+# fresh STEP: $VM becomes a new clone of STEP's parent, booted, with its
+# swarm formed on the clone's address and every service running again.
+fresh() {
+  exists && multipass delete --purge "$VM"
+  say "Cloning ${NUMBER[${PARENT[$1]}]} ${PARENT[$1]} into $VM"
+  clone_from "${PARENT[$1]}" "$VM" || return 1
+  multipass start "$VM" >/dev/null || return 1
+  readdress || return 1
+  local t0=$SECONDS
+  settle || return 1
+  say "Restarted the clone's services in $((SECONDS - t0))s"
+}
+
+# run_step STEP: the step in $VM, timed. Not called after || or &&: bash
+# would then ignore set -e in the step, and a failing command would not stop it.
+run_step() {
+  local t0=$SECONDS rc
+  say "Step ${NUMBER[$1]} $1"
+  ( set -e; "step_$1" )
+  rc=$?
+  echo $((SECONDS - t0)) > "$ROOT/bin/times/$1"
+  say "Step ${NUMBER[$1]} $1 took $(minutes $((SECONDS - t0)))"
+  return $rc
+}
+
+# trunk LAST: base, install and login, in $VM, from the newest valid snapshot,
+# up to LAST.
+trunk() {
+  local last=$1 s resume= steps=() rc
+  read -r -a steps <<<"$(path "$last")"
   if exists; then
     for s in "${steps[@]}"; do
       valid "$s" || break
       resume=$s
     done
   fi
-  if [ "$resume" = "$target" ]; then
-    say "${NUMBER[$target]} $target is green already"
+  if [ "$resume" = "$last" ]; then
+    status "$last" "green already"
     return 0
   fi
   if [ -n "$resume" ]; then
-    say "Restoring snapshot ${NUMBER[$resume]} $resume for ${NUMBER[$target]} $target"
+    say "Restoring snapshot ${NUMBER[$resume]} $resume"
     multipass stop "$VM" 2>/dev/null || true
     multipass restore --destructive "$VM.$resume" >/dev/null
-    # What grows from here no longer matches what this run builds.
-    for s in "${STEPS[@]}"; do
-      [ "${PARENT[$s]}" = "$resume" ] && [[ " ${steps[*]} " == *" $s "* ]] && drop "$s"
-    done
     multipass start "$VM"
-  fi
-  if [ -z "$resume" ] && [ -n "$fork" ]; then
-    multipass start "$VM" >/dev/null 2>&1
-    local t0=$SECONDS
-    settle || return 1
-    say "Restarted the clone's services in $((SECONDS - t0))s"
   fi
   local go=${resume:+no}
   for s in "${steps[@]}"; do
@@ -423,145 +444,188 @@ branch() {
       [ "$s" = "$resume" ] && go=yes
       continue
     fi
-    say "Step ${NUMBER[$s]} $s"
-    local t0=$SECONDS
-    ( set -e; "step_$s" )
+    run_step "$s"
     rc=$?
-    say "Step ${NUMBER[$s]} $s took $(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s"
     if [ $rc != 0 ]; then
-      say "Step ${NUMBER[$s]} $s failed"
+      status "$s" failed
       return $rc
     fi
     save "$s"
+    status "$s" green
+  done
+}
+
+# grow FIXTURE: its fixtures and scenarios that are needed, each in a job of
+# its own; waits for them all.
+grow() {
+  local c pids=() rc=0 p
+  for c in $(children "$1"); do
+    needed "$c" || continue
+    if is_fixture "$c"; then fixture_job "$c" & else scenario_job "$c" & fi
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p" || rc=1; done
+  return $rc
+}
+
+# fixture_job STEP: a fixture below the trunk, kept from its snapshot when
+# valid, else made in a new clone of its parent and saved; then what grows
+# from it. Logs to bin/steps-STEP.log.
+fixture_job() {
+  set +e
+  local s=$1 log=$ROOT/bin/steps-$1.log rc=0
+  VM=$(vm_of "$s")
+  if exists && valid "$s"; then
+    status "$s" "green already"
+  else
+    acquire
+    status "$s" "running (log: ${log#"$ROOT/"})"
+    {
+      fresh "$s"; rc=$?
+      if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
+      if [ $rc = 0 ]; then save "$s"; rc=$?; fi
+      multipass stop "$VM" >/dev/null 2>&1
+    } > "$log" 2>&1
+    release
+    if [ $rc != 0 ]; then
+      status "$s" failed
+      report "$log"
+      skip_below "$s"
+      return 1
+    fi
+    status "$s" "green, $(minutes "$(cat "$ROOT/bin/times/$s")")"
+  fi
+  grow "$s"
+}
+
+# scenario_job STEP: a scenario, unless green already, in a new clone of its
+# fixture; the clone is deleted when it passes (KEEP=1 keeps it, stopped)
+# and kept, stopped, when it fails. Logs to bin/steps-STEP.log.
+scenario_job() {
+  set +e
+  local s=$1 log=$ROOT/bin/steps-$1.log fp rc=0
+  VM=$(vm_of "$s")
+  fp=$(fingerprint "$s")
+  if [ "$(green_of "$s")" = "$fp" ]; then
+    status "$s" "green already"
+    return 0
+  fi
+  rm -f "$ROOT/bin/green/$s"
+  acquire
+  status "$s" "running (log: ${log#"$ROOT/"})"
+  {
+    fresh "$s"; rc=$?
+    if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
+    multipass stop "$VM" >/dev/null 2>&1
+  } > "$log" 2>&1
+  release
+  if [ $rc != 0 ]; then
+    status "$s" "failed (its VM $VM is kept)"
+    report "$log"
+    return 1
+  fi
+  echo "$fp" > "$ROOT/bin/green/$s"
+  [ "${KEEP:-}" = 1 ] || multipass delete --purge "$VM"
+  status "$s" "green, $(minutes "$(cat "$ROOT/bin/times/$s")")"
+}
+
+# report LOG: the failures in a job's log.
+report() { grep -E '^(FAIL|==> .*(failed|did not))' -A2 "$1" | head -40 || true; }
+
+# forget STEP: STEP and what grows from it are no longer green.
+forget() {
+  local s
+  for s in $(descendants "$1"); do
+    if is_fixture "$s"; then
+      if VM=$(vm_of "$s") exists && [ -n "$(VM=$(vm_of "$s") snapshot_of "$s")" ]; then
+        multipass stop "$(vm_of "$s")" 2>/dev/null || true
+        multipass delete --purge "$(vm_of "$s").$s"
+      fi
+    else
+      rm -f "$ROOT/bin/green/$s"
+    fi
+  done
+}
+
+list() {
+  local s have want state indent kind took
+  printf '%-20s %-9s %-7s %-8s %s\n' STEP KIND STATE TOOK VM
+  for s in "${STEPS[@]}"; do
+    if is_fixture "$s"; then
+      kind=fixture; have=$(VM=$(vm_of "$s") snapshot_of "$s")
+    else
+      kind=scenario; have=$(green_of "$s")
+    fi
+    want=$(fingerprint "$s")
+    if [ -z "$have" ]; then state=none; elif [ "$have" = "$want" ]; then state=green; else state=stale; fi
+    took=-; [ -f "$ROOT/bin/times/$s" ] && took=$(minutes "$(cat "$ROOT/bin/times/$s")")
+    indent=$(printf '%*s' $(( ($(path "$s" | wc -w) - 1) * 2 )) '')
+    printf '%-20s %-9s %-7s %-8s %s\n' "$indent${NUMBER[$s]} $s" "$kind" "$state" "$took" "$(vm_of "$s")"
   done
 }
 
 # ---------- main ----------
 
-targets=() from= SERIAL=
+mkdir -p "$ROOT/bin/green" "$ROOT/bin/state" "$ROOT/bin/times"
+targets=() from=
 while [ $# -gt 0 ]; do
   case $1 in
-    --list)   shift; [ "${1:-}" = --serial ] && SERIAL=1; list; exit 0 ;;
+    --list)   list; exit 0 ;;
     --clean)  for v in $(multipass list --format csv | awk -F, -v p="$VM" 'NR > 1 && ($1 == p || index($1, p "-") == 1) { print $1 }'); do
                 multipass delete --purge "$v"; echo "deleted $v"
-              done; exit 0 ;;
-    --serial) SERIAL=1; shift ;;
+              done
+              rm -rf "$ROOT/bin/green" "$ROOT/bin/state" "$ROOT/bin/times"; exit 0 ;;
     --from)   from=${2:?--from needs a step}; shift 2 ;;
     -*)       echo "unknown option: $1" >&2; exit 2 ;;
     *)        targets+=("$1"); shift ;;
   esac
 done
-[ ${#targets[@]} -gt 0 ] || read -r -a targets <<<"$(leaves | tr '\n' ' ')"
+if [ ${#targets[@]} = 0 ]; then
+  for s in "${STEPS[@]}"; do is_fixture "$s" || targets+=("$s"); done
+fi
 for s in "${targets[@]}" $from; do
   [ -n "${NUMBER[$s]:-}" ] || { echo "unknown step: $s (steps: ${STEPS[*]})" >&2; exit 2; }
 done
-if [ -n "$from" ]; then
-  for s in $(descendants "$from"); do
-    vm=$VM; [ -n "$SERIAL" ] || vm=$(branch_vm "$s")
-    if VM=$vm exists && [ -n "$(VM=$vm snapshot_of "$s")" ]; then
-      multipass stop "$vm" 2>/dev/null || true
-      multipass delete --purge "$vm.$s"
-    fi
-  done
-fi
+NEEDED=" "
+for t in "${targets[@]}"; do
+  for s in $(path "$t"); do needed "$s" || NEEDED+="$s "; done
+done
+[ -z "$from" ] || forget "$from"
+rm -rf "$ROOT/bin/slots" && mkdir -p "$ROOT/bin/slots"
+rm -f "$ROOT/bin/state/"*
 
-failed=()
-if [ -n "$SERIAL" ] || ! ( for t in "${targets[@]}"; do below_fork "$t" || exit 1; done ); then
-  # One VM: each branch in turn. Not "branch || ...": bash would then ignore
-  # set -e in every step, and a failing command would not stop its step.
-  for t in "${targets[@]}"; do
-    set +e
-    branch "$t"
-    rc=$?
-    set -e
-    [ $rc = 0 ] || failed+=("${NUMBER[$t]} $t")
-  done
-  last_vm=$VM
-else
-  # The trunk first, in $VM.
-  set +e
-  branch "$FORK"
-  rc=$?
-  set -e
-  [ $rc = 0 ] || { say "The trunk failed at or before ${NUMBER[$FORK]} $FORK"; exit 1; }
+# The trunk, as far as it is needed.
+last=
+for s in base install login; do needed "$s" && last=$s; done
+set +e
+trunk "$last"
+rc=$?
+set -e
+[ $rc = 0 ] || { echo; list; say "Failed: ${NUMBER[$last]} $last, or a step before it"; exit 1; }
+multipass stop "$VM" 2>/dev/null || true
 
-  # The main VM holds only the trunk; snapshots below the fork live in the clones.
-  multipass stop "$VM" 2>/dev/null || true
-  for s in "${STEPS[@]}"; do
-    below_fork "$s" && [ -n "$(snapshot_of "$s")" ] && multipass delete --purge "$VM.$s"
-  done
-
-  # Group the targets by branch VM; clone the ones whose first step is not valid.
-  declare -A group=()
-  for t in "${targets[@]}"; do
-    v=$(branch_vm "$t"); group[$v]="${group[$v]:-} $t"
-  done
-  for v in "${!group[@]}"; do
-    first=${v#"$VM-"}
-    if VM=$v exists && VM=$v valid "$first"; then
-      continue
-    fi
-    say "Cloning ${NUMBER[$FORK]} $FORK into $v"
-    VM=$v exists && multipass delete --purge "$v"
-    multipass stop "$VM" 2>/dev/null || true
-    multipass restore --destructive "$VM.$FORK" >/dev/null
-    multipass clone "$VM" --name "$v" >/dev/null
-    multipass start "$v" >/dev/null
-    VM=$v readdress
-    multipass stop "$v" >/dev/null
-  done
-  multipass stop "$VM" 2>/dev/null || true
-
-  # The branches, in parallel, each in its VM, each logging to bin/.
-  make --no-print-directory build >/dev/null
-  export BUILT=1
-  declare -A pid=()
-  for v in "${!group[@]}"; do
-    log=$ROOT/bin/steps-${v#"$VM-"}.log
-    # The steps of the branch that failed, one per line: a branch's other
-    # steps may well be green.
-    : > "${log%.log}.failed"
-    say "Branch $v:${group[$v]} (log: ${log#"$ROOT/"})"
-    (
-      VM=$v
-      rc=0
-      for t in ${group[$v]}; do
-        set +e
-        branch "$t" "$FORK"
-        r=$?
-        set -e
-        [ $r = 0 ] || { rc=$r; echo "${NUMBER[$t]} $t" >> "${log%.log}.failed"; }
-      done
-      exit $rc
-    ) > "$log" 2>&1 &
-    pid[$v]=$!
-  done
-  for v in "${!group[@]}"; do
-    if wait "${pid[$v]}"; then
-      say "Branch $v green"
-    else
-      say "Branch $v failed"
-      log=$ROOT/bin/steps-${v#"$VM-"}.log
-      grep -E '^(FAIL|==> .*Step .* failed)' -A2 "$log" | head -40
-      while read -r t; do failed+=("$t"); done < "${log%.log}.failed"
-      [ -s "${log%.log}.failed" ] || failed+=("${group[$v]# }")
-    fi
-  done
-  # The browser goes to the branch with the apps, if it ran.
-  last_vm=$(branch_vm "${targets[-1]}")
-  for t in "${targets[@]}"; do [ "$t" = talk ] || [ "$t" = deploy ] && last_vm=$(branch_vm "$t"); done
-  multipass start "$last_vm" >/dev/null 2>&1 || true
-fi
+# The rest, in parallel, built once for all of them.
+make --no-print-directory build >/dev/null
+export BUILT=1
+set +e
+grow login
+set -e
 
 echo
 list
+failed=()
+for s in "${STEPS[@]}"; do
+  case $(cat "$ROOT/bin/state/$s" 2>/dev/null) in failed*|skipped*) failed+=("${NUMBER[$s]} $s") ;; esac
+done
 if [ ${#failed[@]} -gt 0 ]; then
-  say "Failed: ${failed[*]}"
+  say "Failed: ${failed[*]} (logs: bin/steps-<step>.log)"
   exit 1
 fi
 say "Green: ${targets[*]}"
-if [ "${OPEN:-1}" != 0 ]; then
-  VM=$last_vm test/vm/dns.sh
+# The browser goes to the fixture with the apps, todo's.
+if [ "${OPEN:-1}" != 0 ] && needed deploy && VM=$(vm_of deploy) exists; then
+  multipass start "$(vm_of deploy)" >/dev/null 2>&1 || true
+  VM=$(vm_of deploy) test/vm/dns.sh
   # shellcheck disable=SC1090
   url=https://keycloak.$(. "$ANSWERS" && echo "$DOMAIN")
   if command -v xdg-open >/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
