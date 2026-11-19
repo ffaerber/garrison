@@ -50,20 +50,20 @@ For `on_push` or `on_alert`, read the namespace's `routines.yaml` first and prop
 - Its answer is posted in the namespace's channel.
 - It runs with nobody watching, with the agent's own account: it may change a repo only through a grant with `unattended: true` and the owner in its `for`, with propose_patch or screenshot (and merge_change where the grant's level allows). Propose that grant in the same pull request when the task changes something.
 - Its browser signs in as the agent's own account, so screenshot and browse work, also on private environments. propose_change, create_namespace and create_repo need a person and are refused.
-- The agent must have the tools the task needs, and no more: pick the one whose role fits. The photographer takes screenshots, the monitor reads logs and metrics (good for checks and `on_alert`), the coder proposes code with propose_patch, qa tries apps in the browser. find_agents shows each agent's tools.
+- The agent must have the tools the task needs, and no more: pick the one whose role fits. the monitor reads logs and metrics (good for checks and `on_alert`), the coder proposes code with propose_patch, the browser tries apps and takes screenshots of them. find_agents shows each agent's tools.
 
-A daily screenshot of the app todo into its repo app, for example, is add_routine with agent photographer, schedule "0 9 * * *", repo app and the task below; it writes a grant and a routine in `todo/config`:
+A daily screenshot of the app todo into its repo app, for example, is add_routine with agent browser, schedule "0 9 * * *", repo app and the task below; it writes a grant and a routine in `todo/config`:
 
 ```yaml
 # grants.yaml
-- agent: photographer
+- agent: browser
   repo: app
   level: propose
   for: members
   unattended: true
 
 # routines.yaml
-- agent: photographer
+- agent: browser
   name: daily-screenshot
   schedule: "0 9 * * *"
   owner: alice

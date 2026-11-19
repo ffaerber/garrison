@@ -10,8 +10,7 @@ An installation starts with these, each with only the tools its role needs:
 | `commander` | Finds the agent for a task and hands it over; no tools of its own |
 | `coder` | Changes code as pull requests (`propose_patch`; `merge_change` where a grant allows); reaches the package registries |
 | `reviewer` | Reviews pull requests; changes nothing |
-| `qa` | Tries the apps in the browser and reports; changes nothing |
-| `photographer` | Takes screenshots of the apps and proposes them into a repo |
+| `browser` | Tries the apps in the browser and reports, and takes screenshots it proposes into a repo; changes nothing else |
 | `monitor` | Reads state, logs and metrics and explains what is wrong; changes nothing; fits `on_alert` routines |
 | `researcher` | Researches on the public web; no access to Garrison's repos |
 | `media` | Makes pictures and videos with ComfyUI in a project's styles (`generate_media`), into the namespace's media library; its skill `media-project` says how a project is laid out |

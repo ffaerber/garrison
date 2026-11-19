@@ -87,7 +87,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		names = append(names, a.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"coder", "commander", "media", "monitor", "operator", "photographer", "qa", "researcher", "reviewer", "shorts"}; len(problems) > 0 || !slices.Equal(names, want) {
+	if want := []string{"browser", "coder", "commander", "media", "monitor", "operator", "researcher", "reviewer", "shorts"}; len(problems) > 0 || !slices.Equal(names, want) {
 		t.Fatalf("got %v, want %v; %v", names, want, problems)
 	}
 	// Each has a role of its own, and only the tools it needs: only the
@@ -104,7 +104,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		}
 	}
 	for _, write := range []string{"propose_change", "propose_patch", "merge_change", "screenshot"} {
-		for _, name := range []string{"reviewer", "qa", "monitor", "researcher"} {
+		for _, name := range []string{"reviewer", "monitor", "researcher"} {
 			i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == name })
 			if slices.Contains(got[i].Tools, write) {
 				t.Errorf("%s, which changes nothing, has %s", name, write)

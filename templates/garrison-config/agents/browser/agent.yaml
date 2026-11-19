@@ -1,0 +1,5 @@
+# The browser: uses the apps in a browser, as the person. It tries them and
+# reports, and takes screenshots it proposes into a repo; it changes nothing else.
+description: Tries the apps in the browser and reports what works, and takes screenshots of them for docs and homepages
+model: ""
+tools: [list_stacks, stack_status, service_logs, list_repos, list_files, browse, screenshot]
