@@ -400,13 +400,22 @@ skip_below() {
   done
 }
 
-# A pool of JOBS slots: a job holds one while its VM runs.
+# A pool of JOBS slots: a job holds one while its VM runs. Fixtures go
+# first, as scenarios wait for them: a scenario takes a slot only while no
+# fixture waits for one (acquire fixture).
 acquire() {
   local i
+  [ "${1:-}" = fixture ] && touch "$ROOT/bin/slots/want-$BASHPID"
   while :; do
-    for i in $(seq "$JOBS"); do
-      mkdir "$ROOT/bin/slots/$i" 2>/dev/null && { SLOT=$i; return 0; }
-    done
+    if [ "${1:-}" = fixture ] || ! compgen -G "$ROOT/bin/slots/want-*" >/dev/null; then
+      for i in $(seq "$JOBS"); do
+        if mkdir "$ROOT/bin/slots/$i" 2>/dev/null; then
+          SLOT=$i
+          rm -f "$ROOT/bin/slots/want-$BASHPID"
+          return 0
+        fi
+      done
+    fi
     sleep 3
   done
 }
@@ -510,7 +519,7 @@ fixture_job() {
   if exists && valid "$s"; then
     status "$s" "green already"
   else
-    acquire
+    acquire fixture
     status "$s" "running (log: ${log#"$ROOT/"})"
     {
       fresh "$s"; rc=$?
