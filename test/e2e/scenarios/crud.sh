@@ -154,7 +154,8 @@ check "she cannot merge it unapproved"     test "$(nmerge)" != 200
 check "nor approve it herself"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED"}' "$notes/pulls/$npr/reviews")" != 200 -o "$(nmerge)" != 200
 check "bob approves it"                    test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Fine."}' "$notes/pulls/$npr/reviews")" = 200
 check "then alice merges it"               test "$(nmerge)" = 200
-check "other branches stay free"           test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"branch":"tidy","message":"more","content":"bm90ZQo="}' "$notes/contents/more.txt")" = 201
+check "the merge deletes its branch"        test "$(gitea_api alice -o /dev/null -w '%{http_code}' "$notes/branches/tidy")" = 404
+check "other branches stay free"           test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"branch":"main","new_branch":"more","message":"more","content":"bm90ZQo="}' "$notes/contents/more.txt")" = 201
 check "alice removes bob again"            change_config $ns "" members.yaml="$(put_file m6 'admins: [alice]\nmembers: []\n')"
 free_main() { [ "$(put_main "alone-$(date +%s%N)")" = 201 ]; }
 check "alone again, she pushes to main freely" until_true 60 free_main
