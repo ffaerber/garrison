@@ -70,6 +70,7 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
   - A team made to include all repos misses a repo created at the same moment. The members sync now adds missing repos (`teamRepos`).
   - Gitea drops a team without access from a branch rule. A rule that differs is written again at every sync, and each write makes Gitea re-check pull requests and refuse merges for a while.
   - Merges right after an approval can get "Please try again later": retry, as `merges` and `to_main` in `test/e2e/lib.sh` do.
+  - Gitea counts an approval only if its author was in an approving team when they gave it (`official`). A new admin's very first visit to Gitea makes their account a moment before the members sync puts it in `admins`, so an approval given then never counts. The `garrison/approval` check skips such approvals and says to approve again.
   - Right after an approval, a pull request's page can offer only "merge when all checks succeed". That schedule waits for a check to change; if they all passed already, it never merges. `Person.merge` in `test/ui/lib.py` cancels it and merges again.
 - **gVisor:** a sandbox has no Docker DNS. Reach containers by IP, or through the agent service's proxy, which looks names up.
 - **Multipass:**

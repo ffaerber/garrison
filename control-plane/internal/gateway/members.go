@@ -926,14 +926,26 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 				State     string `json:"state"`
 				Stale     bool   `json:"stale"`
 				Dismissed bool   `json:"dismissed"`
+				// Official: Gitea counts it towards the rule's approvals,
+				// as its author was in an approving team when they gave it.
+				Official bool `json:"official"`
 			}
 			if _, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("%s/pulls/%d/reviews", repo, pr.Number), nil, &reviews); err != nil {
 				return err
 			}
-			var approvers []string
+			// An approval Gitea does not count would pass this check and
+			// still leave the merge refused. It happens to an admin who
+			// approves in their first visit to Gitea, which makes their
+			// account a moment before the sync puts it in admins.
+			var approvers, uncounted []string
 			for _, r := range reviews {
-				if r.State == "APPROVED" && !r.Stale && !r.Dismissed {
+				if r.State != "APPROVED" || r.Stale || r.Dismissed {
+					continue
+				}
+				if r.Official {
 					approvers = append(approvers, r.User.Login)
+				} else if !slices.Contains(uncounted, r.User.Login) {
+					uncounted = append(uncounted, r.User.Login)
 				}
 			}
 			// Who wrote it: who opened it, and who pushed to its branch.
@@ -949,6 +961,9 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 			desc = why
 			if ok {
 				state = "success"
+			} else if len(uncounted) > 0 {
+				desc = "Gitea does not count the approval of " + strings.Join(uncounted, ", ") +
+					", given before they were in this namespace's team: approve again; " + why
 			}
 		}
 		if len(desc) > 250 {

@@ -198,7 +198,7 @@ func TestWhoPushedToAConfigChangeDoesNotApproveIt(t *testing.T) {
 		case p == "/repos/homepage/config/pulls/5/reviews":
 			var out []map[string]any
 			for _, a := range approvers {
-				out = append(out, map[string]any{"user": map[string]any{"login": a}, "state": "APPROVED"})
+				out = append(out, map[string]any{"user": map[string]any{"login": a}, "state": "APPROVED", "official": a != "carol"})
 			}
 			json.NewEncoder(w).Encode(out)
 		case p == "/repos/homepage/config/activities/feeds":
@@ -241,6 +241,14 @@ func TestWhoPushedToAConfigChangeDoesNotApproveIt(t *testing.T) {
 	mu.Unlock()
 	if got := last(); got != "success: approved by dave" {
 		t.Errorf("dave's approval: %q", got)
+	}
+	// carol approved in her first visit to Gitea, before the sync put her
+	// in admins: Gitea does not count it, so neither does the check.
+	mu.Lock()
+	approvers = []string{"carol"}
+	mu.Unlock()
+	if got := last(); !strings.HasPrefix(got, "pending: Gitea does not count the approval of carol") || !strings.Contains(got, "approve again") {
+		t.Errorf("carol's uncounted approval: %q", got)
 	}
 }
 

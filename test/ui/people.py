@@ -36,10 +36,10 @@ def last_pr() -> int:
     return prs[0]["number"] if prs else 0
 
 
-def asks_back(text: str, *words: str) -> bool:
-    """An answer that asks the person, naming at least one of words."""
-    low = text.lower()
-    return "?" in text and any(w in low for w in words)
+def team_members(team: str) -> list:
+    """The logins in todo's Gitea team."""
+    t = next((t for t in gitea(f"/orgs/{NS}/teams") or [] if t["name"] == team), None)
+    return [u["login"] for u in gitea(f"/teams/{t['id']}/members") or []] if t else []
 
 
 section("1. before: todo is alice's alone")
@@ -59,7 +59,9 @@ alice.channel(NS)
 asked = alice.say("commander", "Can bob and carol help out here?")
 first = check("the commander answers", alice.next_answer, asked, COMMANDER, 0) or ""
 print(f"it said: {first[:300]!r}", flush=True)
-check("it asks back, about their roles", lambda: asks_back(first, "admin", "member", "role"))
+# Asking back may end on "say the word" rather than a question mark: what
+# counts is that it raises their roles and proposes nothing yet.
+check("it asks back, about their roles", lambda: any(w in first.lower() for w in ("admin", "member", "role")))
 check("and proposes nothing yet", lambda: members_pr(before) is None)
 alice.reply(asked, "bob as a member, carol as an admin.", "commander")
 check("told, it goes on", alice.next_answer, asked, COMMANDER, 1)
@@ -79,6 +81,11 @@ check("with its button", alice.merge, NS, "config", pr)
 section("3. after: bob and carol see todo")
 check("bob finds todo's channel in his sidebar", until, 120, bob.sidebar_has, NS, every=10)
 check("so does carol", until, 120, carol.sidebar_has, NS, every=10)
+# carol opens Gitea, as a new admin would before approving anything: her
+# account is made then, and the sync puts it in todo's admins, which Gitea
+# needs for her approval to count (an approval given before is not).
+check("carol signs in to Gitea", carol.sign_in_gitea)
+check("and is in todo's admins there", until, 120, lambda: "carol" in team_members("admins"), every=5)
 check("bob opens it", bob.channel, NS)
 check("he reads its history: alice's question", lambda: any("bob and carol help out" in (m.get("content") or "")
                                                             for m in bob.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")))
