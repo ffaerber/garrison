@@ -477,11 +477,18 @@ release() { rmdir "$ROOT/bin/slots/$SLOT" 2>/dev/null || true; }
 
 # clone_from STEP DEST: DEST becomes a copy of the fixture STEP's VM at its
 # snapshot. One clone at a time per source, which is stopped for it.
+# stopped NAME: whether Multipass lists the VM as stopped.
+stopped() { [ "$(multipass info "$1" --format csv 2>/dev/null | awk -F, 'NR==2 {print $2}')" = Stopped ]; }
 clone_from() {
   local src; src=$(vm_of "$1")
   (
     flock 9
-    multipass stop "$src" >/dev/null 2>&1 || true
+    # A stop can fail without the VM stopping (Multipass's five minutes, or
+    # its daemon brought back meanwhile); restore and clone then refuse.
+    # It is about to be restored to its snapshot, so forcing it off is safe.
+    if ! multipass stop "$src" >/dev/null 2>&1 || ! stopped "$src"; then
+      multipass stop --force "$src" >/dev/null 2>&1 || true
+    fi
     multipass restore --destructive "$src.$1" >/dev/null
     multipass clone "$src" --name "$2" >/dev/null
   ) 9>"$ROOT/bin/lock-$src"
