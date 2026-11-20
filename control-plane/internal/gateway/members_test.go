@@ -382,14 +382,19 @@ func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
 }
 
 // Every repo of a namespace deletes a pull request's branch when it is
-// merged; the sync sets those that do not, and leaves archived ones.
+// merged, but one an app deploys from a branch besides main keeps it; the
+// sync sets those that differ, and leaves archived ones.
 func TestMergedBranchesAreDeleted(t *testing.T) {
 	var patched []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
 		switch {
 		case p == "/orgs/todo/repos" && r.Method == http.MethodGet:
-			io.WriteString(w, `[{"name":"config","default_delete_branch_after_merge":true},{"name":"app"},{"name":"old","archived":true}]`)
+			io.WriteString(w, `[{"name":"config","default_delete_branch_after_merge":true},{"name":"notes"},{"name":"app","default_delete_branch_after_merge":true},{"name":"old","archived":true}]`)
+		case p == "/repos/todo/config/contents/stacks":
+			io.WriteString(w, `[{"name":"todo.yaml","type":"file"}]`)
+		case p == "/repos/todo/config/raw/stacks/todo.yaml":
+			io.WriteString(w, "source: app\nentrypoint: web\nservices:\n  web: { image: \"{{registry}}/todo/app:{{commit}}\", port: 8080 }\nenvironments:\n  main: {}\n  dev: {}\n")
 		case r.Method == http.MethodPatch:
 			body, _ := io.ReadAll(r.Body)
 			patched = append(patched, p+" "+strings.TrimSpace(string(body)))
@@ -401,39 +406,10 @@ func TestMergedBranchesAreDeleted(t *testing.T) {
 	defer srv.Close()
 	m := &Members{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
 	m.deleteMerged(context.Background(), "todo")
-	if strings.Join(patched, ",") != `/repos/todo/app {"default_delete_branch_after_merge":true,"has_pull_requests":true}` {
+	want := `/repos/todo/notes {"default_delete_branch_after_merge":true,"has_pull_requests":true},` +
+		`/repos/todo/app {"default_delete_branch_after_merge":false,"has_pull_requests":true}`
+	if strings.Join(patched, ",") != want {
 		t.Errorf("patched: %v", patched)
-	}
-}
-
-// The branches an app deploys from besides main get a rule, so a merge
-// does not delete them; one with a rule already is left as it is.
-func TestEnvironmentBranchesAreKept(t *testing.T) {
-	var made []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
-		switch {
-		case p == "/repos/todo/config/contents/stacks":
-			io.WriteString(w, `[{"name":"app.yaml","type":"file"},{"name":"immich.yaml","type":"file"}]`)
-		case p == "/repos/todo/config/raw/stacks/app.yaml":
-			io.WriteString(w, "source: app\nentrypoint: web\nservices:\n  web: { image: \"{{registry}}/todo/app:{{commit}}\", port: 8080 }\nenvironments:\n  main: {}\n  dev: {}\n  staging: {}\n  preview: {}\n")
-		case p == "/repos/todo/config/raw/stacks/immich.yaml":
-			io.WriteString(w, "entrypoint: web\nservices:\n  web: { image: ghcr.io/immich-app/immich-server:v1.135.3, port: 2283 }\nenvironments:\n  main: {}\n")
-		case p == "/repos/todo/app/branch_protections/staging" && r.Method == http.MethodGet:
-			io.WriteString(w, `{"rule_name":"staging"}`)
-		case p == "/repos/todo/app/branch_protections" && r.Method == http.MethodPost:
-			body, _ := io.ReadAll(r.Body)
-			made = append(made, strings.TrimSpace(string(body)))
-			io.WriteString(w, `{}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-	m := &Members{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
-	m.keepEnvironments(context.Background(), "todo")
-	if strings.Join(made, ",") != `{"enable_push":true,"rule_name":"dev"}` {
-		t.Errorf("rules made: %v", made)
 	}
 }
 

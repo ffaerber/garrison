@@ -242,10 +242,29 @@ func (g *Gitea) Merge(ctx context.Context, person, ns, repo string, n int) error
 	if err := validRepo(repo); err != nil {
 		return err
 	}
+	// Its branch goes with it, unless an app deploys from that branch (dev).
+	var pr struct {
+		Head struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if _, err := g.do(ctx, person, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d", ns, repo, n), nil, &pr); err != nil {
+		return err
+	}
+	del := true
+	if envs, err := g.environments(ctx, ns); err != nil {
+		del = false // not knowing, keep it
+	} else {
+		for _, e := range envs {
+			if e.Repo == repo && e.Branch == pr.Head.Ref {
+				del = false
+			}
+		}
+	}
 	var err error
 	for i := 0; i < 5; i++ {
 		_, err = g.do(ctx, person, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", ns, repo, n),
-			map[string]any{"Do": "merge", "delete_branch_after_merge": true}, nil)
+			map[string]any{"Do": "merge", "delete_branch_after_merge": del}, nil)
 		if err == nil || !strings.Contains(err.Error(), "try again later") {
 			return err
 		}

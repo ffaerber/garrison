@@ -49,6 +49,8 @@ func cardsGitea(t *testing.T, merges *[]string) *httptest.Server {
 				{"state": "COMMENT", "user": map[string]string{"login": "erin"}},
 				{"state": "APPROVED", "user": map[string]string{"login": "frank"}},
 			})
+		case "GET /api/v1/repos/todo/config/contents/stacks":
+			http.NotFound(w, r) // no apps: the merge deletes the branch
 		case "GET /api/v1/repos/todo/config/commits/abc/status":
 			send(map[string]any{"statuses": []map[string]string{{"context": "garrison/approval", "status": "pending", "description": "waits"}}})
 		case "POST /api/v1/repos/todo/config/pulls/4/merge":

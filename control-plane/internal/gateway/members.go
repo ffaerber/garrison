@@ -534,7 +534,6 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 	if err := m.teamRepos(ctx, ns, teams, "admins", "members", RootTeam); err != nil {
 		return err
 	}
-	m.keepEnvironments(ctx, ns)
 	m.deleteMerged(ctx, ns)
 	if err := m.protectApps(ctx, ns, roster); err != nil {
 		return err
@@ -574,60 +573,48 @@ func (m *Members) teamRepos(ctx context.Context, ns string, teams map[string]int
 	return nil
 }
 
-// deleteMerged sets every repo of the namespace to delete a pull request's
-// branch when it is merged, as Gitea's merge button then does by default;
-// Gitea has no such default for the whole installation. Repos made later,
-// also by hand in Gitea, get it at the next sync. A repo it cannot set is
-// logged and left for the next sync: the rest of the sync goes on.
+// deleteMerged sets Gitea's default for deleting a pull request's branch
+// when it is merged, in every repo of the namespace (Gitea has no default
+// for the installation): on, but off in a repo that an app deploys from a
+// branch besides main, such as dev, so merging dev into main in Gitea does
+// not delete dev, and its environment with it, unless the person ticks
+// the box. Garrison's own merges delete the branch unless it is an
+// environment's (Gitea.Merge). Repos made later, also by hand in Gitea,
+// get it at the next sync. A repo it cannot set is logged and left for the
+// next sync: the rest of the sync goes on.
 func (m *Members) deleteMerged(ctx context.Context, ns string) {
 	repos, err := m.Gitea.Repos(ctx, "", ns)
 	if err != nil {
 		log.Printf("members: %s: deleting merged branches: %v", ns, err)
 		return
 	}
+	envs, err := m.Gitea.environments(ctx, ns)
+	if err != nil {
+		log.Printf("members: %s: deleting merged branches: %v", ns, err)
+		return
+	}
+	keeps := map[string]bool{}
+	for _, e := range envs {
+		if e.Branch != "main" {
+			keeps[e.Repo] = true
+		}
+	}
 	for _, r := range repos {
-		if r.DeleteMerged || r.Archived {
+		want := !keeps[r.Name]
+		if r.DeleteMerged == want || r.Archived {
 			continue
 		}
+		// Gitea changes the pull requests' settings only along with has_pull_requests.
 		if _, err := m.Gitea.do(ctx, "", http.MethodPatch, fmt.Sprintf("/repos/%s/%s", ns, url.PathEscape(r.Name)),
-			// Gitea changes the pull requests' settings only along with has_pull_requests.
-			map[string]bool{"has_pull_requests": true, "default_delete_branch_after_merge": true}, nil); err != nil {
+			map[string]bool{"has_pull_requests": true, "default_delete_branch_after_merge": want}, nil); err != nil {
 			log.Printf("members: %s/%s: deleting merged branches: %v", ns, r.Name, err)
 			continue
 		}
-		log.Printf("members: %s/%s now deletes a pull request's branch when it is merged", ns, r.Name)
-	}
-}
-
-// keepEnvironments protects the branches that apps' environments deploy
-// from, besides main (protectApps keeps that one): dev and the like, as the
-// namespace's stacks/*.yaml on main name them. A merge deletes its pull
-// request's branch, and Gitea deletes no branch a rule protects, so merging
-// dev into main keeps dev. The rule only names the branch: pushes stay open,
-// and a rule already there, also one made by hand, is left as it is.
-func (m *Members) keepEnvironments(ctx context.Context, ns string) {
-	envs, err := m.Gitea.environments(ctx, ns)
-	if err != nil {
-		log.Printf("members: %s: the environments' branches: %v", ns, err)
-		return
-	}
-	for _, e := range envs {
-		if e.Branch == "main" {
-			continue
+		if want {
+			log.Printf("members: %s/%s now deletes a pull request's branch when it is merged", ns, r.Name)
+		} else {
+			log.Printf("members: %s/%s keeps a pull request's branch when it is merged: an app deploys its branches", ns, r.Name)
 		}
-		path := fmt.Sprintf("/repos/%s/%s/branch_protections", ns, url.PathEscape(e.Repo))
-		status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/"+url.PathEscape(e.Branch), nil, nil)
-		if status != http.StatusNotFound {
-			if err != nil {
-				log.Printf("members: %s/%s: the branch %s: %v", ns, e.Repo, e.Branch, err)
-			}
-			continue
-		}
-		if _, err := m.Gitea.do(ctx, "", http.MethodPost, path, map[string]any{"rule_name": e.Branch, "enable_push": true}, nil); err != nil {
-			log.Printf("members: %s/%s: the branch %s: %v", ns, e.Repo, e.Branch, err)
-			continue
-		}
-		log.Printf("members: %s/%s: the branch %s, an environment of %s, is kept after merges", ns, e.Repo, e.Branch, e.Stack)
 	}
 }
 
