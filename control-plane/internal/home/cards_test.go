@@ -92,6 +92,25 @@ func TestAChangeWaitsOnTheDashboard(t *testing.T) {
 	}
 }
 
+func TestWaitingRefreshesOnItsOwn(t *testing.T) {
+	s, _ := server()
+	s.Changes = newFakeChanges()
+	if body := get(s, "bob", "/").Body.String(); !strings.Contains(body, `<div id="waiting-box">`) || !strings.Contains(body, `data-key="c/c/todo/config/4"`) {
+		t.Error("bob's page has no box for what waits, or its change has no key")
+	}
+	w := get(s, "bob", "/waiting")
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, "Waiting for you") || !strings.Contains(body, `href="/c/todo/config/4"`) || strings.Contains(body, "<html") {
+		t.Errorf("bob's /waiting: %d %q", w.Code, body)
+	}
+	if body := get(s, "carol", "/waiting").Body.String(); strings.TrimSpace(body) != "" {
+		t.Errorf("carol waits for nothing, yet /waiting says %q", body)
+	}
+	if w := get(s, "", "/waiting"); w.Code != http.StatusUnauthorized {
+		t.Errorf("/waiting without a person: %d", w.Code)
+	}
+}
+
 func TestTheCardSaysItPlainly(t *testing.T) {
 	s, _ := server()
 	s.Changes = newFakeChanges()

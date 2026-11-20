@@ -98,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", s.signedIn(s.feed))
 	mux.Handle("GET /feed", s.signedIn(s.more))
+	mux.Handle("GET /waiting", s.signedIn(s.waiting))
 	mux.Handle("GET /e/{id}", s.signedIn(s.event))
 	mux.Handle("GET /api/events", s.signedIn(s.apiList))
 	mux.Handle("GET /api/events/{id}", s.signedIn(s.apiEvent))
@@ -246,13 +247,19 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 		p.More = es[len(es)-1].ID
 	}
 	p.Namespaces, _ = s.Events.Namespaces(r.Context(), v)
-	// What agents asked this person and wait for, above everything else.
-	p.Waiting, _ = s.Events.List(r.Context(), events.Query{Visibility: v, Kinds: []string{events.KindQuestion},
+	s.waitingFor(r.Context(), v, &p)
+	s.render(w, "page", p)
+}
+
+// waitingFor fills in what waits for the person: the questions agents asked
+// them, still open, and the pull requests waiting for them, or theirs.
+func (s *Server) waitingFor(ctx context.Context, v events.Visibility, p *feedPage) {
+	p.Waiting, _ = s.Events.List(ctx, events.Query{Visibility: v, Kinds: []string{events.KindQuestion},
 		Actor: v.Person, Status: events.StatusWaiting, Limit: 20})
 	if s.Changes != nil {
 		// The page waits for the changes a few seconds at most: what
 		// agents ask, above them, is shown either way.
-		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		cards, err := s.Changes.Waiting(ctx, v.Person, 10)
 		cancel()
 		if err != nil {
@@ -260,7 +267,14 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 		}
 		p.Cards = cards
 	}
-	s.render(w, "page", p)
+}
+
+// waiting answers the page's live updates of what waits for the person.
+func (s *Server) waiting(w http.ResponseWriter, r *http.Request, v events.Visibility) {
+	p := feedPage{Now: s.now(), Fragment: true}
+	s.waitingFor(r.Context(), v, &p)
+	w.Header().Set("Cache-Control", "no-store")
+	s.render(w, "waiting", p)
 }
 
 // more answers the live updates (after=ID) and the next page (before=ID)

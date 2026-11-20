@@ -133,24 +133,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   <span class="live" id="live" title="New entries appear on their own"><i></i><span>live</span></span>
 </form>
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-{{if or .Waiting .Cards}}{{$now := .Now}}<section class="waiting" aria-labelledby="waiting">
-  <h2 id="waiting">Waiting for you</h2>
-  <div class="panel"><ol class="feed">{{range .Waiting}}<li>
-    <span class="mark g-agent s-waiting waiting" title="question, waiting"></span>
-    <div>
-      <a class="title" href="/e/{{.ID}}">{{.Title}}</a>
-      <div class="meta"><span class="chip">{{.Agent}}</span>{{if .Link}}<a class="answer" href="{{.Link}}">Answer in the chat</a>{{end}}</div>
-    </div>
-    <time class="when" datetime="{{iso .At}}" title="{{stamp .At}}">{{ago $now .At}}</time>
-  </li>{{end}}{{range .Cards}}<li class="change">
-    <span class="mark g-review {{if .Ready}}ok{{else}}s-waiting waiting{{end}}" title="change{{if .Ready}}, ready{{end}}"></span>
-    <div>
-      <a class="title" href="{{card .}}">{{.Title}}</a>
-      <div class="meta"><span class="chip">{{.Namespace}}/{{.Repo}}</span><span>{{if .Mine}}yours{{else}}by {{.Author}}{{end}}</span><span>· {{.Waits}}</span></div>
-    </div>
-    <time class="when" datetime="{{iso .Created}}" title="{{stamp .Created}}">{{ago $now .Created}}</time>
-  </li>{{end}}</ol></div>
-</section>{{end}}
+<div id="waiting-box">{{template "waiting" .}}</div>
 <div class="panel">
   <ol class="feed" id="feed" data-query="{{.Query}}">{{template "entries" .}}</ol>
   {{if not .Events}}<div class="empty" id="empty">Nothing yet{{if .Filter}} for this filter{{end}}. Pushes, pipelines, deploys and what agents do appear here as they happen.</div>{{end}}
@@ -177,6 +160,45 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   }
   setInterval(poll, 5000);
   document.addEventListener('visibilitychange', poll);
+  // What waits for this person refreshes on its own too, every 20 seconds
+  // and whenever the feed gets something new; anything new there plays a
+  // short tone and shows its count in the tab's title.
+  var box = document.getElementById('waiting-box'), title = document.title, audio, busy = false;
+  function keys() { var k = {}; box.querySelectorAll('li[data-key]').forEach(function (li) { k[li.dataset.key] = true; }); return k; }
+  function count() { var n = box.querySelectorAll('li[data-key]').length; document.title = (n ? '(' + n + ') ' : '') + title; }
+  function unlock() { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {} }
+  ['click', 'keydown', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, unlock, {once: true}); });
+  function chime() {
+    if (!audio || audio.state !== 'running') return;
+    var t = audio.currentTime;
+    [880, 1320].forEach(function (f, i) {
+      var o = audio.createOscillator(), g = audio.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + i * 0.12);
+      g.gain.exponentialRampToValueAtTime(0.15, t + i * 0.12 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.12 + 0.25);
+      o.connect(g); g.connect(audio.destination);
+      o.start(t + i * 0.12); o.stop(t + i * 0.12 + 0.3);
+    });
+  }
+  function waiting() {
+    if (busy) return; busy = true;
+    fetch('/waiting', {credentials: 'same-origin', cache: 'no-store'}).then(function (r) {
+      if (!r.ok) throw r.status;
+      return r.text();
+    }).then(function (html) {
+      var before = keys(), fresh = false;
+      box.innerHTML = html;
+      box.querySelectorAll('li[data-key]').forEach(function (li) {
+        if (!before[li.dataset.key]) { li.classList.add('fresh'); fresh = true; }
+      });
+      count();
+      if (fresh) chime();
+    }).catch(function () {}).then(function () { busy = false; });
+  }
+  count();
+  setInterval(waiting, 20000);
+  new MutationObserver(function () { waiting(); }).observe(feed, {childList: true});
   var more = document.getElementById('more');
   if (more) more.addEventListener('click', function () {
     fetch('/feed?before=' + more.dataset.before + (q ? '&' + q : ''), {credentials: 'same-origin'}).then(function (r) { return r.text(); }).then(function (html) {
@@ -190,6 +212,25 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 })();
 </script>
 {{end}}
+
+{{define "waiting"}}{{if or .Waiting .Cards}}{{$now := .Now}}<section class="waiting" aria-labelledby="waiting">
+  <h2 id="waiting">Waiting for you</h2>
+  <div class="panel"><ol class="feed">{{range .Waiting}}<li data-key="q{{.ID}}">
+    <span class="mark g-agent s-waiting waiting" title="question, waiting"></span>
+    <div>
+      <a class="title" href="/e/{{.ID}}">{{.Title}}</a>
+      <div class="meta"><span class="chip">{{.Agent}}</span>{{if .Link}}<a class="answer" href="{{.Link}}">Answer in the chat</a>{{end}}</div>
+    </div>
+    <time class="when" datetime="{{iso .At}}" title="{{stamp .At}}">{{ago $now .At}}</time>
+  </li>{{end}}{{range .Cards}}<li class="change" data-key="c{{card .}}">
+    <span class="mark g-review {{if .Ready}}ok{{else}}s-waiting waiting{{end}}" title="change{{if .Ready}}, ready{{end}}"></span>
+    <div>
+      <a class="title" href="{{card .}}">{{.Title}}</a>
+      <div class="meta"><span class="chip">{{.Namespace}}/{{.Repo}}</span><span>{{if .Mine}}yours{{else}}by {{.Author}}{{end}}</span><span>· {{.Waits}}</span></div>
+    </div>
+    <time class="when" datetime="{{iso .Created}}" title="{{stamp .Created}}">{{ago $now .Created}}</time>
+  </li>{{end}}</ol></div>
+</section>{{end}}{{end}}
 
 {{define "entries"}}{{$now := .Now}}{{range .Events}}{{template "entry" (entry . $now false)}}{{end}}{{end}}
 
