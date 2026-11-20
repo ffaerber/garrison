@@ -145,6 +145,24 @@ func (k *Keycloak) admin(ctx context.Context, method, path string, body, out any
 	return resp.StatusCode, nil
 }
 
+// Email is the email address of the person signed in to Garrison as
+// username, or "" for no such person.
+func (k *Keycloak) Email(ctx context.Context, username string) (string, error) {
+	var users []struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+	}
+	if _, err := k.admin(ctx, http.MethodGet, "/users?exact=true&username="+url.QueryEscape(username), nil, &users); err != nil {
+		return "", err
+	}
+	for _, u := range users {
+		if strings.EqualFold(u.Username, username) {
+			return u.Email, nil
+		}
+	}
+	return "", nil
+}
+
 // setupClient makes the client agents, or brings it back to how it must
 // be: confidential, password grants only, its secret derived, its tokens
 // naming sso.

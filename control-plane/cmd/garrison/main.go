@@ -470,7 +470,7 @@ func gatewayCmd(args []string) error {
 	}
 	sync := &gateway.OpenWebUI{
 		URL: *openwebui, Email: "installer@" + domain, Password: strings.TrimSpace(string(password)),
-		Domain: domain, Gitea: g, Agents: catalog,
+		Domain: domain, Gitea: g, Keycloak: tools.Keycloak, Agents: catalog,
 	}
 	// Gitea's webhook wakes the syncs; the intervals stay for missed deliveries.
 	wake := &hooks.Wake{}

@@ -70,6 +70,7 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
   - A team made to include all repos misses a repo created at the same moment. The members sync now adds missing repos (`teamRepos`).
   - Gitea drops a team without access from a branch rule. A rule that differs is written again at every sync, and each write makes Gitea re-check pull requests and refuse merges for a while.
   - Merges right after an approval can get "Please try again later": retry, as `merges` and `to_main` in `test/e2e/lib.sh` do.
+  - Right after an approval, a pull request's page can offer only "merge when all checks succeed". That schedule waits for a check to change; if they all passed already, it never merges. `Person.merge` in `test/ui/lib.py` cancels it and merges again.
 - **gVisor:** a sandbox has no Docker DNS. Reach containers by IP, or through the agent service's proxy, which looks names up.
 - **Multipass:**
   - It is a snap and cannot read files under `/tmp`. Put anything it transfers under the repo (`bin/` is ignored).
@@ -78,7 +79,7 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
 - **Bash:** `set -e` is ignored inside anything run after `&&`, `||` or in an `if`, subshells included. `steps.sh` runs steps as plain statements and checks `$?` after.
 - **Open WebUI:**
   - It limits sign-ins, so the gateway keeps its token.
-  - A namespace's group holds only people who have signed in to Open WebUI at least once.
+  - A namespace's group holds only people who have signed in to Open WebUI at least once. It finds them by the email of their Gitea account, or Keycloak's before their first Gitea sign-in (`OpenWebUI.email`); without that, someone added who had not opened Gitea did not see the channel.
   - In a channel, Open WebUI calls an agent only for a message that mentions it, or that is a Reply to one of its messages (`reply_to_id`). A plain message in its thread goes unanswered. The pinned how-to tells people to use Reply; the browser tests' `Person.reply(..., agent)` mentions the agent, and `commander` checks a Reply. The agent service cannot answer such messages itself: it acts with the person's token, which only Open WebUI's call carries.
   - Right after it starts, its sidebar can show no channels for a while; `Person.sidebar_has` waits for garrison's channel, which everyone has, before saying one is missing.
   - The models are Garrison's agents, `garrison/<agent>`, for everyone. What membership changes is the namespace's channel: whether it shows in the sidebar and whether its messages can be read.

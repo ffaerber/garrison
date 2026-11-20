@@ -526,12 +526,34 @@ class Person:
         return b.count() > 0 and b.first.is_enabled() and "enough required approvals" not in p.content()
 
     def merge(self, org: str, repo: str, n: int):
-        """Merges a pull request with its page's button, and confirms."""
+        """Merges a pull request with its page's button, and confirms.
+        Right after an approval Gitea may still be checking the pull request
+        and offer only "merge when all checks succeed"; that schedule waits
+        for a check to change, and they all passed already, so it never
+        merges. Then it cancels the schedule, as a person would, and merges
+        again."""
         p = self.page
-        p.goto(f"{GIT}/{org}/{repo}/pulls/{n}", wait_until="domcontentloaded")
-        p.get_by_role("button", name="Create merge commit").first.click()
-        p.locator("button[name='do'][value='merge']:visible").click()
-        until(60, lambda: (gitea(f"/repos/{org}/{repo}/pulls/{n}") or {}).get("merged"))
+        merged = lambda: (gitea(f"/repos/{org}/{repo}/pulls/{n}") or {}).get("merged")
+        for attempt in range(3):
+            if merged():
+                break
+            p.goto(f"{GIT}/{org}/{repo}/pulls/{n}", wait_until="domcontentloaded")
+            cancel = p.get_by_role("button", name=re.compile("Cancel auto merge", re.I))
+            if cancel.count():
+                cancel.first.click()
+                p.wait_for_load_state("domcontentloaded")
+                p.wait_for_timeout(3000)
+                continue
+            p.get_by_role("button", name="Create merge commit").first.click()
+            p.locator("button[name='do'][value='merge']:visible").click()
+            try:
+                until(20 if attempt < 2 else 60, merged)
+                break
+            except AssertionError:
+                self.snap(f"not merged yet {org}/{repo}#{n}")
+                p.wait_for_timeout(5000)
+        else:
+            until(30, merged)
         self.snap(f"merged {org}/{repo}#{n}")
         return True
 

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,7 +100,7 @@ func (f *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/admin/realms/garrison/users" && r.Method == http.MethodGet:
 		out := []map[string]any{}
 		if u := f.users[r.URL.Query().Get("username")]; u != nil && r.URL.Query().Get("exact") == "true" {
-			out = append(out, map[string]any{"id": "id-" + u["username"].(string), "enabled": u["enabled"]})
+			out = append(out, map[string]any{"id": "id-" + u["username"].(string), "username": u["username"], "email": u["email"], "enabled": u["enabled"]})
 		}
 		json.NewEncoder(w).Encode(out)
 	case p == "/admin/realms/garrison/users" && r.Method == http.MethodPost:
@@ -218,5 +219,31 @@ func TestARunWithoutAPersonSignsInAsTheAgent(t *testing.T) {
 	none := &Tools{Browser: &Browser{}}
 	if _, err := none.Call(context.Background(), routine, agent, "browse", json.RawMessage(`{"url":"https://todo.example.test/"}`)); err == nil || !strings.Contains(err.Error(), "gives agents none in Keycloak") {
 		t.Errorf("without Keycloak: %v", err)
+	}
+}
+
+// A person in a roster who never opened Gitea has no account there yet; the
+// group sync finds their email in Keycloak, so the namespace's channel shows
+// for them in Open WebUI anyway.
+func TestRosterEmailBeforeGitea(t *testing.T) {
+	kc, ksrv := newFakeKeycloak(t)
+	kc.users["carol"] = map[string]any{"username": "carol", "email": "carol@example.com", "enabled": true}
+	gsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/users/alice" {
+			io.WriteString(w, `{"email":"alice@example.com"}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer gsrv.Close()
+	o := &OpenWebUI{Gitea: &Gitea{URL: gsrv.URL, User: "admin", Password: "pw"}}
+	if got := o.email(context.Background(), "carol"); got != "" {
+		t.Errorf("without Keycloak: %q", got)
+	}
+	o.Keycloak = &Keycloak{URL: ksrv.URL, User: "root", Password: "pw"}
+	for name, want := range map[string]string{"alice": "alice@example.com", "carol": "carol@example.com", "nobody": ""} {
+		if got := o.email(context.Background(), name); got != want {
+			t.Errorf("%s: %q, want %q", name, got, want)
+		}
 	}
 }

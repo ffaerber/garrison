@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -35,6 +36,9 @@ type OpenWebUI struct {
 	Password string
 	Domain   string
 	Gitea    *Gitea
+	// Keycloak finds the email of people in a roster who have no Gitea
+	// account yet; nil: they join the group after their first Gitea sign-in.
+	Keycloak *Keycloak
 	Agents   *Catalog // filled with the agents read, for the MCP endpoints
 	HTTP     *http.Client
 
@@ -533,6 +537,27 @@ type owuiGroup struct {
 // agents visible to members show only to them. It returns the group ids by
 // namespace. garrison has none: its people are root admins, whom Open WebUI
 // shows everything.
+// email is the email address of the person name of a roster: their Gitea
+// account's, or, before their first Gitea sign-in, Keycloak's, so that being
+// added to a namespace shows its channel without opening Gitea first. ""
+// when neither knows them.
+func (o *OpenWebUI) email(ctx context.Context, name string) string {
+	var u struct {
+		Email string `json:"email"`
+	}
+	if _, err := o.Gitea.do(ctx, "", http.MethodGet, "/users/"+url.PathEscape(name), nil, &u); err == nil && u.Email != "" {
+		return u.Email
+	}
+	if o.Keycloak == nil {
+		return ""
+	}
+	email, err := o.Keycloak.Email(ctx, name)
+	if err != nil {
+		log.Printf("open webui: the email of %s: %v", name, err)
+	}
+	return email
+}
+
 func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []Namespace) (map[string]string, error) {
 	var groups []owuiGroup
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/groups/", nil, &groups); err != nil {
@@ -585,13 +610,8 @@ func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []N
 		}
 		var want []string
 		for _, name := range slices.Concat(roster.Admins, roster.Members) {
-			var u struct {
-				Email string `json:"email"`
-			}
-			if _, err := o.Gitea.do(ctx, "", http.MethodGet, "/users/"+name, nil, &u); err != nil {
-				continue // not signed in yet
-			}
-			if uid := byEmail[strings.ToLower(u.Email)]; uid != "" {
+			email := o.email(ctx, name)
+			if uid := byEmail[strings.ToLower(email)]; email != "" && uid != "" {
 				want = append(want, uid)
 			}
 		}
