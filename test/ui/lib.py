@@ -442,7 +442,16 @@ class Person:
         # mid-typing; type again until the box holds the whole text.
         for attempt in range(5):
             if agent:
-                self.mention(box, agent, retries=1)
+                # The redraw can also close the list of agents before one
+                # is picked: that is tried again here, reloading the thread.
+                try:
+                    self.mention(box, agent, retries=1)
+                except Exception:  # noqa: BLE001
+                    if attempt == 4:
+                        raise
+                    p.reload()
+                    box.wait_for()
+                    continue
                 p.keyboard.type(" " + text)
             else:
                 box.click()
