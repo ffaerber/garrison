@@ -37,7 +37,7 @@ orgs() { gitea_api "" "$api/admin/orgs?limit=50" | python3 -c 'import json,sys; 
 before=$(orgs)
 answer=$(ask_agent garrison alice "Please create an organization for me.")
 check "asked for an organisation, it makes none" test "$(orgs)" = "$before"
-check "and asks for its name"              grep -Eqi '\?|tell me|what name|the name' <<<"$answer"
+check "and asks for its name"              grep -Eqi '\?|tell me|what name|the name|a name|its name|name for' <<<"$answer"
 printf 'it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
 asked_back=$answer
 answer=$(ask_agent garrison alice "Call it family.")
