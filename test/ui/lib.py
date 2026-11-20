@@ -308,18 +308,14 @@ class Person:
         out = self.owui(path)
         return out if isinstance(out, list) else []
 
-    def say(self, agent: str, text: str) -> str:
-        """In the open channel: types @agent, picks it from the list, types
-        text and sends it. Returns the message's id."""
+    def mention(self, box, agent: str, retries: int = 3):
+        """In the editor box: types @agent and picks it from the list. The
+        page knows the agents there were when it loaded; one of a namespace
+        made since appears after a reload, as for a person."""
         p = self.page
-        cid = channel_id(p.url)
-        before = {m["id"] for m in self.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")}
         option = p.locator("button.selected-command-option-button, button[data-selected='true']").filter(has_text=agent)
-        # The page knows the agents there were when it loaded; one of a
-        # namespace made since appears after a reload, as for a person.
-        for attempt in range(3):
-            ed = p.locator("#chat-input")
-            ed.click()
+        for attempt in range(retries):
+            box.click()
             p.keyboard.press("Control+A")
             p.keyboard.press("Delete")
             p.keyboard.type("@" + agent)
@@ -327,12 +323,20 @@ class Person:
                 option.first.wait_for(timeout=10_000)
                 break
             except Exception:  # noqa: BLE001 - not offered (yet)
-                if attempt == 2:
+                if attempt == retries - 1:
                     raise
                 p.reload()
-                p.locator("#chat-input").wait_for()
+                box.wait_for()
         option.first.click()
         p.wait_for_timeout(500)  # the editor swallows keys while it inserts the mention
+
+    def say(self, agent: str, text: str) -> str:
+        """In the open channel: types @agent, picks it from the list, types
+        text and sends it. Returns the message's id."""
+        p = self.page
+        cid = channel_id(p.url)
+        before = {m["id"] for m in self.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")}
+        self.mention(p.locator("#chat-input"), agent)
         p.keyboard.type(" " + text)
         p.keyboard.press("Enter")
         mine = until(30, lambda: [m for m in self.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")
@@ -385,22 +389,36 @@ class Person:
 
     def sidebar_has(self, name: str) -> bool:
         """Whether Open WebUI's sidebar shows the channel name to the person,
-        as they see it after loading the page."""
+        as they see it after loading the page. Every signed-in person has
+        garrison's channel: until its link shows, the list is not there yet
+        (a page loaded right after Open WebUI started can show none), so
+        it loads the page again, signing in again on the second try; a
+        sidebar that never shows it is a failure, not an answer."""
         p = self.page
-        p.goto(f"{CHAT}/")
-        self.dismiss()
-        if p.locator("button[aria-label='Open Sidebar']").first.is_visible():
-            p.locator("button[aria-label='Open Sidebar']").first.click()
-        # Every signed-in person has garrison's channel: once its link shows,
-        # the list is there. The section may be closed; a click opens it.
         links = p.locator("a[href*='/channels/']")
-        for _ in range(3):
+        garrison = links.filter(has_text=re.compile(r"^\s*#?\s*garrison\b"))
+        for attempt in range(4):
+            if attempt == 2:
+                self.sign_in_chat()
+            p.goto(f"{CHAT}/")
+            self.dismiss()
+            if p.locator("button[aria-label='Open Sidebar']").first.is_visible():
+                p.locator("button[aria-label='Open Sidebar']").first.click()
             try:
-                links.first.wait_for(timeout=8_000)
+                garrison.first.wait_for(timeout=15_000)
                 break
-            except Exception:  # noqa: BLE001 - closed, or not rendered yet
+            except Exception:  # noqa: BLE001 - closed, or not loaded yet
+                # The section may be closed: a click opens it.
                 if p.get_by_text("Channels", exact=True).count():
                     p.get_by_text("Channels", exact=True).first.click()
+                    try:
+                        garrison.first.wait_for(timeout=5_000)
+                        break
+                    except Exception:  # noqa: BLE001
+                        pass
+        else:
+            self.snap("sidebar without channels")
+            raise AssertionError(f"{self.name}'s sidebar shows no channels, not even garrison's")
         self.snap(f"sidebar, looking for {name}")
         return links.filter(has_text=re.compile(rf"^\s*#?\s*{re.escape(name)}\b")).count() > 0
 
@@ -410,8 +428,10 @@ class Person:
         out = self.owui(f"/api/v1/channels/{cid}/messages?skip=0&limit=5")
         return isinstance(out, list)
 
-    def reply(self, message: str, text: str):
-        """Replies in the thread of message of the open channel."""
+    def reply(self, message: str, text: str, agent: str = ""):
+        """Replies in the thread of message of the open channel. With agent,
+        the reply mentions it, as a person must for an agent to answer in a
+        thread: Open WebUI calls a model only when a message mentions it."""
         p = self.page
         cid = channel_id(p.url)
         p.goto(f"{CHAT}/channels/{cid}?thread={message}")
@@ -421,12 +441,16 @@ class Person:
         # The pane redraws as its messages load and takes the focus away
         # mid-typing; type again until the box holds the whole text.
         for attempt in range(5):
-            box.click()
-            p.keyboard.press("Control+A")
-            p.keyboard.press("Delete")
-            p.keyboard.type(text)
+            if agent:
+                self.mention(box, agent, retries=1)
+                p.keyboard.type(" " + text)
+            else:
+                box.click()
+                p.keyboard.press("Control+A")
+                p.keyboard.press("Delete")
+                p.keyboard.type(text)
             p.wait_for_timeout(700)
-            if box.inner_text().strip() == text:
+            if box.inner_text().strip().endswith(text) and (not agent or agent in box.inner_text()):
                 break
         else:
             raise AssertionError(f"the thread's box holds {box.inner_text()!r}")

@@ -23,7 +23,8 @@ import json,sys
 sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("app") == "quotes" and a["labels"].get("namespace") == "todo" for a in json.load(sys.stdin)) else 1)'; }
 check "an alert fires: it keeps failing"   until_true 400 quotes_alert
 check "todo's people see it in the feed"   until_true 120 in_feed carol ns=todo "e['kind'] == 'alert' and e['status'] == 'failed' and 'quotes_web' in e['title']"
-check "bob, out of todo, does not"         not_in_feed bob ns=todo "e['kind'] == 'alert' and 'quotes_web' in e['title']"
+# Who outside todo sees it is home's TestEachSeesWhatTheyMayRead: here bob
+# and carol are both todo's (the fixture team).
 alert_post() {
   chat_api alice "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
 import json,sys

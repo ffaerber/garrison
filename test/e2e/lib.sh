@@ -238,12 +238,13 @@ mention() {
 # ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent, the operator by
 # default, in the namespace's channel (or $CHANNEL), where it works in that
 # namespace, and prints its answer from the thread. The agents are
-# garrison's: their model is garrison/<agent>.
+# garrison's: their model is garrison/<agent>. It waits ASK_WAIT seconds
+# (360) for the answer; a turn may take up to the agent service's 10 minutes.
 ask_agent() {
   local ns=$1 who=$2 question=$3 id=garrison/${4:-operator} cid mid i
   read -r cid mid <<<"$(mention "${CHANNEL:-$ns}" "$who" "$id" "$question")"
   [ -n "$mid" ] || return 1
-  for i in $(seq 72); do
+  for i in $(seq $(( ${ASK_WAIT:-360} / 5 ))); do
     chat_api "$who" "$chat/api/v1/channels/$cid/messages/$mid/thread" | python3 -c '
 import json,sys
 for m in json.load(sys.stdin):

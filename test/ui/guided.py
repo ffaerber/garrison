@@ -61,12 +61,12 @@ first = check("the commander answers", bob.next_answer, asked, COMMANDER, 0) or 
 print(f"it said: {first[:300]!r}", flush=True)
 check("it asks which app: todo has two", lambda: asks_back(first, "quotes", "which", "todo"))
 check("and changes nothing yet", lambda: newest(REPO, before) is None and newest("quotes") is None)
-bob.reply(asked, "The todo list, its page.")
+bob.reply(asked, "The todo list, its page.", "commander")
 check("told, it goes on", bob.next_answer, asked, COMMANDER, 1)
 pr = check("a pull request on todo/app, as bob", until, 900, lambda: newest(REPO, before), every=10)
 if not pr:
     print("retry nothing proposed yet; asking plainly", flush=True)
-    bob.reply(asked, "Please propose it now: in todo/app, set the page's background colour (--bg in page.html) to a blue.")
+    bob.reply(asked, "Please propose it now: in todo/app, set the page's background colour (--bg in page.html) to a blue.", "commander")
     pr = check("asked plainly, a pull request on todo/app", until, 900, lambda: newest(REPO, before), every=10)
 diff = (gitea(f"/repos/{NS}/{REPO}/pulls/{pr}.diff") if pr else "") or ""
 def sets_blue():
@@ -89,7 +89,7 @@ asked = bob.say("commander", "Can the todo list have its own address, list.<our 
 answer = check("the commander answers", bob.next_answer, asked, COMMANDER, 0) or ""
 print(f"it said: {answer[:300]!r}", flush=True)
 if not newest("config", before_cfg):
-    bob.reply(asked, "Yes, please propose it.")
+    bob.reply(asked, "Yes, please propose it.", "commander")
     check("told, it goes on", bob.next_answer, asked, COMMANDER, 1)
 cfg = check("a pull request on todo/config, as bob", until, 900, lambda: newest("config", before_cfg), every=10)
 # A stack's file name is its address: stacks/list.yaml answers at list.<domain>.

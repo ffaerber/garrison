@@ -79,5 +79,7 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
 - **Open WebUI:**
   - It limits sign-ins, so the gateway keeps its token.
   - A namespace's group holds only people who have signed in to Open WebUI at least once.
+  - In a channel, Open WebUI calls an agent only for a message that mentions it, replies in a thread too: a reply to an agent's question without `@agent` goes unanswered. The browser tests' `Person.reply(..., agent)` mentions it, as a person must.
+  - Right after it starts, its sidebar can show no channels for a while; `Person.sidebar_has` waits for garrison's channel, which everyone has, before saying one is missing.
   - The models are Garrison's agents, `garrison/<agent>`, for everyone. What membership changes is the namespace's channel: whether it shows in the sidebar and whether its messages can be read.
 - **The LLM:** a check that needs a vague request to be clarified first depends on the prompts' rule to ask back (commander, operator, coder). Keep those rules when editing prompts.

@@ -74,11 +74,13 @@ check "alice signs in to her dashboard"    until_true 60 home_login alice
 check "the feed has what it made, for media's people" in_feed alice ns=media "e['kind'] == 'media' and e['agent'] == 'media/media'"
 
 echo "# @media cuts a short from them"
-answer=$(ask_agent media alice "Make a short vertical video of at most 15 seconds from the pictures and the video of the project demo. Do not ask back." media)
+# Cutting takes a while: wait as long as a turn may last, so a retry does
+# not queue behind the first request.
+answer=$(ASK_WAIT=660 ask_agent media alice "Make a short vertical video of at most 15 seconds from the pictures and the video of the project demo. Do not ask back." media)
 short() { ls "$lib"/demo/shorts/short-*.mp4 >/dev/null 2>&1; }
 if ! short; then
   printf 'retry @media made no short; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." media)
+  answer=$(ASK_WAIT=660 ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." media)
 fi
 check "a short in the library"             short
 sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
@@ -89,7 +91,8 @@ size=$(docker run --rm -v "$lib/demo/shorts:/s:ro" --entrypoint sh "$sandbox_ima
   [ -n "$f" ] || f=$(find /s -name "short-*.mp4" -size +0 | sort | tail -n1)
   ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$f"' 2>/dev/null)
 check "no empty or broken file left in the library" bash -c '! find "$0" -name "short-*.mp4" -size 0 | grep -q .' "$lib/demo/shorts"
-check "vertical, 9:16"                     python3 -c 'import sys; w,h=map(int,sys.argv[1].split(",")); sys.exit(0 if w*16 == h*9 else 1)' "$size"
+vertical() { [ -n "$size" ] && python3 -c 'import sys; w,h=map(int,sys.argv[1].split(",")[:2]); sys.exit(0 if w*16 == h*9 else 1)' "$size"; }
+check "vertical, 9:16"                     vertical
 
 echo "# the file browser"
 files_login() {

@@ -61,12 +61,12 @@ first = check("the commander answers", alice.next_answer, asked, COMMANDER, 0) o
 print(f"it said: {first[:300]!r}", flush=True)
 check("it asks back, about their roles", lambda: asks_back(first, "admin", "member", "role"))
 check("and proposes nothing yet", lambda: members_pr(before) is None)
-alice.reply(asked, "bob as a member, carol as an admin.")
+alice.reply(asked, "bob as a member, carol as an admin.", "commander")
 check("told, it goes on", alice.next_answer, asked, COMMANDER, 1)
 pr = check("a pull request on todo/config changes members.yaml, as alice", until, 600, lambda: members_pr(before), every=10)
 if not pr:
     print("retry the agent proposed nothing; asking plainly", flush=True)
-    alice.reply(asked, "Please propose it now: bob under members, carol under admins, alice stays admin.")
+    alice.reply(asked, "Please propose it now: bob under members, carol under admins, alice stays admin.", "commander")
     pr = check("asked plainly, it proposes it", until, 600, lambda: members_pr(before), every=10)
 check("bob a member, carol an admin, alice still an admin",
       lambda: roster(pr_head(pr)) == {"admins": ["alice", "carol"], "members": ["bob"]})
@@ -100,7 +100,7 @@ try:
     pr = until(60, lambda: members_pr(before), every=10)
 except AssertionError:
     # It asked first, as it may: alice confirms.
-    alice.reply(asked, "Yes, remove him from todo.")
+    alice.reply(asked, "Yes, remove him from todo.", "commander")
     check("told, it goes on", alice.next_answer, asked, COMMANDER, seen)
 pr = pr or check("a pull request removes bob from members.yaml, as alice", until, 600, lambda: members_pr(before), every=10)
 check("bob is out, carol and alice stay admins",
