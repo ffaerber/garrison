@@ -14,6 +14,10 @@
 #   test/vm/steps.sh --clean       delete the VMs, their snapshots and the green marks
 #   JOBS=2 test/vm/steps.sh        at most 2 VMs at once (default 4)
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
+#   COMFYUI=host test/vm/steps.sh media
+#                                  media with a real ComfyUI on this computer,
+#                                  reached at the VM's gateway, port 8188,
+#                                  instead of the fake one: it really draws
 #
 # The scenarios that talk to a real LLM (agent, media, journey, ui, and team
 # and what grows from it) use by
@@ -71,6 +75,7 @@ TRUNK=" base install login "
 
 # Which LLM the agents use: local (Ollama on this computer, LOCAL_MODEL) or cloud.
 LLM=${LLM:-local}
+COMFYUI=${COMFYUI:-fake}
 LOCAL_MODEL=${LOCAL_MODEL:-qwen3.8-64k:latest}
 case $LLM in local|cloud) ;; *) echo "LLM must be local or cloud" >&2; exit 2 ;; esac
 
@@ -234,7 +239,7 @@ step_guided() { browser_scenario guided; }
 step_media() {
   sync_repo
   put_llm_key
-  smoke media
+  in_vm sudo bash -c "cd garrison && COMFYUI=$COMFYUI WAIT_READY=600 test/e2e/smoke.sh media"
 }
 
 # Every kind of thing a namespace holds, made, read, changed and removed:
@@ -312,6 +317,7 @@ fingerprint() {
       declare -f "step_$s" sync_repo smoke put_llm_key
       [[ $(declare -f "step_$s") == *scenario* ]] && declare -f scenario browser_scenario
       [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL"
+      [ "$s" = media ] && [ "$COMFYUI" != fake ] && echo "COMFYUI=$COMFYUI"
       files=$(inputs "$s")
       # Without paths, git ls-files would list the whole repo.
       if [ -n "$files" ]; then

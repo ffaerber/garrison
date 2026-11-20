@@ -23,10 +23,20 @@ check "the deployer deploys it"            until_true 600 files_up
 check "which makes the media library"      zfs list "${lib#/}"
 
 echo "# ComfyUI, outside Garrison"
-mkdir -p "$tmp/comfy" && cp test/e2e/media/picture.png test/e2e/media/clip.mp4 "$tmp/comfy/"
-python3 test/e2e/media/comfy.py 8188 "$tmp/comfy" & comfy_pid=$!
-trap 'kill $comfy_pid 2>/dev/null; rm -rf "$tmp"' EXIT
-host_ip=$(ip route get 1.1.1.1 | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+# COMFYUI=host: a real one on the computer running the VM, at the VM's
+# gateway, as the local Ollama is; it really draws, on its GPU. Otherwise a
+# fake one in the VM, which hands back a fixed picture and clip.
+comfy_pid=
+if [ "${COMFYUI:-fake}" = host ]; then
+  host_ip=$(ip route | awk '/^default/ { print $3; exit }')
+  check "a real ComfyUI answers on the host, with a GPU" bash -c \
+    'curl -sf --max-time 10 "http://$0:8188/system_stats" | grep -q "\"type\": \"cuda\""' "$host_ip"
+else
+  mkdir -p "$tmp/comfy" && cp test/e2e/media/picture.png test/e2e/media/clip.mp4 "$tmp/comfy/"
+  python3 test/e2e/media/comfy.py 8188 "$tmp/comfy" & comfy_pid=$!
+  host_ip=$(ip route get 1.1.1.1 | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+fi
+trap '[ -z "$comfy_pid" ] || kill $comfy_pid 2>/dev/null; rm -rf "$tmp"' EXIT
 sed -i '/^COMFYUI_URL=/d' $ETC/install.env && echo "COMFYUI_URL=http://$host_ip:8188" >> $ETC/install.env
 docker service update --force --detach=false -q control-plane_agents >/dev/null 2>&1
 agents_say() { docker service logs --since 3m control-plane_agents 2>&1 | grep -q "generate_media uses ComfyUI at http://$host_ip:8188"; }
@@ -45,12 +55,21 @@ fi
 check "two pictures and a video, in the library" made
 first=$(ls "$lib"/demo/comic-*.png 2>/dev/null | head -n1)
 check "each with a .json of how it was made" bash -c 'grep -q "\"style\": \"comic\"" "$0.json" && grep -q "\"project\": \"media/demo\"" "$0.json"' "$first"
-check "ComfyUI got the style's prompt, size and length in their nodes" python3 -c '
+sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
+if [ -n "$comfy_pid" ]; then
+  check "ComfyUI got the style's prompt, size and length in their nodes" python3 -c '
 import json,sys
 runs=[json.loads(l) for l in open(sys.argv[1])]
 pic=any(r.get("6",{}).get("inputs",{}).get("text","").endswith(", comic style, bold ink lines, flat bright colours") and r["5"]["inputs"]["width"] == 768 and r["7"]["inputs"]["text"] == "photo, blurry, scary" for r in runs)
 vid=any(r.get("12",{}).get("inputs",{}).get("length") == 49 for r in runs)
 sys.exit(0 if pic and vid else 1)' "$tmp/comfy/prompts.jsonl"
+else
+  # What the real one drew: the style's size, and its number of frames.
+  probe() { docker run --rm -v "$lib/demo:/d:ro" --entrypoint ffprobe "$sandbox_image" -v error -select_streams v:0 "$@"; }
+  check "a picture, drawn in the style's 768x1024" test "$(probe -show_entries stream=width,height -of csv=p=0 "/d/${first##*/}")" = 768,1024
+  video=$(ls "$lib"/demo/motion-*.mp4 2>/dev/null | head -n1)
+  check "a video of the style's 49 frames" test "$(probe -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "/d/${video##*/}")" = 49
+fi
 check "alice signs in to her dashboard"    until_true 60 home_login alice
 check "the feed has what it made, for media's people" in_feed alice ns=media "e['kind'] == 'media' and e['agent'] == 'media/media'"
 

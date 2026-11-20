@@ -12,6 +12,7 @@ test/vm/steps.sh --clean         # delete the VMs, their snapshots and the green
 KEEP=1 test/vm/steps.sh guided   # keep a passing scenario's VM, to look around in it
 JOBS=2 test/vm/steps.sh          # at most 2 VMs at once
 LLM=cloud test/vm/steps.sh       # the agents on Ollama's cloud instead of the local Ollama
+COMFYUI=host test/vm/steps.sh media  # media with a real ComfyUI on this computer (port 8188 on the VMs' gateway), not the fake
 LOCAL_MODEL=nemotron-3.5-lightning:latest test/vm/steps.sh   # another local model
 test/e2e/smoke.sh roles          # in a VM: one scenario, test/e2e/scenarios/roles.sh
 ```
@@ -46,7 +47,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `crud` | scenario | Every kind of thing a namespace holds, made, read, changed and removed without the LLM |
 | `ui` | scenario | In the browser, as alice, bob and the admin: the namespace `todo` and its app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. `docs/walkthrough/make.py` takes the walkthrough's pictures from its screenshots |
 | `agent` | fixture | Bob and alice ask the agents of `garrison` in its channel: logs, metrics, proposals, an LLM provider, the scout's browser under gVisor |
-| `media` | scenario | A namespace's media library and file browser, `@media` with a fake ComfyUI, a short, and the chain `software-updates` |
+| `media` | scenario | A namespace's media library and file browser, `@media` with a fake ComfyUI (a real one with `COMFYUI=host`), a short, and the chain `software-updates` |
 | `deploy` | fixture | The namespace `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
 | `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
 | `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
