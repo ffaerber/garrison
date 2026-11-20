@@ -224,7 +224,7 @@ Played by `people` (`test/ui/people.py`), in the browser, as alice, bob and caro
 Played by `guided` (`test/ui/guided.py`), in the browser, as bob and carol, from the fixture `team`. todo has two apps, `todo/app` (the todo list) and `todo/quotes`.
 
 1. Bob: *@commander Please make the background blue.* The commander asks which app, as todo has two, and changes nothing yet. Bob: *The todo list, its page.* A pull request on `todo/app`, as bob, sets the page's background to a blue in `page.html` alone; `todo/config` is left alone. Carol approves and merges it in Gitea, and the todo list turns blue.
-2. Bob: *@commander Can the todo list have its own address, list.<our domain>?* That is the stack's, not the code's: a stack's file name is its address. A pull request on `todo/config`, as bob, changes `stacks/` only, for the address `list`, and the app's code is left alone.
+2. Bob: *@commander Can the quotes app run at its own address, sayings.<our domain>?* That is the stack's, not the code's: a stack's file name is its address. A pull request on `todo/config`, as bob, changes `stacks/` only, for the address `sayings`, and quotes' code is left alone. It is asked for quotes, which has no stack yet: renaming todo's stack would start it on a new, empty dataset, as a stack's data lives under its name, and the operator says so instead of proposing it.
 
 ## In the browser
 

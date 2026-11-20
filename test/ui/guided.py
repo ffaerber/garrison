@@ -1,8 +1,10 @@
 """Vague requests in todo's channel, and the agents guiding the person to
 what they mean. todo has two apps, todo/app (the todo list) and todo/quotes,
 so "the background" is ambiguous: the commander asks which, and the change
-goes to the app's code, not its stack. An address for the app is the
-opposite: its stack, in todo/config, not its code. See docs/scenarios.md,
+goes to the app's code, not its stack. An address for an app is the
+opposite: its stack, in todo/config, not its code. It is asked for quotes,
+which has no stack yet: renaming todo's would leave its data behind, which the
+operator rightly refuses. See docs/scenarios.md,
 "Vague requests". Run by test/ui/run.sh guided.
 """
 
@@ -82,20 +84,20 @@ check("carol approves it in Gitea", carol.approve, NS, REPO, pr)
 check("and merges it", carol.merge, NS, REPO, pr)
 check("the todo list turns blue, as carol sees it", until, 1200, lambda: blue(carol.background(STACK)), every=15)
 
-section("2. bob asks for an address of the app's own")
-before_cfg, before_app = last("config"), last(REPO)
+section("2. bob asks for an address of quotes' own")
+before_cfg, before_app = last("config"), last("quotes")
 bob.channel(NS)
-asked = bob.say("commander", "Can the todo list have its own address, list.<our domain>?")
+asked = bob.say("commander", "Can the quotes app run at its own address, sayings.<our domain>?")
 answer = check("the commander answers", bob.next_answer, asked, COMMANDER, 0) or ""
 print(f"it said: {answer[:300]!r}", flush=True)
 if not newest("config", before_cfg):
     bob.reply(asked, "Yes, please propose it.", "commander")
     check("told, it goes on", bob.next_answer, asked, COMMANDER, 1)
 cfg = check("a pull request on todo/config, as bob", until, 900, lambda: newest("config", before_cfg), every=10)
-# A stack's file name is its address: stacks/list.yaml answers at list.<domain>.
+# A stack's file name is its address: stacks/sayings.yaml answers at sayings.<domain>.
 check("it changes the stacks, in todo/config", lambda: all(f.startswith("stacks/") for f in pr_files(NS, "config", cfg)))
-check("for the address list", lambda: "stacks/list.yaml" in pr_files(NS, "config", cfg)
-      or re.search(r"^\+.*\blist\b", gitea(f"/repos/{NS}/config/pulls/{cfg}.diff") or "", re.M))
-check("and leaves the app's code alone", lambda: newest(REPO, before_app) is None)
+check("for the address sayings", lambda: "stacks/sayings.yaml" in pr_files(NS, "config", cfg)
+      or re.search(r"^\+.*\bsayings\b", gitea(f"/repos/{NS}/config/pulls/{cfg}.diff") or "", re.M))
+check("and leaves the app's code alone", lambda: newest("quotes", before_app) is None)
 
 done()

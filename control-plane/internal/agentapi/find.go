@@ -49,7 +49,9 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 	var b strings.Builder
 	if channel, ok := strings.CutPrefix(c.Chat, "channel:"); ok && s.Poster != nil {
 		if info, err := s.Poster.Channel(ctx, channel); err == nil && info.Namespace != "" {
-			fmt.Fprintf(&b, "This channel belongs to the namespace %s.\n\n", info.Namespace)
+			fmt.Fprintf(&b, "This channel belongs to the namespace %s.\n", info.Namespace)
+			s.writeRepos(ctx, &b, c.Person, info.Namespace)
+			b.WriteString("\n")
 		}
 	}
 	ns := asker.Namespace
@@ -78,6 +80,38 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 		fmt.Fprintf(&b, "\nTo ask one of these working in %s, name it as %s/<agent> in ask_agent.", ns, ns)
 	}
 	return strings.TrimSpace(b.String()), false
+}
+
+// writeRepos writes the repos of the namespace ns that person may see, so
+// that an agent asked about "the app" knows whether there are several.
+// Without Gitea, or when they cannot be read, it writes nothing.
+func (s *Server) writeRepos(ctx context.Context, b *strings.Builder, person, ns string) {
+	if s.Gitea == nil || person == "" {
+		return
+	}
+	repos, err := s.Gitea.Repos(ctx, person, ns)
+	if err != nil || len(repos) == 0 {
+		return
+	}
+	var apps []string
+	for _, r := range repos {
+		if r.Archived || r.Name == "config" {
+			continue
+		}
+		app := r.Name
+		if d := strings.TrimSpace(r.Description); d != "" {
+			app += " (" + d + ")"
+		}
+		apps = append(apps, app)
+	}
+	switch len(apps) {
+	case 0:
+		fmt.Fprintf(b, "It has no app repos yet, only %s/config.\n", ns)
+	case 1:
+		fmt.Fprintf(b, "Its one app repo is %s/%s; its stacks are in %s/config.\n", ns, apps[0], ns)
+	default:
+		fmt.Fprintf(b, "Its app repos are %s; its stacks are in %s/config. A request about \"the app\" that names none of them could mean any.\n", strings.Join(apps, ", "), ns)
+	}
 }
 
 // inChain tells whether the agent name is part of a run already, in any

@@ -705,3 +705,38 @@ func TestAFiringIsForgottenAWeekAfterItWasLastSent(t *testing.T) {
 		t.Error("the mark of a firing long over is still kept")
 	}
 }
+
+// find_agents names the app repos of the channel's namespace, as the person
+// sees them, so the commander can tell when "the app" could mean several.
+func TestFindAgentsNamesTheApps(t *testing.T) {
+	s := &Server{}
+	repos := `[{"name":"app","description":"Todo list"},{"name":"config"},{"name":"quotes"},{"name":"old","archived":true}]`
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/orgs/todo/repos" && r.Header.Get("Sudo") == "bob" {
+			io.WriteString(w, repos)
+			return
+		}
+		if r.URL.Path == "/api/v1/orgs/lab/repos" {
+			io.WriteString(w, `[{"name":"config"},{"name":"example"}]`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer gitea.Close()
+	s.Gitea = &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	write := func(person, ns string) string {
+		var b strings.Builder
+		s.writeRepos(context.Background(), &b, person, ns)
+		return b.String()
+	}
+	got := write("bob", "todo")
+	if !strings.Contains(got, "app (Todo list), quotes") || !strings.Contains(got, "could mean any") || strings.Contains(got, "old") {
+		t.Errorf("two apps: %q", got)
+	}
+	if got := write("bob", "lab"); !strings.Contains(got, "one app repo is lab/example") {
+		t.Errorf("one app: %q", got)
+	}
+	if got := write("carol", "nope"); got != "" {
+		t.Errorf("unreadable: %q", got)
+	}
+}
