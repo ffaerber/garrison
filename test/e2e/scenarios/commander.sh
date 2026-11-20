@@ -37,12 +37,15 @@ orgs() { gitea_api "" "$api/admin/orgs?limit=50" | python3 -c 'import json,sys; 
 before=$(orgs)
 answer=$(ask_agent garrison alice "Please create an organization for me.")
 check "asked for an organisation, it makes none" test "$(orgs)" = "$before"
-check "it names it a namespace"            grep -qi 'namespace' <<<"$answer"
 check "and asks for its name"              grep -Eqi '\?|tell me|what name|the name' <<<"$answer"
 printf 'it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+asked_back=$answer
 answer=$(ask_agent garrison alice "Call it family.")
 family_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/family")" = 200 ]; }
 check "told the name, it makes the namespace family, as alice" until_true 30 family_made
+# The prompt says to call it a namespace; the local model does so in its
+# question or once it made it, so either answer counts.
+check "it names it a namespace"            grep -qi 'namespace' <<<"$asked_back $answer"
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # routines.yaml may not exist yet: Gitea's 404 is JSON, not a list.
