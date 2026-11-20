@@ -71,7 +71,10 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
   - Gitea drops a team without access from a branch rule. A rule that differs is written again at every sync, and each write makes Gitea re-check pull requests and refuse merges for a while.
   - Merges right after an approval can get "Please try again later": retry, as `merges` and `to_main` in `test/e2e/lib.sh` do.
 - **gVisor:** a sandbox has no Docker DNS. Reach containers by IP, or through the agent service's proxy, which looks names up.
-- **Multipass** is a snap and cannot read files under `/tmp`. Put anything it transfers under the repo (`bin/` is ignored).
+- **Multipass:**
+  - It is a snap and cannot read files under `/tmp`. Put anything it transfers under the repo (`bin/` is ignored).
+  - Its daemon (1.17) has segfaulted when several VMs were changed at once, so `steps.sh` runs commands that change a VM one at a time. After a crash it does not come back by itself (its old dnsmasq holds the address): run `test/vm/revive-multipass.sh`.
+- **A cloned VM** re-forms the swarm. `settle` in `steps.sh` restarts every service, and BuildKit, which runs outside Swarm, until each is reachable by name again.
 - **Bash:** `set -e` is ignored inside anything run after `&&`, `||` or in an `if`, subshells included. `steps.sh` runs steps as plain statements and checks `$?` after.
 - **Open WebUI:**
   - It limits sign-ins, so the gateway keeps its token.

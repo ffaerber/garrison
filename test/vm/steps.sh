@@ -95,6 +95,32 @@ inputs() {
 
 say()   { printf '\n==> [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 in_vm() { multipass exec "$VM" -- "$@"; }
+# multipass: Multipass 1.17 segfaulted twice when VMs were changed at once
+# (a fixture's snapshot while other VMs were restored and cloned), and its
+# restarts then failed on the dnsmasq it left behind. So commands that
+# change a VM run one at a time, under one lock. A command that finds the
+# daemon gone waits up to 10 minutes for it (see AGENTS.md, "Multipass", to
+# bring it back), then tries once more.
+multipass() {
+  local rc try
+  for try in 1 2; do
+    case $1 in
+      launch|start|stop|restart|snapshot|restore|clone|delete|purge)
+        ( flock 8; command multipass "$@" ) 8>"$ROOT/bin/multipass.lock" ;;
+      *) command multipass "$@" ;;
+    esac
+    rc=$?
+    [ $rc = 0 ] && return 0
+    command multipass version 2>/dev/null | grep -q '^multipassd' && return $rc
+    echo "==> Multipass's daemon is not answering; waiting for it (see AGENTS.md, Multipass)" >&2
+    local i
+    for i in $(seq 1 120); do
+      command multipass version 2>/dev/null | grep -q '^multipassd' && break
+      sleep 5
+    done
+  done
+  return $rc
+}
 # By name in the list: info fails for a VM that is running but unreachable.
 exists() { multipass list --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$VM"; }
 

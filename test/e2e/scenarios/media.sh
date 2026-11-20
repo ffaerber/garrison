@@ -63,8 +63,12 @@ if ! short; then
 fi
 check "a short in the library"             short
 sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
-# The short with its .json beside it: the finished one.
-size=$(docker run --rm -v "$lib/demo/shorts:/s:ro" --entrypoint sh "$sandbox_image" -c 'f=$(ls /s/short-*.mp4.json | head -n1); ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${f%.json}"' 2>/dev/null)
+# The short with its .json beside it, the finished one; else the newest
+# non-empty one, as an agent running ffmpeg itself writes no .json.
+size=$(docker run --rm -v "$lib/demo/shorts:/s:ro" --entrypoint sh "$sandbox_image" -c '
+  f=$(ls /s/short-*.mp4.json 2>/dev/null | head -n1); f=${f%.json}
+  [ -n "$f" ] || f=$(find /s -name "short-*.mp4" -size +0 | sort | tail -n1)
+  ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$f"' 2>/dev/null)
 check "no empty or broken file left in the library" bash -c '! find "$0" -name "short-*.mp4" -size 0 | grep -q .' "$lib/demo/shorts"
 check "vertical, 9:16"                     python3 -c 'import sys; w,h=map(int,sys.argv[1].split(",")); sys.exit(0 if w*16 == h*9 else 1)' "$size"
 
