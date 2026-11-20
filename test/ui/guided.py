@@ -4,7 +4,8 @@ so "the background" is ambiguous: the commander asks which, and the change
 goes to the app's code, not its stack. An address for an app is the
 opposite: its stack, in todo/config, not its code. It is asked for quotes,
 which has no stack yet: renaming todo's would leave its data behind, which the
-operator rightly refuses. See docs/scenarios.md,
+operator rightly refuses. bob also names the file quotes serves, which it
+cannot start without. See docs/scenarios.md,
 "Vague requests". Run by test/ui/run.sh guided.
 """
 
@@ -87,7 +88,10 @@ check("the todo list turns blue, as carol sees it", until, 1200, lambda: blue(ca
 section("2. bob asks for an address of quotes' own")
 before_cfg, before_app = last("config"), last("quotes")
 bob.channel(NS)
-asked = bob.say("commander", "Can the quotes app run at its own address, sayings.<our domain>?")
+# quotes starts only with QUOTES_FILE, the file it serves (test/e2e/apps/
+# quotes): bob says so, or the operator rightly proposes nothing that would
+# fail at start.
+asked = bob.say("commander", "Can the quotes app run at its own address, sayings.<our domain>? It serves the file QUOTES_FILE names; /etc/motd will do for now.")
 answer = check("the commander answers", bob.next_answer, asked, COMMANDER, 0) or ""
 print(f"it said: {answer[:300]!r}", flush=True)
 if not newest("config", before_cfg):
