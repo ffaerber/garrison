@@ -57,6 +57,9 @@ command -v sanoid  >/dev/null || need+=(sanoid)   # scheduled snapshots
 command -v python3 >/dev/null || need+=(python3)  # merges Docker's daemon.json
 command -v gpg     >/dev/null || need+=(gnupg)    # gVisor's repository key
 command -v age-keygen >/dev/null || need+=(age)   # the secrets' recovery key
+# apt waits for dpkg's lock instead of failing: on a freshly booted machine
+# unattended-upgrades often holds it for a few minutes.
+apt-get() { command apt-get -o DPkg::Lock::Timeout=600 "$@"; }
 if [ ${#need[@]} -gt 0 ]; then
   apt-get update -qq
   apt-get install -y -qq "${need[@]}" >/dev/null
