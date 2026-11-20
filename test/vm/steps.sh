@@ -627,7 +627,8 @@ service_logs() {
   local dir=$ROOT/bin/logs/$1 svc
   rm -rf "$dir" && mkdir -p "$dir"
   for svc in $(in_vm sudo docker service ls --format '{{.Name}}' 2>/dev/null); do
-    in_vm sudo docker service logs --timestamps --no-trunc "$svc" > "$dir/$svc.log" 2>&1
+    # docker service logs can hang on a task whose node is gone, so each has a minute.
+    in_vm sudo timeout 60 docker service logs --timestamps --no-trunc --tail 5000 "$svc" > "$dir/$svc.log" 2>&1
   done
   echo "==> the services' logs are in ${dir#"$ROOT/"}/"
 }
