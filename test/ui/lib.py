@@ -119,6 +119,14 @@ def gitea(path: str, method: str = "GET", body=None):
         raise
 
 
+def typed(text: str) -> str:
+    """text as Open WebUI's editor shows it once typed, or as it was: the
+    editor turns -- into a dash and ' into a curly quote as one types."""
+    for a, b in (("\u2014", "--"), ("\u2013", "--"), ("\u2019", "'"), ("\u2018", "'"), ("\u201c", '"'), ("\u201d", '"')):
+        text = text.replace(a, b)
+    return text
+
+
 def raw(org: str, repo: str, path: str, ref: str = "main"):
     return gitea(f"/repos/{org}/{repo}/raw/{path}?ref={ref}")
 
@@ -469,13 +477,14 @@ class Person:
                 p.keyboard.press("Delete")
                 p.keyboard.type(text)
             p.wait_for_timeout(700)
-            if box.inner_text().strip().endswith(text) and (not agent or agent in box.inner_text()):
+            held = typed(box.inner_text())
+            if held.strip().endswith(typed(text)) and (not agent or agent in held):
                 break
         else:
             raise AssertionError(f"the thread's box holds {box.inner_text()!r}")
         # Enter in the thread's box does not send; its button does.
         p.locator("#send-message-button").last.click()
-        until(20, lambda: any(text in (m.get("content") or "")
+        until(20, lambda: any(typed(text) in typed(m.get("content") or "")
                               for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")))
         self.snap("replied")
         return True

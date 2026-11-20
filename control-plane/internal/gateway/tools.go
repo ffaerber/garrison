@@ -181,7 +181,7 @@ func baseSpecs() []Spec {
 			"private":     map[string]any{"type": "boolean", "description": "only the unit's people may read it; default false"},
 			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: todo, a todo app in Go on Postgres (page.html, main.go, its tests), behind the sign-in; empty for nothing"},
 		}, "unit", "repo"),
-		spec("create_branch", "Makes a branch of a repo from the tip of another (main by default), as the person asking, if they may push there. When a stack in the unit's config deploys that branch of the repo as an environment (dev, for one), the deployer deploys it once its pipeline has built the image, and the answer gives its address. A branch for a change is made by propose_patch; use this for a branch that lasts.", map[string]any{
+		spec("create_branch", "Makes a branch of a repo from the tip of another (main by default), as the person asking, if they may push there. When a stack in the unit's config deploys that branch of the repo as an environment (dev, for one), the deployer deploys it once its pipeline has built the image, and the answer gives its address. Only for a branch the person asked for by name: a change goes to main through propose_patch, which makes its own branch; never make a branch to put a change on.", map[string]any{
 			"unit":   nsArg,
 			"repo":   str("repo name"),
 			"branch": str("the new branch's name, e.g. dev"),
