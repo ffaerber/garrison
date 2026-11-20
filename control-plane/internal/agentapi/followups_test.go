@@ -172,3 +172,33 @@ func TestANewNamespaceIsWelcomed(t *testing.T) {
 		t.Error("still waiting to welcome")
 	}
 }
+
+// A deploy read while it still runs is updated in place when it ends, under
+// the same ID: it is read again, and its end said.
+func TestADeployReadWhileRunningIsSaidOnceItEnds(t *testing.T) {
+	ctx := context.Background()
+	feed := &events.Memory{}
+	poster := &fakePoster{}
+	cards := fakeCards{"todo/app#4": {Namespace: "todo", Repo: "app", Number: 4, Title: "White dev", Base: "dev",
+		Body: "Asked by alice through todo/coder."}}
+	f := &Followups{Feed: feed, Cards: cards, Poster: poster}
+	f.Check(ctx)
+	feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK,
+		Namespace: "todo", Repo: "app", PR: 4, Actor: "alice", Commit: "c551", Key: "m4"})
+	deploy := func(status string) {
+		feed.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: status, Namespace: "todo",
+			Repo: "app", Commit: "c551", Title: "redeployed todo/todo@dev at c551 as dev-todo", Link: "https://dev-todo.x", Key: "deploy:todo/todo@dev@c551"})
+	}
+	deploy(events.StatusRunning)
+	f.Check(ctx)
+	if n := len(poster.all()); n != 1 {
+		t.Fatalf("after the merge and a running deploy: %+v", poster.all())
+	}
+	deploy(events.StatusOK)
+	f.Check(ctx)
+	f.Check(ctx)
+	posts := poster.all()
+	if len(posts) != 2 || posts[1].Text != "Your change White dev (todo/app#4) is live: https://dev-todo.x." || posts[1].Mention != "alice" {
+		t.Errorf("posts: %+v", posts)
+	}
+}

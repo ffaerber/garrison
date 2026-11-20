@@ -35,6 +35,10 @@ type Followups struct {
 	started  bool
 	waiting  []awaited
 	welcomes []welcome
+	// unfinished are deploys read while still running: the deployer
+	// updates an event in place when it ends, under the same ID, which the
+	// feed read from after does not show again. Each is read again by ID.
+	unfinished map[int64]time.Time
 }
 
 // welcome is the greeting of a namespace just set up, still to be posted:
@@ -106,6 +110,22 @@ func (f *Followups) Check(ctx context.Context) {
 		log.Printf("followups: %v", err)
 		return
 	}
+	// Deploys read before they ended, read again: oldest first, like the rest.
+	for id, since := range f.unfinished {
+		e, ok, err := f.Feed.Get(ctx, id, all)
+		switch {
+		case err != nil:
+			log.Printf("followups: event %d: %v", id, err)
+			continue
+		case !ok || f.now().Sub(since) > followupWait:
+			delete(f.unfinished, id)
+			continue
+		case e.Status != events.StatusOK && e.Status != events.StatusFailed:
+			continue
+		}
+		delete(f.unfinished, id)
+		f.deployed(ctx, e)
+	}
 	// Oldest first.
 	for i := len(es) - 1; i >= 0; i-- {
 		e := es[i]
@@ -116,6 +136,13 @@ func (f *Followups) Check(ctx context.Context) {
 		case events.KindPRMerged:
 			f.merged(ctx, e)
 		case events.KindDeploy:
+			if e.Status != events.StatusOK && e.Status != events.StatusFailed {
+				if f.unfinished == nil {
+					f.unfinished = map[int64]time.Time{}
+				}
+				f.unfinished[e.ID] = f.now()
+				continue
+			}
 			f.deployed(ctx, e)
 		case events.KindNamespace:
 			if e.Namespace != "" && e.Actor != "" {
