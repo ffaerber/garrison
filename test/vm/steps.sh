@@ -104,8 +104,9 @@ in_vm() { multipass exec "$VM" -- "$@"; }
 # (a fixture's snapshot while other VMs were restored and cloned), and its
 # restarts then failed on the dnsmasq it left behind. So commands that
 # change a VM run one at a time, under one lock. A command that finds the
-# daemon gone waits up to 10 minutes for it (see AGENTS.md, "Multipass", to
-# bring it back), then tries once more.
+# daemon gone waits for it, bringing it back after half a minute with
+# test/vm/revive-multipass.sh when sudo needs no password (see AGENTS.md,
+# "Multipass"), up to 10 minutes, then tries once more.
 multipass() {
   local rc try
   for try in 1 2; do
@@ -121,6 +122,10 @@ multipass() {
     local i
     for i in $(seq 1 120); do
       command multipass version 2>/dev/null | grep -q '^multipassd' && break
+      if [ "$i" = 6 ] && sudo -n true 2>/dev/null; then
+        echo "==> Bringing Multipass's daemon back" >&2
+        ( flock 8; "$ROOT/test/vm/revive-multipass.sh" ) 8>"$ROOT/bin/multipass.lock" >&2 || true
+      fi
       sleep 5
     done
   done
