@@ -10,7 +10,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 . /etc/garrison/install.env
 out=${OUT:-/var/tmp/garrison-ui}
 rm -rf "$out" && mkdir -p "$out"
-docker build -q -t garrison-ui . >/dev/null
+# Pulling Playwright's image of over a gigabyte can drop halfway ("failed to
+# send write: EOF"); a clone has none yet, so it is tried again.
+for try in 1 2 3; do
+  docker build -q -t garrison-ui . >/dev/null && break
+  [ "$try" = 3 ] && exit 1
+  echo "building the browser's image failed; trying again" >&2
+  sleep 10
+done
 docker run --rm --network host -v "$PWD:/ui:ro" -v "$out:/out" -w /ui \
   -e OUT=/out -e DOMAIN="$DOMAIN" -e TIMEZONE="${TIMEZONE:-UTC}" -e ADMIN_USER="$ADMIN_USER" \
   -e ADMIN_PASSWORD="$(cat /etc/garrison/admin-password)" -e PASSWORD="${TEST_PASSWORD:-12345678}" \
