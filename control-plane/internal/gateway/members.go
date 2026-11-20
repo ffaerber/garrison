@@ -20,7 +20,6 @@ import (
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/hooks"
-	"garrison/control-plane/internal/stack"
 	"garrison/templates"
 )
 
@@ -607,46 +606,28 @@ func (m *Members) deleteMerged(ctx context.Context, ns string) {
 // dev into main keeps dev. The rule only names the branch: pushes stay open,
 // and a rule already there, also one made by hand, is left as it is.
 func (m *Members) keepEnvironments(ctx context.Context, ns string) {
-	f := configFiles{g: m.Gitea, ns: ns, ref: "main"}
-	entries, err := f.List(ctx, stack.Dir)
+	envs, err := m.Gitea.environments(ctx, ns)
 	if err != nil {
-		if !errors.Is(err, agents.ErrNotExist) {
-			log.Printf("members: %s: the environments' branches: %v", ns, err)
-		}
+		log.Printf("members: %s: the environments' branches: %v", ns, err)
 		return
 	}
-	for _, e := range entries {
-		name, ok := strings.CutSuffix(e.Name, ".yaml")
-		if e.Type != "file" || !ok {
+	for _, e := range envs {
+		if e.Branch == "main" {
 			continue
 		}
-		data, err := f.Read(ctx, stack.Dir+"/"+e.Name)
-		if err != nil {
-			log.Printf("members: %s: %s: %v", ns, e.Name, err)
+		path := fmt.Sprintf("/repos/%s/%s/branch_protections", ns, url.PathEscape(e.Repo))
+		status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/"+url.PathEscape(e.Branch), nil, nil)
+		if status != http.StatusNotFound {
+			if err != nil {
+				log.Printf("members: %s/%s: the branch %s: %v", ns, e.Repo, e.Branch, err)
+			}
 			continue
 		}
-		s, err := stack.ParseIn([]byte(data), ns, name)
-		if err != nil || s.Source == "" {
-			continue // the deployer says what is wrong with it; without a source only main is deployed
+		if _, err := m.Gitea.do(ctx, "", http.MethodPost, path, map[string]any{"rule_name": e.Branch, "enable_push": true}, nil); err != nil {
+			log.Printf("members: %s/%s: the branch %s: %v", ns, e.Repo, e.Branch, err)
+			continue
 		}
-		for _, branch := range s.Branches() {
-			if branch == "main" {
-				continue
-			}
-			path := fmt.Sprintf("/repos/%s/%s/branch_protections", ns, url.PathEscape(s.Source))
-			status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/"+url.PathEscape(branch), nil, nil)
-			if status != http.StatusNotFound {
-				if err != nil {
-					log.Printf("members: %s/%s: the branch %s: %v", ns, s.Source, branch, err)
-				}
-				continue
-			}
-			if _, err := m.Gitea.do(ctx, "", http.MethodPost, path, map[string]any{"rule_name": branch, "enable_push": true}, nil); err != nil {
-				log.Printf("members: %s/%s: the branch %s: %v", ns, s.Source, branch, err)
-				continue
-			}
-			log.Printf("members: %s/%s: the branch %s, an environment of %s, is kept after merges", ns, s.Source, branch, name)
-		}
+		log.Printf("members: %s/%s: the branch %s, an environment of %s, is kept after merges", ns, e.Repo, e.Branch, e.Stack)
 	}
 }
 

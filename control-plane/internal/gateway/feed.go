@@ -23,6 +23,7 @@ var changing = map[string]bool{
 	"screenshot":       true,
 	"create_namespace": true,
 	"create_repo":      true,
+	"create_branch":    true,
 	"add_provider":     true,
 }
 

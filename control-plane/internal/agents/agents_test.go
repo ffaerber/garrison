@@ -77,7 +77,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	// gateway's own test checks these are all.
 	all := []string{"list_namespaces", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_namespace", "create_repo", "merge_change", "browse", "screenshot", "generate_media"}
+		"propose_change", "propose_patch", "create_namespace", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media"}
 	got, problems, err := Load(context.Background(), files, files, PlatformNamespace, all)
 	if err != nil {
 		t.Fatal(err)

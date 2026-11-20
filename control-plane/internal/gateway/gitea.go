@@ -15,7 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/changes"
+	"garrison/control-plane/internal/stack"
 	"garrison/templates"
 )
 
@@ -590,4 +592,82 @@ func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description strin
 		}
 	}
 	return r.HTMLURL, nil
+}
+
+// environment is a branch of a repo that an app deploys, as stacks/*.yaml
+// in the namespace's config on main says: Host is its hostname's first label.
+type environment struct{ Stack, Repo, Branch, Host string }
+
+// environments lists the branches the namespace's apps deploy from. Stacks
+// without a source (only main) and files that do not parse are left out:
+// the deployer says what is wrong with them.
+func (g *Gitea) environments(ctx context.Context, ns string) ([]environment, error) {
+	f := configFiles{g: g, ns: ns, ref: "main"}
+	entries, err := f.List(ctx, stack.Dir)
+	if errors.Is(err, agents.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []environment
+	for _, e := range entries {
+		name, ok := strings.CutSuffix(e.Name, ".yaml")
+		if e.Type != "file" || !ok {
+			continue
+		}
+		data, err := f.Read(ctx, stack.Dir+"/"+e.Name)
+		if err != nil {
+			return nil, err
+		}
+		s, err := stack.ParseIn([]byte(data), ns, name)
+		if err != nil || s.Source == "" {
+			continue
+		}
+		for _, b := range s.Branches() {
+			out = append(out, environment{Stack: name, Repo: s.Source, Branch: b, Host: s.Hostname(b)})
+		}
+	}
+	return out, nil
+}
+
+// CreateBranch makes the branch name of org/repo from the tip of from, as
+// the person: Gitea's rules decide whether they may. It answers with the
+// branch's page in Gitea.
+func (g *Gitea) CreateBranch(ctx context.Context, as, org, repo, name, from string) (string, error) {
+	if err := validOrg(org); err != nil {
+		return "", err
+	}
+	if err := validRepo(repo); err != nil {
+		return "", err
+	}
+	if !branchName.MatchString(name) || strings.Contains(name, "..") || strings.HasPrefix(name, "-") || strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".lock") {
+		return "", fmt.Errorf("%w: branch name %q", ErrInvalid, name)
+	}
+	if strings.HasPrefix(name, ChangeBranch) {
+		return "", fmt.Errorf("%w: %s branches are made by propose_patch", ErrInvalid, ChangeBranch)
+	}
+	if from == "" {
+		from = "main"
+	}
+	status, err := g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/branches", org, repo),
+		map[string]string{"new_branch_name": name, "old_branch_name": from}, nil)
+	switch status {
+	case http.StatusConflict:
+		return "", refused{fmt.Sprintf("%s/%s already has a branch %s", org, repo, name)}
+	case http.StatusNotFound:
+		return "", refused{fmt.Sprintf("%s/%s has no branch %s to start from, or %s cannot see the repo", org, repo, from, as)}
+	case http.StatusForbidden:
+		return "", refused{fmt.Sprintf("%s may not make branches in %s/%s", as, org, repo)}
+	}
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if _, err := g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s", org, repo), nil, &r); err != nil || r.HTMLURL == "" {
+		return "", nil
+	}
+	return r.HTMLURL + "/src/branch/" + escapePath(name), nil
 }

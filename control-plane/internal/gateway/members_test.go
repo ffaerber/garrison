@@ -466,3 +466,51 @@ func TestTeamsGetTheReposGiteaLeftOut(t *testing.T) {
 		t.Errorf("added: %v", added)
 	}
 }
+
+// create_branch makes the branch as the person and, when a stack deploys
+// it, says where; a branch that exists is refused in plain words.
+func TestCreateBranchSaysWhereItDeploys(t *testing.T) {
+	var made []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/api/v1")
+		switch {
+		case p == "/repos/todo/app/branches" && r.Method == http.MethodPost:
+			body, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(body), `"new_branch_name":"main"`) {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			made = append(made, r.Header.Get("Sudo")+" "+strings.TrimSpace(string(body)))
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{}`)
+		case p == "/repos/todo/app":
+			io.WriteString(w, `{"html_url":"https://git.example.test/todo/app"}`)
+		case p == "/repos/todo/config/contents/stacks":
+			io.WriteString(w, `[{"name":"todo.yaml","type":"file"}]`)
+		case p == "/repos/todo/config/raw/stacks/todo.yaml":
+			io.WriteString(w, "source: app\nentrypoint: web\nservices:\n  web: { image: \"{{registry}}/todo/app:{{commit}}\", port: 8080 }\nenvironments:\n  main: {}\n  dev: {}\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}, Dashboard: "https://example.test"}
+	out, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Namespace: "todo", Repo: "app", Branch: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"https://git.example.test/todo/app/src/branch/dev", "https://dev-todo.example.test/", "environment dev"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("answer lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Join(made, ",") != `alice {"new_branch_name":"dev","old_branch_name":"main"}` {
+		t.Errorf("made: %v", made)
+	}
+	if _, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Namespace: "todo", Repo: "app", Branch: "main"}); err == nil || !strings.Contains(err.Error(), "already has a branch main") {
+		t.Errorf("an existing branch: %v", err)
+	}
+	if _, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Namespace: "todo", Repo: "app", Branch: "change/x"}); err == nil {
+		t.Error("a change/ branch was made")
+	}
+}

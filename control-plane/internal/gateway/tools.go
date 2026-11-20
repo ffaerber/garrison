@@ -181,6 +181,12 @@ func baseSpecs() []Spec {
 			"private":     map[string]any{"type": "boolean", "description": "only the namespace's people may read it; default false"},
 			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: todo, a todo app in Go on Postgres (page.html, main.go, its tests), behind the sign-in; empty for nothing"},
 		}, "namespace", "repo"),
+		spec("create_branch", "Makes a branch of a repo from the tip of another (main by default), as the person asking, if they may push there. When a stack in the namespace's config deploys that branch of the repo as an environment (dev, for one), the deployer deploys it once its pipeline has built the image, and the answer gives its address. A branch for a change is made by propose_patch; use this for a branch that lasts.", map[string]any{
+			"namespace": nsArg,
+			"repo":      str("repo name"),
+			"branch":    str("the new branch's name, e.g. dev"),
+			"base":      str("the branch it starts from; default main"),
+		}, "namespace", "repo", "branch"),
 		spec("merge_change", "Merges a pull request of one of your proposals, with your own account, if one of your grants allows merging into its base branch for the person you talk to and its checks have passed. A merge into a branch that deploys (main, dev) deploys it. If it is refused, say why; do not work around it.", map[string]any{
 			"namespace": nsArg,
 			"repo":      str("repo name"),
@@ -240,7 +246,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 	// to its granted repos: only propose_patch, screenshot and merge_change,
 	// which check the grants, change anything then. Its browser signs in
 	// with the agent's account in Keycloak.
-	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_namespace" || name == "create_repo" || name == "add_provider") {
+	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_namespace" || name == "create_repo" || name == "add_provider" || name == "create_branch") {
 		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
 	}
 	if p.Unattended && (name == "screenshot" || name == "browse") && t.Keycloak == nil {
@@ -459,6 +465,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			return fmt.Sprintf("Made the repo %s/%s from the template %s, on main; its pipeline builds its image for every push. To deploy it, propose stacks/%s.yaml in %s/config as its README says; nothing runs until a person merges it.\n%s\n\nREADME.md:\n%s", a.Namespace, a.Repo, a.Template, a.Repo, a.Namespace, u, readme), nil
 		}
 		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); to deploy it, propose stacks/%s.yaml in %s/config with source: %s. Nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, a.Repo, a.Namespace, a.Repo, u), nil
+	case "create_branch":
+		return t.createBranch(ctx, p, a)
 	case "merge_change":
 		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
 	case "add_routine":
@@ -900,4 +908,30 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+// createBranch makes a branch as the person, and says where it deploys,
+// if a stack deploys it.
+func (t *Tools) createBranch(ctx context.Context, p Person, a args) (string, error) {
+	base := a.Base
+	if base == "" {
+		base = "main"
+	}
+	link, err := t.Gitea.CreateBranch(ctx, p.Name, a.Namespace, a.Repo, a.Branch, base)
+	if err != nil {
+		return "", err
+	}
+	out := fmt.Sprintf("Made the branch %s of %s/%s from %s, as %s.\n%s", a.Branch, a.Namespace, a.Repo, base, p.Name, link)
+	envs, err := t.Gitea.environments(ctx, a.Namespace)
+	if err != nil {
+		return out, nil
+	}
+	domain := strings.TrimPrefix(strings.TrimPrefix(t.Dashboard, "https://"), "http://")
+	for _, e := range envs {
+		if e.Repo == a.Repo && e.Branch == a.Branch {
+			out += fmt.Sprintf("\nThe stack %s deploys it as its environment %s: the deployer deploys it once the pipeline has built its image, in a few minutes, at https://%s.%s/ . stack_status on %s shows when it runs.", e.Stack, e.Branch, e.Host, strings.TrimSuffix(domain, "/"), e.Stack)
+			return out, nil
+		}
+	}
+	return out + fmt.Sprintf("\nNo stack of %s deploys this branch: it is only a branch. To deploy it, propose an environment %s in the stack's file in %s/config.", a.Namespace, a.Branch, a.Namespace), nil
 }
