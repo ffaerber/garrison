@@ -245,7 +245,7 @@ func (g *Gitea) Merge(ctx context.Context, person, ns, repo string, n int) error
 	var err error
 	for i := 0; i < 5; i++ {
 		_, err = g.do(ctx, person, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", ns, repo, n),
-			map[string]string{"Do": "merge"}, nil)
+			map[string]any{"Do": "merge", "delete_branch_after_merge": true}, nil)
 		if err == nil || !strings.Contains(err.Error(), "try again later") {
 			return err
 		}

@@ -177,6 +177,9 @@ type Repo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Empty       bool   `json:"empty"`
+	Archived    bool   `json:"archived"`
+	// DeleteMerged: a merge deletes the pull request's branch by default.
+	DeleteMerged bool `json:"default_delete_branch_after_merge"`
 }
 
 // Repos lists the namespace's repos as person sees them.

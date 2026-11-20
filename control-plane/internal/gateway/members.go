@@ -20,6 +20,7 @@ import (
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/hooks"
+	"garrison/control-plane/internal/stack"
 	"garrison/templates"
 )
 
@@ -534,6 +535,8 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 	if err := m.teamRepos(ctx, ns, teams, "admins", "members", RootTeam); err != nil {
 		return err
 	}
+	m.keepEnvironments(ctx, ns)
+	m.deleteMerged(ctx, ns)
 	if err := m.protectApps(ctx, ns, roster); err != nil {
 		return err
 	}
@@ -572,6 +575,81 @@ func (m *Members) teamRepos(ctx context.Context, ns string, teams map[string]int
 	return nil
 }
 
+// deleteMerged sets every repo of the namespace to delete a pull request's
+// branch when it is merged, as Gitea's merge button then does by default;
+// Gitea has no such default for the whole installation. Repos made later,
+// also by hand in Gitea, get it at the next sync. A repo it cannot set is
+// logged and left for the next sync: the rest of the sync goes on.
+func (m *Members) deleteMerged(ctx context.Context, ns string) {
+	repos, err := m.Gitea.Repos(ctx, "", ns)
+	if err != nil {
+		log.Printf("members: %s: deleting merged branches: %v", ns, err)
+		return
+	}
+	for _, r := range repos {
+		if r.DeleteMerged || r.Archived {
+			continue
+		}
+		if _, err := m.Gitea.do(ctx, "", http.MethodPatch, fmt.Sprintf("/repos/%s/%s", ns, url.PathEscape(r.Name)),
+			// Gitea changes the pull requests' settings only along with has_pull_requests.
+			map[string]bool{"has_pull_requests": true, "default_delete_branch_after_merge": true}, nil); err != nil {
+			log.Printf("members: %s/%s: deleting merged branches: %v", ns, r.Name, err)
+			continue
+		}
+		log.Printf("members: %s/%s now deletes a pull request's branch when it is merged", ns, r.Name)
+	}
+}
+
+// keepEnvironments protects the branches that apps' environments deploy
+// from, besides main (protectApps keeps that one): dev and the like, as the
+// namespace's stacks/*.yaml on main name them. A merge deletes its pull
+// request's branch, and Gitea deletes no branch a rule protects, so merging
+// dev into main keeps dev. The rule only names the branch: pushes stay open,
+// and a rule already there, also one made by hand, is left as it is.
+func (m *Members) keepEnvironments(ctx context.Context, ns string) {
+	f := configFiles{g: m.Gitea, ns: ns, ref: "main"}
+	entries, err := f.List(ctx, stack.Dir)
+	if err != nil {
+		if !errors.Is(err, agents.ErrNotExist) {
+			log.Printf("members: %s: the environments' branches: %v", ns, err)
+		}
+		return
+	}
+	for _, e := range entries {
+		name, ok := strings.CutSuffix(e.Name, ".yaml")
+		if e.Type != "file" || !ok {
+			continue
+		}
+		data, err := f.Read(ctx, stack.Dir+"/"+e.Name)
+		if err != nil {
+			log.Printf("members: %s: %s: %v", ns, e.Name, err)
+			continue
+		}
+		s, err := stack.ParseIn([]byte(data), ns, name)
+		if err != nil || s.Source == "" {
+			continue // the deployer says what is wrong with it; without a source only main is deployed
+		}
+		for _, branch := range s.Branches() {
+			if branch == "main" {
+				continue
+			}
+			path := fmt.Sprintf("/repos/%s/%s/branch_protections", ns, url.PathEscape(s.Source))
+			status, err := m.Gitea.do(ctx, "", http.MethodGet, path+"/"+url.PathEscape(branch), nil, nil)
+			if status != http.StatusNotFound {
+				if err != nil {
+					log.Printf("members: %s/%s: the branch %s: %v", ns, s.Source, branch, err)
+				}
+				continue
+			}
+			if _, err := m.Gitea.do(ctx, "", http.MethodPost, path, map[string]any{"rule_name": branch, "enable_push": true}, nil); err != nil {
+				log.Printf("members: %s/%s: the branch %s: %v", ns, s.Source, branch, err)
+				continue
+			}
+			log.Printf("members: %s/%s: the branch %s, an environment of %s, is kept after merges", ns, s.Source, branch, name)
+		}
+	}
+}
+
 // platform keeps garrison/config, which holds the agents, for every
 // namespace. It has no members.yaml: root admins approve and merge its
 // changes.
@@ -595,6 +673,7 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 	if err := m.syncTeam(ctx, ns, RootTeam, teams[RootTeam], roots); err != nil {
 		return err
 	}
+	m.deleteMerged(ctx, ns)
 	return m.approvals(ctx, ns, nil, roots)
 }
 
