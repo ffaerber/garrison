@@ -357,20 +357,37 @@ settle() {
         case $n in *lost) n=${n#/}; echo "${n%%.*}" ;; esac
       done | sort -u
     }
+    up=0
     for i in $(seq 1 60); do
       if docker service ls --format "{{.Replicas}}" | awk -F"[/ ]" "\$1 != \$2 { bad = 1 } END { exit bad }"; then
         lost=$(detached)
-        [ -z "$lost" ] && exit 0
+        [ -z "$lost" ] && { up=1; break; }
         echo "restarting services without a network endpoint: $lost" >&2
         for s in $lost; do docker service update --quiet --detach --force "$s" >/dev/null; done
         sleep 15
       fi
       sleep 5
     done
-    echo "services still starting after 5 minutes:" >&2
-    docker service ls --format "{{.Name}} {{.Replicas}}" >&2
+    [ "$up" = 1 ] || { echo "services still starting after 5 minutes:" >&2
+                         docker service ls --format "{{.Name}} {{.Replicas}}" >&2; exit 1; }
+    # BuildKit runs outside Swarm, on the builds network; after the swarm is
+    # re-formed its name can be gone from that network, and pipelines fail
+    # with "lookup garrison-buildkit ... server misbehaving". It is restarted
+    # until a client on the builds network reaches it by name.
+    systemctl is-enabled --quiet garrison-buildkit.service 2>/dev/null || exit 0
+    for i in $(seq 1 6); do
+      systemctl restart garrison-buildkit.service
+      for j in $(seq 1 10); do
+        sleep 3
+        docker run --rm --network garrison-builds --entrypoint buildctl moby/buildkit:v0.34.1 \
+          --addr tcp://garrison-buildkit:1234 debug workers >/dev/null 2>&1 && exit 0
+      done
+      echo "BuildKit is not reachable on the builds network; restarting it" >&2
+    done
+    echo "BuildKit still unreachable on the builds network" >&2
     exit 1'
 }
+
 
 
 # ---------- the tree ----------
