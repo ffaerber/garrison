@@ -434,10 +434,21 @@ class Person:
         thread: Open WebUI calls a model only when a message mentions it."""
         p = self.page
         cid = channel_id(p.url)
-        p.goto(f"{CHAT}/channels/{cid}?thread={message}")
-        # The thread's box, not the channel's: the pane opens after the page.
+        # The thread's box, not the channel's: the pane opens after the page,
+        # and now and then not at all, so the thread is opened again.
         box = p.locator("#chat-input[aria-label='Reply to thread...']")
-        box.wait_for()
+
+        def open_thread():
+            for tries in range(3):
+                p.goto(f"{CHAT}/channels/{cid}?thread={message}")
+                try:
+                    box.wait_for(timeout=20_000)
+                    return
+                except Exception:  # noqa: BLE001
+                    if tries == 2:
+                        self.snap("no thread pane")
+                        raise
+        open_thread()
         # The pane redraws as its messages load and takes the focus away
         # mid-typing; type again until the box holds the whole text.
         for attempt in range(5):
@@ -449,8 +460,7 @@ class Person:
                 except Exception:  # noqa: BLE001
                     if attempt == 4:
                         raise
-                    p.reload()
-                    box.wait_for()
+                    open_thread()
                     continue
                 p.keyboard.type(" " + text)
             else:
