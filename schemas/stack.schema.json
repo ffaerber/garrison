@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Stack",
-  "description": "One app in a namespace. See docs/spec.md, \"Stack format\".",
+  "description": "One app in a unit. See docs/spec.md, \"Stack format\".",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,15 +12,15 @@
   "properties": {
     "stack": {
       "$ref": "#/$defs/label",
-      "description": "Stack name, also the hostname of the main environment. In a namespace's config repo (stacks/<name>.yaml) the file's name says it; there it may be left out."
+      "description": "Stack name, also the hostname of the main environment. In a unit's config repo (stacks/<name>.yaml) the file's name says it; there it may be left out."
     },
-    "namespace": {
+    "unit": {
       "$ref": "#/$defs/label",
-      "description": "The namespace. In a config repo its place says it; there it may be left out."
+      "description": "The unit. In a config repo its place says it; there it may be left out."
     },
     "source": {
       "$ref": "#/$defs/label",
-      "description": "A repo of the namespace with the app's code. Its branches are the environments (main, dev...), each deployed at its newest commit, and with an environment preview each open pull request gets one; {{commit}} in an image is that commit. Without it, only main exists, deployed as this file says."
+      "description": "A repo of the unit with the app's code. Its branches are the environments (main, dev...), each deployed at its newest commit, and with an environment preview each open pull request gets one; {{commit}} in an image is that commit. Without it, only main exists, deployed as this file says."
     },
     "entrypoint": {
       "$ref": "#/$defs/label",
@@ -156,7 +156,7 @@
           "properties": {
             "share": {
               "$ref": "#/$defs/label",
-              "description": "Library shared between stacks of the namespace."
+              "description": "Library shared between stacks of the unit."
             },
             "readonly": {
               "type": "boolean"

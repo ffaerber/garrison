@@ -18,10 +18,10 @@ import (
 
 // Post is an answer of an agent that no person's message is waiting for:
 // a routine's, or one an agent was asked for in the background. It goes into
-// a channel: the one named, or the agent's namespace's.
+// a channel: the one named, or the agent's unit's.
 type Post struct {
-	Agent   string `json:"agent"`   // <namespace>/<agent>
-	Channel string `json:"channel"` // an Open WebUI channel id; empty for the namespace's
+	Agent   string `json:"agent"`   // <unit>/<agent>
+	Channel string `json:"channel"` // an Open WebUI channel id; empty for the unit's
 	Text    string `json:"text"`
 	// Parent, if set, is the message whose thread it goes into.
 	Parent string `json:"parent,omitempty"`
@@ -69,7 +69,7 @@ func (o *OpenWebUI) Post(ctx context.Context, p Post) (Posted, error) {
 			}
 		}
 		if id == "" {
-			return Posted{}, fmt.Errorf("namespace %s has no channel yet", ns)
+			return Posted{}, fmt.Errorf("unit %s has no channel yet", ns)
 		}
 	}
 	text := strings.TrimSpace(p.Text)
@@ -213,7 +213,7 @@ func PostHandler(o *OpenWebUI, key string) http.Handler {
 	})
 }
 
-// HasChannel tells whether namespace ns has its channel yet.
+// HasChannel tells whether unit ns has its channel yet.
 func (o *OpenWebUI) HasChannel(ctx context.Context, ns string) (bool, error) {
 	token, err := o.session(ctx)
 	if err != nil {
@@ -228,8 +228,8 @@ func (o *OpenWebUI) HasChannel(ctx context.Context, ns string) (bool, error) {
 
 // ChannelInfo is what a channel is to the platform.
 type ChannelInfo struct {
-	Namespace string `json:"namespace"` // empty: not a namespace's
-	// Members: only the namespace's people read it. Every namespace's
+	Unit string `json:"unit"` // empty: not a unit's
+	// Members: only the unit's people read it. Every unit's
 	// channel but garrison's.
 	Members bool `json:"members"`
 }
@@ -249,7 +249,7 @@ func (o *OpenWebUI) Channel(ctx context.Context, id string) (ChannelInfo, error)
 			continue
 		}
 		ns, _ := c.Meta[ChannelMarker].(string)
-		return ChannelInfo{Namespace: ns, Members: ns != "" && ns != PlatformNamespace}, nil
+		return ChannelInfo{Unit: ns, Members: ns != "" && ns != PlatformUnit}, nil
 	}
 	return ChannelInfo{}, nil
 }

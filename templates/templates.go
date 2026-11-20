@@ -1,5 +1,5 @@
 // Package templates embeds what new repos start with: the config repo of a
-// namespace, and what garrison's adds to it.
+// unit, and what garrison's adds to it.
 package templates
 
 import (
@@ -11,13 +11,13 @@ import (
 
 // all: keeps the files whose names start with a dot, as .gitea/.
 //
-//go:embed namespace-config garrison-config all:app
+//go:embed unit-config garrison-config all:app
 var files embed.FS
 
-// Namespace and Platform name the template folders: every namespace's
+// Unit and Platform name the template folders: every unit's
 // config, and garrison's on top of it.
 const (
-	Namespace = "namespace-config"
+	Unit = "unit-config"
 	Platform  = "garrison-config"
 )
 
@@ -36,17 +36,17 @@ func Apps() []string {
 	return out
 }
 
-// AppFiles are an app template's files, with {{namespace}} and {{repo}}
+// AppFiles are an app template's files, with {{unit}} and {{repo}}
 // filled in; nil if there is no such template. A file stored as NAME.tmpl
 // is NAME in the repo: the template's Go files and go.mod are kept that
 // way so that Go takes them for neither this module's code nor a module
 // of their own, which go:embed would leave out.
-func AppFiles(name, namespace, repo string) map[string]string {
+func AppFiles(name, unit, repo string) map[string]string {
 	if name == "" || strings.ContainsAny(name, "/.") || !slices.Contains(Apps(), name) {
 		return nil
 	}
 	out := map[string]string{}
-	fill := strings.NewReplacer("{{namespace}}", namespace, "{{repo}}", repo)
+	fill := strings.NewReplacer("{{unit}}", unit, "{{repo}}", repo)
 	for p, c := range Files(App + "/" + name) {
 		out[strings.TrimSuffix(p, ".tmpl")] = fill.Replace(c)
 	}

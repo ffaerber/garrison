@@ -25,8 +25,8 @@ type GitProxy struct {
 	Agents Agents
 }
 
-// /git/<namespace>/<repo>[.git]/info/refs?service=git-upload-pack or
-// /git/<namespace>/<repo>[.git]/git-upload-pack.
+// /git/<unit>/<repo>[.git]/info/refs?service=git-upload-pack or
+// /git/<unit>/<repo>[.git]/git-upload-pack.
 var gitPath = regexp.MustCompile(`^/git/([^/]+)/([^/]+?)(?:\.git)?/(info/refs|git-upload-pack)$`)
 
 // Handler serves /git/; caller names the sandbox's person.
@@ -43,7 +43,7 @@ func (g *GitProxy) Handler(caller func(http.ResponseWriter, *http.Request) (sand
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m := gitPath.FindStringSubmatch(r.URL.Path)
 		if m == nil {
-			http.Error(w, "not a Git fetch: clone <api>/git/<namespace>/<repo>.git", http.StatusNotFound)
+			http.Error(w, "not a Git fetch: clone <api>/git/<unit>/<repo>.git", http.StatusNotFound)
 			return
 		}
 		org, repo, op := m[1], m[2], m[3]

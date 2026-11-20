@@ -32,7 +32,7 @@ const (
 	StatusRefused = "refused" // a rule said no
 )
 
-// AudienceMembers limits an event to the namespace's people, e.g. a
+// AudienceMembers limits an event to the unit's people, e.g. a
 // routine's answer, which goes to its channel only they read. Without it,
 // whoever may read the event's repo sees it.
 const AudienceMembers = "members"
@@ -47,15 +47,15 @@ type Event struct {
 	Kind   string `json:"kind"` // e.g. push, pipeline, deploy, pr-merged, propose_patch, routine
 	Status string `json:"status"`
 
-	// Where: a namespace and repo decide who sees it. An empty namespace is
+	// Where: a unit and repo decide who sees it. An empty unit is
 	// the installation's own (system stacks), for everyone signed in; an
-	// empty repo stands for the namespace's config.
-	Namespace string `json:"namespace,omitempty"`
-	Repo      string `json:"repo,omitempty"`
-	Audience  string `json:"audience,omitempty"`
+	// empty repo stands for the unit's config.
+	Unit     string `json:"unit,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	Audience string `json:"audience,omitempty"`
 
 	Actor     string `json:"actor,omitempty"`      // the person it was for, or a Gitea account
-	Agent     string `json:"agent,omitempty"`      // namespace/name, when an agent did it
+	Agent     string `json:"agent,omitempty"`      // unit/name, when an agent did it
 	StartedBy string `json:"started_by,omitempty"` // person, agent <id>, routine <id>/<name>
 
 	Title  string `json:"title"`
@@ -135,6 +135,6 @@ func Logged(r Recorder) Recorder { return logged{Or(r)} }
 type logged struct{ r Recorder }
 
 func (l logged) Record(ctx context.Context, e Event) {
-	log.Printf("event: %s %s %s/%s: %s", e.Kind, e.Status, e.Namespace, e.Repo, e.Title)
+	log.Printf("event: %s %s %s/%s: %s", e.Kind, e.Status, e.Unit, e.Repo, e.Title)
 	l.r.Record(ctx, e)
 }

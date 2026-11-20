@@ -1,6 +1,6 @@
 # Chat at https://chat.<domain>. People sign in through Keycloak; root admins
 # become Open WebUI admins, everyone else a user. Its one model connection is
-# the agent service (control-plane_agents), whose models are the namespaces'
+# the agent service (control-plane_agents), whose models are the units'
 # agents (folders under agents/ in their repo config); it runs them, with
 # tools acting as the person chatting: Open WebUI sends their Keycloak token.
 # Open WebUI itself has no LLM key and no tools.
@@ -62,8 +62,8 @@ services:
           "headers": {"X-Garrison-Chat": "{{`{{CHAT_ID}}`}}", "X-Garrison-Task": "{{`{{TASK}}`}}"}}}
       # New chats start with the commander, which finds the agent for a task.
       DEFAULT_MODELS: garrison/commander
-      # One channel per namespace, kept by the gateway: the team chat
-      # where people mention the namespace's agents.
+      # One channel per unit, kept by the gateway: the team chat
+      # where people mention the unit's agents.
       ENABLE_CHANNELS: "True"
       ENABLE_DIRECT_CONNECTIONS: "False"
       ENABLE_COMMUNITY_SHARING: "False"

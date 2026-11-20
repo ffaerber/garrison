@@ -50,7 +50,7 @@ func (g *Gitea) Card(ctx context.Context, person, ns, repo string, n int) (chang
 	if _, err := g.do(ctx, person, http.MethodGet, base, nil, &p); err != nil {
 		return changes.Card{}, err
 	}
-	c := changes.Card{Namespace: ns, Repo: repo, Number: p.Number, Title: p.Title, Body: p.Body, Author: p.User.Login,
+	c := changes.Card{Unit: ns, Repo: repo, Number: p.Number, Title: p.Title, Body: p.Body, Author: p.User.Login,
 		Base: p.Base.Ref, URL: p.HTMLURL, Created: p.CreatedAt, Merged: p.Merged, Closed: p.State == "closed" && !p.Merged,
 		Mine: p.User.Login == person}
 	var files []struct {
@@ -144,7 +144,7 @@ func (g *Gitea) approvals(ctx context.Context, person, pull string) ([]string, e
 }
 
 // Waiting lists the open pull requests person could act on: theirs, and
-// others' in the namespaces they are an admin of that they have not
+// others' in the units they are an admin of that they have not
 // approved yet; at most limit.
 func (g *Gitea) Waiting(ctx context.Context, person string, limit int) ([]changes.Card, error) {
 	var issues []struct {

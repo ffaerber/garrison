@@ -39,7 +39,7 @@ func TestTheGate(t *testing.T) {
 	}{
 		{"GET", "/api/resources/demo", as("bob"), 200},        // everyone signed in reads
 		{"POST", "/api/login", as("bob"), 200},                // and signs in
-		{"POST", "/api/resources/demo/x.png", as("bob"), 403}, // but bob is not the namespace's
+		{"POST", "/api/resources/demo/x.png", as("bob"), 403}, // but bob is not the unit's
 		{"DELETE", "/api/resources/demo/x.png", as("bob"), 403},
 		{"PATCH", "/api/resources/demo/x.png", as("bob"), 403},
 		{"POST", "/api/tus/demo/x.mp4", as("bob"), 403},

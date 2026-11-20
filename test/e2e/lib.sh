@@ -98,7 +98,7 @@ in_feed() {
 import json,sys
 cond = sys.argv[1]
 for e in json.load(sys.stdin):
-    for k in ("commit", "detail", "agent", "actor", "started_by", "link", "repo", "namespace"):
+    for k in ("commit", "detail", "agent", "actor", "started_by", "link", "repo", "unit"):
         e.setdefault(k, ""); e.setdefault("pr", 0)
     if eval(cond, {}, {"e": e}):
         print(e["id"]); sys.exit(0)
@@ -122,7 +122,7 @@ sys.exit(1)' "$3"
 }
 
 # set_config NS PATH FILE|- [APPROVER]: alice proposes the file PATH of the
-# namespace NS's config as FILE, or its removal with -; APPROVER (by default
+# unit NS's config as FILE, or its removal with -; APPROVER (by default
 # the local admin, a root admin) approves it, and alice merges it once the
 # approval check passes. Fails if a step does.
 set_config() {
@@ -202,7 +202,7 @@ chat_login() {
   done
   return 1
 }
-# system_channel [PERSON]: the id of the channel of the namespace garrison.
+# system_channel [PERSON]: the id of the channel of the unit garrison.
 system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "garrison"))' 2>/dev/null; }
 # mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
 mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
@@ -235,9 +235,9 @@ mention() {
   echo "$cid $mid" >> "$tmp/posted"
   echo "$cid $mid"
 }
-# ask_agent NAMESPACE PERSON QUESTION [AGENT]: asks an agent, the operator by
-# default, in the namespace's channel (or $CHANNEL), where it works in that
-# namespace, and prints its answer from the thread. The agents are
+# ask_agent UNIT PERSON QUESTION [AGENT]: asks an agent, the operator by
+# default, in the unit's channel (or $CHANNEL), where it works in that
+# unit, and prints its answer from the thread. The agents are
 # garrison's: their model is garrison/<agent>. It waits ASK_WAIT seconds
 # (360) for the answer; a turn may take up to the agent service's 10 minutes.
 ask_agent() {
@@ -266,7 +266,7 @@ sys.exit(1)' "$id" && return 0
 render_todo() {
   rm -rf "$3" && cp -r templates/app/todo "$3" || return 1
   find "$3" -name '*.tmpl' -exec sh -c 'mv "$1" "${1%.tmpl}"' _ {} \;
-  find "$3" -type f -exec sed -i "s/{{namespace}}/$1/g; s/{{repo}}/$2/g" {} +
+  find "$3" -type f -exec sed -i "s/{{unit}}/$1/g; s/{{repo}}/$2/g" {} +
   python3 -c '
 import re,sys
 print(re.search(r"```yaml\n(.*?)```", open(sys.argv[1]).read(), re.S).group(1), end="")' "$3/README.md" > "$3.stack.yaml"

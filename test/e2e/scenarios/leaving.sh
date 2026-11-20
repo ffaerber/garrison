@@ -4,7 +4,7 @@ section_leaving() {
 talk_setup || return 0
 echo "# 5. alice removes bob"
 since=$(last_pr config)
-answer=$(ask_agent todo alice "Remove bob from the namespace todo.")
+answer=$(ask_agent todo alice "Remove bob from the unit todo.")
 rpr=$(newest_pr config alice "$since")
 if [ -z "$rpr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
@@ -26,7 +26,7 @@ no_channel() { [ -z "$(channel_of todo bob)" ]; }
 check "bob no longer sees todo's channel" until_true 120 no_channel
 
 echo "# 5b. bob, no longer in todo, asks the desk for a change, in a chat of his own"
-# The desk works there in no namespace, but a change to todo's repo goes
+# The desk works there in no unit, but a change to todo's repo goes
 # with the grant todo gives it.
 # ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
 # through Open WebUI's API, and prints its answer.
@@ -36,11 +36,11 @@ ask_private() {
     "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
 }
 since=$(last_pr app)
-answer=$(ask_private bob garrison/desk "In the repo app of the namespace todo, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else.")
+answer=$(ask_private bob garrison/desk "In the repo app of the unit todo, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else.")
 opr=$(newest_pr app agent-todo-desk "$since")
 if [ -z "$opr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_private bob garrison/desk "Please propose that IDEAS.md for todo/app now with propose_change: namespace todo, repo app, path IDEAS.md, content: Dark mode, please.")
+  answer=$(ask_private bob garrison/desk "Please propose that IDEAS.md for todo/app now with propose_change: unit todo, repo app, path IDEAS.md, content: Dark mode, please.")
   opr=$(newest_pr app agent-todo-desk "$since")
 fi
 check "the desk proposes it with its own account" test -n "$opr"
@@ -54,8 +54,8 @@ check "carol's feed shows it"              until_true 60 in_feed carol ns=todo "
 # The dashboard asks Gitea again after at most 20 seconds.
 sleep 21
 check "bob's, out of todo, does not"       not_in_feed bob ns=todo "e['kind'] == 'repo-created' and e['repo'] == 'secret'"
-printf 'description: Knows a namespace'"'"'s repo secret\ntools: [read_file]\n' > "$tmp/keeper.yaml"
-printf 'You answer questions about the namespace'"'"'s repo secret, reading its files.\n' > "$tmp/keeper.md"
+printf 'description: Knows a unit'"'"'s repo secret\ntools: [read_file]\n' > "$tmp/keeper.yaml"
+printf 'You answer questions about the unit'"'"'s repo secret, reading its files.\n' > "$tmp/keeper.md"
 kpr=$(REPO=$gc propose_config keeper "Add the keeper" "agents/keeper/agent.yaml=$tmp/keeper.yaml" "agents/keeper/prompt.md=$tmp/keeper.md")
 check "a root admin approves the keeper, alice merges it" lands "$kpr"
 # A grant on the private repo makes the keeper, as it works in todo, todo's
@@ -66,13 +66,13 @@ check "carol approves its grant in todo"   test "$(review config carol "$kgr")" 
 check "the approval check passes"          until_true 90 approval_is "$kgr" success
 check "alice merges it"                    test "$(merge config alice "$kgr")" = 200
 check "carol sees the keeper"              until_true 120 has_model garrison/keeper carol
-answer=$(ask_agent todo carol "Read README.md of the repo secret of the namespace todo and tell me its first line." keeper)
+answer=$(ask_agent todo carol "Read README.md of the repo secret of the unit todo and tell me its first line." keeper)
 check "it answers carol in todo's channel" grep -qi secret <<<"$answer"
 # In garrison's channel, which everyone reads, the commander may not hand
 # work to the keeper as it works in todo.
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: garrison/commander may not ask todo/keeper: .*answers only where only todo's people read"; }
-answer=$(ask_agent garrison carol "Use ask_agent to ask todo/keeper for the first line of README.md of the repo secret of the namespace todo." commander)
+answer=$(ask_agent garrison carol "Use ask_agent to ask todo/keeper for the first line of README.md of the repo secret of the unit todo." commander)
 if ! refused_here; then
   printf 'retry the commander asked no keeper; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent garrison carol "Please call ask_agent now with agent todo/keeper, task: the first line of README.md of todo/secret, done_when: the line." commander)
@@ -83,7 +83,7 @@ gitea_api "" -o /dev/null -X DELETE "$hp/secret"
 echo "# 6. alice adds an agent that may only read"
 check "todo has no agents of its own; the operator is garrison's" \
   bash -c '[ "$0" = 404 ] && [ "$1" = 200 ] || { echo "todo: $0, garrison: $1"; false; }' "$(gitea_api "" -o /dev/null -w '%{http_code}' "$hp/config/raw/agents/operator/prompt.md?ref=main")" "$(gitea_api "" -o /dev/null -w '%{http_code}' "$gc/raw/agents/operator/prompt.md?ref=main")"
-reader() { add_agent "$1" reader "$2" "Reads the namespace's repos" "You read files of the namespace's repos and explain them."; }
+reader() { add_agent "$1" reader "$2" "Reads the unit's repos" "You read files of the unit's repos and explain them."; }
 bad=$(reader reader-bad 'read_file, rm_rf')
 check "an agent with a tool that does not exist fails the check" until_true 90 gc_approval_is "$bad" failure
 check "the check names the tool"           grep -q 'rm_rf' <<<"$(gc_approval "$bad")"

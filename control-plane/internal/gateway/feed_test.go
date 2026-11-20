@@ -11,9 +11,9 @@ import (
 )
 
 func TestToolEvents(t *testing.T) {
-	dev := &agents.Agent{Namespace: "todo", Name: "developer"}
+	dev := &agents.Agent{Unit: "todo", Name: "developer"}
 	bob := Person{Name: "bob", StartedBy: "person"}
-	args := json.RawMessage(`{"namespace":"todo","repo":"app"}`)
+	args := json.RawMessage(`{"unit":"todo","repo":"app"}`)
 
 	if _, ok := toolEvent(bob, dev, "read_file", args, "contents", nil); ok {
 		t.Error("a read went to the feed")
@@ -24,10 +24,10 @@ func TestToolEvents(t *testing.T) {
 		t.Errorf("propose: %+v", e)
 	}
 	e, ok = toolEvent(bob, dev, "browse", json.RawMessage(`{"url":"https://example.org/"}`), "", refused{"only the installation's own pages"})
-	if !ok || e.Status != events.StatusRefused || e.Namespace != "todo" || !strings.Contains(e.Title, "browse was refused") || !strings.Contains(e.Title, "example.org") {
+	if !ok || e.Status != events.StatusRefused || e.Unit != "todo" || !strings.Contains(e.Title, "browse was refused") || !strings.Contains(e.Title, "example.org") {
 		t.Errorf("refusal: %+v", e)
 	}
-	e, _ = toolEvent(bob, dev, "merge_change", json.RawMessage(`{"namespace":"todo","repo":"app","number":5}`), "", errors.New("Gitea is down"))
+	e, _ = toolEvent(bob, dev, "merge_change", json.RawMessage(`{"unit":"todo","repo":"app","number":5}`), "", errors.New("Gitea is down"))
 	if e.Status != events.StatusFailed || e.PR != 5 {
 		t.Errorf("failure: %+v", e)
 	}

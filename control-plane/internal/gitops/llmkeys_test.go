@@ -96,7 +96,7 @@ func TestSyncLLMKeys(t *testing.T) {
 	}
 }
 
-// The platform's namespace keeps secrets: its providers' keys. Asked
+// The platform's unit keeps secrets: its providers' keys. Asked
 // without Gitea, as it needs none for it.
 func TestPlatformKeepsSecrets(t *testing.T) {
 	c := &Config{Org: "garrison"}

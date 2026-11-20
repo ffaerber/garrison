@@ -20,7 +20,7 @@ echo "# their agents: the developer, the tester and the desk, with grants"
 # tester; the tester browses; the desk takes requests. todo gives them
 # grants.
 cat > "$tmp/developer.yaml" <<'YAML'
-description: Changes the code of the namespace's apps
+description: Changes the code of the unit's apps
 tools: [list_repos, read_file, propose_patch, merge_change]
 agents: [tester]
 YAML
@@ -29,18 +29,18 @@ cat > "$tmp/grants.yaml" <<'YAML'
 - {agent: desk, repo: app, level: propose, for: everyone}
 YAML
 cat > "$tmp/tester.yaml" <<'YAML'
-description: Tries the namespace's apps in the browser
+description: Tries the unit's apps in the browser
 tools: [browse]
 YAML
-printf 'You try the namespace'"'"'s apps in the browser, as the person you work for, and report exactly what you see. Change nothing.
+printf 'You try the unit'"'"'s apps in the browser, as the person you work for, and report exactly what you see. Change nothing.
 ' > "$tmp/tester.md"
 cat > "$tmp/desk.yaml" <<'YAML'
-description: Takes requests for changes to the namespace's apps from anyone
+description: Takes requests for changes to the unit's apps from anyone
 tools: [read_file, propose_change, propose_patch]
 YAML
-printf 'You take requests for small changes to the namespace'"'"'s apps from anyone, and propose them as pull requests for the namespace'"'"'s people to review.
+printf 'You take requests for small changes to the unit'"'"'s apps from anyone, and propose them as pull requests for the unit'"'"'s people to review.
 ' > "$tmp/desk.md"
-printf 'You change the code of the namespace'"'"'s apps. Work in a clone of the repo in your workspace, check what you changed with git diff, and propose it as one pull request.\n' > "$tmp/developer.md"
+printf 'You change the code of the unit'"'"'s apps. Work in a clone of the repo in your workspace, check what you changed with git diff, and propose it as one pull request.\n' > "$tmp/developer.md"
 apr=$(REPO=$gc propose_config agents "Add the developer, which merges and asks the tester, the tester and the desk" \
   "agents/developer/agent.yaml=$tmp/developer.yaml" "agents/developer/prompt.md=$tmp/developer.md" "agents/tester/agent.yaml=$tmp/tester.yaml" "agents/tester/prompt.md=$tmp/tester.md" \
   "agents/desk/agent.yaml=$tmp/desk.yaml" "agents/desk/prompt.md=$tmp/desk.md")

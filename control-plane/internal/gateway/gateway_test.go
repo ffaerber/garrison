@@ -182,8 +182,8 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 	}))
 	t.Cleanup(prom.Close)
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"},"apps":{"homepage/todo@main":{"namespace":"homepage","repo":"todo","environment":"main","stack":"todo","commit":"fedcba9876543210"}}}`), 0o644)
-	os.WriteFile(filepath.Join(dir, "snapshots.json"), []byte(`{"todo":{"namespace":"homepage","snapshots":[{"name":"deploy-20261113-150405-abc1234","created":"2026-11-13T15:04:05Z"}]}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"},"apps":{"homepage/todo@main":{"unit":"homepage","repo":"todo","environment":"main","stack":"todo","commit":"fedcba9876543210"}}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "snapshots.json"), []byte(`{"todo":{"unit":"homepage","snapshots":[{"name":"deploy-20261113-150405-abc1234","created":"2026-11-13T15:04:05Z"}]}}`), 0o644)
 	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
 		if name == "docker" && len(args) > 1 && args[0] == "service" && args[1] == "ls" {
 			return []byte("grafana_grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\ntodo_web\t1/1\tgit.example.com/homepage/todo:fedcba987654\n"), nil
@@ -255,7 +255,7 @@ func TestMCPHandshake(t *testing.T) {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
 	got := strings.Join(names, " ")
-	for _, want := range []string{"service_logs", "service_usage", "query_metrics", "propose_change", "list_namespaces"} {
+	for _, want := range []string{"service_logs", "service_usage", "query_metrics", "propose_change", "list_units"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("tools/list lacks %s: %s", want, got)
 		}
@@ -281,54 +281,54 @@ func TestMCPHandshake(t *testing.T) {
 
 func TestEveryoneMayLook(t *testing.T) {
 	m, _ := setup(t)
-	text, isErr := callText(t, m, "tok-bob", "list_namespaces", nil)
+	text, isErr := callText(t, m, "tok-bob", "list_units", nil)
 	if isErr || !strings.Contains(text, "garrison") || !strings.Contains(text, "homepage") {
-		t.Errorf("list_namespaces = %q", text)
+		t.Errorf("list_units = %q", text)
 	}
-	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "garrison"})
+	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"unit": "garrison"})
 	if isErr || !strings.Contains(text, "grafana (commit 0123456789ab)") || strings.Contains(text, "hello") {
 		t.Errorf("list_stacks = %q", text)
 	}
-	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"namespace": "homepage"})
+	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"unit": "homepage"})
 	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || strings.Contains(text, "grafana") {
 		t.Errorf("list_stacks homepage = %q", text)
 	}
-	text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"namespace": "homepage", "stack": "todo"})
+	text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"unit": "homepage", "stack": "todo"})
 	if isErr || !strings.Contains(text, "deploy-20261113-150405-abc1234\t2026-11-13T15:04:05Z") {
 		t.Errorf("list_snapshots = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"namespace": "garrison", "stack": "todo"}); !isErr {
-		t.Errorf("list_snapshots of another namespace's stack = %q", text)
+	if text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"unit": "garrison", "stack": "todo"}); !isErr {
+		t.Errorf("list_snapshots of another unit's stack = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "homepage", "service": "todo_web"}); isErr {
+	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"unit": "homepage", "service": "todo_web"}); isErr {
 		t.Errorf("service_logs of an app = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"namespace": "garrison", "service": "grafana_grafana"}); isErr || text != "log line\n" {
+	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"unit": "garrison", "service": "grafana_grafana"}); isErr || text != "log line\n" {
 		t.Errorf("service_logs = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "service_usage", map[string]any{"namespace": "garrison", "stack": "grafana"}); isErr || !strings.Contains(text, "12.5") {
+	if text, isErr = callText(t, m, "tok-bob", "service_usage", map[string]any{"unit": "garrison", "stack": "grafana"}); isErr || !strings.Contains(text, "12.5") {
 		t.Errorf("service_usage = %q", text)
 	}
 	if text, isErr = callText(t, m, "tok-bob", "query_metrics", map[string]any{"query": "up"}); isErr || !strings.Contains(text, "grafana_grafana") {
 		t.Errorf("query_metrics = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "read_file", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "compose.yaml"}); isErr || text != "services: {}\n" {
+	if text, isErr = callText(t, m, "tok-bob", "read_file", map[string]any{"unit": "garrison", "repo": "grafana", "path": "compose.yaml"}); isErr || text != "services: {}\n" {
 		t.Errorf("read_file = %q", text)
 	}
 }
 
-func TestToolsStayInTheirNamespace(t *testing.T) {
+func TestToolsStayInTheirUnit(t *testing.T) {
 	m, _ := setup(t)
 	for _, c := range []struct {
 		tool string
 		args map[string]any
 	}{
-		{"service_logs", map[string]any{"namespace": "garrison", "service": "hello_web"}},            // not a garrison stack
-		{"service_logs", map[string]any{"namespace": "garrison", "service": "grafana_grafana; id"}},  // not a name
-		{"stack_status", map[string]any{"namespace": "homepage", "stack": "grafana"}},                // wrong namespace
-		{"read_file", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "../../x"}}, // outside the repo
-		{"read_file", map[string]any{"namespace": "../admin", "repo": "grafana", "path": "a"}},       // not a namespace
-		{"query_metrics", map[string]any{"query": "bad("}},                                           // Prometheus refuses
+		{"service_logs", map[string]any{"unit": "garrison", "service": "hello_web"}},            // not a garrison stack
+		{"service_logs", map[string]any{"unit": "garrison", "service": "grafana_grafana; id"}},  // not a name
+		{"stack_status", map[string]any{"unit": "homepage", "stack": "grafana"}},                // wrong unit
+		{"read_file", map[string]any{"unit": "garrison", "repo": "grafana", "path": "../../x"}}, // outside the repo
+		{"read_file", map[string]any{"unit": "../admin", "repo": "grafana", "path": "a"}},       // not a unit
+		{"query_metrics", map[string]any{"query": "bad("}},                                      // Prometheus refuses
 	} {
 		if text, isErr := callText(t, m, "tok-alice", c.tool, c.args); !isErr {
 			t.Errorf("%s %v accepted: %q", c.tool, c.args, text)
@@ -337,7 +337,7 @@ func TestToolsStayInTheirNamespace(t *testing.T) {
 }
 
 func TestProposalsActAsThePerson(t *testing.T) {
-	args := map[string]any{"namespace": "garrison", "repo": "grafana", "path": "compose.yaml", "content": "services: {x: {}}\n", "title": "Add x"}
+	args := map[string]any{"unit": "garrison", "repo": "grafana", "path": "compose.yaml", "content": "services: {x: {}}\n", "title": "Add x"}
 	m, fg := setup(t)
 	text, isErr := callText(t, m, "tok-bob", "propose_change", args)
 	if !isErr || !strings.Contains(text, "not allowed: bob") || fg.prs != 0 {
@@ -360,7 +360,7 @@ func TestARoutineThatWouldBeRefusedIsNotProposed(t *testing.T) {
 		{"- agent: marketing\n  name: shots\n  schedule: \"0 9 * * *\"\n  owner: alice\n  task: Take a screenshot: then stop.\n", "mapping values are not allowed"},
 		{"- {agent: painter, name: shots, schedule: \"0 9 * * *\", owner: alice, task: x}\n", `there is no agent "painter"`},
 	} {
-		args := map[string]any{"namespace": "homepage", "repo": "config", "path": "routines.yaml", "content": c.content, "title": "Shots"}
+		args := map[string]any{"unit": "homepage", "repo": "config", "path": "routines.yaml", "content": c.content, "title": "Shots"}
 		text, isErr := callText(t, m, "tok-alice", "propose_change", args)
 		if !isErr || !strings.Contains(text, "routines.yaml would be refused, so nothing was proposed") || !strings.Contains(text, c.want) || !strings.Contains(text, "double quotes") || fg.prs != 0 {
 			t.Errorf("%q: %q, prs %d", c.content, text, fg.prs)
@@ -370,7 +370,7 @@ func TestARoutineThatWouldBeRefusedIsNotProposed(t *testing.T) {
 
 func TestPatchesActAsThePersonAndAddUp(t *testing.T) {
 	m, fg := setup(t)
-	args := map[string]any{"namespace": "garrison", "repo": "grafana", "patch": "diff --git a/x b/x\n", "title": "Add x"}
+	args := map[string]any{"unit": "garrison", "repo": "grafana", "patch": "diff --git a/x b/x\n", "title": "Add x"}
 	if text, isErr := callText(t, m, "tok-bob", "propose_patch", args); !isErr || !strings.Contains(text, "not allowed") || len(fg.patches) != 0 {
 		t.Fatalf("bob: %q", text)
 	}
@@ -613,7 +613,7 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Errorf("homepage's group: %v (alice is in it; bob has not signed in to Open WebUI; carol is not in homepage)", groupUsers[gid])
 	}
 	// The models are garrison's agents, by their names, but the broken one.
-	// They work in every namespace: the catalog has them in homepage too,
+	// They work in every unit: the catalog has them in homepage too,
 	// with homepage's grants.
 	sys, ok := models["garrison/operator"]
 	if !ok || sys.Name != "operator" || models["garrison/marketing"].Name != "marketing" {
@@ -634,7 +634,7 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Error("the model of a removed agent folder was kept")
 	}
 	if _, ok := models["agent-gone"]; ok {
-		t.Error("the agent of a deleted namespace was kept")
+		t.Error("the agent of a deleted unit was kept")
 	}
 	if _, ok := models["ns-garrison"]; ok {
 		t.Error("an agent of an earlier version was kept")
@@ -653,7 +653,7 @@ func TestOpenWebUISync(t *testing.T) {
 	if _, ok := models["gpt-oss:120b"]; ok {
 		t.Error("an entry for the LLM was made")
 	}
-	// One channel per namespace, everyone may post, the gone one removed, others kept.
+	// One channel per unit, everyone may post, the gone one removed, others kept.
 	byNS := map[string]owuiChannel{}
 	for _, c := range channels {
 		if ns, ok := c.Meta[ChannelMarker].(string); ok {
@@ -664,7 +664,7 @@ func TestOpenWebUISync(t *testing.T) {
 		t.Errorf("channels = %v", channels)
 	}
 	if _, ok := channels["c-gone"]; ok {
-		t.Error("the channel of a deleted namespace was kept")
+		t.Error("the channel of a deleted unit was kept")
 	}
 	if _, ok := channels["c-other"]; !ok {
 		t.Error("a channel the sync does not own was removed")
@@ -681,7 +681,7 @@ func TestOpenWebUISync(t *testing.T) {
 	if profileName != AccountName {
 		t.Errorf("account name = %q", profileName)
 	}
-	// Each namespace channel has the how-to pinned, once.
+	// Each unit channel has the how-to pinned, once.
 	sysID := byNS["garrison"].ID
 	pinnedHowTos := func() int {
 		n := 0
@@ -718,8 +718,8 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	m, fg := setup(t)
 	m.Agents = &Catalog{}
 	m.Agents.Set([]agents.Agent{
-		{Namespace: "homepage", Name: "reader", Tools: []string{"read_file"}},
-		{Namespace: "homepage", Name: "marketing", Tools: []string{"list_repos"},
+		{Unit: "homepage", Name: "reader", Tools: []string{"read_file"}},
+		{Unit: "homepage", Name: "marketing", Tools: []string{"list_repos"},
 			Skills: []agents.Skill{{Name: "thumbnail", Description: "Make a thumbnail.", Dir: "agents/marketing/skills/thumbnail"}}},
 	})
 	names := func(path string) []string {
@@ -744,7 +744,7 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	}
 	// A tool the agent lacks is refused before anything happens.
 	_, out := rpcAt(t, m, "/mcp/homepage/reader", "tok-alice", "tools/call", map[string]any{"name": "propose_change", "arguments": map[string]any{
-		"namespace": "garrison", "repo": "grafana", "path": "compose.yaml", "content": "x", "title": "t"}})
+		"unit": "garrison", "repo": "grafana", "path": "compose.yaml", "content": "x", "title": "t"}})
 	if out["error"] == nil || fg.prs != 0 {
 		t.Errorf("reader proposed a change: %v, %d pull requests", out, fg.prs)
 	}
@@ -785,9 +785,9 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 	// carol is not in homepage: she may use its agents on public repos, not
 	// those on private ones or kept to its people.
 	m.Agents.Set([]agents.Agent{
-		{Namespace: "homepage", Name: "desk", Tools: []string{"read_file"}, Grants: []agents.Grant{{Repo: "site", Level: agents.LevelPropose}}},
-		{Namespace: "homepage", Name: "keeper", Tools: []string{"read_file"}, Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
-		{Namespace: "homepage", Name: "inner", Tools: []string{"read_file"}, Visible: agents.VisibleMembers},
+		{Unit: "homepage", Name: "desk", Tools: []string{"read_file"}, Grants: []agents.Grant{{Repo: "site", Level: agents.LevelPropose}}},
+		{Unit: "homepage", Name: "keeper", Tools: []string{"read_file"}, Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
+		{Unit: "homepage", Name: "inner", Tools: []string{"read_file"}, Visible: agents.VisibleMembers},
 	})
 	for agent, want := range map[string]int{"desk": http.StatusOK, "keeper": http.StatusForbidden, "inner": http.StatusForbidden} {
 		if code, _ := rpcAt(t, m, "/mcp/homepage/"+agent, "tok-carol", "tools/list", nil); code != want {
@@ -798,7 +798,7 @@ func TestAgentEndpointsServeOnlyTheirTools(t *testing.T) {
 		}
 	}
 	m.Agents.Set([]agents.Agent{
-		{Namespace: "homepage", Name: "marketing", Tools: []string{"list_repos"},
+		{Unit: "homepage", Name: "marketing", Tools: []string{"list_repos"},
 			Skills: []agents.Skill{{Name: "thumbnail", Description: "Make a thumbnail.", Dir: "agents/marketing/skills/thumbnail"}}},
 	})
 	// Skills: load one, read its file, nothing outside it.
@@ -868,20 +868,20 @@ func TestTheBrowserStaysAtHome(t *testing.T) {
 func TestScreenshotChecksBeforeShooting(t *testing.T) {
 	m, fg := setup(t)
 	// No browser set up: refused, nothing proposed.
-	if text, isErr := callText(t, m, "tok-alice", "screenshot", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "no browser") {
+	if text, isErr := callText(t, m, "tok-alice", "screenshot", map[string]any{"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "no browser") {
 		t.Errorf("without a browser: %q %v", text, isErr)
 	}
 	m.Tools.Browser = &Browser{URL: "http://127.0.0.1:1", Domain: "example.com"}
 	// bob may not write to grafana: refused before the browser runs (which
 	// here would fail differently).
-	if text, isErr := callText(t, m, "tok-bob", "screenshot", map[string]any{"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "not allowed") {
+	if text, isErr := callText(t, m, "tok-bob", "screenshot", map[string]any{"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t"}); !isErr || !strings.Contains(text, "not allowed") {
 		t.Errorf("bob: %q %v", text, isErr)
 	}
 	for name, args := range map[string]map[string]any{
-		"not a png":     {"namespace": "garrison", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
-		"too wide":      {"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
-		"another site":  {"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "https://example.org/", "title": "t"},
-		"internal host": {"namespace": "garrison", "repo": "grafana", "path": "a.png", "url": "http://gitea_gitea:3000/", "title": "t"},
+		"not a png":     {"unit": "garrison", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
+		"too wide":      {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
+		"another site":  {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "https://example.org/", "title": "t"},
+		"internal host": {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "http://gitea_gitea:3000/", "title": "t"},
 	} {
 		if text, isErr := callText(t, m, "tok-alice", "screenshot", args); !isErr {
 			t.Errorf("%s: accepted: %q", name, text)
@@ -905,20 +905,20 @@ func TestALargePatchGetsThrough(t *testing.T) {
 	m, fg := setup(t)
 	patch := "diff --git a/x b/x\n" + strings.Repeat("+a line of the file\n", 100000) // about 2 MB
 	code, out := rpc(t, m, "tok-alice", "tools/call", map[string]any{"name": "propose_patch",
-		"arguments": map[string]any{"namespace": "garrison", "repo": "grafana", "patch": patch, "title": "Add x"}})
+		"arguments": map[string]any{"unit": "garrison", "repo": "grafana", "patch": patch, "title": "Add x"}})
 	if code != http.StatusOK || out["error"] != nil || len(fg.patches) != 1 {
 		t.Fatalf("%d %v, %d patches reached Gitea", code, out["error"], len(fg.patches))
 	}
 	// Beyond the limit the tool says so itself.
 	patch = strings.Repeat("+", MaxPatch+1)
-	text, isErr := callText(t, m, "tok-alice", "propose_patch", map[string]any{"namespace": "garrison", "repo": "grafana", "patch": patch, "title": "Add x"})
+	text, isErr := callText(t, m, "tok-alice", "propose_patch", map[string]any{"unit": "garrison", "repo": "grafana", "patch": patch, "title": "Add x"})
 	if !isErr || !strings.Contains(text, "larger than 8 MB") {
 		t.Errorf("a patch beyond the limit: %.200q", text)
 	}
 }
 
-// Every namespace is listed, not only Gitea's first page of them.
-func TestNamespacesBeyondTheFirstPage(t *testing.T) {
+// Every unit is listed, not only Gitea's first page of them.
+func TestUnitsBeyondTheFirstPage(t *testing.T) {
 	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/orgs" {
 			http.NotFound(w, r)
@@ -937,9 +937,9 @@ func TestNamespacesBeyondTheFirstPage(t *testing.T) {
 	}))
 	defer gitea.Close()
 	g := &Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
-	nss, err := g.Namespaces(context.Background(), "")
+	nss, err := g.Units(context.Background(), "")
 	if err != nil || len(nss) != 51 || nss[50].Name != "photos" {
-		t.Fatalf("%d namespaces, %v", len(nss), err)
+		t.Fatalf("%d units, %v", len(nss), err)
 	}
 }
 
@@ -949,8 +949,8 @@ func TestNamespacesBeyondTheFirstPage(t *testing.T) {
 func TestTheTokenGoesOnlyToPrivatePages(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"apps":{
-		"homepage/todo@main":{"namespace":"homepage","stack":"todo","private":true,"hosts":["todo","todo-api"]},
-		"homepage/blog@main":{"namespace":"homepage","stack":"blog","hosts":["blog"]}}}`), 0o644)
+		"homepage/todo@main":{"unit":"homepage","stack":"todo","private":true,"hosts":["todo","todo-api"]},
+		"homepage/blog@main":{"unit":"homepage","stack":"blog","hosts":["blog"]}}}`), 0o644)
 	tools := &Tools{WorkDir: dir}
 	b := &Browser{Domain: "example.com", Private: tools.PrivateHost}
 	for u, want := range map[string]bool{
@@ -975,13 +975,13 @@ func TestTheTokenGoesOnlyToPrivatePages(t *testing.T) {
 
 func TestTheHowToNamesTheCommander(t *testing.T) {
 	o := &OpenWebUI{}
-	list := []agents.Agent{{Namespace: "todo", Name: "operator", Description: "Runs todo"}}
+	list := []agents.Agent{{Unit: "todo", Name: "operator", Description: "Runs todo"}}
 	for _, l := range [][]agents.Agent{list, nil} {
-		if got := o.howTo(Namespace{Name: "todo"}, l, "commander"); !strings.Contains(got, "Not sure which agent fits? Ask `@commander`") {
+		if got := o.howTo(Unit{Name: "todo"}, l, "commander"); !strings.Contains(got, "Not sure which agent fits? Ask `@commander`") {
 			t.Errorf("how-to with a commander:\n%s", got)
 		}
 	}
-	if got := o.howTo(Namespace{Name: "todo"}, list, ""); strings.Contains(got, "commander") {
+	if got := o.howTo(Unit{Name: "todo"}, list, ""); strings.Contains(got, "commander") {
 		t.Errorf("how-to without one:\n%s", got)
 	}
 }
@@ -989,7 +989,7 @@ func TestTheHowToNamesTheCommander(t *testing.T) {
 func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 	m, fg := setup(t)
 	fg.routines = "# Ours.\n- agent: operator\n  name: hourly\n  every: 1h\n  owner: alice\n  task: \"Look around.\"\n"
-	args := map[string]any{"namespace": "homepage", "agent": "marketing", "name": "morning-shot", "schedule": "0 9 * * *",
+	args := map[string]any{"unit": "homepage", "agent": "marketing", "name": "morning-shot", "schedule": "0 9 * * *",
 		"task": "Take a screenshot of https://site.example.com/: then propose it.", "repo": "site"}
 	text, isErr := callText(t, m, "tok-alice", "add_routine", args)
 	if isErr || fg.prs != 1 || len(fg.commits) != 1 || !strings.Contains(text, "the routine morning-shot of marketing, on the schedule 0 9 * * *, for alice") ||
@@ -1025,7 +1025,7 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 		{"schedule": "0 9 * * *", "every": "1h"},
 		{"schedule": ""},
 	} {
-		a := map[string]any{"namespace": "homepage", "agent": "marketing", "name": "x", "task": "Look."}
+		a := map[string]any{"unit": "homepage", "agent": "marketing", "name": "x", "task": "Look."}
 		for k, v := range bad {
 			a[k] = v
 		}
@@ -1033,14 +1033,14 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 			t.Errorf("%v: %q", bad, text)
 		}
 	}
-	if text, isErr := callText(t, m, "tok-alice", "add_routine", map[string]any{"namespace": "garrison", "agent": "marketing", "name": "x", "task": "x", "every": "1h"}); !isErr || !strings.Contains(text, "not allowed") {
+	if text, isErr := callText(t, m, "tok-alice", "add_routine", map[string]any{"unit": "garrison", "agent": "marketing", "name": "x", "task": "x", "every": "1h"}); !isErr || !strings.Contains(text, "not allowed") {
 		t.Errorf("a routine in garrison, by alice: %q", text)
 	}
 
 	// A chain: its lead runs it, and the grants go to the agents of the
 	// chain that propose, not to the lead, which only looks.
 	fg.commits = nil
-	text, isErr = callText(t, m, "tok-alice", "add_routine", map[string]any{"namespace": "homepage", "chain": "shots", "name": "weekly-shots", "schedule": "0 7 * * 1", "repos": []string{"site", "docs"}})
+	text, isErr = callText(t, m, "tok-alice", "add_routine", map[string]any{"unit": "homepage", "chain": "shots", "name": "weekly-shots", "schedule": "0 7 * * 1", "repos": []string{"site", "docs"}})
 	if isErr || fg.prs != 2 || len(fg.commits) != 1 || !strings.Contains(text, "the routine weekly-shots of marketing") ||
 		!strings.Contains(text, "operator in homepage/site, operator in homepage/docs.") {
 		t.Fatalf("a chain: %q, prs %d", text, fg.prs)
@@ -1063,7 +1063,7 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 		{"chain": "nope"},
 		{"chain": "shots", "agent": "operator"},
 	} {
-		a := map[string]any{"namespace": "homepage", "name": "y", "every": "1h"}
+		a := map[string]any{"unit": "homepage", "name": "y", "every": "1h"}
 		for k, v := range bad {
 			a[k] = v
 		}
@@ -1092,7 +1092,7 @@ func TestAppendEntry(t *testing.T) {
 func TestAPatchedRoutineThatWouldBeRefusedIsTakenBack(t *testing.T) {
 	m, fg := setup(t)
 	fg.routines = "- agent: marketing\n  name: shots\n  schedule: \"0 9 * * *\"\n  owner: alice\n  task: Shoot: then stop.\n"
-	args := map[string]any{"namespace": "homepage", "repo": "config", "patch": "diff --git a/routines.yaml b/routines.yaml\n", "title": "Shots"}
+	args := map[string]any{"unit": "homepage", "repo": "config", "patch": "diff --git a/routines.yaml b/routines.yaml\n", "title": "Shots"}
 	text, isErr := callText(t, m, "tok-alice", "propose_patch", args)
 	if !isErr || !strings.Contains(text, "routines.yaml would be refused") || !strings.Contains(text, "taken back") || len(fg.closed) != 2 || fg.closed[0] != "PATCH 9" {
 		t.Fatalf("%q, closed %v", text, fg.closed)

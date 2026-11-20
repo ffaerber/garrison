@@ -25,7 +25,7 @@ func TestARoutineAsksItsPersonAndGoesOn(t *testing.T) {
 	}))
 	defer gitea.Close()
 	g := &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
-	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
 		{Name: "colours", Every: time.Hour, Raw: "1h", Owner: "bob", Task: `call ask_person {"question":"Blue or green for the header?"}`},
 	}}}
 	d := withSandboxes(t, s)
@@ -64,7 +64,7 @@ func TestARoutineAsksItsPersonAndGoesOn(t *testing.T) {
 		return len(es) == 1
 	})
 
-	// Posted in the namespace's channel, naming bob; nothing else is, as the
+	// Posted in the unit's channel, naming bob; nothing else is, as the
 	// routine waits.
 	posts := poster.all()
 	if len(posts) != 1 || posts[0].Mention != "bob" || posts[0].Channel != "" || !strings.Contains(posts[0].Text, "Blue or green for the header?") ||

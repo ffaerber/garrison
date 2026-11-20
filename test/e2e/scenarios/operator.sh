@@ -20,7 +20,7 @@ check "it does not start"                  until_true 120 quotes_crashes
 am_alerts() { docker exec "$(docker ps -q -f name=prometheus_alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts; }
 quotes_alert() { am_alerts | python3 -c '
 import json,sys
-sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("app") == "quotes" and a["labels"].get("namespace") == "todo" for a in json.load(sys.stdin)) else 1)'; }
+sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("app") == "quotes" and a["labels"].get("unit") == "todo" for a in json.load(sys.stdin)) else 1)'; }
 check "an alert fires: it keeps failing"   until_true 400 quotes_alert
 check "todo's people see it in the feed"   until_true 120 in_feed carol ns=todo "e['kind'] == 'alert' and e['status'] == 'failed' and 'quotes_web' in e['title']"
 # Who outside todo sees it is home's TestEachSeesWhatTheyMayRead: here bob
@@ -38,7 +38,7 @@ check "it starts the operator, which posts in todo's channel" until_true 600 ale
 check "naming the missing setting"         grep -q QUOTES_FILE <<<"$(alert_post)"
 check "the feed has its run"               in_feed carol ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/operator' and 'ServiceFailing' in e['title']"
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent todo alice "The quotes app of the namespace todo, https://quotes.$DOMAIN/, does not work. Find out why and tell me what to change.")
+answer=$(ask_agent todo alice "The quotes app of the unit todo, https://quotes.$DOMAIN/, does not work. Find out why and tell me what to change.")
 check "it looks at the stack, as alice"    grep -qE "mcp: alice: (stack_status|service_logs)" <<<"$(mcp_calls "$at" alice)"
 check "it names the missing setting"       grep -q QUOTES_FILE <<<"$answer"
 check "alice removes its stack, carol approves" set_stack todo quotes - carol
@@ -48,7 +48,7 @@ check "and the alert resolves"             until_true 300 in_feed carol ns=todo 
 gitea_api "" -o /dev/null -X DELETE "$hp/quotes"
 
 echo "# 8. alice has the operator set up a new app, from nothing"
-answer=$(ask_agent garrison alice "Set up a new app for us: make a namespace photos for our photo apps, and in it the app gallery, a small web app that shows who is visiting: the image traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own. Propose its stack. You have everything you need; do not ask back.")
+answer=$(ask_agent garrison alice "Set up a new app for us: make a unit photos for our photo apps, and in it the app gallery, a small web app that shows who is visiting: the image traefik/whoami:v1.11 on port 80, behind the sign-in. It comes from elsewhere, so it needs no repo of its own. Propose its stack. You have everything you need; do not ask back.")
 org_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/photos")" = 200 ]; }
 # stack_pr: the open pull request of photos/config by alice that adds stacks/gallery.yaml.
 stack_pr() {
@@ -60,9 +60,9 @@ stack_pr() {
 }
 if ! org_made || ! stack_pr >/dev/null; then
   printf 'retry the operator did not do both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent garrison alice "Please go ahead now: create_namespace photos if it is missing, then propose stacks/gallery.yaml in photos/config with propose_change (image traefik/whoami:v1.11, port 80, entrypoint web, environment main private).")
+  answer=$(ask_agent garrison alice "Please go ahead now: create_unit photos if it is missing, then propose stacks/gallery.yaml in photos/config with propose_change (image traefik/whoami:v1.11, port 80, entrypoint web, environment main private).")
 fi
-check "it makes the namespace photos, as alice" org_made
+check "it makes the unit photos, as alice" org_made
 photos_admin() { gitea_api "" "$api/repos/photos/config/raw/members.yaml" | python3 -c 'import sys,yaml; sys.exit(0 if (yaml.safe_load(sys.stdin) or {}).get("admins") == ["alice"] else 1)'; }
 check "with alice as its first admin"      until_true 180 photos_admin
 gpr=$(stack_pr)
@@ -81,9 +81,9 @@ check "alice merges it"                    test "$(gitea_api alice -o /dev/null 
 gallery_deployed() { garrison applied | grep -q "^app photos/gallery@main gallery "; }
 check "the deployer deploys it"            until_true 300 gallery_deployed
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent garrison bob "Make me a namespace bobs for my own apps.")
-check "bob cannot make a namespace"        test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/bobs")" = 404
-refused_ns() { refused_only "$since" bob create_namespace "only root admins may"; }
+answer=$(ask_agent garrison bob "Make me a unit bobs for my own apps.")
+check "bob cannot make a unit"        test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/bobs")" = 404
+refused_ns() { refused_only "$since" bob create_unit "only root admins may"; }
 check "the gateway refused every try"      refused_ns
 
 echo "# 9. alice has the operator bring todo's data back"

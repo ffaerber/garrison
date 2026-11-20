@@ -28,7 +28,7 @@ func ToolNames() []string {
 // gateway: generate_media, which needs the sandbox's media library.
 var AgentServiceTools = []string{"generate_media"}
 
-// Catalog holds the agents as they work in every namespace, as the Open
+// Catalog holds the agents as they work in every unit, as the Open
 // WebUI sync last read them, for the MCP endpoints to look up. An agent it
 // does not know yet, e.g. before the first sync, is read from Gitea when it
 // is asked for.
@@ -50,7 +50,7 @@ func (c *Catalog) Set(list []agents.Agent) {
 	c.mu.Unlock()
 }
 
-// Get looks an agent up by its instance, <namespace>/<agent>.
+// Get looks an agent up by its instance, <unit>/<agent>.
 func (c *Catalog) Get(id string) (agents.Agent, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -58,7 +58,7 @@ func (c *Catalog) Get(id string) (agents.Agent, bool) {
 	return a, ok
 }
 
-// Lookup is Get, reading the agent's namespace from Gitea if it is unknown.
+// Lookup is Get, reading the agent's unit from Gitea if it is unknown.
 func (c *Catalog) Lookup(ctx context.Context, id string) (agents.Agent, bool) {
 	if a, ok := c.Get(id); ok || c.Gitea == nil {
 		return a, ok
@@ -88,7 +88,7 @@ func (c *Catalog) Lookup(ctx context.Context, id string) (agents.Agent, bool) {
 	return out, ok
 }
 
-// configFiles reads a namespace's config repo at ref, as the admin.
+// configFiles reads a unit's config repo at ref, as the admin.
 type configFiles struct {
 	g   *Gitea
 	ns  string
@@ -124,10 +124,10 @@ func (f configFiles) Read(ctx context.Context, path string) (string, error) {
 	return out, err
 }
 
-// Agents reads the agents as they work in a namespace: garrison's agents,
-// with the grants and routines of the namespace's config repo at ref.
+// Agents reads the agents as they work in a unit: garrison's agents,
+// with the grants and routines of the unit's config repo at ref.
 // garrison's agents are read at ref for garrison's own pull requests, which
-// may change them, and on main for the others. A namespace that does not
+// may change them, and on main for the others. A unit that does not
 // exist has none.
 func (g *Gitea) Agents(ctx context.Context, ns, ref string) ([]agents.Agent, []string, error) {
 	if err := validOrg(ns); err != nil {
@@ -139,22 +139,22 @@ func (g *Gitea) Agents(ctx context.Context, ns, ref string) ([]agents.Agent, []s
 		return nil, nil, err
 	}
 	platformRef := "main"
-	if ns == PlatformNamespace {
+	if ns == PlatformUnit {
 		platformRef = ref
 	}
-	return agents.Load(ctx, configFiles{g: g, ns: PlatformNamespace, ref: platformRef}, configFiles{g: g, ns: ns, ref: ref}, ns, ToolNames())
+	return agents.Load(ctx, configFiles{g: g, ns: PlatformUnit, ref: platformRef}, configFiles{g: g, ns: ns, ref: ref}, ns, ToolNames())
 }
 
 // Definitions reads garrison's agents on main, as they work in garrison.
 func (g *Gitea) Definitions(ctx context.Context) ([]agents.Agent, error) {
-	defs, _, err := agents.Definitions(ctx, configFiles{g: g, ns: PlatformNamespace, ref: "main"}, ToolNames())
+	defs, _, err := agents.Definitions(ctx, configFiles{g: g, ns: PlatformUnit, ref: "main"}, ToolNames())
 	return defs, err
 }
 
 // AgentsWith is Agents on main with garrison's agents already read (defs),
-// for going through every namespace.
+// for going through every unit.
 func (g *Gitea) AgentsWith(ctx context.Context, defs []agents.Agent, ns string) ([]agents.Agent, error) {
-	if ns == PlatformNamespace {
+	if ns == PlatformUnit {
 		list, _, err := g.Agents(ctx, ns, "main")
 		return list, err
 	}

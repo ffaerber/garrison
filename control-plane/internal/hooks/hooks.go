@@ -166,7 +166,7 @@ func (g *Gitea) Register(ctx context.Context, org, target string, secret []byte)
 // Keep registers the webhook on every organisation, now and on each new one,
 // checking every interval until ctx ends. Gitea may still be starting. Gitea
 // tells nobody of a new organisation, which has no webhook yet: Keep pokes
-// wake (nil: none) when it finds one, so a namespace made by hand is set up
+// wake (nil: none) when it finds one, so a unit made by hand is set up
 // at once, not at the loops' next tick.
 func (g *Gitea) Keep(ctx context.Context, target string, secret []byte, interval time.Duration, wake *Wake) {
 	done := map[string]bool{}

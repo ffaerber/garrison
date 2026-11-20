@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestMakingNamespacesAndRepos(t *testing.T) {
+func TestMakingUnitsAndRepos(t *testing.T) {
 	var made []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		as := r.Header.Get("Sudo")
@@ -48,30 +48,30 @@ func TestMakingNamespacesAndRepos(t *testing.T) {
 		raw, _ := json.Marshal(args)
 		return tools.Call(context.Background(), Person{Name: who}, nil, tool, raw)
 	}
-	// The agent answers once the namespace is set up, not before.
-	if out, err := call("alice", "create_namespace", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") ||
+	// The agent answers once the unit is set up, not before.
+	if out, err := call("alice", "create_unit", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") ||
 		!strings.Contains(out, "It is ready") || !strings.Contains(out, "the agents (@operator and the others) work in photos") || len(readied) != 1 {
 		t.Errorf("alice: %q %v %v", out, err, readied)
 	}
-	if _, err := call("bob", "create_namespace", map[string]any{"name": "bobs"}); err == nil || !strings.Contains(err.Error(), "only root admins may") {
+	if _, err := call("bob", "create_unit", map[string]any{"name": "bobs"}); err == nil || !strings.Contains(err.Error(), "only root admins may") {
 		t.Errorf("bob: %v", err)
 	}
-	if _, err := call("alice", "create_namespace", map[string]any{"name": "homepage"}); err == nil || !strings.Contains(err.Error(), "already") {
+	if _, err := call("alice", "create_unit", map[string]any{"name": "homepage"}); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Errorf("an existing one: %v", err)
 	}
 	for _, bad := range []string{"Photos", "a.b", "../x"} {
-		if _, err := call("alice", "create_namespace", map[string]any{"name": bad}); err == nil {
-			t.Errorf("namespace %q made", bad)
+		if _, err := call("alice", "create_unit", map[string]any{"name": bad}); err == nil {
+			t.Errorf("unit %q made", bad)
 		}
 	}
-	if out, err := call("alice", "create_repo", map[string]any{"namespace": "photos", "repo": "immich"}); err != nil || !strings.Contains(out, "https://git/photos/immich") {
+	if out, err := call("alice", "create_repo", map[string]any{"unit": "photos", "repo": "immich"}); err != nil || !strings.Contains(out, "https://git/photos/immich") {
 		t.Errorf("repo: %q %v", out, err)
 	}
-	if _, err := call("bob", "create_repo", map[string]any{"namespace": "photos", "repo": "mine"}); err == nil || !strings.Contains(err.Error(), "may not make repos in photos") {
+	if _, err := call("bob", "create_repo", map[string]any{"unit": "photos", "repo": "mine"}); err == nil || !strings.Contains(err.Error(), "may not make repos in photos") {
 		t.Errorf("bob's repo: %v", err)
 	}
 	for _, bad := range []string{"config", "Immich", "a_b"} {
-		if _, err := call("alice", "create_repo", map[string]any{"namespace": "photos", "repo": bad}); err == nil {
+		if _, err := call("alice", "create_repo", map[string]any{"unit": "photos", "repo": bad}); err == nil {
 			t.Errorf("repo %q made", bad)
 		}
 	}
@@ -80,8 +80,8 @@ func TestMakingNamespacesAndRepos(t *testing.T) {
 	}
 	// Not without a person.
 	raw, _ := json.Marshal(map[string]any{"name": "x"})
-	if _, err := tools.Call(context.Background(), Person{Name: "agent-x", Unattended: true, Owner: "alice"}, nil, "create_namespace", raw); err == nil {
-		t.Error("a routine made a namespace")
+	if _, err := tools.Call(context.Background(), Person{Name: "agent-x", Unattended: true, Owner: "alice"}, nil, "create_unit", raw); err == nil {
+		t.Error("a routine made a unit")
 	}
 }
 
@@ -184,7 +184,7 @@ func TestARepoFromATemplate(t *testing.T) {
 	}))
 	defer srv.Close()
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
-	raw, _ := json.Marshal(map[string]any{"namespace": "lab", "repo": "example", "template": "todo"})
+	raw, _ := json.Marshal(map[string]any{"unit": "lab", "repo": "example", "template": "todo"})
 	out, err := tools.Call(context.Background(), Person{Name: "alice"}, nil, "create_repo", raw)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestARepoFromATemplate(t *testing.T) {
 	if !strings.Contains(out, "from the template todo") || !strings.Contains(out, "source: example") {
 		t.Errorf("out: %s", out)
 	}
-	raw, _ = json.Marshal(map[string]any{"namespace": "lab", "repo": "other", "template": "../namespace-config"})
+	raw, _ = json.Marshal(map[string]any{"unit": "lab", "repo": "other", "template": "../unit-config"})
 	if _, err := tools.Call(context.Background(), Person{Name: "alice"}, nil, "create_repo", raw); err == nil {
 		t.Error("a template outside app/")
 	}

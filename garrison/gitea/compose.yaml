@@ -13,10 +13,10 @@ services:
       GITEA__server__DISABLE_SSH: "true"
       GITEA__security__INSTALL_LOCK: "true"
       # Builds run on the runner of the garrison organisation (garrison/runner) and
-      # on the user runner of every other namespace (garrison/control-plane).
+      # on the user runner of every other unit (garrison/control-plane).
       GITEA__actions__ENABLED: "true"
       GITEA__repository__DEFAULT_REPO_UNITS: repo.code,repo.releases,repo.issues,repo.pulls,repo.wiki,repo.projects,repo.packages,repo.actions
-      # Namespaces are made by root admins only.
+      # Units are made by root admins only.
       GITEA__admin__DISABLE_REGULAR_ORG_CREATION: "true"
       # The container registry, for images built here.
       GITEA__packages__ENABLED: "true"

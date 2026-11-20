@@ -47,7 +47,7 @@ func TestFromGitea(t *testing.T) {
 			t.Fatalf("%s: %d events", c.event, len(es))
 		}
 		e := es[0]
-		if e.Kind != c.kind || e.Title != c.title || e.Status != c.status || e.Commit != c.commit || e.PR != c.pr || e.Namespace == "" {
+		if e.Kind != c.kind || e.Title != c.title || e.Status != c.status || e.Commit != c.commit || e.PR != c.pr || e.Unit == "" {
 			t.Errorf("%s: %+v", c.event, e)
 		}
 	}
@@ -66,10 +66,10 @@ func TestKeyUpdatesTheRecord(t *testing.T) {
 func TestVisibility(t *testing.T) {
 	m := &Memory{}
 	m.Record(ctx, Event{Kind: KindDeploy, Title: "system"})
-	m.Record(ctx, Event{Kind: KindPush, Namespace: "todo", Repo: "app", Title: "public"})
-	m.Record(ctx, Event{Kind: KindPush, Namespace: "todo", Repo: "secret", Title: "private"})
-	m.Record(ctx, Event{Kind: KindRoutine, Namespace: "todo", Audience: AudienceMembers, Title: "routine"})
-	m.Record(ctx, Event{Kind: KindDeploy, Namespace: "todo", Title: "config"})
+	m.Record(ctx, Event{Kind: KindPush, Unit: "todo", Repo: "app", Title: "public"})
+	m.Record(ctx, Event{Kind: KindPush, Unit: "todo", Repo: "secret", Title: "private"})
+	m.Record(ctx, Event{Kind: KindRoutine, Unit: "todo", Audience: AudienceMembers, Title: "routine"})
+	m.Record(ctx, Event{Kind: KindDeploy, Unit: "todo", Title: "config"})
 	titles := func(v Visibility) string {
 		es, _ := m.List(ctx, Query{Visibility: v})
 		var out []string
@@ -94,14 +94,14 @@ func TestVisibility(t *testing.T) {
 func TestRelatedFollowsThePullRequestToItsDeploy(t *testing.T) {
 	now := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
 	m := &Memory{Now: func() time.Time { now = now.Add(time.Second); return now }}
-	app := func(e Event) Event { e.Namespace, e.Repo = "todo", "app"; return e }
-	m.Record(ctx, Event{Kind: KindRoutine, Namespace: "todo", Audience: AudienceMembers, StartedBy: "routine todo/developer/nightly", Status: StatusRunning, Key: "r"}) // 1
-	m.Record(ctx, app(Event{Kind: "propose_patch", StartedBy: "routine todo/developer/nightly", PR: 7}))                                                                // 2
-	m.Record(ctx, app(Event{Kind: KindPROpened, PR: 7, Commit: "h"}))                                                                                                   // 3
-	m.Record(ctx, app(Event{Kind: KindPRMerged, PR: 7, Commit: "m"}))                                                                                                   // 4
-	m.Record(ctx, app(Event{Kind: KindPipeline, Commit: "m"}))                                                                                                          // 5
-	m.Record(ctx, app(Event{Kind: KindDeploy, Commit: "m"}))                                                                                                            // 6
-	m.Record(ctx, app(Event{Kind: KindPush, Commit: "other"}))                                                                                                          // 7
+	app := func(e Event) Event { e.Unit, e.Repo = "todo", "app"; return e }
+	m.Record(ctx, Event{Kind: KindRoutine, Unit: "todo", Audience: AudienceMembers, StartedBy: "routine todo/developer/nightly", Status: StatusRunning, Key: "r"}) // 1
+	m.Record(ctx, app(Event{Kind: "propose_patch", StartedBy: "routine todo/developer/nightly", PR: 7}))                                                           // 2
+	m.Record(ctx, app(Event{Kind: KindPROpened, PR: 7, Commit: "h"}))                                                                                              // 3
+	m.Record(ctx, app(Event{Kind: KindPRMerged, PR: 7, Commit: "m"}))                                                                                              // 4
+	m.Record(ctx, app(Event{Kind: KindPipeline, Commit: "m"}))                                                                                                     // 5
+	m.Record(ctx, app(Event{Kind: KindDeploy, Commit: "m"}))                                                                                                       // 6
+	m.Record(ctx, app(Event{Kind: KindPush, Commit: "other"}))                                                                                                     // 7
 	m.Record(ctx, Event{Kind: KindRoutine, Status: StatusOK, Key: "r"})
 	all := Visibility{All: true}
 	merged, _, _ := m.Get(ctx, 4, all)

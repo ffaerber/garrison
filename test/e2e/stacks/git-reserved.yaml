@@ -1,6 +1,6 @@
 # Claims the hostname "git", which root reserves for Gitea.
 stack: git
-namespace: demo
+unit: demo
 entrypoint: web
 services:
   web: { image: traefik/whoami:v1.11, port: 80 }

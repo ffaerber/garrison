@@ -1,4 +1,4 @@
-# Actions runner for the user namespaces: every organisation except garrison.
+# Actions runner for the user units: every organisation except garrison.
 # It reaches Docker only through the control plane's guard, which
 # refuses anything that would let a job out of its container. Jobs run on the
 # builds network, where they reach Gitea and BuildKit, and nothing else of the

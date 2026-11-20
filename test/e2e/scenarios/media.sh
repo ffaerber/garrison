@@ -1,4 +1,4 @@
-# media: a namespace's media library, its file browser, and the agents
+# media: a unit's media library, its file browser, and the agents
 # making pictures and videos into it with ComfyUI (a fake one here, outside
 # Garrison, as people run theirs) and cutting a short from them. Talks to the
 # real LLM. Sourced by smoke.sh, whose helpers it uses.
@@ -8,15 +8,15 @@ echo "# media: a library, its file browser, and agents making media into it"
 lib=/garrison/ns/media/shares/media
 check "alice signs in to the chat"         chat_login alice
 
-echo "# the namespace media, with its file browser"
+echo "# the unit media, with its file browser"
 code=$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"media","visibility":"limited","description":"Our pictures and videos"}' "$api/orgs")
-check "alice creates the namespace media"  bash -c "[ $code = 201 ] || [ $code = 422 ]"
+check "alice creates the unit media"  bash -c "[ $code = 201 ] || [ $code = 422 ]"
 media_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/media/config/raw/members.yaml?ref=main")" = 200 ]; }
 check "media has its config"               until_true 120 media_config
-# The file browser exactly as the namespace's README gives it.
+# The file browser exactly as the unit's README gives it.
 python3 -c '
 import re,sys
-print(re.search(r"## Media\n.*?```yaml\n(.*?)```", open(sys.argv[1]).read(), re.S).group(1), end="")' templates/namespace-config/README.md > "$tmp/files.yaml"
+print(re.search(r"## Media\n.*?```yaml\n(.*?)```", open(sys.argv[1]).read(), re.S).group(1), end="")' templates/unit-config/README.md > "$tmp/files.yaml"
 check "alice adds the file browser of its README" set_stack media files "$tmp/files.yaml"
 files_up() { garrison applied | grep -q "^app media/files@main files "; }
 check "the deployer deploys it"            until_true 600 files_up
@@ -124,7 +124,7 @@ echo "# a chain of command: software updates"
 # which asks the scout (the real web) and then the coder, in that order.
 cat > "$tmp/greeter.yaml" <<'YAML'
 stack: greeter
-namespace: media
+unit: media
 entrypoint: web
 services:
   web: { image: traefik/whoami:v1.10.0, port: 80 }
@@ -133,7 +133,7 @@ environments:
 YAML
 check "media runs traefik/whoami:v1.10.0"  set_stack media greeter "$tmp/greeter.yaml"
 asked_from=$(feed alice "/api/events?limit=1" | python3 -c 'import json,sys; e=json.load(sys.stdin); print(e[0]["id"] if e else 0)')
-answer=$(ask_agent media alice "Are there software updates for the apps of the namespace media? If so, have them proposed." commander)
+answer=$(ask_agent media alice "Are there software updates for the apps of the unit media? If so, have them proposed." commander)
 # update_pr: the open pull request in media/config, by alice, that changes
 # only the tag of whoami in stacks/greeter.yaml to a newer one.
 update_pr() {

@@ -8,7 +8,7 @@ cat >> "$tmp/routines.yaml" <<'YAML'
   name: main-moved
   on_push: {repo: app, branch: main}
   owner: bob
-  task: Call read_file on stacks/todo.yaml of the repo config of the namespace todo, then say in one sentence which environments it has. Change nothing.
+  task: Call read_file on stacks/todo.yaml of the repo config of the unit todo, then say in one sentence which environments it has. Change nothing.
 YAML
 rpr=$(propose_config main-moved "The developer's routine" "routines.yaml=$tmp/routines.yaml")
 check "carol approves the routine"         test "$(review config carol "$rpr")" = 200

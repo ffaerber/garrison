@@ -19,7 +19,7 @@ import (
 // so often or when a branch moves, for the routine's owner, with nobody
 // watching. It acts with the agent's own account: it reads, and changes
 // only what grants with unattended: true allow for the owner. Its answer is
-// posted in the namespace's channel.
+// posted in the unit's channel.
 //
 // When each last ran, and the commit each on_push routine last saw, are
 // kept in Store: after a restart, a schedule missed meanwhile runs once, and
@@ -203,7 +203,7 @@ func (r *Routines) Check(ctx context.Context) {
 				}
 				why = "it runs every " + rt.Raw
 			} else if rt.OnPush != nil {
-				head, err := r.Gitea.BranchHead(ctx, a.Namespace, rt.OnPush.Repo, rt.OnPush.Branch)
+				head, err := r.Gitea.BranchHead(ctx, a.Unit, rt.OnPush.Repo, rt.OnPush.Branch)
 				if err != nil {
 					log.Printf("routines: %s: %v", key, err)
 					continue
@@ -222,7 +222,7 @@ func (r *Routines) Check(ctx context.Context) {
 					continue
 				}
 				r.heads[key] = head
-				why = fmt.Sprintf("%s of %s/%s moved to %.12s", rt.OnPush.Branch, a.Namespace, rt.OnPush.Repo, head)
+				why = fmt.Sprintf("%s of %s/%s moved to %.12s", rt.OnPush.Branch, a.Unit, rt.OnPush.Repo, head)
 			} else {
 				continue // on_alert: started by alerts, not by the clock
 			}
@@ -246,7 +246,7 @@ func (r *Routines) Check(ctx context.Context) {
 
 func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, key, why string) {
 	s := r.Server
-	// Into the namespace's channel, which only its people read.
+	// Into the unit's channel, which only its people read.
 	post := func(text string) {
 		if s.Poster == nil {
 			return
@@ -255,9 +255,9 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 			log.Printf("routines: %s: post: %v", key, err)
 		}
 	}
-	// The feed gets the run, for the namespace's people, as its channel.
+	// The feed gets the run, for the unit's people, as its channel.
 	ev := events.Event{Source: events.SourceAgents, Kind: events.KindRoutine, Status: events.StatusRunning,
-		Namespace: a.Namespace, Audience: events.AudienceMembers, Actor: rt.Owner, Agent: a.ID(), StartedBy: "routine " + key,
+		Unit: a.Unit, Audience: events.AudienceMembers, Actor: rt.Owner, Agent: a.ID(), StartedBy: "routine " + key,
 		Title: fmt.Sprintf("routine %s of %s, for %s: %s", rt.Name, a.ID(), rt.Owner, why), Key: fmt.Sprintf("routine:%s:%d", key, r.now().UnixNano())}
 	record := func(status, detail string) {
 		if s.Events != nil {
@@ -265,21 +265,21 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 			s.Events.Record(ctx, ev)
 		}
 	}
-	role, err := r.Gitea.Role(ctx, a.Namespace, rt.Owner)
+	role, err := r.Gitea.Role(ctx, a.Unit, rt.Owner)
 	if err != nil {
 		log.Printf("routines: %s: %v", key, err)
 		record(events.StatusFailed, err.Error())
 		return
 	}
 	if role == "" {
-		log.Printf("routines: %s: not run: its owner %s is not in %s", key, rt.Owner, a.Namespace)
-		record(events.StatusRefused, fmt.Sprintf("Not run: its owner %s is not in %s.", rt.Owner, a.Namespace))
-		post(fmt.Sprintf("The routine %s did not run: its owner %s is not in %s. Change its owner in %s of %s/config.", rt.Name, rt.Owner, a.Namespace, agents.RoutinesFile, a.Namespace))
+		log.Printf("routines: %s: not run: its owner %s is not in %s", key, rt.Owner, a.Unit)
+		record(events.StatusRefused, fmt.Sprintf("Not run: its owner %s is not in %s.", rt.Owner, a.Unit))
+		post(fmt.Sprintf("The routine %s did not run: its owner %s is not in %s. Change its owner in %s of %s/config.", rt.Name, rt.Owner, a.Unit, agents.RoutinesFile, a.Unit))
 		return
 	}
 	log.Printf("routines: %s for %s: %s", key, rt.Owner, why)
 	record(events.StatusRunning, "")
-	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.`, rt.Name, rt.Owner, why, a.Namespace)
+	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.`, rt.Name, rt.Owner, why, a.Unit)
 	if s.Questions != nil && s.Poster != nil {
 		text += fmt.Sprintf(" If you need something only %s can tell you (a choice, a missing fact, an approval), ask them with ask_person and end your turn: you go on here when they answer.", rt.Owner)
 	}

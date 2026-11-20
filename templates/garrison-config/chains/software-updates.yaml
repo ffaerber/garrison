@@ -6,7 +6,7 @@ when: someone asks about software updates, new versions or releases of what Garr
 lead: sentry
 steps:
   - agent: sentry
-    does: "List the software and the versions in use. In garrison, each repo with a compose.yaml pins its images (list_repos, then read_file of each compose.yaml), e.g. gitea/gitea:1.25 or postgres:17-alpine; for a namespace asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."
+    does: "List the software and the versions in use. In garrison, each repo with a compose.yaml pins its images (list_repos, then read_file of each compose.yaml), e.g. gitea/gitea:1.25 or postgres:17-alpine; for a unit asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."
   - agent: scout
     does: "For each image and version (only these, nothing else of Garrison), find the newest release on the project's own pages (its releases page, changelog or Docker Hub tags). Per image: the newest version of the same major line, the newest major version if higher, and the link to its release notes."
   - agent: sentry

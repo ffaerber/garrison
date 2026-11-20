@@ -2,7 +2,7 @@
 # control-plane-tree.sh OUTDIR: assembles the contents of the repo
 # garrison/control-plane: its stack (compose.yaml), the source, the
 # Dockerfiles (the control plane's, the agents' sandbox's and the
-# namespaces' file browser's) and the build
+# units' file browser's) and the build
 # workflow.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,7 +21,7 @@ Deploys every repo of the `garrison` organisation that holds a `compose.yaml`, i
 - `control-plane/`, `schemas/`, `templates/`, `go.mod`: the source.
 - `control-plane/Dockerfile`: the image.
 - `sandbox/`: the agents' sandbox image: Pi, the agent harness, and what agents work with.
-- `files/`: the namespaces' file browser image, `garrison/files`: Filebrowser behind Garrison's gate.
+- `files/`: the units' file browser image, `garrison/files`: Filebrowser behind Garrison's gate.
 - `.gitea/workflows/build.yaml`: on every push to `main`, builds the images, pushes them to this Gitea's registry and sets their tag in `compose.yaml`; the running deployer then deploys them.
 - `compose.yaml`: the stack.
 MD

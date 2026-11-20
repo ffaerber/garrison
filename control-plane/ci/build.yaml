@@ -1,6 +1,6 @@
 # Installed as .gitea/workflows/build.yaml in the repo garrison/control-plane.
 # On every push to main: build the control plane image, the agents'
-# sandbox image and the namespaces' file browser (garrison/files, also
+# sandbox image and the units' file browser (garrison/files, also
 # tagged current, which stacks name), push them to Gitea's registry, and deploy them by committing
 # their tag to compose.yaml in this repo.
 # The running deployer then applies that commit and replaces itself.

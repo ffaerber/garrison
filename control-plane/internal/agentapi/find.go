@@ -15,13 +15,13 @@ import (
 // it may hand work to, for this person, here.
 var findSpec = toolSpec{
 	Name:        "find_agents",
-	Description: "Lists the agents you may hand work to with ask_agent, for this person and here, as they work in your namespace: what each does, its tools, skills and rights there. Call it when you do not know which agent fits.",
+	Description: "Lists the agents you may hand work to with ask_agent, for this person and here, as they work in your unit: what each does, its tools, skills and rights there. Call it when you do not know which agent fits.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			// Not "namespace": agents are told to pass their own to every
+			// Not "unit": agents are told to pass their own to every
 			// tool that takes one.
-			"in_namespace": map[string]any{"type": "string", "description": "the agents as they work in another namespace, with its rights there; leave it out for the one you work in, which is what you usually want"},
+			"in_unit": map[string]any{"type": "string", "description": "the agents as they work in another unit, with its rights there; leave it out for the one you work in, which is what you usually want"},
 		},
 		"additionalProperties": false,
 	},
@@ -31,11 +31,11 @@ var findSpec = toolSpec{
 // ask that its person may use and that may answer in this chat.
 func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawMessage) (string, bool) {
 	var in struct {
-		Namespace string `json:"in_namespace"`
+		Unit string `json:"in_unit"`
 	}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
-			return "error: find_agents takes only in_namespace", true
+			return "error: find_agents takes only in_unit", true
 		}
 	}
 	asker, ok, err := s.Agents.Get(ctx, c.Agent)
@@ -48,19 +48,19 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 	}
 	var b strings.Builder
 	if channel, ok := strings.CutPrefix(c.Chat, "channel:"); ok && s.Poster != nil {
-		if info, err := s.Poster.Channel(ctx, channel); err == nil && info.Namespace != "" {
-			fmt.Fprintf(&b, "This channel belongs to the namespace %s.\n", info.Namespace)
-			s.writeRepos(ctx, &b, c.Person, info.Namespace)
+		if info, err := s.Poster.Channel(ctx, channel); err == nil && info.Unit != "" {
+			fmt.Fprintf(&b, "This channel belongs to the unit %s.\n", info.Unit)
+			s.writeRepos(ctx, &b, c.Person, info.Unit)
 			b.WriteString("\n")
 		}
 	}
-	ns := asker.Namespace
-	if in.Namespace != "" {
-		ns = in.Namespace
+	ns := asker.Unit
+	if in.Unit != "" {
+		ns = in.Unit
 	}
 	n := 0
 	for _, a := range list {
-		if a.Namespace != ns || !asker.MayAsk(a.ID()) || inChain(c.Run.Chain, a.Name) {
+		if a.Unit != ns || !asker.MayAsk(a.ID()) || inChain(c.Run.Chain, a.Name) {
 			continue
 		}
 		if why, err := s.mayAnswer(ctx, c, a); err != nil {
@@ -73,16 +73,16 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 	}
 	if n == 0 {
 		b.WriteString("There is no agent you may ask for this person here.")
-		if in.Namespace != "" {
-			b.WriteString(" Try without in_namespace.")
+		if in.Unit != "" {
+			b.WriteString(" Try without in_unit.")
 		}
-	} else if ns != asker.Namespace {
+	} else if ns != asker.Unit {
 		fmt.Fprintf(&b, "\nTo ask one of these working in %s, name it as %s/<agent> in ask_agent.", ns, ns)
 	}
 	return strings.TrimSpace(b.String()), false
 }
 
-// writeRepos writes the repos of the namespace ns that person may see, so
+// writeRepos writes the repos of the unit ns that person may see, so
 // that an agent asked about "the app" knows whether there are several.
 // Without Gitea, or when they cannot be read, it writes nothing.
 func (s *Server) writeRepos(ctx context.Context, b *strings.Builder, person, ns string) {
@@ -115,7 +115,7 @@ func (s *Server) writeRepos(ctx context.Context, b *strings.Builder, person, ns 
 }
 
 // inChain tells whether the agent name is part of a run already, in any
-// namespace.
+// unit.
 func inChain(chain []string, name string) bool {
 	return slices.ContainsFunc(chain, func(id string) bool { return agents.NameOf(id) == name })
 }
@@ -150,7 +150,7 @@ func describe(b *strings.Builder, a agents.Agent) {
 		if g.Branch != "" {
 			where += " into " + g.Branch
 		}
-		fmt.Fprintf(b, "  may %s on %s/%s, for %s\n", g.Level, a.Namespace, where, grantFor(g.For))
+		fmt.Fprintf(b, "  may %s on %s/%s, for %s\n", g.Level, a.Unit, where, grantFor(g.For))
 	}
 }
 

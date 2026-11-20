@@ -161,9 +161,9 @@ func (c *collect) answer() string {
 
 // askSpec is the tool ask_agent, for an agent that may ask others.
 func askSpec(a agents.Agent) toolSpec {
-	agent := map[string]any{"type": "string", "enum": a.Asks, "description": "the agent to ask; it works in your namespace"}
+	agent := map[string]any{"type": "string", "enum": a.Asks, "description": "the agent to ask; it works in your unit"}
 	if a.AsksAny() {
-		agent = map[string]any{"type": "string", "description": "the agent to ask, by name as find_agents lists it; it works in your namespace. For one working in another namespace: <namespace>/<agent>"}
+		agent = map[string]any{"type": "string", "description": "the agent to ask, by name as find_agents lists it; it works in your unit. For one working in another unit: <unit>/<agent>"}
 	}
 	return toolSpec{
 		Name:        "ask_agent",
@@ -200,7 +200,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	if err != nil || !ok {
 		return "error: cannot read your own agent folder", true
 	}
-	id := instance(in.Agent, asker.Namespace)
+	id := instance(in.Agent, asker.Unit)
 	switch {
 	case !asker.MayAsk(id):
 		if asker.AsksAny() {
@@ -247,10 +247,10 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	}
 	key := c.Chat + "\x00" + target.ID()
 	log.Printf("agents: %s: %s asks %s (%s)", who, c.Agent, target.ID(), strings.Join(run.Chain, " → "))
-	// The feed shows the hand-off to the asked agent's namespace and to the
+	// The feed shows the hand-off to the asked agent's unit and to the
 	// person, and how it ended.
 	ev := events.Event{Source: events.SourceAgents, Kind: events.KindAsk, Status: events.StatusRunning,
-		Namespace: target.Namespace, Audience: events.AudienceMembers, Actor: who, Agent: target.ID(), StartedBy: "agent " + c.Agent,
+		Unit: target.Unit, Audience: events.AudienceMembers, Actor: who, Agent: target.ID(), StartedBy: "agent " + c.Agent,
 		Title: fmt.Sprintf("%s asked %s, for %s: %s", c.Agent, target.ID(), who, strings.TrimSpace(in.Task)),
 		Key:   fmt.Sprintf("ask:%s:%s:%d", c.Agent, target.ID(), time.Now().UnixNano())}
 	record := func(ctx context.Context, answer string, err error) {
@@ -293,7 +293,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		}()
 		where := "this channel"
 		if !inChannel {
-			where = "the channel of " + target.Namespace
+			where = "the channel of " + target.Unit
 		}
 		return fmt.Sprintf("%s is working on it and will post its answer in %s. Tell the person so; do not wait for it.", target.ID(), where), false
 	}
@@ -314,10 +314,10 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	return target.ID() + " answers:\n" + answer, false
 }
 
-// instance is the agent asked for as it works: in the namespace named, as
-// <namespace>/<agent>, or else, by its name (or garrison/<name>), in ns.
+// instance is the agent asked for as it works: in the unit named, as
+// <unit>/<agent>, or else, by its name (or garrison/<name>), in ns.
 func instance(id, ns string) string {
-	if pre, name, ok := strings.Cut(id, "/"); ok && pre != agents.PlatformNamespace {
+	if pre, name, ok := strings.Cut(id, "/"); ok && pre != agents.PlatformUnit {
 		return pre + "/" + name
 	}
 	return ns + "/" + agents.NameOf(id)
@@ -335,14 +335,14 @@ func (s *Server) mayAnswer(ctx context.Context, c sandbox.Caller, target agents.
 		if ok, err := s.Gitea.CanUse(ctx, &target, person); err != nil {
 			return "", err
 		} else if !ok {
-			return fmt.Sprintf("%s is for the people of %s, and %s is not one of them", target.ID(), target.Namespace, person.Name), nil
+			return fmt.Sprintf("%s is for the people of %s, and %s is not one of them", target.ID(), target.Unit, person.Name), nil
 		}
 	}
 	return s.privateHere(ctx, target, c.Chat)
 }
 
 // privateHere says why a private agent may not answer in chat, where people
-// outside its namespace would read it: a channel other than its namespace's,
+// outside its unit would read it: a channel other than its unit's,
 // which only its people read. "" if it may: a public agent, a private chat,
 // a routine.
 func (s *Server) privateHere(ctx context.Context, a agents.Agent, chat string) (string, error) {
@@ -359,9 +359,9 @@ func (s *Server) privateHere(ctx context.Context, a agents.Agent, chat string) (
 		if err != nil {
 			return "", err
 		}
-		if info.Members && info.Namespace == a.Namespace {
+		if info.Members && info.Unit == a.Unit {
 			return "", nil
 		}
 	}
-	return fmt.Sprintf("%s works on private repos of %s, so it answers only where only %s's people read: ask it in the channel %s or in a private chat", a.ID(), a.Namespace, a.Namespace, a.Namespace), nil
+	return fmt.Sprintf("%s works on private repos of %s, so it answers only where only %s's people read: ask it in the channel %s or in a private chat", a.ID(), a.Unit, a.Unit, a.Unit), nil
 }

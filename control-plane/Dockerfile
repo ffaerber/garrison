@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 go build -trimpath -o /garrison ./control-plane/cmd/garrison
 
 # The Docker CLI deploys stacks; git follows the platform repo; nsenter runs
-# ZFS commands on the host; sops and age encrypt the namespaces' secrets
+# ZFS commands on the host; sops and age encrypt the units' secrets
 # (the dashboard) and decrypt them (the deployer, which alone has the keys).
 # tini is PID 1 and reaps orphans: git leaves helpers behind (git-remote-http
 # of a fetch cut short, detached auto-maintenance), and garrison as PID 1

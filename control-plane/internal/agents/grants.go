@@ -10,7 +10,7 @@ import (
 )
 
 // VisibleMembers in agent.yaml (visible) keeps an agent to its
-// namespace's people (admins, members and root admins) even if all its
+// unit's people (admins, members and root admins) even if all its
 // repos are public. Without it, an agent is for everyone unless it works on
 // a private repo: see the gateway's AgentPrivate.
 const VisibleMembers = "members"
@@ -40,7 +40,7 @@ func Rank(level string) int {
 // the level promises, so a grant must say autonomous.
 var Deploying = []string{"main", "dev"}
 
-// Grant is a right of an agent's own, in one repo of the namespace whose
+// Grant is a right of an agent's own, in one repo of the unit whose
 // grants.yaml gives it.
 type Grant struct {
 	Agent      string   `yaml:"agent"` // which of garrison's agents
@@ -52,7 +52,7 @@ type Grant struct {
 	Unattended bool     `yaml:"unattended"` // may runs without a person use it
 }
 
-// Routine is work an agent starts by itself in the namespace whose
+// Routine is work an agent starts by itself in the unit whose
 // routines.yaml names it, for its owner: every so often, or when a branch
 // moves.
 type Routine struct {
@@ -64,10 +64,10 @@ type Routine struct {
 	Schedule string         `yaml:"schedule"` // cron: minute hour day month weekday, in Garrison's time zone
 	Cron     *cron.Schedule `yaml:"-"`
 	OnPush   *Push          `yaml:"on_push"`
-	// OnAlert starts it when an alert of its namespace fires whose labels
+	// OnAlert starts it when an alert of its unit fires whose labels
 	// have these values, e.g. {alertname: ServiceDown}; {} for every alert.
 	OnAlert map[string]string `yaml:"on_alert"`
-	Owner   string            `yaml:"owner"` // a person of the namespace; grants are checked for them
+	Owner   string            `yaml:"owner"` // a person of the unit; grants are checked for them
 	Task    string            `yaml:"task"`  // the instruction, in words
 }
 
@@ -92,7 +92,7 @@ var (
 	context_ = regexp.MustCompile(`^[^\x00-\x1f]{1,200}$`)
 )
 
-// ConfigRepo is the namespace's config repo, which no grant may name: an
+// ConfigRepo is the unit's config repo, which no grant may name: an
 // agent must never change its own grants.
 const ConfigRepo = "config"
 
@@ -129,10 +129,10 @@ func checkGrants(gs []Grant) (out []Grant, why []string) {
 		case ForAdmins, ForMembers:
 		case ForEveryone:
 			if g.Level != LevelPropose {
-				why = append(why, at+": for: everyone is only for propose; people outside the namespace never merge through its agents")
+				why = append(why, at+": for: everyone is only for propose; people outside the unit never merge through its agents")
 			}
 		default:
-			why = append(why, fmt.Sprintf("%s: for must be admins, members or everyone (groups of this namespace), not %q", at, g.For))
+			why = append(why, fmt.Sprintf("%s: for must be admins, members or everyone (groups of this unit), not %q", at, g.For))
 		}
 		for _, c := range g.Checks {
 			if !context_.MatchString(c) {
@@ -171,8 +171,8 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 				switch {
 				case !labelName.MatchString(k):
 					why = append(why, fmt.Sprintf("%s: on_alert: %q is not a label name", at, k))
-				case k == "namespace":
-					why = append(why, at+": on_alert: namespace is always this namespace")
+				case k == "unit":
+					why = append(why, at+": on_alert: unit is always this unit")
 				case v == "" || len(v) > 200:
 					why = append(why, fmt.Sprintf("%s: on_alert: %s needs a value", at, k))
 				}
@@ -200,13 +200,13 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 			r.Every = d
 		case r.OnPush != nil:
 			if !repoName.MatchString(r.OnPush.Repo) || !branchRe.MatchString(r.OnPush.Branch) || strings.Contains(r.OnPush.Branch, "..") {
-				why = append(why, at+": on_push needs a repo of this namespace and a branch")
+				why = append(why, at+": on_push needs a repo of this unit and a branch")
 			}
 		default:
 			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h), on_push (repo and branch) or on_alert (label values, e.g. {alertname: ServiceDown})")
 		}
 		if !person.MatchString(r.Owner) {
-			why = append(why, at+": owner must be the username of a person of this namespace")
+			why = append(why, at+": owner must be the username of a person of this unit")
 		}
 		if strings.TrimSpace(r.Task) == "" || len(r.Task) > 4000 {
 			why = append(why, at+": task must say what to do, in at most 4000 characters")
@@ -223,7 +223,7 @@ func checkAsks(self string, ids []string) (out []string, why []string) {
 	for _, id := range ids {
 		name := id
 		if m := agentID.FindStringSubmatch(id); m != nil {
-			if m[1] != PlatformNamespace {
+			if m[1] != PlatformUnit {
 				why = append(why, fmt.Sprintf("agents: %q: the agents are all garrison's; name it %s", id, m[2]))
 				continue
 			}
@@ -274,7 +274,7 @@ func (a Agent) GrantFor(repo, branch, level, role string, unattended bool) (Gran
 // it has grants or routines.
 func (a Agent) NeedsAccount() bool { return len(a.Grants) > 0 || len(a.Routines) > 0 }
 
-// WorksOn are the repos of its namespace an agent works on there: those of
+// WorksOn are the repos of its unit an agent works on there: those of
 // its grants and those its routines watch. If one is private, so is the
 // agent, there.
 func (a Agent) WorksOn() []string {

@@ -6,16 +6,16 @@ A guide for people and coding agents changing this repository: how the system fi
 
 Garrison runs on one Ubuntu machine with Docker Swarm and ZFS. **Gitea is the source of truth**: everything that runs is described in a repo, and the control plane makes the machine match `main`.
 
-- **Namespaces** are Gitea organisations. `garrison` is the platform's own: one repo per system stack (`garrison/<stack>` in this repo, with a `compose.yaml` each), plus `garrison/config`, which holds **the agents** (`agents/<name>/agent.yaml`, `prompt.md`, skills), the chains of command (`chains/`) and the LLM providers and models (`llm/`). Every other namespace has a `config` repo (`members.yaml`, `stacks/<name>.yaml`, `grants.yaml`, `routines.yaml`, `secrets/`, `restores/`) and app repos holding only code.
+- **Units** are Gitea organisations. `garrison` is the platform's own: one repo per system stack (`garrison/<stack>` in this repo, with a `compose.yaml` each), plus `garrison/config`, which holds **the agents** (`agents/<name>/agent.yaml`, `prompt.md`, skills), the chains of command (`chains/`) and the LLM providers and models (`llm/`). Every other unit has a `config` repo (`members.yaml`, `stacks/<name>.yaml`, `grants.yaml`, `routines.yaml`, `secrets/`, `restores/`) and app repos holding only code.
 - **The control plane** (`control-plane/`) is one Go binary, `garrison`, with one role per subcommand (`control-plane/cmd/garrison/main.go`):
   - `deploy`: the **deployer**, which applies Git to Swarm on each webhook and every 15 s. System stacks come from `garrison/*/compose.yaml`; apps come from `<ns>/config/stacks/*.yaml`, rendered by `internal/render`, with environments per branch, previews, snapshots before deploys, restores and secrets.
-  - `gateway`: MCP tools for the agents (`internal/gateway/tools.go`), acting with each person's own token. It also syncs members to Gitea teams (`members.go`), and namespaces, groups, channels and models to Open WebUI (`openwebui.go`). It runs the approval check `garrison/approval` on config pull requests.
+  - `gateway`: MCP tools for the agents (`internal/gateway/tools.go`), acting with each person's own token. It also syncs members to Gitea teams (`members.go`), and units, groups, channels and models to Open WebUI (`openwebui.go`). It runs the approval check `garrison/approval` on config pull requests.
   - `agents`: the **agent service**. Open WebUI calls it as an OpenAI-style API. It runs each chat in a sandbox container (`internal/sandbox`, image `sandbox/`: Pi, under gVisor), holds the LLM key, proxies the internet per agent, and runs routines and `ask_agent` (`internal/agentapi`).
   - `home`: the dashboard at `https://<domain>/` (`internal/home`), with the feed, cards, secrets and Models page.
   - `guard`, `gate`: Docker access for pipelines, and the sign-in gate in front of apps.
   - `validate`, `render`, `apply`, `applied`, `claims`: the CLI on the host.
-- **Agents** are defined only in `garrison/config` and work in every namespace. A namespace gives them rights (`grants.yaml`, which gives an agent account of its own in Gitea) and routines (`routines.yaml`). The defaults come from `templates/garrison-config/agents/`: operator, commander, coder, sentry, scout, media. Design: [docs/agents.md](docs/agents.md).
-- **People** sign in through Keycloak (realm `garrison`). The group `root-admins` may change the platform. Namespace roles come from `members.yaml`, applied to Gitea teams `admins` and `members`; nobody approves their own role change.
+- **Agents** are defined only in `garrison/config` and work in every unit. A unit gives them rights (`grants.yaml`, which gives an agent account of its own in Gitea) and routines (`routines.yaml`). The defaults come from `templates/garrison-config/agents/`: operator, commander, coder, sentry, scout, media. Design: [docs/agents.md](docs/agents.md).
+- **People** sign in through Keycloak (realm `garrison`). The group `root-admins` may change the platform. Unit roles come from `members.yaml`, applied to Gitea teams `admins` and `members`; nobody approves their own role change.
 - **Data**: Postgres (`garrison` database: events, routine state), ZFS datasets per app environment, Sanoid snapshots, and SOPS-encrypted secrets in Git.
 
 How a change travels: chat → agent (sandbox) → gateway tool, as the person → a pull request in Gitea → a person approves and merges → webhook → deployer → Swarm. The dashboard feed records each step.
@@ -31,7 +31,7 @@ How a change travels: chat → agent (sandbox) → gateway tool, as the person �
 | What Open WebUI shows | `control-plane/internal/gateway/openwebui.go` | Groups, channels, the pinned how-to, models |
 | Routines, `ask_agent`, sandboxes | `control-plane/internal/agentapi`, `internal/sandbox`, `sandbox/` | |
 | A system stack | `garrison/<stack>/compose.yaml` | Pushed at install; on a running machine, `test/vm/push-repos.sh` |
-| New repos' starting contents | `templates/` | `namespace-config`, `garrison-config`, `app/todo` |
+| New repos' starting contents | `templates/` | `unit-config`, `garrison-config`, `app/todo` |
 | The installer | `install.sh`, `installer/` | Safe to run again: every step checks what exists |
 
 ## Build and test
@@ -80,8 +80,8 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
 - **Bash:** `set -e` is ignored inside anything run after `&&`, `||` or in an `if`, subshells included. `steps.sh` runs steps as plain statements and checks `$?` after.
 - **Open WebUI:**
   - It limits sign-ins, so the gateway keeps its token.
-  - A namespace's group holds only people who have signed in to Open WebUI at least once. It finds them by the email of their Gitea account, or Keycloak's before their first Gitea sign-in (`OpenWebUI.email`); without that, someone added who had not opened Gitea did not see the channel.
+  - A unit's group holds only people who have signed in to Open WebUI at least once. It finds them by the email of their Gitea account, or Keycloak's before their first Gitea sign-in (`OpenWebUI.email`); without that, someone added who had not opened Gitea did not see the channel.
   - In a channel, Open WebUI calls an agent only for a message that mentions it, or that is a Reply to one of its messages (`reply_to_id`). A plain message in its thread goes unanswered. The pinned how-to tells people to use Reply; the browser tests' `Person.reply(..., agent)` mentions the agent, and `commander` checks a Reply. The agent service cannot answer such messages itself: it acts with the person's token, which only Open WebUI's call carries.
   - Right after it starts, its sidebar can show no channels for a while; `Person.sidebar_has` waits for garrison's channel, which everyone has, before saying one is missing.
-  - The models are Garrison's agents, `garrison/<agent>`, for everyone. What membership changes is the namespace's channel: whether it shows in the sidebar and whether its messages can be read.
+  - The models are Garrison's agents, `garrison/<agent>`, for everyone. What membership changes is the unit's channel: whether it shows in the sidebar and whether its messages can be read.
 - **The LLM:** a check that needs a vague request to be clarified first depends on the prompts' rule to ask back (commander, operator, coder). Keep those rules when editing prompts.

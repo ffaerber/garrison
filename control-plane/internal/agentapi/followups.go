@@ -15,7 +15,7 @@ import (
 )
 
 // Followups close the loop on the changes agents open. Once a person merges
-// one, the agent that opened it says so in the namespace's channel, naming
+// one, the agent that opened it says so in the unit's channel, naming
 // whom it was for, so they hear of it without looking; if merging deploys
 // it, the agent says again once it is live, with its address, or that it
 // failed. It follows the feed, from where it was when it started: what
@@ -41,7 +41,7 @@ type Followups struct {
 	unfinished map[int64]time.Time
 }
 
-// welcome is the greeting of a namespace just set up, still to be posted:
+// welcome is the greeting of a unit just set up, still to be posted:
 // its channel follows it by moments.
 type welcome struct {
 	ns, person string
@@ -54,7 +54,7 @@ const welcomeWait = 10 * time.Minute
 // awaited is a merged change whose deploy is still to come.
 type awaited struct {
 	card   changes.Card
-	agent  string // <namespace>/<agent>
+	agent  string // <unit>/<agent>
 	person string
 	commit string   // an app's: the merge commit its deploy names
 	stacks []string // the config's: the stacks it changes, <ns>/<stack>
@@ -105,7 +105,7 @@ func (f *Followups) Check(ctx context.Context) {
 		f.started = true
 		return
 	}
-	es, err := f.Feed.List(ctx, events.Query{Visibility: all, After: f.after, Kinds: []string{events.KindPRMerged, events.KindDeploy, events.KindNamespace}, Limit: 200})
+	es, err := f.Feed.List(ctx, events.Query{Visibility: all, After: f.after, Kinds: []string{events.KindPRMerged, events.KindDeploy, events.KindUnit}, Limit: 200})
 	if err != nil {
 		log.Printf("followups: %v", err)
 		return
@@ -144,9 +144,9 @@ func (f *Followups) Check(ctx context.Context) {
 				continue
 			}
 			f.deployed(ctx, e)
-		case events.KindNamespace:
-			if e.Namespace != "" && e.Actor != "" {
-				f.welcomes = append(f.welcomes, welcome{ns: e.Namespace, person: e.Actor, until: f.now().Add(welcomeWait)})
+		case events.KindUnit:
+			if e.Unit != "" && e.Actor != "" {
+				f.welcomes = append(f.welcomes, welcome{ns: e.Unit, person: e.Actor, until: f.now().Add(welcomeWait)})
 			}
 		}
 	}
@@ -168,7 +168,7 @@ func (f *Followups) Check(ctx context.Context) {
 		if now.Before(w.until) {
 			kept = append(kept, w)
 		} else if len(w.said) == 0 {
-			log.Printf("followups: %s/%s#%d: no deploy within %s", w.card.Namespace, w.card.Repo, w.card.Number, followupWait)
+			log.Printf("followups: %s/%s#%d: no deploy within %s", w.card.Unit, w.card.Repo, w.card.Number, followupWait)
 		}
 	}
 	f.waiting = kept
@@ -181,12 +181,12 @@ func (f *Followups) post(ctx context.Context, agent, person, text string) {
 }
 
 func (f *Followups) merged(ctx context.Context, e events.Event) {
-	if e.Namespace == "" || e.Repo == "" || e.PR == 0 {
+	if e.Unit == "" || e.Repo == "" || e.PR == 0 {
 		return
 	}
-	c, err := f.Cards.Card(ctx, "", e.Namespace, e.Repo, e.PR)
+	c, err := f.Cards.Card(ctx, "", e.Unit, e.Repo, e.PR)
 	if err != nil {
-		log.Printf("followups: %s/%s#%d: %v", e.Namespace, e.Repo, e.PR, err)
+		log.Printf("followups: %s/%s#%d: %v", e.Unit, e.Repo, e.PR, err)
 		return
 	}
 	m := askedByNote.FindStringSubmatch(c.Body)
@@ -200,7 +200,7 @@ func (f *Followups) merged(ctx context.Context, e events.Event) {
 	case c.Repo == gateway.ConfigRepo:
 		for _, file := range c.Files {
 			if name, ok := strings.CutPrefix(file.Path, "stacks/"); ok && strings.HasSuffix(name, ".yaml") && file.Status != "removed" && file.Status != "deleted" {
-				w.stacks = append(w.stacks, c.Namespace+"/"+strings.TrimSuffix(name, ".yaml"))
+				w.stacks = append(w.stacks, c.Unit+"/"+strings.TrimSuffix(name, ".yaml"))
 			}
 		}
 		var parts []string
@@ -226,7 +226,7 @@ func (f *Followups) merged(ctx context.Context, e events.Event) {
 	}
 	if !strings.HasPrefix(e.Actor, "agent-") {
 		// An agent that merged it with its own account said so already.
-		text := fmt.Sprintf("Your change [%s](%s) (%s/%s#%d) is merged, by %s.", c.Title, c.URL, c.Namespace, c.Repo, c.Number, e.Actor)
+		text := fmt.Sprintf("Your change [%s](%s) (%s/%s#%d) is merged, by %s.", c.Title, c.URL, c.Unit, c.Repo, c.Number, e.Actor)
 		if then != "" {
 			text += " " + then
 		}
@@ -243,7 +243,7 @@ func (f *Followups) deployed(ctx context.Context, e events.Event) {
 	}
 	for i := range f.waiting {
 		w := &f.waiting[i]
-		if e.Namespace != w.card.Namespace {
+		if e.Unit != w.card.Unit {
 			continue
 		}
 		match := w.commit != "" && e.Repo == w.card.Repo && e.Commit == w.commit
@@ -257,13 +257,13 @@ func (f *Followups) deployed(ctx context.Context, e events.Event) {
 		w.said[e.Title] = true
 		var text string
 		if e.Status == events.StatusOK {
-			text = fmt.Sprintf("Your change %s (%s/%s#%d) is live", w.card.Title, w.card.Namespace, w.card.Repo, w.card.Number)
+			text = fmt.Sprintf("Your change %s (%s/%s#%d) is live", w.card.Title, w.card.Unit, w.card.Repo, w.card.Number)
 			if e.Link != "" {
 				text += ": " + e.Link
 			}
 			text += "."
 		} else {
-			text = fmt.Sprintf("Your change %s (%s/%s#%d) is merged, but deploying it failed: %s", w.card.Title, w.card.Namespace, w.card.Repo, w.card.Number, e.Title)
+			text = fmt.Sprintf("Your change %s (%s/%s#%d) is merged, but deploying it failed: %s", w.card.Title, w.card.Unit, w.card.Repo, w.card.Number, e.Title)
 			if d := strings.TrimSpace(e.Detail); d != "" {
 				text += "\n\n" + firstLine(d)
 			}
@@ -281,14 +281,14 @@ func firstLine(s string) string {
 	return line
 }
 
-// welcomeText greets the person who made a namespace in its channel: what
+// welcomeText greets the person who made a unit in its channel: what
 // they can ask for, in words, and where what is proposed waits for them.
 func (f *Followups) welcomeText(ns string) string {
 	where := "in Gitea, as a pull request"
 	if f.Dashboard != "" {
 		where = "on your dashboard, " + strings.TrimSuffix(f.Dashboard, "/") + ", under Waiting for you"
 	}
-	return fmt.Sprintf("Welcome to %[1]s, your new namespace. This is its channel: only its people read it, and here the agents work in %[1]s. Ask me in words, for example:\n\n"+
+	return fmt.Sprintf("Welcome to %[1]s, your new unit. This is its channel: only its people read it, and here the agents work in %[1]s. Ask me in words, for example:\n\n"+
 		"- `@operator make the repo app in %[1]s from the template todo, and put it online as todo`\n"+
 		"- `@operator every Monday at 8, check that todo answers and tell us here`\n"+
 		"- `@operator add bob to %[1]s as a member`\n\n"+

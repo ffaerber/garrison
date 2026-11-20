@@ -222,7 +222,7 @@ mkdir -p "$ETC/llm-keys"
 chmod 700 "$ETC/llm-keys"
 install -m 644 "$ROOT/garrison/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
 
-# The namespaces' secrets are encrypted for their own keys, which the
+# The units' secrets are encrypted for their own keys, which the
 # deployer makes here, and for the recovery key. Only its public half stays;
 # the private half is shown once, when the install is done, to be kept
 # offline: it decrypts every secret should the machine be lost.
@@ -323,7 +323,7 @@ systemctl enable garrison-repair >/dev/null 2>&1
 # is replaced instead of being taken for healthy.
 /usr/local/lib/garrison/repair-services.sh
 
-# ---------- BuildKit, for the user namespaces' pipelines ----------
+# ---------- BuildKit, for the user units' pipelines ----------
 # It pushes to Gitea's registry at its public name, which it reaches on the
 # host through Traefik and trusts with the installation's certificate.
 {
@@ -340,7 +340,7 @@ systemctl enable garrison-repair >/dev/null 2>&1
 install -D -m 755 "$ROOT/host/buildkit.sh" /usr/local/lib/garrison/buildkit.sh
 cat > /etc/systemd/system/garrison-buildkit.service <<UNIT
 [Unit]
-Description=Garrison: BuildKit for the user namespaces' pipelines
+Description=Garrison: BuildKit for the user units' pipelines
 After=docker.service
 Requires=docker.service
 
@@ -414,7 +414,7 @@ say "Done"
 cat <<MSG
   Keycloak  https://keycloak.$DOMAIN  (people sign in to the realm "garrison")
   Gitea     https://git.$DOMAIN
-  Chat      https://chat.$DOMAIN  (one agent per namespace)
+  Chat      https://chat.$DOMAIN  (one agent per unit)
   Grafana   https://grafana.$DOMAIN
   Admin     $ADMIN_USER (password in $ETC/admin-password)
   TLS       self-signed; certificate in $ETC/tls.crt
@@ -429,7 +429,7 @@ if [ -s "$ETC/sops/recovery-key.txt" ]; then
 $(grep -v '^#' "$ETC/sops/recovery-key.txt" | sed 's/^/    /')
 
   With it, \`SOPS_AGE_KEY_FILE=<file holding it> sops decrypt secrets/<name>.yaml\`
-  in a namespace's config repo shows a secret.
+  in a unit's config repo shows a secret.
 MSG
   rm -f "$ETC/sops/recovery-key.txt"
 fi

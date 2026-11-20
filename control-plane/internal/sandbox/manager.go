@@ -21,29 +21,29 @@ import (
 // lets the agent service touch nothing else.
 const Label = "garrison.sandbox"
 
-// NamespaceLabel names the namespace a sandbox works in; the guard binds
-// only that namespace's media library.
-const NamespaceLabel = "garrison.namespace"
+// UnitLabel names the unit a sandbox works in; the guard binds
+// only that unit's media library.
+const UnitLabel = "garrison.unit"
 
-// MediaTarget is where the namespace's media library is in a sandbox.
+// MediaTarget is where the unit's media library is in a sandbox.
 const MediaTarget = "/data/media"
 
 // Want is the sandbox a turn needs.
 type Want struct {
 	Key        string // one sandbox per key: a chat and an agent
 	Chat       string
-	Agent      string // <namespace>/<agent>
+	Agent      string // <unit>/<agent>
 	Person     string // whose message started the turn
 	Model      string
 	Prompt     string // the system prompt
 	Definition string // changes when the agent's definition does
-	// Media, if set, is the host folder of the namespace's media library,
+	// Media, if set, is the host folder of the unit's media library,
 	// bound at /data/media; a change restarts the sandbox between turns.
 	Media string
 }
 
-// Namespace is the namespace the agent works in, from Agent.
-func (w Want) Namespace() string {
+// Unit is the unit the agent works in, from Agent.
+func (w Want) Unit() string {
 	ns, _, _ := strings.Cut(w.Agent, "/")
 	return ns
 }
@@ -115,7 +115,7 @@ var ErrBusy = errors.New("busy")
 // Run is whom a turn is for and what started it.
 type Run struct {
 	Token      string   // the Keycloak token of the person whose message started it; empty without one
-	StartedBy  string   // person, agent <namespace>/<agent>, routine <namespace>/<agent>/<name>
+	StartedBy  string   // person, agent <unit>/<agent>, routine <unit>/<agent>/<name>
 	Chain      []string // the agents of this run, the first one first, this one last
 	Unattended bool     // nobody is watching: a routine
 	Owner      string   // then: the routine's owner
@@ -253,7 +253,7 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 		return err
 	}
 	labels := map[string]string{Label: "true", "garrison.chat": want.Chat, "garrison.agent": want.Agent, "garrison.person": want.Person,
-		NamespaceLabel: want.Namespace()}
+		UnitLabel: want.Unit()}
 	// A container left from before (this service restarted) is replaced; the
 	// volume, with the workspace and Pi's session, stays.
 	if err := m.Docker.Remove(ctx, s.name); err != nil {
@@ -424,7 +424,7 @@ func (m *Manager) stop(ctx context.Context, s *Session) {
 
 // Caller is who a sandbox acts for.
 type Caller struct {
-	Agent  string // <namespace>/<agent>
+	Agent  string // <unit>/<agent>
 	Model  string
 	Chat   string
 	Person string // whose turn runs: the person, or a routine's owner

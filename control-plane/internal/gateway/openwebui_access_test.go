@@ -14,7 +14,7 @@ import (
 // An agent whose repo went private must lose its access for everyone: Open
 // WebUI's model update keeps the grants, so they are set on their own.
 func TestAgentThatTurnsPrivateLosesItsAccess(t *testing.T) {
-	a := agents.Agent{Namespace: "crud", Name: "helper", Description: "Helps"}
+	a := agents.Agent{Unit: "crud", Name: "helper", Description: "Helps"}
 	o := &OpenWebUI{}
 	models := map[string]owuiModel{a.ID(): o.want(a, nil, false)}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +63,7 @@ func TestAnAgentGoesByItsNameAlone(t *testing.T) {
 		{"garrison", "commander", "garrison/commander", "commander"},
 		{"garrison", "operator", "garrison/operator", "operator"},
 	} {
-		m := o.want(agents.Agent{Namespace: c.ns, Name: c.name}, nil, false)
+		m := o.want(agents.Agent{Unit: c.ns, Name: c.name}, nil, false)
 		if m.ID != c.id || m.Name != c.shown {
 			t.Errorf("%s/%s: id %q, name %q", c.ns, c.name, m.ID, m.Name)
 		}

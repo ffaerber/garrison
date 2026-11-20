@@ -16,8 +16,8 @@ import (
 	"garrison/control-plane/internal/models"
 )
 
-// ErrForbidden: the person may not manage the namespace's secrets.
-var ErrForbidden = errors.New("only the namespace's admins and root admins manage its secrets")
+// ErrForbidden: the person may not manage the unit's secrets.
+var ErrForbidden = errors.New("only the unit's admins and root admins manage its secrets")
 
 // ErrInvalid: a name or value that cannot be a secret.
 var ErrInvalid = errors.New("invalid secret")
@@ -39,53 +39,53 @@ type Gitea interface {
 	Commit(ctx context.Context, org, repo, message, author string, files map[string][]byte) error
 }
 
-// Store writes a namespace's secrets for the dashboard's form: it encrypts
+// Store writes a unit's secrets for the dashboard's form: it encrypts
 // with the public keys alone, so it can write secrets but never read them.
 type Store struct {
 	Gitea Gitea
-	// Recipients are the public keys of a namespace (the deployer's
+	// Recipients are the public keys of a unit (the deployer's
 	// Keys.Handler, through Remote).
 	Recipients func(ctx context.Context, ns string) ([]string, error)
 	Run        Runner
 	Domain     string
 }
 
-// PlatformNamespace has no apps of its config. Its secrets are only the
+// PlatformUnit has no apps of its config. Its secrets are only the
 // LLM providers' API keys, llm-<provider> (models.KeySecret), which root
 // admins set on the dashboard's Models page and the deployer writes to the
 // agent service's key folder.
-const PlatformNamespace = "garrison"
+const PlatformUnit = "garrison"
 
 // ErrPlatformName: a secret of garrison that is not a provider's key.
 var ErrPlatformName = fmt.Errorf("%w: garrison keeps only the LLM providers' keys, llm-<provider>, set on the Models page", ErrInvalid)
 
-// ConfigRepo is the repo a namespace's secrets are in.
+// ConfigRepo is the repo a unit's secrets are in.
 const ConfigRepo = "config"
 
 // May tells whether person may manage the secrets of ns: its admins and
 // root admins; garrison's, its providers' keys, root admins only.
 func (s *Store) May(ctx context.Context, ns, person string) (bool, error) {
-	if !namespace.MatchString(ns) {
+	if !unit.MatchString(ns) {
 		return false, nil
 	}
 	admin, err := s.Gitea.IsAdmin(ctx, person)
-	if err != nil || admin || ns == PlatformNamespace {
+	if err != nil || admin || ns == PlatformUnit {
 		return admin, err
 	}
 	role, err := s.Gitea.Role(ctx, ns, person)
 	return role == "admin", err
 }
 
-// Namespaces are those whose secrets person may manage on the Secrets page:
+// Units are those whose secrets person may manage on the Secrets page:
 // garrison's are on the Models page.
-func (s *Store) Namespaces(ctx context.Context, person string) ([]string, error) {
+func (s *Store) Units(ctx context.Context, person string) ([]string, error) {
 	orgs, err := s.Gitea.Orgs(ctx, person)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, ns := range orgs {
-		if ns == PlatformNamespace {
+		if ns == PlatformUnit {
 			continue
 		}
 		ok, err := s.May(ctx, ns, person)
@@ -100,7 +100,7 @@ func (s *Store) Namespaces(ctx context.Context, person string) ([]string, error)
 	return out, nil
 }
 
-// Names are the secrets a namespace has.
+// Names are the secrets a unit has.
 func (s *Store) Names(ctx context.Context, ns string) ([]string, error) {
 	files, err := s.Gitea.Files(ctx, ns, ConfigRepo, Dir)
 	if err != nil {
@@ -134,7 +134,7 @@ func (s *Store) Set(ctx context.Context, ns, name, value, person string) error {
 	if !Name.MatchString(name) {
 		return fmt.Errorf("%w: a name is lowercase letters, digits and dashes, up to 32", ErrInvalid)
 	}
-	if _, ok := models.ProviderOf(name); ns == PlatformNamespace && !ok {
+	if _, ok := models.ProviderOf(name); ns == PlatformUnit && !ok {
 		return ErrPlatformName
 	}
 	if err := CheckValue(value); err != nil {
@@ -169,7 +169,7 @@ func (s *Store) Delete(ctx context.Context, ns, name, person string) error {
 	if !Name.MatchString(name) {
 		return fmt.Errorf("%w: no secret is called %q", ErrInvalid, name)
 	}
-	if _, ok := models.ProviderOf(name); ns == PlatformNamespace && !ok {
+	if _, ok := models.ProviderOf(name); ns == PlatformUnit && !ok {
 		return ErrPlatformName
 	}
 	if ok, err := s.May(ctx, ns, person); err != nil {
@@ -188,7 +188,7 @@ func (s *Store) Delete(ctx context.Context, ns, name, person string) error {
 }
 
 // Remote asks the deployer at base (e.g. http://control-plane_deployer:8090)
-// for a namespace's public keys.
+// for a unit's public keys.
 func Remote(base string) func(ctx context.Context, ns string) ([]string, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	return func(ctx context.Context, ns string) ([]string, error) {

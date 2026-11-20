@@ -46,7 +46,7 @@ func TestSwarmGolden(t *testing.T) {
 }
 
 func TestSwarmErrors(t *testing.T) {
-	s, err := stack.Parse([]byte("stack: a\nnamespace: n\nentrypoint: w\nservices:\n  w: { image: i:1, port: 1 }\nenvironments:\n  main: {}\n"))
+	s, err := stack.Parse([]byte("stack: a\nunit: n\nentrypoint: w\nservices:\n  w: { image: i:1, port: 1 }\nenvironments:\n  main: {}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestImagePlaceholders(t *testing.T) {
 // environment and an internal service get neither.
 func TestTheIngressKeyOfPrivateEnvironments(t *testing.T) {
 	s, err := stack.Parse([]byte(`stack: todo
-namespace: homepage
+unit: homepage
 entrypoint: web
 services:
   web: { image: "todo:1", port: 8080, env: { MODE: "x" } }

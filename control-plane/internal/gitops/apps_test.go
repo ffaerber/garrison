@@ -30,7 +30,7 @@ environments:
   dev: { private: true }
 `
 
-// fakeApps plays Gitea (API and git) and Docker for app namespaces.
+// fakeApps plays Gitea (API and git) and Docker for app units.
 type fakeApps struct {
 	mu       sync.Mutex
 	t        *testing.T
@@ -314,7 +314,7 @@ func TestNoAppIsDeployedWithoutRegistryCredentials(t *testing.T) {
 func TestAppsThatBreakTheRulesAreNotDeployed(t *testing.T) {
 	for name, c := range map[string]struct{ file, stack string }{
 		"stack named unlike its file": {"todo", "stack: other\n" + todoStack},
-		"stack of another namespace":  {"todo", "namespace: garrison\n" + todoStack},
+		"stack of another unit":       {"todo", "unit: garrison\n" + todoStack},
 		"reserved hostname":           {"grafana", todoStack},
 		"not a valid stack":           {"todo", "source: todo\n"},
 		"source that does not exist":  {"todo", strings.Replace(todoStack, "source: todo", "source: nothing", 1)},
@@ -357,7 +357,7 @@ func TestAHostnameIsFirstComeFirstServed(t *testing.T) {
 	c, f := setupApps(t)
 	ctx := context.Background()
 	apps, _ := c.syncApps(ctx, false, map[string]App{})
-	// Another namespace's todo would take the same hostnames.
+	// Another unit's todo would take the same hostnames.
 	f.repos["other"] = []string{"config", "todo"}
 	f.files["other/config@main"] = map[string]string{"stacks/todo.yaml": todoStack}
 	f.commits["other/config@main"] = "eeee"
@@ -488,7 +488,7 @@ func TestTheFeedGetsDeploysWaitsAndRemovals(t *testing.T) {
 
 	var got []string
 	for _, e := range feed.All() {
-		if e.Source != events.SourceDeployer || e.Namespace != "homepage" {
+		if e.Source != events.SourceDeployer || e.Unit != "homepage" {
 			t.Errorf("%+v", e)
 		}
 		got = append(got, e.Kind+" "+e.Status+" "+e.Repo+"@"+e.Commit[:min(4, len(e.Commit))])
@@ -553,7 +553,7 @@ func TestPrivateEnvironmentsGetTheirIngressKey(t *testing.T) {
 	}
 }
 
-// The main environment gets a stored secret, decrypted with the namespace's
+// The main environment gets a stored secret, decrypted with the unit's
 // key; other environments, running code not yet merged, do not. A changed
 // secret changes main's spec, so main redeploys and the others do not.
 func TestOnlyMainGetsStoredSecrets(t *testing.T) {
@@ -599,15 +599,15 @@ func TestOnlyMainGetsStoredSecrets(t *testing.T) {
 	}
 }
 
-// {{members}} is the namespace's people, from members.yaml: rendered into a
+// {{members}} is the unit's people, from members.yaml: rendered into a
 // service's env, and part of the stack's spec, so a change redeploys it.
-func TestTheNamespacesPeople(t *testing.T) {
+func TestTheUnitsPeople(t *testing.T) {
 	cfg := t.TempDir()
 	os.WriteFile(filepath.Join(cfg, "members.yaml"), []byte("# who\nadmins: [alice]\nmembers: [bob, alice, \"../x\"]\n"), 0o644)
-	if got := namespacePeople(cfg); strings.Join(got, ",") != "alice,bob" {
+	if got := unitPeople(cfg); strings.Join(got, ",") != "alice,bob" {
 		t.Errorf("people: %v", got)
 	}
-	if got := namespacePeople(t.TempDir()); got != nil {
+	if got := unitPeople(t.TempDir()); got != nil {
 		t.Errorf("no members.yaml: %v", got)
 	}
 	c := &Config{Domain: "home.test"}

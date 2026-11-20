@@ -8,7 +8,7 @@ services:
             labels:
                 garrison.app: jellyfin
                 garrison.environment: main
-                garrison.namespace: media
+                garrison.unit: media
                 traefik.enable: "true"
                 traefik.http.routers.jellyfin-admin.entrypoints: websecure
                 traefik.http.routers.jellyfin-admin.rule: Host(`jellyfin-admin.example.com`)
@@ -38,7 +38,7 @@ services:
             labels:
                 garrison.app: jellyfin
                 garrison.environment: main
-                garrison.namespace: media
+                garrison.unit: media
                 traefik.enable: "true"
                 traefik.http.routers.jellyfin.entrypoints: websecure
                 traefik.http.routers.jellyfin.rule: Host(`jellyfin.example.com`)
@@ -61,7 +61,7 @@ services:
             labels:
                 garrison.app: jellyfin
                 garrison.environment: main
-                garrison.namespace: media
+                garrison.unit: media
 networks:
     traefik-public:
         external: true

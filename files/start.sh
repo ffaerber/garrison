@@ -6,7 +6,7 @@ set -eu
 db=/database/filebrowser.db
 if [ ! -f "$db" ]; then
   # Everyone may change files as far as Filebrowser knows: the gate refuses
-  # changes from anyone not of the namespace. No shares (public links past
+  # changes from anyone not of the unit. No shares (public links past
   # the sign-in), no commands, no admins.
   /filebrowser config init -d "$db" --auth.method=proxy --auth.header=X-Garrison-User \
     --perm.create --perm.modify --perm.rename --perm.delete --perm.download \

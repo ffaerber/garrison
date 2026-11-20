@@ -16,13 +16,13 @@ import (
 	"garrison/control-plane/internal/hooks"
 )
 
-// Builders gives every namespace other than garrison the credentials its
-// pipelines push images with: a build account, <namespace>-builder, in the
+// Builders gives every unit other than garrison the credentials its
+// pipelines push images with: a build account, <unit>-builder, in the
 // organisation's team "builders", which may write packages and nothing else,
 // with a token limited to packages. The token and the registry's address
 // become the organisation's Actions secrets REGISTRY_USER and REGISTRY_TOKEN
 // and variable REGISTRY. Gitea's own job tokens cannot push to an
-// organisation's registry, and a namespace's account can push only there.
+// organisation's registry, and a unit's account can push only there.
 type Builders struct {
 	// Wake, when set, starts a sync before the interval is over.
 	Wake   <-chan struct{}
@@ -33,8 +33,8 @@ type Builders struct {
 	CA string
 }
 
-// BuilderName is the build account of a namespace.
-func BuilderName(namespace string) string { return namespace + "-builder" }
+// BuilderName is the build account of a unit.
+func BuilderName(unit string) string { return unit + "-builder" }
 
 func randomHex(n int) string {
 	b := make([]byte, n)
@@ -44,16 +44,16 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// Sync sets up every namespace that lacks its build credentials.
+// Sync sets up every unit that lacks its build credentials.
 func (b *Builders) Sync(ctx context.Context) error {
-	namespaces, err := b.Gitea.Namespaces(ctx, "")
+	units, err := b.Gitea.Units(ctx, "")
 	if err != nil {
 		return err
 	}
 	present := map[string]bool{}
-	for _, ns := range namespaces {
+	for _, ns := range units {
 		present[ns.Name] = true
-		if ns.Name == PlatformNamespace {
+		if ns.Name == PlatformUnit {
 			continue
 		}
 		if err := b.setup(ctx, ns.Name); err != nil {
@@ -63,8 +63,8 @@ func (b *Builders) Sync(ctx context.Context) error {
 	return b.removeGone(ctx, present)
 }
 
-// removeGone deletes the build accounts of namespaces that are gone, and
-// with them their tokens: a namespace made again under the same name gets
+// removeGone deletes the build accounts of units that are gone, and
+// with them their tokens: a unit made again under the same name gets
 // an account of its own, and the old token pushes nowhere.
 func (b *Builders) removeGone(ctx context.Context, present map[string]bool) error {
 	users, err := b.Gitea.users(ctx)
@@ -79,7 +79,7 @@ func (b *Builders) removeGone(ctx context.Context, present map[string]bool) erro
 		if _, err := b.Gitea.do(ctx, "", http.MethodDelete, "/admin/users/"+u.Login, nil, nil); err != nil {
 			return fmt.Errorf("remove the build account of %s, which is gone: %w", ns, err)
 		}
-		log.Printf("builders: removed %s: its namespace is gone", u.Login)
+		log.Printf("builders: removed %s: its unit is gone", u.Login)
 	}
 	return nil
 }
@@ -130,7 +130,7 @@ func (b *Builders) setup(ctx context.Context, ns string) error {
 			ID int64 `json:"id"`
 		}
 		if _, err := g.do(ctx, "", http.MethodPost, "/orgs/"+ns+"/teams", map[string]any{
-			"name": "builders", "description": "Build accounts of this namespace's pipelines: may push images.",
+			"name": "builders", "description": "Build accounts of this unit's pipelines: may push images.",
 			"permission": "read", "units_map": map[string]string{"repo.packages": "write"},
 			"includes_all_repositories": false, "can_create_org_repo": false,
 		}, &created); err != nil {
@@ -166,7 +166,7 @@ func (b *Builders) setup(ctx context.Context, ns string) error {
 			return err
 		}
 	}
-	log.Printf("builders: namespace %s can push images as %s", ns, user)
+	log.Printf("builders: unit %s can push images as %s", ns, user)
 	return nil
 }
 

@@ -33,7 +33,7 @@ func TestParseSpecExample(t *testing.T) {
 
 const minimal = `
 stack: site
-namespace: homepage
+unit: homepage
 entrypoint: web
 services:
   web: { image: nginx:1, port: 80 }
@@ -127,7 +127,7 @@ environments:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Name != "todo" || s.Namespace != "homepage" || s.Source != "todo" || s.Environments["dev"].Hostname != "dev-todo" {
+	if s.Name != "todo" || s.Unit != "homepage" || s.Source != "todo" || s.Environments["dev"].Hostname != "dev-todo" {
 		t.Errorf("%+v", s)
 	}
 	upstream := "entrypoint: web\nservices:\n  web: { image: ghcr.io/immich-app/immich-server:v1.135.3, port: 2283 }\nenvironments:\n  main: { private: true }\n"
@@ -136,7 +136,7 @@ environments:
 	}
 	for name, c := range map[string]struct{ file, data, want string }{
 		"other name":        {"todo", "stack: other\n" + own, "leave it out"},
-		"other ns":          {"todo", "namespace: shop\n" + own, "leave it out"},
+		"other ns":          {"todo", "unit: shop\n" + own, "leave it out"},
 		"bad file name":     {"To_do", own, "lowercase"},
 		"dev, no source":    {"x", "entrypoint: web\nservices:\n  web: { image: a, port: 80 }\nenvironments:\n  main: {}\n  dev: {}\n", "needs a source repo"},
 		"commit, no source": {"x", "entrypoint: web\nservices:\n  web: { image: \"{{registry}}/a/b:{{commit}}\", port: 80 }\nenvironments:\n  main: {}\n", "needs a source repo"},
@@ -146,7 +146,7 @@ environments:
 		}
 	}
 	// On its own, a stack file names itself.
-	if _, err := Parse([]byte(upstream)); err == nil || !strings.Contains(err.Error(), "names its stack and namespace") {
+	if _, err := Parse([]byte(upstream)); err == nil || !strings.Contains(err.Error(), "names its stack and unit") {
 		t.Errorf("standalone: %v", err)
 	}
 }

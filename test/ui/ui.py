@@ -1,5 +1,5 @@
 """The UI scenarios: everything a person does, clicked and typed in Gitea,
-Open WebUI and the dashboard, from the namespace todo to its todo app deployed, a
+Open WebUI and the dashboard, from the unit todo to its todo app deployed, a
 screenshot, a scheduled job and a question a routine asks. See
 docs/scenarios.md, "In the browser". Run by test/ui/run.sh ui.
 """
@@ -14,7 +14,7 @@ from lib import (CHAT, channel_id, DOMAIN, GIT, HOME, Person, approval, browser,
 
 # The app is the template todo: the repo REPO, deployed as STACK at
 # https://STACK.<domain>, as the deploy step of the VM test does it.
-NS = os.environ.get("UI_NAMESPACE", "todo")
+NS = os.environ.get("UI_UNIT", "todo")
 REPO, STACK = os.environ.get("UI_REPO", "app"), os.environ.get("UI_STACK", "todo")
 HEADING = "<h1>Todo</h1>"
 GREEN = "rgb(46, 125, 50)"  # #2e7d32
@@ -45,7 +45,7 @@ check("bob signs in to Gitea", bob.sign_in_gitea)
 check("and to Open WebUI", bob.sign_in_chat)
 check("the admin signs in to Gitea", admin.sign_in_gitea)
 
-section(f"2. alice makes the namespace {NS} in Gitea's form")
+section(f"2. alice makes the unit {NS} in Gitea's form")
 check("she fills in New Organisation", alice.create_org, NS)
 check("within seconds it has its config, alice its first admin", until, 20,
       lambda: "alice" in (raw(NS, "config", "members.yaml") or ""))
@@ -71,7 +71,7 @@ alice.snap("welcome in the channel")
 
 def set_up_in_feed():
     alice.page.goto(f"{HOME}/?ns={NS}")
-    return f"The namespace {NS} is set up" in alice.page.content()
+    return f"The unit {NS} is set up" in alice.page.content()
 
 
 check("alice's dashboard says it is set up", until, 20, set_up_in_feed)
@@ -98,7 +98,7 @@ stack_pr = check("the operator makes the repo from the template and proposes the
                  f"{NS}/config with propose_change: the yaml block of the README.md of {NS}/{REPO}, as it is.",
                  lambda: newest_pr(NS, "config", "alice", file=f"stacks/{STACK}.yaml"))
 check("the repo has the template's todo app", lambda: HEADING in (raw(NS, REPO, "page.html") or ""))
-# alice is the namespace's only person: nobody else could approve, so her own needs no other approval.
+# alice is the unit's only person: nobody else could approve, so her own needs no other approval.
 check(f"as {NS}'s only person, her own passes the approval check", until, 60, lambda: approval(NS, stack_pr or 0) == "success")
 
 
@@ -136,7 +136,7 @@ alice.snap("todo is green")
 section("6. the operator takes a screenshot of the todo list")
 shot_pr = check("it proposes the screenshot in a pull request", retry, alice, NS, "operator",
                 f"Take a screenshot of https://{STACK}.{DOMAIN}/ and propose it as docs/{STACK}.png in the repo {NS}/{REPO}.",
-                f"Please call screenshot now: url https://{STACK}.{DOMAIN}/, namespace {NS}, repo {REPO}, path docs/{STACK}.png.",
+                f"Please call screenshot now: url https://{STACK}.{DOMAIN}/, unit {NS}, repo {REPO}, path docs/{STACK}.png.",
                 lambda: newest_pr(NS, REPO, "alice", file=f"docs/{STACK}.png"))
 
 
@@ -154,7 +154,7 @@ gitea(f"/repos/{NS}/{REPO}/pulls/{shot_pr or 0}", "PATCH", {"state": "closed"})
 
 section(f"7. bob joins {NS}; main of its app then takes only approved pull requests")
 member_pr = check("the operator proposes bob as a member", retry, alice, NS, "operator",
-                  f"Add bob as a member of the namespace {NS}; alice stays its admin. Do not ask back.",
+                  f"Add bob as a member of the unit {NS}; alice stays its admin. Do not ask back.",
                   f"Please propose members.yaml in {NS}/config now: admins [alice], members [bob].",
                   lambda: newest_pr(NS, "config", "alice", file="members.yaml"))
 check("the admin approves it", admin.approve, NS, "config", member_pr or 0)
@@ -174,7 +174,7 @@ check("then bob merges it", bob.merge, NS, REPO, bob_pr or 0)
 check(f"{STACK} shows bob's heading", until, 900, alice.page_shows, STACK, BOBS, every=10)
 
 section(f"8. scheduled agents: alice gives the operator two routines in {NS}, in Gitea's editor")
-# The operator is garrison's; the namespace's routines.yaml says what it does there
+# The operator is garrison's; the unit's routines.yaml says what it does there
 # by itself.
 now = datetime.now(ZONE)
 greet_at, ask_at = now + timedelta(minutes=5), now + timedelta(minutes=6)
@@ -234,14 +234,14 @@ bob.snap("the routine went on")
 check("his dashboard no longer lists it", lambda: (bob.page.goto(f"{HOME}/"), bob.page.locator("section.waiting a.answer").count() == 0)[1])
 
 section(f"10. the commander, by its name, in {NS}'s channel")
-# The same agent in every channel, @commander; here it works in the namespace.
+# The same agent in every channel, @commander; here it works in the unit.
 said = check("bob types @commander, picks it and asks it", bob.ask, NS, "commander",
              f"Which agent should I ask to change the todo app of {NS}/{REPO}? Only tell me whom; do not do it yourself.")
 check("it answers, naming the coder or the operator", lambda: any(a in (said or "").lower() for a in ("coder", "operator")))
 bob.snap("asked the commander")
 
 section("11. a scheduled job of the app: a Gitea Actions workflow on a cron schedule")
-# Its own job, in the app's repo, on the namespace's runner: no agent in it.
+# Its own job, in the app's repo, on the unit's runner: no agent in it.
 # Gitea starts scheduled workflows of the default branch, about every two
 # minutes at most; the runner's image is Alpine, so the steps run in sh.
 NIGHTLY = f"""name: nightly

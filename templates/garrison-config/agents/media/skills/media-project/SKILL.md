@@ -5,7 +5,7 @@ description: How a media project is laid out (styles, ComfyUI workflows, the med
 
 # A media project
 
-A project is a repo of the namespace, e.g. `media/demo`, and a folder of its media library, `/data/media/demo/`, where `generate_media` puts what it makes, each file with a `.json` beside it saying how it was made (prompt, style, seed, workflow).
+A project is a repo of the unit, e.g. `media/demo`, and a folder of its media library, `/data/media/demo/`, where `generate_media` puts what it makes, each file with a `.json` beside it saying how it was made (prompt, style, seed, workflow).
 
 ```
 README.md            what the project is: subject, audience, tone; read it before generating

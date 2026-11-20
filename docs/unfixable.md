@@ -12,14 +12,14 @@ Branch protection keeps everyone, root admins included, from pushing to `main` o
 ## Repos can be deleted in Gitea's UI
 
 - Root admins (Gitea site admins) can delete any repo, in the UI or the API.
-- Namespace admins can delete their namespace's repos too, as long as their team has admin access (today). Lowering it to write access, with deletion through an approved pull request done by the gateway, is planned and closes this part.
+- Unit admins can delete their unit's repos too, as long as their team has admin access (today). Lowering it to write access, with deletion through an approved pull request done by the gateway, is planned and closes this part.
 
 - **Why:** Gitea has no setting to switch off repo deletion; it follows the access level, and site admins have every level.
 - **Instead:** keep deletion rights with root admins only (planned, see above). A deleted repo's history is gone unless there is a backup: snapshots of Gitea's data are not built yet, so today nothing brings a deleted repo back.
 
-## Namespace channels in Open WebUI can be deleted by its admins
+## Unit channels in Open WebUI can be deleted by its admins
 
-People cannot delete or rename a namespace's channel (only its creator, the gateway's account, and Open WebUI admins can). But root admins are Open WebUI admins.
+People cannot delete or rename a unit's channel (only its creator, the gateway's account, and Open WebUI admins can). But root admins are Open WebUI admins.
 
 - **Why:** Open WebUI lets every admin delete any channel and has no setting against it.
 - **Instead:** the gateway makes a deleted channel again at its next sync, and puts back a renamed one, but the messages of a deleted channel are lost.

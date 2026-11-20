@@ -38,8 +38,8 @@ auth=$(docker exec -u git "$(container gitea_gitea)" sh -c '
 ' "$DOMAIN")
 
 # ---------- the garrison organisation ----------
-# A namespace is a Gitea organisation and each of its stacks a repo. The
-# system stack is the namespace `system`. Everyone signed in can read it; only
+# A unit is a Gitea organisation and each of its stacks a repo. The
+# system stack is the unit `system`. Everyone signed in can read it; only
 # Gitea admins, i.e. root admins, can change it.
 ROOT=$(cd "$here/../.." && pwd)
 work=$(mktemp -d)

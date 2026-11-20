@@ -26,7 +26,7 @@ func TestAppFilesTodo(t *testing.T) {
 }
 
 func TestAppFilesUnknown(t *testing.T) {
-	for _, name := range []string{"", "static-web", "../namespace-config", "todo/.."} {
+	for _, name := range []string{"", "static-web", "../unit-config", "todo/.."} {
 		if AppFiles(name, "lab", "example") != nil {
 			t.Errorf("%q gave files", name)
 		}

@@ -1,6 +1,6 @@
 // Package agentapi is the agent service: an OpenAI-compatible API that
 // Open WebUI talks to as if it were an LLM. Each model is an agent of a
-// namespace, <namespace>/<agent>, read from its config repo; a chat with it
+// unit, <unit>/<agent>, read from its config repo; a chat with it
 // runs the agent's loop here: the LLM with the agent's prompt and its tools
 // from the gateway, which act as the person chatting. Open WebUI sends that
 // person's Keycloak token, and holds no LLM key.
@@ -28,7 +28,7 @@ import (
 	"garrison/control-plane/internal/sandbox"
 )
 
-// Agents finds the agents defined in the namespaces' config repos.
+// Agents finds the agents defined in the units' config repos.
 type Agents interface {
 	All(ctx context.Context) ([]agents.Agent, error)
 	Get(ctx context.Context, id string) (agents.Agent, bool, error)
@@ -49,10 +49,10 @@ type Server struct {
 	MaxToolCalls int              // tool calls per turn in a sandbox; 0: 60
 	Git          *GitProxy        // Git for the sandboxes; nil: none
 	Gitea        *gateway.Gitea   // who may use an agent (visible); nil: everyone
-	// Media reads the namespaces' configs for their media library (the
+	// Media reads the units' configs for their media library (the
 	// share media), which their sandboxes get at /data/media; nil: none.
 	Media      MediaFiles
-	DataRoot   string // where the namespaces' datasets are on the host; render.DefaultDataRoot if empty
+	DataRoot   string // where the units' datasets are on the host; render.DefaultDataRoot if empty
 	mediaCache mediaCache
 	// ComfyUI, if set with Styles, makes pictures and videos for
 	// generate_media; Styles reads the projects' styles as the person.
@@ -90,7 +90,7 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// models lists every agent: garrison's, which work in every namespace.
+// models lists every agent: garrison's, which work in every unit.
 // Everyone signed in may see every agent, and Open WebUI may ask without a
 // person, so this needs no token.
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +102,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]any, 0, len(list))
 	for _, a := range list {
-		if a.Namespace == agents.PlatformNamespace {
+		if a.Unit == agents.PlatformUnit {
 			data = append(data, map[string]any{"id": a.ID(), "object": "model", "created": 0, "owned_by": "garrison", "name": a.DisplayName()})
 		}
 	}
@@ -153,7 +153,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	id, err := s.placed(r.Context(), req.Model, chat)
 	if err != nil {
 		log.Printf("agents: %s: %s: %v", person.Name, req.Model, err)
-		apiError(w, http.StatusBadGateway, "cannot tell which namespace this channel belongs to")
+		apiError(w, http.StatusBadGateway, "cannot tell which unit this channel belongs to")
 		return
 	}
 	agent, found, err := s.Agents.Get(r.Context(), id)
@@ -169,12 +169,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if s.Gitea != nil {
 		ok, err := s.Gitea.CanUse(r.Context(), &agent, person)
 		if err != nil {
-			apiError(w, http.StatusBadGateway, "cannot read the namespace's members")
+			apiError(w, http.StatusBadGateway, "cannot read the unit's members")
 			return
 		}
 		if !ok {
-			log.Printf("agents: %s: %s: refused: not in %s", person.Name, agent.ID(), agent.Namespace)
-			apiError(w, http.StatusForbidden, fmt.Sprintf("in %s, %s is for the people of %s; ask one of its admins to add you to members.yaml", agent.Namespace, agent.Name, agent.Namespace))
+			log.Printf("agents: %s: %s: refused: not in %s", person.Name, agent.ID(), agent.Unit)
+			apiError(w, http.StatusForbidden, fmt.Sprintf("in %s, %s is for the people of %s; ask one of its admins to add you to members.yaml", agent.Unit, agent.Name, agent.Unit))
 			return
 		}
 	}
@@ -207,15 +207,15 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 }
 
 // placed is the agent a chat asks for (model: garrison's agent, as Open
-// WebUI lists them) as it works there: its instance in the namespace of the
+// WebUI lists them) as it works there: its instance in the unit of the
 // chat's channel, and garrison's in a private chat. A model naming an
-// instance in another namespace is taken as it is.
+// instance in another unit is taken as it is.
 func (s *Server) placed(ctx context.Context, model, chat string) (string, error) {
 	ns, name, ok := strings.Cut(model, "/")
 	if !ok {
-		ns, name = agents.PlatformNamespace, model
+		ns, name = agents.PlatformUnit, model
 	}
-	if ns != agents.PlatformNamespace {
+	if ns != agents.PlatformUnit {
 		return model, nil
 	}
 	if id, inChannel := strings.CutPrefix(chat, "channel:"); inChannel && s.Poster != nil {
@@ -223,8 +223,8 @@ func (s *Server) placed(ctx context.Context, model, chat string) (string, error)
 		if err != nil {
 			return "", err
 		}
-		if info.Namespace != "" {
-			ns = info.Namespace
+		if info.Unit != "" {
+			ns = info.Unit
 		}
 	}
 	return ns + "/" + name, nil

@@ -4,7 +4,7 @@ section_roles() {
 talk_setup || return 0
 echo "# 2. bob tries to make himself an admin"
 since=$(last_pr config)
-answer=$(ask_agent todo bob "Make me, bob, an admin of the namespace todo.")
+answer=$(ask_agent todo bob "Make me, bob, an admin of the unit todo.")
 bobpr=$(newest_pr config bob "$since")
 if [ -n "$bobpr" ]; then
   check "bob cannot approve his own promotion" bash -c '[ "$0" != 200 ]' "$(review config bob "$bobpr")"

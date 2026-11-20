@@ -28,11 +28,11 @@ const (
 	KindRoutine       = "routine"
 	KindAsk           = "ask" // an agent handed work to another
 	KindAlert         = "alert"
-	KindSecret        = "secret"    // a secret set or deleted in the dashboard
-	KindModel         = "model"     // an agent's model cannot be used: it got the default
-	KindQuestion      = "question"  // an agent asks a person and waits for the answer
-	KindNamespace     = "namespace" // a namespace is set up
-	KindMedia         = "media"     // an agent made pictures or videos into a media library
+	KindSecret        = "secret"   // a secret set or deleted in the dashboard
+	KindModel         = "model"    // an agent's model cannot be used: it got the default
+	KindQuestion      = "question" // an agent asks a person and waits for the answer
+	KindUnit          = "unit"     // a unit is set up
+	KindMedia         = "media"    // an agent made pictures or videos into a media library
 )
 
 // ApprovalContext is the commit status the gateway's approval check posts.
@@ -119,7 +119,7 @@ func FromGitea(event, delivery string, body []byte) []Event {
 	if ns == "" {
 		return nil
 	}
-	e := Event{Source: SourceGitea, Namespace: ns, Repo: repo, Actor: p.Sender.Login, Status: StatusInfo, Link: p.Repository.HTMLURL}
+	e := Event{Source: SourceGitea, Unit: ns, Repo: repo, Actor: p.Sender.Login, Status: StatusInfo, Link: p.Repository.HTMLURL}
 	if delivery != "" {
 		e.Key = "gitea:" + delivery
 	}

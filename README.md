@@ -7,8 +7,8 @@ Garrison turns one Ubuntu machine into a small cloud for a household or a team: 
 ## What you get
 
 - **Apps by conversation.** Each app is a file in Git (`config/stacks/<name>.yaml`) and answers at `https://<name>.<your domain>`. Branches become environments: `dev` runs at `dev-<name>.<domain>`, and pull requests can get previews.
-- **Agents that act with your rights.** In a namespace's channel in Open WebUI, `@operator`, `@coder`, `@sentry`, `@scout`, `@media` and `@commander` (which finds the right one) work for whoever mentions them. They read stacks, logs, metrics and code, and propose changes; only people merge. Each chat runs in a gVisor sandbox, and the internet is reachable only through a proxy, as far as each agent is allowed.
-- **Namespaces for people and projects.** A namespace (a Gitea organisation) has its own people, repos, apps, chat channel and secrets. Who may change it is in `config/members.yaml`, and changing that file needs someone else's approval.
+- **Agents that act with your rights.** In a unit's channel in Open WebUI, `@operator`, `@coder`, `@sentry`, `@scout`, `@media` and `@commander` (which finds the right one) work for whoever mentions them. They read stacks, logs, metrics and code, and propose changes; only people merge. Each chat runs in a gVisor sandbox, and the internet is reachable only through a proxy, as far as each agent is allowed.
+- **Units for people and projects.** A unit (a Gitea organisation) has its own people, repos, apps, chat channel and secrets. Who may change it is in `config/members.yaml`, and changing that file needs someone else's approval.
 - **Routines and chains.** Agents run on a schedule, when a branch moves, or when an alert fires. They ask a person when they need an answer. A chain of command writes down who does what in a job, e.g. weekly software updates: the sentry lists the versions, the scout finds the releases, the coder proposes the updates.
 - **Safety nets.** ZFS snapshots of all data (hourly, daily, monthly), and a snapshot before every deploy. A restore is a pull request. Secrets are encrypted in Git with SOPS. A dashboard feed shows everything that happened and how it was handled.
 - **Monitoring.** Grafana with Prometheus and Loki. Alerts go to the feed and can start an agent's routine.
@@ -37,7 +37,7 @@ Then open `https://<domain>/` (the dashboard), `https://chat.<domain>` (the team
                               Docker Swarm <──deploys── deployer <──webhook── Gitea (main)
 ```
 
-The control plane (Go, `control-plane/`) is one binary with several roles: the **deployer** applies Git to Docker Swarm, the **gateway** gives agents their tools and keeps namespaces, members and chat in sync, the **agent service** runs each chat in its sandbox, and **home** serves the dashboard.
+The control plane (Go, `control-plane/`) is one binary with several roles: the **deployer** applies Git to Docker Swarm, the **gateway** gives agents their tools and keeps units, members and chat in sync, the **agent service** runs each chat in its sandbox, and **home** serves the dashboard.
 
 ## Learn more
 
@@ -58,7 +58,7 @@ The control plane (Go, `control-plane/`) is one binary with several roles: the *
 | `templates/` | Starting contents of new config repos and app repos, the agents among them; compiled into the control plane |
 | `sandbox/` | The agents' sandbox image: Pi, its tools, a headless browser |
 | `files/` | The media library's file browser image |
-| `schemas/` | JSON Schema for stack files, namespace config, change records |
+| `schemas/` | JSON Schema for stack files, unit config, change records |
 | `host/` | Host-side scripts: BuildKit, repairing services after a reboot |
 | `docs/` | Spec, status, agents, scenarios, walkthrough |
 | `test/` | End-to-end tests on throwaway Multipass VMs |

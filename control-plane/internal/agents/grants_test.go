@@ -44,7 +44,7 @@ func TestVisible(t *testing.T) {
 		t.Errorf("members: %q", a.Visible)
 	}
 	for _, v := range []string{"everyone", "friends"} {
-		if _, p := load1(t, PlatformNamespace, "visible: "+v+"\n", nil); len(p) != 1 {
+		if _, p := load1(t, PlatformUnit, "visible: "+v+"\n", nil); len(p) != 1 {
 			t.Errorf("%s: %v", v, p)
 		}
 	}
@@ -104,7 +104,7 @@ func TestGrantsThatAreRefused(t *testing.T) {
 		"- {agent: dev, repo: config, level: propose}":                              "no agent may have a grant on config",
 		"- {agent: dev, repo: todo, branch: main, level: merge}":                    "say level: autonomous",
 		"- {agent: dev, repo: todo, branch: dev, level: autonomous, for: everyone}": "only for propose",
-		"- {agent: dev, repo: todo, level: propose, for: homepage/admins}":          "groups of this namespace",
+		"- {agent: dev, repo: todo, level: propose, for: homepage/admins}":          "groups of this unit",
 		"- {agent: dev, repo: todo, level: autonomous}":                             "needs the branch",
 		"- {agent: dev, repo: todo, branch: dev, level: propose}":                   "propose takes no branch",
 		"- {agent: dev, repo: todo, level: own}":                                    "level must be",
@@ -143,7 +143,7 @@ func TestRoutines(t *testing.T) {
 		"[{agent: dev, name: x, every: 1h, owner: a, task: t}, {agent: dev, name: x, every: 2h, owner: a, task: t}]": "two routines",
 		"- {agent: dev, name: x, every: 1h, on_push: {repo: todo, branch: main}, owner: a, task: t}":                 "not several",
 		`- {agent: dev, name: x, every: 1h, schedule: "@daily", owner: a, task: t}`:                                  "not several",
-		`- {agent: dev, name: x, on_alert: {namespace: shop}, owner: a, task: t}`:                                    "always this namespace",
+		`- {agent: dev, name: x, on_alert: {unit: shop}, owner: a, task: t}`:                                         "always this unit",
 		`- {agent: dev, name: x, on_alert: {"a-b": c}, owner: a, task: t}`:                                           "not a label name",
 		`- {agent: dev, name: x, schedule: "*/5 * * * *", owner: a, task: t}`:                                        "more often than every 10m",
 		`- {agent: dev, name: x, schedule: "0 0 30 2 *", owner: a, task: t}`:                                         "never comes",
@@ -164,10 +164,10 @@ func TestAsks(t *testing.T) {
 	if !a.MayAsk("tester") || !a.MayAsk("homepage/tester") || !a.MayAsk("lab/shop") || a.MayAsk("other") {
 		t.Errorf("may ask: %v", a.Asks)
 	}
-	if _, p := load1(t, PlatformNamespace, "agents: [tester]\n", nil); !strings.Contains(strings.Join(p, ""), "there is no agent tester") {
+	if _, p := load1(t, PlatformUnit, "agents: [tester]\n", nil); !strings.Contains(strings.Join(p, ""), "there is no agent tester") {
 		t.Errorf("missing: %v", p)
 	}
-	if _, p := load1(t, PlatformNamespace, "agents: [dev]\n", nil); !strings.Contains(strings.Join(p, ""), "does not ask itself") {
+	if _, p := load1(t, PlatformUnit, "agents: [dev]\n", nil); !strings.Contains(strings.Join(p, ""), "does not ask itself") {
 		t.Errorf("itself: %v", p)
 	}
 }

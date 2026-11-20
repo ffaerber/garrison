@@ -38,22 +38,22 @@ type grantEntry struct {
 }
 
 // addRoutine proposes a routine, "do this every day at 9", as a pull request
-// to the namespace's config: the entry is written here, not by the model,
+// to the unit's config: the entry is written here, not by the model,
 // so it is valid YAML, keeps the routines already there, and is checked as
 // the approval check will check it. A routine that changes a repo also
 // needs a grant its run may use with nobody watching; that is added to
 // grants.yaml in the same pull request, unless there is one.
 func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a args) (string, error) {
-	if err := validOrg(a.Namespace); err != nil {
+	if err := validOrg(a.Unit); err != nil {
 		return "", err
 	}
-	if a.Namespace == PlatformNamespace {
+	if a.Unit == PlatformUnit {
 		// garrison's own routines, e.g. updates of the platform's software:
 		// root admins only, who alone merge them anyway.
 		if admin, err := t.Gitea.IsAdmin(ctx, p.Name); err != nil {
 			return "", err
 		} else if !admin {
-			return "", fmt.Errorf("%w: only root admins add routines in garrison; name the namespace the routine works in", ErrForbidden)
+			return "", fmt.Errorf("%w: only root admins add routines in garrison; name the unit the routine works in", ErrForbidden)
 		}
 	}
 	name, which := strings.TrimSpace(a.Name), agents.NameOf(strings.TrimSpace(a.Agent))
@@ -92,7 +92,7 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		entry.Agent, entry.Chain = "", chainName
 	}
 
-	main := configFiles{g: t.Gitea, ns: a.Namespace, ref: "main"}
+	main := configFiles{g: t.Gitea, ns: a.Unit, ref: "main"}
 	files := map[string]string{}
 	routines, err := main.Read(ctx, agents.RoutinesFile)
 	if err != nil && !errors.Is(err, agents.ErrNotExist) {
@@ -127,7 +127,7 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 					return "", err
 				}
 				have = append(have, agents.Grant{Agent: who, Repo: repo, Unattended: true})
-				gave = append(gave, who+" in "+a.Namespace+"/"+repo)
+				gave = append(gave, who+" in "+a.Unit+"/"+repo)
 			}
 		}
 		if len(gave) > 0 {
@@ -138,11 +138,11 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 	if len(gave) > 0 {
 		granted = fmt.Sprintf(" It also gives grants to propose that its runs may use with nobody watching (grants.yaml): %s.", strings.Join(gave, ", "))
 	}
-	if err := t.checkFiles(ctx, a.Namespace, files); err != nil {
+	if err := t.checkFiles(ctx, a.Unit, files); err != nil {
 		return "", err
 	}
 
-	as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, ConfigRepo)
+	as, viaAgent, err := t.proposer(ctx, p, agent, a.Unit, ConfigRepo)
 	if err != nil {
 		return "", err
 	}
@@ -150,7 +150,7 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 	if agent != nil {
 		role := "member"
 		if viaAgent {
-			if role, err = t.role(ctx, p, a.Namespace); err != nil {
+			if role, err = t.role(ctx, p, a.Unit); err != nil {
 				return "", err
 			}
 		}
@@ -169,12 +169,12 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		what = strings.TrimSpace("the chain " + chainName + ". " + task)
 	}
 	desc := strings.TrimSpace(a.Description + fmt.Sprintf("\n\n%s runs %s, for %s: %s", which, when, p.Name, what))
-	c, err := t.Gitea.ProposeAs(ctx, as, a.Namespace, ConfigRepo, files, title, desc, newBranch(p, agent, viaAgent), note)
+	c, err := t.Gitea.ProposeAs(ctx, as, a.Unit, ConfigRepo, files, title, desc, newBranch(p, agent, viaAgent), note)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Opened change %s/%s#%d: the routine %s of %s, %s, for %s; what it finds is posted in %s's channel.%s Nothing runs until a person allowed to merge merges it.\n%s",
-		c.Namespace, c.Repo, c.Number, name, which, when, p.Name, a.Namespace, granted, t.links(c)), nil
+		c.Unit, c.Repo, c.Number, name, which, when, p.Name, a.Unit, granted, t.links(c)), nil
 }
 
 // appendEntry adds one entry to a YAML list file, keeping what is there,
@@ -200,7 +200,7 @@ func appendEntry(file string, entry any) (string, error) {
 	return strings.TrimRight(file, "\n") + "\n" + string(item), nil
 }
 
-// checkFiles refuses grants.yaml and routines.yaml of a namespace's config
+// checkFiles refuses grants.yaml and routines.yaml of a unit's config
 // (garrison's too),
 // as they would be with files, if the approval check would refuse them.
 func (t *Tools) checkFiles(ctx context.Context, ns string, files map[string]string) error {
@@ -265,5 +265,5 @@ func (g *Gitea) ProposeAs(ctx context.Context, as, org, repo string, files map[s
 		map[string]any{"head": branch, "base": "main", "title": title, "body": description}, &pr); err != nil {
 		return Change{}, err
 	}
-	return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, nil
+	return Change{Unit: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, nil
 }

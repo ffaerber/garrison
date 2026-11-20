@@ -29,11 +29,11 @@ STILLS = {
     "sign-in-keycloak": ("alice-keycloak", 0),
     "sign-in-dashboard": ("alice-dashboard", 0),
     "sign-in-chat": ("alice-chat", 0),
-    # 03 a namespace
-    "namespace-form": ("alice-new-organisation", 0),
-    "namespace-created": ("alice-created-todo", 0),
-    "namespace-welcome": ("alice-welcome-in-the-channel", 0),
-    "namespace-feed": ("alice-feed-todo-is-set-up", 0),
+    # 03 a unit
+    "unit-form": ("alice-new-organisation", 0),
+    "unit-created": ("alice-created-todo", 0),
+    "unit-welcome": ("alice-welcome-in-the-channel", 0),
+    "unit-feed": ("alice-feed-todo-is-set-up", 0),
     "secrets": ("alice-secrets", 0),
     # 04 an app and its stack
     "app-ask": ("alice-asked-operator", 0),

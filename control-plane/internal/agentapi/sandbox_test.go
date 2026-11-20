@@ -49,7 +49,7 @@ func TestAChatRunsInItsOwnSandbox(t *testing.T) {
 	if content != "tools: 1" {
 		t.Fatalf("content %q", content)
 	}
-	for _, want := range []string{"Let me look.", `list_repos({"namespace":"homepage"})`, "hmm"} {
+	for _, want := range []string{"Let me look.", `list_repos({"unit":"homepage"})`, "hmm"} {
 		if !strings.Contains(reasoning, want) {
 			t.Errorf("reasoning %q lacks %q", reasoning, want)
 		}

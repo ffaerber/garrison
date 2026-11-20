@@ -37,8 +37,8 @@ type Person struct {
 	Owner      string `json:"-"` // in such a run, the routine's owner, for whom grants are checked
 }
 
-// PlatformNamespace is the namespace the deployer deploys.
-const PlatformNamespace = "garrison"
+// PlatformUnit is the unit the deployer deploys.
+const PlatformUnit = "garrison"
 
 // Tools are what the operator agents may do. Reads of the cluster (stacks,
 // logs, metrics) are open to everyone signed in, as everything is; reads and
@@ -58,7 +58,7 @@ type Tools struct {
 	// Dashboard is the dashboard's address, e.g. https://example.com: a
 	// change opened links its card there. "": only Gitea's page.
 	Dashboard string
-	// Ready, if set, waits until a namespace just made is set up: its config
+	// Ready, if set, waits until a unit just made is set up: its config
 	// repo and its channel.
 	Ready func(ctx context.Context, ns string) error
 
@@ -90,7 +90,7 @@ func spec(name, desc string, props map[string]any, required ...string) Spec {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
-var nsArg = str("the namespace, i.e. the Gitea organisation, e.g. garrison")
+var nsArg = str("the unit, i.e. the Gitea organisation, e.g. garrison")
 
 // Specs are the tools of the plain /mcp endpoint.
 func (t *Tools) Specs() []Spec { return SpecsFor(nil) }
@@ -119,79 +119,79 @@ func SpecsFor(a *agents.Agent) []Spec {
 
 func baseSpecs() []Spec {
 	return []Spec{
-		spec("list_namespaces", "Lists the namespaces (Gitea organisations).", nil),
-		spec("list_stacks", "Lists a namespace's stacks with the commit the deployer deployed, and each of their Swarm services with running/desired replicas and image.", map[string]any{"namespace": nsArg}, "namespace"),
-		spec("stack_status", "Shows the tasks of one stack: their state and any error, newest first. Use it to see why a service does not run.", map[string]any{"namespace": nsArg, "stack": str("stack name, e.g. grafana")}, "namespace", "stack"),
+		spec("list_units", "Lists the units (Gitea organisations).", nil),
+		spec("list_stacks", "Lists a unit's stacks with the commit the deployer deployed, and each of their Swarm services with running/desired replicas and image.", map[string]any{"unit": nsArg}, "unit"),
+		spec("stack_status", "Shows the tasks of one stack: their state and any error, newest first. Use it to see why a service does not run.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
 		spec("service_logs", "Shows the last lines of a service's logs.", map[string]any{
-			"namespace": nsArg,
-			"service":   str("Swarm service name, <stack>_<service>, e.g. grafana_grafana"),
-			"lines":     map[string]any{"type": "integer", "description": "how many lines, at most 500; default 100"},
-		}, "namespace", "service"),
-		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"namespace": nsArg, "stack": str("stack name, e.g. grafana")}, "namespace", "stack"),
-		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the namespace's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"namespace": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "namespace", "stack"),
+			"unit":    nsArg,
+			"service": str("Swarm service name, <stack>_<service>, e.g. grafana_grafana"),
+			"lines":   map[string]any{"type": "integer", "description": "how many lines, at most 500; default 100"},
+		}, "unit", "service"),
+		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
+		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the unit's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"unit": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "unit", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
-		spec("list_members", "Shows who may change a namespace: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"namespace": nsArg}, "namespace"),
+		spec("list_members", "Shows who may change a unit: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"unit": nsArg}, "unit"),
 		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
 		spec("add_provider", "Proposes another LLM provider, an OpenAI-compatible API, in llm/providers.yaml of garrison/config, as a pull request by the person asking; only root admins may. Once merged, its models are listed by the model sync, turned off until a root admin enables them. Never ask for or pass its API key: the person sets it on the dashboard's Models page, whose link the answer gives. If they paste a key into the chat, do not repeat or use it; tell them to replace it at the provider, as the chat keeps it, and to set the new one on that page.", map[string]any{
 			"name":    str("the provider's name in Garrison: lowercase letters, digits and dashes, at most 28, e.g. openrouter"),
 			"url":     str("the API's base URL, the one /chat/completions and /models are under, e.g. https://openrouter.ai/api/v1"),
 			"include": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "optional: only its models matching one of these patterns, e.g. [\"anthropic/*\"]; empty for all"},
 		}, "name", "url"),
-		spec("list_repos", "Lists the repos of a namespace. In garrison, each repo with a compose.yaml is a stack.", map[string]any{"namespace": nsArg}, "namespace"),
-		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "namespace", "repo"),
-		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"namespace": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "namespace", "repo", "path"),
-		spec("list_changes", "Lists a namespace's proposed changes (open pull requests) with their diffs and links.", map[string]any{"namespace": nsArg}, "namespace"),
+		spec("list_repos", "Lists the repos of a unit. In garrison, each repo with a compose.yaml is a stack.", map[string]any{"unit": nsArg}, "unit"),
+		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"unit": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "unit", "repo"),
+		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"unit": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "unit", "repo", "path"),
+		spec("list_changes", "Lists a unit's proposed changes (open pull requests) with their diffs and links.", map[string]any{"unit": nsArg}, "unit"),
 		spec("propose_change", "Proposes a new version of one file as a pull request, as the person asking. Nothing changes until a person allowed to merges it in Gitea; give them the link.", map[string]any{
-			"namespace":   nsArg,
+			"unit":        nsArg,
 			"repo":        str("repo name"),
 			"path":        str("file path"),
 			"content":     str("the complete new content of the file"),
 			"title":       str("short title of the change"),
 			"description": str("why, and what it does"),
-		}, "namespace", "repo", "path", "content", "title"),
+		}, "unit", "repo", "path", "content", "title"),
 		spec("propose_patch", "Proposes changes to several files at once, as a patch (the output of git diff, with --binary for binary files), as a pull request by the person asking. Without branch, a new branch from base and a new pull request; with the branch of an earlier change, the patch goes on top of it and its pull request shows it. Nothing changes until a person allowed to merges it in Gitea; give them the link.", map[string]any{
-			"namespace":   nsArg,
+			"unit":        nsArg,
 			"repo":        str("repo name"),
 			"patch":       str("the changes, as git diff prints them"),
 			"title":       str("short title of the change"),
 			"description": str("why, and what it does"),
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
-		}, "namespace", "repo", "patch", "title"),
-		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the namespace's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes repos (a screenshot or a patch proposed into them), give repos: the agent then also gets the grant to propose there that a run with nobody watching needs. For a chain of command (find_agents shows which agent leads one), give chain instead of agent: its lead runs it, and every agent of the chain that proposes gets the grants on repos. In garrison, only root admins add routines. What each run finds is posted in the namespace's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
-			"namespace":   nsArg,
+		}, "unit", "repo", "patch", "title"),
+		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the unit's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes repos (a screenshot or a patch proposed into them), give repos: the agent then also gets the grant to propose there that a run with nobody watching needs. For a chain of command (find_agents shows which agent leads one), give chain instead of agent: its lead runs it, and every agent of the chain that proposes gets the grants on repos. In garrison, only root admins add routines. What each run finds is posted in the unit's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
+			"unit":        nsArg,
 			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots; leave it out with chain"),
 			"chain":       str("a chain of command the routine runs, e.g. software-updates; its lead runs it"),
-			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the namespace, e.g. morning-check"),
+			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the unit, e.g. morning-check"),
 			"schedule":    str("when, as cron in Garrison's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
 			"every":       str("how often instead of schedule, 10m to 168h, e.g. 6h"),
 			"task":        str("what the agent does each time, as you would ask it: what to look at, what to do, what to say"),
-			"repos":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the namespace's repos the task changes (proposes a screenshot or a patch into), if any"},
+			"repos":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the unit's repos the task changes (proposes a screenshot or a patch into), if any"},
 			"title":       str("short title of the change; default names the routine"),
 			"description": str("why"),
-		}, "namespace", "name"),
-		spec("create_namespace", "Makes a new namespace (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml and its channel, where the agents work in it.", map[string]any{
+		}, "unit", "name"),
+		spec("create_unit", "Makes a new unit (a Gitea organisation), for an app or a team, as the person asking. Only root admins may. They become its first admin; within a minute it has its config repo with members.yaml and its channel, where the agents work in it.", map[string]any{
 			"name":        str("lowercase letters, digits and dashes, e.g. photos"),
 			"description": str("what it is for"),
 		}, "name"),
-		spec("create_repo", "Makes a repo in a namespace, as the person asking: its admins and root admins may. For an app's own code: the app itself is deployed from stacks/<name>.yaml in the namespace's config, which names the repo as its source. With template, it starts with a working app, its Dockerfile and the pipeline that builds its image for every push, and its README says what stack to propose; without, empty but for a README. Propose further files with propose_change or propose_patch.", map[string]any{
-			"namespace":   nsArg,
+		spec("create_repo", "Makes a repo in a unit, as the person asking: its admins and root admins may. For an app's own code: the app itself is deployed from stacks/<name>.yaml in the unit's config, which names the repo as its source. With template, it starts with a working app, its Dockerfile and the pipeline that builds its image for every push, and its README says what stack to propose; without, empty but for a README. Propose further files with propose_change or propose_patch.", map[string]any{
+			"unit":        nsArg,
 			"repo":        str("lowercase letters, digits and dashes; an app's repo is named after it, e.g. immich"),
 			"description": str("what it holds"),
-			"private":     map[string]any{"type": "boolean", "description": "only the namespace's people may read it; default false"},
+			"private":     map[string]any{"type": "boolean", "description": "only the unit's people may read it; default false"},
 			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: todo, a todo app in Go on Postgres (page.html, main.go, its tests), behind the sign-in; empty for nothing"},
-		}, "namespace", "repo"),
-		spec("create_branch", "Makes a branch of a repo from the tip of another (main by default), as the person asking, if they may push there. When a stack in the namespace's config deploys that branch of the repo as an environment (dev, for one), the deployer deploys it once its pipeline has built the image, and the answer gives its address. A branch for a change is made by propose_patch; use this for a branch that lasts.", map[string]any{
-			"namespace": nsArg,
-			"repo":      str("repo name"),
-			"branch":    str("the new branch's name, e.g. dev"),
-			"base":      str("the branch it starts from; default main"),
-		}, "namespace", "repo", "branch"),
+		}, "unit", "repo"),
+		spec("create_branch", "Makes a branch of a repo from the tip of another (main by default), as the person asking, if they may push there. When a stack in the unit's config deploys that branch of the repo as an environment (dev, for one), the deployer deploys it once its pipeline has built the image, and the answer gives its address. A branch for a change is made by propose_patch; use this for a branch that lasts.", map[string]any{
+			"unit":   nsArg,
+			"repo":   str("repo name"),
+			"branch": str("the new branch's name, e.g. dev"),
+			"base":   str("the branch it starts from; default main"),
+		}, "unit", "repo", "branch"),
 		spec("merge_change", "Merges a pull request of one of your proposals, with your own account, if one of your grants allows merging into its base branch for the person you talk to and its checks have passed. A merge into a branch that deploys (main, dev) deploys it. If it is refused, say why; do not work around it.", map[string]any{
-			"namespace": nsArg,
-			"repo":      str("repo name"),
-			"number":    map[string]any{"type": "integer", "description": "the pull request's number"},
-		}, "namespace", "repo", "number"),
+			"unit":   nsArg,
+			"repo":   str("repo name"),
+			"number": map[string]any{"type": "integer", "description": "the pull request's number"},
+		}, "unit", "repo", "number"),
 		spec("browse", "Uses a page of Garrison as the person you talk to, signed in as them, one step per call: open a page (url), click an element (click), or type into one (type_into and text, with submit to press Enter). Each call answers with the page as it is then: its text and its links, buttons and fields, numbered. The tab stays open between calls for a few minutes. Only pages at https://<name>.<domain> load. It acts as the person: click nothing that deletes, sends or pays unless they asked for exactly that.", map[string]any{
 			"url":       str("the page to open, e.g. https://pr-7-todo.example.com/; empty to act on the open page"),
 			"click":     map[string]any{"type": "integer", "description": "the number of the element to click"},
@@ -200,7 +200,7 @@ func baseSpecs() []Spec {
 			"submit":    map[string]any{"type": "boolean", "description": "press Enter after typing"},
 		}),
 		spec("screenshot", "Takes a screenshot of a page of Garrison, signed in as the person asking (in a routine, with nobody watching, as your own account), and proposes it as a PNG file in a repo: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
-			"namespace":   nsArg,
+			"unit":        nsArg,
 			"repo":        str("repo the PNG goes into"),
 			"path":        str("file path of the PNG, ending in .png, e.g. docs/screenshots/todo.png"),
 			"url":         str("the page, e.g. https://todo.example.com/"),
@@ -209,25 +209,25 @@ func baseSpecs() []Spec {
 			"full_page":   map[string]any{"type": "boolean", "description": "the whole page instead of the window; default false"},
 			"title":       str("short title of the change"),
 			"description": str("why, and what it shows"),
-		}, "namespace", "repo", "path", "url", "title"),
+		}, "unit", "repo", "path", "url", "title"),
 	}
 }
 
 var swarmName = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,100}$`)
 
 type args struct {
-	Namespace, Stack, Service, Repo, Path, Content, Title, Description, Query, Name, Skill string
-	Patch, Base, Branch                                                                    string
-	Lines, Width, Height, Number, Click                                                    int
-	TypeInto                                                                               int `json:"type_into"`
-	Private                                                                                bool
-	Text                                                                                   string
-	Submit                                                                                 bool
-	URL                                                                                    string `json:"url"`
-	Template                                                                               string `json:"template"`
-	FullPage                                                                               bool   `json:"full_page"`
-	Agent, Schedule, Every, Task, Chain                                                    string
-	Include, Repos                                                                         []string
+	Unit, Stack, Service, Repo, Path, Content, Title, Description, Query, Name, Skill string
+	Patch, Base, Branch                                                               string
+	Lines, Width, Height, Number, Click                                               int
+	TypeInto                                                                          int `json:"type_into"`
+	Private                                                                           bool
+	Text                                                                              string
+	Submit                                                                            bool
+	URL                                                                               string `json:"url"`
+	Template                                                                          string `json:"template"`
+	FullPage                                                                          bool   `json:"full_page"`
+	Agent, Schedule, Every, Task, Chain                                               string
+	Include, Repos                                                                    []string
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp
@@ -246,7 +246,7 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 	// to its granted repos: only propose_patch, screenshot and merge_change,
 	// which check the grants, change anything then. Its browser signs in
 	// with the agent's account in Keycloak.
-	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_namespace" || name == "create_repo" || name == "add_provider" || name == "create_branch") {
+	if p.Unattended && (name == "propose_change" || name == "add_routine" || name == "create_unit" || name == "create_repo" || name == "add_provider" || name == "create_branch") {
 		return "", refused{name + " needs a person; this run has none. Use propose_patch"}
 	}
 	if p.Unattended && (name == "screenshot" || name == "browse") && t.Keycloak == nil {
@@ -268,17 +268,17 @@ func (t *Tools) Call(ctx context.Context, p Person, agent *agents.Agent, name st
 func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name string, a args) (string, error) {
 	switch name {
 	case "propose_change", "propose_patch", "merge_change", "screenshot", "add_routine":
-		// A change to a namespace is made with that namespace's grants,
+		// A change to a unit is made with that unit's grants,
 		// wherever the person asked.
-		there, err := t.instance(ctx, p, agent, a.Namespace)
+		there, err := t.instance(ctx, p, agent, a.Unit)
 		if err != nil {
 			return "", err
 		}
 		agent = there
 	}
 	switch name {
-	case "list_namespaces":
-		nss, err := t.Gitea.Namespaces(ctx, p.Name)
+	case "list_units":
+		nss, err := t.Gitea.Units(ctx, p.Name)
 		if err != nil {
 			return "", err
 		}
@@ -288,12 +288,12 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return b.String(), nil
 	case "list_stacks":
-		stacks, err := t.Stacks(ctx, a.Namespace)
+		stacks, err := t.Stacks(ctx, a.Unit)
 		if err != nil {
 			return "", err
 		}
 		if len(stacks) == 0 {
-			return "No apps are deployed in this namespace. Each file stacks/<name>.yaml in its repo config is an app, deployed once its images exist.", nil
+			return "No apps are deployed in this unit. Each file stacks/<name>.yaml in its repo config is an app, deployed once its images exist.", nil
 		}
 		var b strings.Builder
 		for _, s := range stacks {
@@ -304,7 +304,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return b.String(), nil
 	case "stack_status":
-		if err := t.ownStack(a.Namespace, a.Stack); err != nil {
+		if err := t.ownStack(a.Unit, a.Stack); err != nil {
 			return "", err
 		}
 		out, err := t.Run(ctx, nil, nil, "docker", "stack", "ps", "--no-trunc", "--format", "{{.Name}}\t{{.CurrentState}}\t{{.Error}}", a.Stack)
@@ -314,7 +314,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if !ok || !swarmName.MatchString(a.Service) {
 			return "", fmt.Errorf("%w: service %q is not <stack>_<service>", ErrInvalid, a.Service)
 		}
-		if err := t.ownStack(a.Namespace, stack); err != nil {
+		if err := t.ownStack(a.Unit, stack); err != nil {
 			return "", err
 		}
 		n := a.Lines
@@ -325,7 +325,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		out, err := t.Run(ctx, nil, nil, "sh", "-c", `docker service logs --tail "$1" --no-task-ids --timestamps "$2" 2>&1`, "sh", fmt.Sprint(n), a.Service)
 		return string(out), err
 	case "list_snapshots":
-		if err := t.ownStack(a.Namespace, a.Stack); err != nil {
+		if err := t.ownStack(a.Unit, a.Stack); err != nil {
 			return "", err
 		}
 		all, at, err := gitops.ReadSnapshots(t.WorkDir)
@@ -333,7 +333,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			return "", err
 		}
 		env, ok := all[a.Stack]
-		if !ok || env.Namespace != a.Namespace || len(env.Snapshots) == 0 {
+		if !ok || env.Unit != a.Unit || len(env.Snapshots) == 0 {
 			return fmt.Sprintf("%s has no snapshots: it keeps no data, or none were taken yet.", a.Stack), nil
 		}
 		var b strings.Builder
@@ -343,7 +343,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		fmt.Fprintf(&b, "(as of %s)\n", at.UTC().Format(time.RFC3339))
 		return b.String(), nil
 	case "service_usage":
-		if err := t.ownStack(a.Namespace, a.Stack); err != nil {
+		if err := t.ownStack(a.Unit, a.Stack); err != nil {
 			return "", err
 		}
 		sel := fmt.Sprintf(`container_label_com_docker_stack_namespace=%q`, a.Stack)
@@ -362,14 +362,14 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return t.promQuery(ctx, a.Query)
 	case "list_members":
-		if a.Namespace == PlatformNamespace {
-			return "The namespace garrison is changed by root admins only; it has no members.yaml.", nil
+		if a.Unit == PlatformUnit {
+			return "The unit garrison is changed by root admins only; it has no members.yaml.", nil
 		}
-		roster, err := t.Gitea.Roster(ctx, p.Name, a.Namespace)
+		roster, err := t.Gitea.Roster(ctx, p.Name, a.Unit)
 		if err != nil {
 			return "", err
 		}
-		return "members.yaml of " + a.Namespace + "/config on main:\n" + roster +
+		return "members.yaml of " + a.Unit + "/config on main:\n" + roster +
 			"\nTo change it, propose a new members.yaml in the repo config. It needs the approval of an admin who did not write the change and whose role it does not change.", nil
 	case "list_models":
 		return t.listModels(ctx)
@@ -387,9 +387,9 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			keys = strings.TrimSuffix(t.Dashboard, "/") + "/models?provider=" + url.QueryEscape(a.Name)
 		}
 		return fmt.Sprintf("Opened change %s/%s#%d, which adds the LLM provider %s at %s. Nothing is changed yet: a root admin must review and merge it. Its API key goes on %s, never into this chat: say so, with that link. Once merged, its models come in llm/models.yaml, turned off.\n%s",
-			c.Namespace, c.Repo, c.Number, a.Name, a.URL, keys, t.links(c)), nil
+			c.Unit, c.Repo, c.Number, a.Name, a.URL, keys, t.links(c)), nil
 	case "list_repos":
-		repos, err := t.Gitea.Repos(ctx, p.Name, a.Namespace)
+		repos, err := t.Gitea.Repos(ctx, p.Name, a.Unit)
 		if err != nil {
 			return "", err
 		}
@@ -399,7 +399,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return b.String(), nil
 	case "list_files":
-		entries, err := t.Gitea.List(ctx, p.Name, a.Namespace, a.Repo, a.Path)
+		entries, err := t.Gitea.List(ctx, p.Name, a.Unit, a.Repo, a.Path)
 		if err != nil {
 			return "", err
 		}
@@ -409,9 +409,9 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		}
 		return b.String(), nil
 	case "read_file":
-		return t.Gitea.Read(ctx, p.Name, a.Namespace, a.Repo, a.Path)
+		return t.Gitea.Read(ctx, p.Name, a.Unit, a.Repo, a.Path)
 	case "list_changes":
-		changes, err := t.Gitea.Changes(ctx, p.Name, a.Namespace)
+		changes, err := t.Gitea.Changes(ctx, p.Name, a.Unit)
 		if err != nil {
 			return "", err
 		}
@@ -443,48 +443,48 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		return page.String(), nil
 	case "propose_patch":
 		return t.proposePatch(ctx, p, agent, a)
-	case "create_namespace":
-		name, err := t.Gitea.CreateNamespace(ctx, p.Name, a.Name, a.Description)
+	case "create_unit":
+		name, err := t.Gitea.CreateUnit(ctx, p.Name, a.Name, a.Description)
 		if err != nil {
 			return "", err
 		}
 		if t.Ready != nil {
 			if err := t.Ready(ctx, name); err != nil {
-				return fmt.Sprintf("Made the namespace %s, with %s as its first admin. %v. Make its repos with create_repo.", name, p.Name, err), nil
+				return fmt.Sprintf("Made the unit %s, with %s as its first admin. %v. Make its repos with create_repo.", name, p.Name, err), nil
 			}
-			return fmt.Sprintf("Made the namespace %s, with %s as its first admin. It is ready: its config repo (members.yaml; grants.yaml and routines.yaml give the agents rights and routines there) and its channel %s, where the agents (@operator and the others) work in %s. Make its repos with create_repo.", name, p.Name, name, name), nil
+			return fmt.Sprintf("Made the unit %s, with %s as its first admin. It is ready: its config repo (members.yaml; grants.yaml and routines.yaml give the agents rights and routines there) and its channel %s, where the agents (@operator and the others) work in %s. Make its repos with create_repo.", name, p.Name, name, name), nil
 		}
-		return fmt.Sprintf("Made the namespace %s, with %s as its first admin. In a few seconds it has its config repo (members.yaml) and its channel, where the agents work in %s. Make its repos with create_repo.", name, p.Name, name), nil
+		return fmt.Sprintf("Made the unit %s, with %s as its first admin. In a few seconds it has its config repo (members.yaml) and its channel, where the agents work in %s. Make its repos with create_repo.", name, p.Name, name), nil
 	case "create_repo":
-		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Namespace, a.Repo, a.Description, a.Private, a.Template)
+		u, err := t.Gitea.CreateRepo(ctx, p.Name, a.Unit, a.Repo, a.Description, a.Private, a.Template)
 		if err != nil {
 			return "", err
 		}
 		if a.Template != "" {
-			readme, _ := t.Gitea.Read(ctx, p.Name, a.Namespace, a.Repo, "README.md")
-			return fmt.Sprintf("Made the repo %s/%s from the template %s, on main; its pipeline builds its image for every push. To deploy it, propose stacks/%s.yaml in %s/config as its README says; nothing runs until a person merges it.\n%s\n\nREADME.md:\n%s", a.Namespace, a.Repo, a.Template, a.Repo, a.Namespace, u, readme), nil
+			readme, _ := t.Gitea.Read(ctx, p.Name, a.Unit, a.Repo, "README.md")
+			return fmt.Sprintf("Made the repo %s/%s from the template %s, on main; its pipeline builds its image for every push. To deploy it, propose stacks/%s.yaml in %s/config as its README says; nothing runs until a person merges it.\n%s\n\nREADME.md:\n%s", a.Unit, a.Repo, a.Template, a.Repo, a.Unit, u, readme), nil
 		}
-		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); to deploy it, propose stacks/%s.yaml in %s/config with source: %s. Nothing runs until a person merges them.\n%s", a.Namespace, a.Repo, a.Repo, a.Namespace, a.Repo, u), nil
+		return fmt.Sprintf("Made the repo %s/%s, empty but for a README on main. Propose its files now (propose_change or propose_patch); to deploy it, propose stacks/%s.yaml in %s/config with source: %s. Nothing runs until a person merges them.\n%s", a.Unit, a.Repo, a.Repo, a.Unit, a.Repo, u), nil
 	case "create_branch":
 		return t.createBranch(ctx, p, a)
 	case "merge_change":
-		return t.mergeChange(ctx, p, agent, a.Namespace, a.Repo, a.Number)
+		return t.mergeChange(ctx, p, agent, a.Unit, a.Repo, a.Number)
 	case "add_routine":
 		return t.addRoutine(ctx, p, agent, a)
 	case "propose_change":
-		if err := validOrg(a.Namespace); err != nil {
+		if err := validOrg(a.Unit); err != nil {
 			return "", err
 		}
 		if err := validRepo(a.Repo); err != nil {
 			return "", err
 		}
-		if err := checkConfigFile(a.Namespace, a.Repo, a.Path, a.Content); err != nil {
+		if err := checkConfigFile(a.Unit, a.Repo, a.Path, a.Content); err != nil {
 			return "", err
 		}
-		if err := t.checkBindings(ctx, a.Namespace, a.Repo, a.Path, a.Content); err != nil {
+		if err := t.checkBindings(ctx, a.Unit, a.Repo, a.Path, a.Content); err != nil {
 			return "", err
 		}
-		as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, a.Repo)
+		as, viaAgent, err := t.proposer(ctx, p, agent, a.Unit, a.Repo)
 		if err != nil {
 			return "", err
 		}
@@ -492,17 +492,17 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if agent != nil {
 			role := "member"
 			if viaAgent {
-				if role, err = t.role(ctx, p, a.Namespace); err != nil {
+				if role, err = t.role(ctx, p, a.Unit); err != nil {
 					return "", err
 				}
 			}
 			note = askedBy(p, agent, role)
 		}
-		c, err := t.Gitea.Propose(ctx, as, a.Namespace, a.Repo, a.Path, a.Content, a.Title, a.Description, newBranch(p, agent, viaAgent), note)
+		c, err := t.Gitea.Propose(ctx, as, a.Unit, a.Repo, a.Path, a.Content, a.Title, a.Description, newBranch(p, agent, viaAgent), note)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it.\n%s", c.Namespace, c.Repo, c.Number, t.links(c)), nil
+		return fmt.Sprintf("Opened change %s/%s#%d. Nothing is changed yet: a person allowed to merge must review and merge it.\n%s", c.Unit, c.Repo, c.Number, t.links(c)), nil
 	}
 	return "", fmt.Errorf("%w: unknown tool %q", ErrInvalid, name)
 }
@@ -539,14 +539,14 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 	if w < 320 || w > 2560 || h < 240 || h > 2000 {
 		return "", fmt.Errorf("%w: the window must be 320 to 2560 wide and 240 to 2000 high", ErrInvalid)
 	}
-	if err := validOrg(a.Namespace); err != nil {
+	if err := validOrg(a.Unit); err != nil {
 		return "", err
 	}
 	if err := validRepo(a.Repo); err != nil {
 		return "", err
 	}
 	// The repo is checked before the browser runs: a refusal costs nothing.
-	as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, a.Repo)
+	as, viaAgent, err := t.proposer(ctx, p, agent, a.Unit, a.Repo)
 	if err != nil {
 		return "", err
 	}
@@ -569,7 +569,7 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 	desc += fmt.Sprintf("Screenshot of %s as %s, %dx%d: page title %q.", shot.URL, seenAs, w, h, shot.Title)
 	branch, note := "", ""
 	if viaAgent {
-		role, err := t.role(ctx, p, a.Namespace)
+		role, err := t.role(ctx, p, a.Unit)
 		if err != nil {
 			return "", err
 		}
@@ -577,7 +577,7 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 	} else if agent != nil {
 		note = askedBy(p, agent, "member")
 	}
-	c, err := t.Gitea.Propose(ctx, as, a.Namespace, a.Repo, a.Path, string(shot.PNG), a.Title, desc, branch, note)
+	c, err := t.Gitea.Propose(ctx, as, a.Unit, a.Repo, a.Path, string(shot.PNG), a.Title, desc, branch, note)
 	if err != nil {
 		return "", err
 	}
@@ -586,7 +586,7 @@ func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a
 		blocked = fmt.Sprintf(" %d requests to other sites were refused, so parts loaded from elsewhere may be missing.", shot.Blocked)
 	}
 	return fmt.Sprintf("Took the screenshot of %s (page title %q, %d KB) and opened change %s/%s#%d with %s.%s Nothing is changed yet: a person allowed to merge must review and merge it.\n%s",
-		shot.URL, shot.Title, len(shot.PNG)>>10, c.Namespace, c.Repo, c.Number, a.Path, blocked, t.links(c)), nil
+		shot.URL, shot.Title, len(shot.PNG)>>10, c.Unit, c.Repo, c.Number, a.Path, blocked, t.links(c)), nil
 }
 
 // overlay is a config repo with some files as proposed.
@@ -602,7 +602,7 @@ func (o overlay) Read(ctx context.Context, path string) (string, error) {
 	return o.Files.Read(ctx, path)
 }
 
-// checkConfigFile refuses a file of a namespace's config the deployer
+// checkConfigFile refuses a file of a unit's config the deployer
 // would not take: one under config/, as if the repo were a folder of
 // itself, or a stack that is not valid. The approval check would refuse
 // the pull request anyway; this way the agent hears why at once.
@@ -614,7 +614,7 @@ func checkConfigFile(ns, repo, path, content string) error {
 		return fmt.Errorf("%w: paths are of the repo %s/%s itself, so nothing was proposed: propose %s, not %s", ErrInvalid, ns, ConfigRepo, rest, path)
 	}
 	name, ok := strings.CutPrefix(path, stack.Dir+"/")
-	if !ok || ns == PlatformNamespace {
+	if !ok || ns == PlatformUnit {
 		return nil
 	}
 	name, ok = strings.CutSuffix(name, ".yaml")
@@ -627,19 +627,19 @@ func checkConfigFile(ns, repo, path, content string) error {
 	return nil
 }
 
-// checkBindings refuses a grants.yaml or routines.yaml of a namespace's
+// checkBindings refuses a grants.yaml or routines.yaml of a unit's
 // config that the approval check would refuse anyway: one that is no YAML,
 // names an agent garrison has not, or a schedule that is none. The agent
 // hears why at once and fixes it, instead of a pull request nobody can
 // merge.
 func (t *Tools) checkBindings(ctx context.Context, ns, repo, path, content string) error {
-	if repo != ConfigRepo || ns == PlatformNamespace || (path != agents.GrantsFile && path != agents.RoutinesFile) {
+	if repo != ConfigRepo || ns == PlatformUnit || (path != agents.GrantsFile && path != agents.RoutinesFile) {
 		return nil
 	}
 	return t.checkBindingsAt(ctx, overlay{Files: configFiles{g: t.Gitea, ns: ns, ref: "main"}, files: map[string]string{path: content}}, ns, []string{path})
 }
 
-// checkBindingsAt checks the bindings of a namespace's config as f has
+// checkBindingsAt checks the bindings of a unit's config as f has
 // them; only the problems of paths count, the others are not proposed.
 func (t *Tools) checkBindingsAt(ctx context.Context, f agents.Files, ns string, paths []string) error {
 	problems, err := t.bindingProblems(ctx, f, paths)
@@ -653,7 +653,7 @@ func (t *Tools) checkBindingsAt(ctx context.Context, f agents.Files, ns string, 
 }
 
 // bindingProblems are what the approval check would refuse in paths of a
-// namespace's config as f has it.
+// unit's config as f has it.
 func (t *Tools) bindingProblems(ctx context.Context, f agents.Files, paths []string) ([]string, error) {
 	defs, err := t.Gitea.Definitions(ctx)
 	if err != nil {
@@ -676,7 +676,7 @@ func (t *Tools) links(c Change) string {
 		return "End your answer with this link, exactly as it is, so the person can open it:\n" + c.URL
 	}
 	return fmt.Sprintf("End your answer with these two lines, exactly as they are: the first opens the change's card, where the person reads in plain words what it changes and approves or merges it; the second is the pull request in Gitea.\nReview it: %s%s\nIn Gitea: %s",
-		strings.TrimSuffix(t.Dashboard, "/"), changes.Path(c.Namespace, c.Repo, c.Number), c.URL)
+		strings.TrimSuffix(t.Dashboard, "/"), changes.Path(c.Unit, c.Repo, c.Number), c.URL)
 }
 
 // skill reads one of the agent's skills from its config repo, as person.
@@ -698,17 +698,17 @@ func (t *Tools) skill(ctx context.Context, p Person, agent *agents.Agent, name s
 		if err := validPath(a.Path); err != nil || a.Path == "" {
 			return "", fmt.Errorf("%w: path %q", ErrInvalid, a.Path)
 		}
-		return t.Gitea.Read(ctx, p.Name, PlatformNamespace, ConfigRepo, sk.Dir+"/"+a.Path)
+		return t.Gitea.Read(ctx, p.Name, PlatformUnit, ConfigRepo, sk.Dir+"/"+a.Path)
 	}
 	// Skills are garrison's, with its agents.
-	body, err := t.Gitea.Read(ctx, p.Name, PlatformNamespace, ConfigRepo, sk.Dir+"/"+agents.SkillFile)
+	body, err := t.Gitea.Read(ctx, p.Name, PlatformUnit, ConfigRepo, sk.Dir+"/"+agents.SkillFile)
 	if err != nil {
 		return "", err
 	}
 	var files []string
 	var walk func(dir, prefix string) error
 	walk = func(dir, prefix string) error {
-		entries, err := t.Gitea.List(ctx, p.Name, PlatformNamespace, ConfigRepo, dir)
+		entries, err := t.Gitea.List(ctx, p.Name, PlatformUnit, ConfigRepo, dir)
 		if err != nil {
 			return err
 		}
@@ -734,26 +734,26 @@ func (t *Tools) skill(ctx context.Context, p Person, agent *agents.Agent, name s
 	return out, nil
 }
 
-// stackNames lists a namespace's deployed Swarm stacks with their commits:
+// stackNames lists a unit's deployed Swarm stacks with their commits:
 // in garrison the stacks the deployer deployed, elsewhere one per deployed
 // environment of each app, named after its hostname (todo, dev-todo).
-func stackNames(state gitops.State, namespace string) map[string]string {
+func stackNames(state gitops.State, unit string) map[string]string {
 	out := map[string]string{}
-	if namespace == PlatformNamespace {
+	if unit == PlatformUnit {
 		for name, commit := range state.Stacks {
 			out[name] = commit
 		}
 		return out
 	}
-	for _, a := range state.AppsOf(namespace) {
+	for _, a := range state.AppsOf(unit) {
 		out[a.Stack] = a.Commit
 	}
 	return out
 }
 
-// ownStack checks that stack is a deployed stack of namespace.
-func (t *Tools) ownStack(namespace, stack string) error {
-	if err := validOrg(namespace); err != nil {
+// ownStack checks that stack is a deployed stack of unit.
+func (t *Tools) ownStack(unit, stack string) error {
+	if err := validOrg(unit); err != nil {
 		return err
 	}
 	if !swarmName.MatchString(stack) {
@@ -763,8 +763,8 @@ func (t *Tools) ownStack(namespace, stack string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := stackNames(state, namespace)[stack]; !ok {
-		return fmt.Errorf("%w: %s is not a stack of %s; list_stacks shows them", ErrInvalid, stack, namespace)
+	if _, ok := stackNames(state, unit)[stack]; !ok {
+		return fmt.Errorf("%w: %s is not a stack of %s; list_stacks shows them", ErrInvalid, stack, unit)
 	}
 	return nil
 }
@@ -862,9 +862,9 @@ type Service struct {
 	Healthy  bool   `json:"healthy"`
 }
 
-// Stacks lists a namespace's deployed stacks with what Swarm runs for them.
-func (t *Tools) Stacks(ctx context.Context, namespace string) ([]Stack, error) {
-	if err := validOrg(namespace); err != nil {
+// Stacks lists a unit's deployed stacks with what Swarm runs for them.
+func (t *Tools) Stacks(ctx context.Context, unit string) ([]Stack, error) {
+	if err := validOrg(unit); err != nil {
 		return nil, err
 	}
 	state, err := gitops.ReadState(t.WorkDir)
@@ -885,7 +885,7 @@ func (t *Tools) Stacks(ctx context.Context, namespace string) ([]Stack, error) {
 		running, desired, _ := strings.Cut(strings.Fields(f[1])[0], "/")
 		byStack[stack] = append(byStack[stack], Service{Name: f[0], Replicas: f[1], Image: f[2], Healthy: running == desired && desired != "0"})
 	}
-	names := stackNames(state, namespace)
+	names := stackNames(state, unit)
 	var stacks []Stack
 	for _, name := range sortedKeys(names) {
 		stacks = append(stacks, Stack{Name: name, Commit: names[name], Services: byStack[name]})
@@ -917,12 +917,12 @@ func (t *Tools) createBranch(ctx context.Context, p Person, a args) (string, err
 	if base == "" {
 		base = "main"
 	}
-	link, err := t.Gitea.CreateBranch(ctx, p.Name, a.Namespace, a.Repo, a.Branch, base)
+	link, err := t.Gitea.CreateBranch(ctx, p.Name, a.Unit, a.Repo, a.Branch, base)
 	if err != nil {
 		return "", err
 	}
-	out := fmt.Sprintf("Made the branch %s of %s/%s from %s, as %s.\n%s", a.Branch, a.Namespace, a.Repo, base, p.Name, link)
-	envs, err := t.Gitea.environments(ctx, a.Namespace)
+	out := fmt.Sprintf("Made the branch %s of %s/%s from %s, as %s.\n%s", a.Branch, a.Unit, a.Repo, base, p.Name, link)
+	envs, err := t.Gitea.environments(ctx, a.Unit)
 	if err != nil {
 		return out, nil
 	}
@@ -933,5 +933,5 @@ func (t *Tools) createBranch(ctx context.Context, p Person, a args) (string, err
 			return out, nil
 		}
 	}
-	return out + fmt.Sprintf("\nNo stack of %s deploys this branch: it is only a branch. To deploy it, propose an environment %s in the stack's file in %s/config.", a.Namespace, a.Branch, a.Namespace), nil
+	return out + fmt.Sprintf("\nNo stack of %s deploys this branch: it is only a branch. To deploy it, propose an environment %s in the stack's file in %s/config.", a.Unit, a.Branch, a.Unit), nil
 }

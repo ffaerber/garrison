@@ -21,9 +21,9 @@ const (
 	TraefikEntrypoint = "websecure"      // HTTPS entry point with the wildcard certificate
 	SSOMiddleware     = "sso@file"       // forward-auth middleware backed by Keycloak
 
-	// Labels of every app service: its namespace, app (the stack file's
+	// Labels of every app service: its unit, app (the stack file's
 	// name) and environment.
-	LabelNamespace   = "garrison.namespace"
+	LabelUnit        = "garrison.unit"
 	LabelApp         = "garrison.app"
 	LabelEnvironment = "garrison.environment"
 	GPUResource      = "GPU" // generic resource the installer advertises per GPU
@@ -46,11 +46,11 @@ type Options struct {
 	// IngressKey, if set, is the ingress key of a private environment (see
 	// IngressHeader): letters and digits only. Empty: none.
 	IngressKey string
-	// Secrets are the namespace's stored secrets this environment gets, by
+	// Secrets are the unit's stored secrets this environment gets, by
 	// name (secrets/<name>.yaml in its config, decrypted); every other
 	// secret a service names has a generated value.
 	Secrets map[string]Stored
-	// Members are the namespace's people, its admins and members, for
+	// Members are the unit's people, its admins and members, for
 	// {{members}} in a service's env: their names, comma-separated.
 	Members []string
 }
@@ -77,7 +77,7 @@ func Image(image, domain, commit string) string {
 }
 
 // DefaultDataRoot is where the installer mounts the dataset that holds all
-// namespaces. The ZFS dataset name is this path without the leading slash.
+// units. The ZFS dataset name is this path without the leading slash.
 const DefaultDataRoot = "/garrison/ns"
 
 // StackName is the Swarm stack name of an environment. Hostnames are unique
@@ -86,12 +86,12 @@ func StackName(s *stack.Stack, env string) string { return s.Hostname(env) }
 
 // DatasetPath is where an environment's own dataset is mounted on the host.
 func DatasetPath(root string, s *stack.Stack, env, dataset string) string {
-	return path.Join(root, s.Namespace, "stacks", s.Hostname(env), dataset)
+	return path.Join(root, s.Unit, "stacks", s.Hostname(env), dataset)
 }
 
-// SharePath is where a namespace's shared library is mounted on the host.
-func SharePath(root, namespace, share string) string {
-	return path.Join(root, namespace, "shares", share)
+// SharePath is where a unit's shared library is mounted on the host.
+func SharePath(root, unit, share string) string {
+	return path.Join(root, unit, "shares", share)
 }
 
 // SecretName is the Swarm secret holding an environment's generated secret.
@@ -198,7 +198,7 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 		}
 		// Who the service belongs to, for the deployer's metrics and alerts.
 		deploy := composeDeploy{Labels: map[string]string{
-			LabelNamespace:   s.Namespace,
+			LabelUnit:        s.Unit,
 			LabelApp:         s.Name,
 			LabelEnvironment: o.Environment,
 		}}
@@ -226,7 +226,7 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 			v := svc.Volumes[vol]
 			m := composeMount{Type: "bind", Target: v.MountPath(vol), ReadOnly: v.Readonly}
 			if v.Share != "" {
-				m.Source = SharePath(o.DataRoot, s.Namespace, v.Share)
+				m.Source = SharePath(o.DataRoot, s.Unit, v.Share)
 			} else {
 				m.Source = DatasetPath(o.DataRoot, s, o.Environment, v.Dataset)
 			}

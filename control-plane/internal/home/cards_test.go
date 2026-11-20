@@ -24,7 +24,7 @@ type fakeChanges struct {
 }
 
 func newFakeChanges() *fakeChanges {
-	return &fakeChanges{card: changes.Card{Namespace: "todo", Repo: "config", Number: 4, Title: "A screenshot every morning",
+	return &fakeChanges{card: changes.Card{Unit: "todo", Repo: "config", Number: 4, Title: "A screenshot every morning",
 		Body: "Asked by alice through todo/operator.", Author: "alice", Base: "main", URL: "https://git.home.test/todo/config/pulls/4",
 		Files:  []changes.File{{Path: "routines.yaml", Status: "modified"}, {Path: "grants.yaml", Status: "modified"}},
 		Checks: []changes.Check{{Name: "garrison/approval", State: "pending", Detail: "waits for an admin of todo who did not write it"}}}}

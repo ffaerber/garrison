@@ -3,7 +3,7 @@
 # here; the running deployer applies that and replaces itself.
 services:
   # The deployer: deploys every repo of the `garrison` organisation that holds
-  # a compose.yaml, this one last, and the apps of every other namespace.
+  # a compose.yaml, this one last, and the apps of every other unit.
   deployer:
     image: git.${DOMAIN}/garrison/control-plane:bootstrap
     command:
@@ -22,7 +22,7 @@ services:
       # What it deploys, and Gitea's deliveries, go to the dashboard's feed;
       # Prometheus reads the services' health at /metrics here.
       - -events-db=postgres://garrison@postgres_postgres:5432/garrison
-      # The namespaces' age keys: it decrypts their stored secrets for their
+      # The units' age keys: it decrypts their stored secrets for their
       # apps, and gives the dashboard the public keys at /secrets/<ns>/recipients.
       - -keys=/etc/garrison/sops
       # The LLM providers' keys set on the dashboard's Models page, kept
@@ -45,7 +45,7 @@ services:
         constraints: [node.role == manager]
 
   # The gateway: the MCP server behind the agents, and the syncs that keep
-  # each namespace's agents, channel, members and build account. Not routed:
+  # each unit's agents, channel, members and build account. Not routed:
   # only the agent service calls it, over the system network, with each
   # person's Keycloak token.
   gateway:
@@ -81,7 +81,7 @@ services:
         constraints: [node.role == manager]
 
   # The agent service: the OpenAI-compatible API Open WebUI talks to. Its
-  # models are the namespaces' agents. Each chat with an agent runs in a
+  # models are the units' agents. Each chat with an agent runs in a
   # sandbox of its own (the image below, built with this one): Pi, the agent
   # harness, with a workspace kept in a volume per chat. The agent service
   # passes on the LLM, whose key only it has, and the agent's tools from the
@@ -137,9 +137,9 @@ services:
       - -label=garrison.sandbox
       - -max-memory=2147483648
       - -runtime=runsc
-      # A sandbox in a namespace's channel gets that namespace's media
+      # A sandbox in a unit's channel gets that unit's media
       # library, the share media, at /data/media: no other folder of the host.
-      - -share=/garrison/ns/{namespace}/shares/media
+      - -share=/garrison/ns/{unit}/shares/media
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [sandbox-guard]
@@ -157,7 +157,7 @@ services:
       - home
       - -password-file=/run/secrets/admin-password
       - -events-db=postgres://garrison@postgres_postgres:5432/garrison
-      # The secrets page encrypts with the namespaces' public keys, which the
+      # The secrets page encrypts with the units' public keys, which the
       # deployer gives; it never reads a value back.
       - -deployer=http://control-plane_deployer:8090
     secrets:
@@ -212,7 +212,7 @@ services:
       placement:
         constraints: [node.role == manager]
 
-  # Actions runner of the user namespaces (see user-runner.yaml). The system
+  # Actions runner of the user units (see user-runner.yaml). The system
   # organisation has its own runner, which may use Docker directly.
   user-runner:
     image: gitea/act_runner:0.2.13

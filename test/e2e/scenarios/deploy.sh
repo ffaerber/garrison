@@ -1,16 +1,16 @@
 # shellcheck shell=bash
-# deploy: a namespace with an app of its own, built and deployed by its
+# deploy: a unit with an app of its own, built and deployed by its
 # pipeline on the user runner. Leaves todo/app running.
 section_deploy() {
 echo "# deploying an app through its pipeline"
 repo=$api/repos/todo/app
 for u in alice bob; do sso_login "$tmp/git-$u.jar" "https://git.$DOMAIN/user/oauth2/keycloak" "$TEST_PASSWORD" "$tmp/git-$u.html" $u >/dev/null 2>&1; done
-check "bob cannot create a namespace" \
-  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"bobs-namespace"}' "$api/orgs")" = 403
+check "bob cannot create a unit" \
+  test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"bobs-unit"}' "$api/orgs")" = 403
 code=$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"todo","visibility":"limited","description":"Our todo list"}' "$api/orgs")
-check "alice creates the namespace todo" bash -c "[ $code = 201 ] || [ $code = 422 ]"
+check "alice creates the unit todo" bash -c "[ $code = 201 ] || [ $code = 422 ]"
 has_build_account() { gitea_api "" "$api/orgs/todo/actions/secrets" | grep -q '"name":"REGISTRY_TOKEN"'; }
-check "the namespace gets its build account" until_true 150 has_build_account
+check "the unit gets its build account" until_true 150 has_build_account
 check "its build account is a member"     test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/todo/members/todo-builder")" = 204
 # The app is the template todo, as create_repo writes it for todo/app, and
 # its stack the one its README tells the agents to propose.
@@ -195,9 +195,9 @@ check "the deploy's thread holds its push and pipeline" deploy_thread
 check "the failed pipeline is a problem"   in_feed alice view=problems "e['kind'] == 'pipeline' and e['commit'] == '$bad'"
 check "and the commit waited for its image" in_feed alice ns=todo "e['kind'] == 'deploy' and e['commit'] == '$bad' and e['status'] == 'waiting'"
 check "the restore"                        in_feed alice ns=todo "e['kind'] == 'restore' and e['status'] == 'ok'"
-check "the reserved hostname"              in_feed alice view=problems "'reserved' in e['title'] and e['namespace'] == 'todo'"
+check "the reserved hostname"              in_feed alice view=problems "'reserved' in e['title'] and e['unit'] == 'todo'"
 check "dev-todo taken down"                in_feed alice ns=todo "e['kind'] == 'undeploy' and 'dev-todo' in e['title']"
-check "the system stacks' deploys, for everyone" in_feed alice "" "e['kind'] == 'deploy' and e['namespace'] == '' and 'traefik' in e['title']"
+check "the system stacks' deploys, for everyone" in_feed alice "" "e['kind'] == 'deploy' and e['unit'] == '' and 'traefik' in e['title']"
 page_lists() { local page; page=$(feed alice "/?ns=todo") && grep -q "deployed todo/todo@main at ${fixed:0:7}" <<<"$page"; }
 check "its page lists them"                page_lists
 check "bob opens it too"                   until_true 60 home_login bob
@@ -237,7 +237,7 @@ check "and deletes the secret"             deleted
 
 echo "# alerts"
 health() { docker exec "$(docker ps -q -f name=prometheus_prometheus | head -n1)" wget -qO- "http://control-plane_deployer:8090/metrics"; }
-check "the deployer tells Prometheus how each service does" grep -q 'garrison_service_replicas_running{namespace="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"
+check "the deployer tells Prometheus how each service does" grep -q 'garrison_service_replicas_running{unit="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"
 # Postgres without a password exits at once: a service that keeps failing.
 printf 'entrypoint: db\nservices:\n  db: { image: postgres:17-alpine, port: 5432 }\nenvironments:\n  main: {}\n' > "$tmp/crash.yaml"
 check "alice adds an app that cannot start" set_stack todo crash "$tmp/crash.yaml"

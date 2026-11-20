@@ -24,7 +24,7 @@ import (
 // hand or by the installer, and is never removed.
 const llmKeysState = "llm-keys.json"
 
-// Decrypter reads a namespace's secret file (secrets.Keys).
+// Decrypter reads a unit's secret file (secrets.Keys).
 type Decrypter interface {
 	Decrypt(ctx context.Context, ns string, data []byte) (string, error)
 }
@@ -63,7 +63,7 @@ func syncLLMKeys(ctx context.Context, keys Decrypter, cfgDir, dir, stateFile str
 	var errs []error
 	changed := false
 	for _, provider := range slices.Sorted(maps.Keys(want)) {
-		value, err := keys.Decrypt(ctx, models.Namespace, want[provider])
+		value, err := keys.Decrypt(ctx, models.Unit, want[provider])
 		if err != nil {
 			errs = append(errs, fmt.Errorf("the key of the LLM provider %s: %w", provider, err))
 			continue
@@ -83,7 +83,7 @@ func syncLLMKeys(ctx context.Context, keys Decrypter, cfgDir, dir, stateFile str
 		}
 		written[provider], changed = sum, true
 		log.Printf("llm keys: wrote the key of %s", provider)
-		record(events.Event{Kind: events.KindSecret, Status: events.StatusOK, Namespace: models.Namespace,
+		record(events.Event{Kind: events.KindSecret, Status: events.StatusOK, Unit: models.Unit,
 			Title: fmt.Sprintf("the API key of the LLM provider %s is in place for the agents", provider)})
 	}
 	for _, provider := range slices.Sorted(maps.Keys(written)) {
@@ -98,7 +98,7 @@ func syncLLMKeys(ctx context.Context, keys Decrypter, cfgDir, dir, stateFile str
 				continue
 			}
 			log.Printf("llm keys: removed the key of %s", provider)
-			record(events.Event{Kind: events.KindSecret, Status: events.StatusOK, Namespace: models.Namespace,
+			record(events.Event{Kind: events.KindSecret, Status: events.StatusOK, Unit: models.Unit,
 				Title: fmt.Sprintf("the API key of the LLM provider %s is removed: its secret is gone", provider)})
 		}
 		delete(written, provider)

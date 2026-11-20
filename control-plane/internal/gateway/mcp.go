@@ -1,7 +1,7 @@
 // Package gateway is the gateway: an MCP server that gives chat
-// agents (Open WebUI, one per namespace) tools to look at the system and to
+// agents (Open WebUI, one per unit) tools to look at the system and to
 // propose changes, acting as the person who asks; and the sync that keeps
-// one such agent per namespace in Open WebUI.
+// one such agent per unit in Open WebUI.
 package gateway
 
 import (
@@ -79,7 +79,7 @@ func (k *KeycloakVerifier) Verify(ctx context.Context, raw string) (Person, erro
 // JSON-RPC request with a JSON response. It keeps no sessions.
 //
 // Each agent gets only the tools its agent.yaml lists. Open WebUI names the
-// agent in the header X-Garrison-Agent (its model id); /mcp/<namespace>/<agent>
+// agent in the header X-Garrison-Agent (its model id); /mcp/<unit>/<agent>
 // names it in the path. /mcp without the header serves every base tool.
 type MCP struct {
 	Tools    *Tools
@@ -156,10 +156,10 @@ func (m *MCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if allowed, err := m.Tools.Gitea.CanUse(r.Context(), agent, person); err != nil {
-		http.Error(w, "cannot read the namespace's members", http.StatusBadGateway)
+		http.Error(w, "cannot read the unit's members", http.StatusBadGateway)
 		return
 	} else if !allowed {
-		http.Error(w, fmt.Sprintf("%s may not use the agent %s: in %s it is for the people of %s", person.Name, agent.Name, agent.Namespace, agent.Namespace), http.StatusForbidden)
+		http.Error(w, fmt.Sprintf("%s may not use the agent %s: in %s it is for the people of %s", person.Name, agent.Name, agent.Unit, agent.Unit), http.StatusForbidden)
 		return
 	}
 	var req rpcRequest

@@ -116,15 +116,15 @@ func (m *Memory) Related(ctx context.Context, e Event, v Visibility) ([]Event, e
 	return out, nil
 }
 
-func (m *Memory) Namespaces(_ context.Context, v Visibility) ([]string, error) {
+func (m *Memory) Units(_ context.Context, v Visibility) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	seen := map[string]bool{}
 	var out []string
 	for _, e := range m.events {
-		if e.Namespace != "" && !seen[e.Namespace] && v.Sees(e) {
-			seen[e.Namespace] = true
-			out = append(out, e.Namespace)
+		if e.Unit != "" && !seen[e.Unit] && v.Sees(e) {
+			seen[e.Unit] = true
+			out = append(out, e.Unit)
 		}
 	}
 	sort.Strings(out)
@@ -140,7 +140,7 @@ func (q Query) matches(e Event) bool {
 		return false
 	case q.After > 0 && e.ID <= q.After:
 		return false
-	case q.Namespace != "" && e.Namespace != q.Namespace:
+	case q.Unit != "" && e.Unit != q.Unit:
 		return false
 	case len(q.Kinds) > 0 && !slices.Contains(q.Kinds, e.Kind):
 		return false

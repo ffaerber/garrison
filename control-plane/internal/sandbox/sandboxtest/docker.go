@@ -242,7 +242,7 @@ func (d *Docker) attach(w http.ResponseWriter, c *Container) {
 				answer = "fetched: " + fetch(c, strings.TrimSpace(u))
 			} else if strings.Contains(cmd.Message, "tools") {
 				emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "stopReason": "toolUse", "content": []any{map[string]any{"type": "text", "text": "Let me look."}}}})
-				emit(map[string]any{"type": "tool_execution_start", "toolName": "list_repos", "args": map[string]any{"namespace": "homepage"}})
+				emit(map[string]any{"type": "tool_execution_start", "toolName": "list_repos", "args": map[string]any{"unit": "homepage"}})
 				answer = d.listTools(c)
 				emit(map[string]any{"type": "tool_execution_end", "toolName": "list_repos", "isError": false})
 			}

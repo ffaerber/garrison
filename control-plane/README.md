@@ -4,13 +4,13 @@ Go. One image, run in Swarm as the stack `control-plane` from the repo `garrison
 
 | Service | Does |
 | --- | --- |
-| `deployer` | Makes the machine match Git: deploys every repo of `garrison` that holds a `compose.yaml` (this one last) and the apps of every other namespace, takes down what was deleted, keeps dashboards in Grafana, snapshots an app's data before each redeploy and carries out restore requests (`restores/*.yaml` in a namespace's config). Later also holds the SOPS key and writes change records. |
-| `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each namespace's agents (from `agents/` in its config repo; each gets only its own tools), their accounts for grants, its channels and Open WebUI group, its members and approval checks, and its build account. Acts as an agent's own account where only a grant allows it (`merge_change`, outsiders' proposals), keeps open proposals up to date, and drives the browser for `screenshot` and `browse`. Changes nothing that runs. |
-| `agents` | The agent service: the OpenAI-compatible API Open WebUI talks to, whose models are the namespaces' agents. Runs each chat with an agent in a sandbox of its own (image from `sandbox/`, built with this one): Pi, the agent harness, with a workspace kept in a volume per chat. Passes on to the sandboxes the LLM, whose key only it holds, and the agent's tools from the gateway, acting as the person chatting. Serves `ask_agent` and runs the agents' routines. |
+| `deployer` | Makes the machine match Git: deploys every repo of `garrison` that holds a `compose.yaml` (this one last) and the apps of every other unit, takes down what was deleted, keeps dashboards in Grafana, snapshots an app's data before each redeploy and carries out restore requests (`restores/*.yaml` in a unit's config). Later also holds the SOPS key and writes change records. |
+| `gateway` | The way in for people's agents: the MCP server Open WebUI calls with each person's Keycloak token, which reads and proposes pull requests as that person. Keeps each unit's agents (from `agents/` in its config repo; each gets only its own tools), their accounts for grants, its channels and Open WebUI group, its members and approval checks, and its build account. Acts as an agent's own account where only a grant allows it (`merge_change`, outsiders' proposals), keeps open proposals up to date, and drives the browser for `screenshot` and `browse`. Changes nothing that runs. |
+| `agents` | The agent service: the OpenAI-compatible API Open WebUI talks to, whose models are the units' agents. Runs each chat with an agent in a sandbox of its own (image from `sandbox/`, built with this one): Pi, the agent harness, with a workspace kept in a volume per chat. Passes on to the sandboxes the LLM, whose key only it holds, and the agent's tools from the gateway, acting as the person chatting. Serves `ask_agent` and runs the agents' routines. |
 | `sandbox-guard` | The Docker API for the agent service, letting through only sandboxes: the sandbox image, labelled, with limits, on the sandboxes network. |
 | `browser` | Headless Chrome for the gateway's `screenshot` tool. Its only network reaches Traefik and the gateway; it loads the installation's pages only, as the person asking. |
 | `guard` | The Docker API for the user runner, letting through only what pipeline jobs need. |
-| `user-runner` | Gitea Actions runner of every namespace other than `garrison`. |
+| `user-runner` | Gitea Actions runner of every unit other than `garrison`. |
 
 The same binary is installed on the host as `garrison`: the installer uses it to deploy once before the services exist, and admins use it for `applied`, `validate`, `render` and `apply`.
 
@@ -21,7 +21,7 @@ The same binary is installed on the host as `garrison`: the installer uses it to
 | `internal/render` | Renders one environment of a stack as a Compose file for `docker stack deploy` |
 | `internal/apply` | Creates the ZFS datasets and Swarm secrets a stack needs, then runs `docker stack deploy` |
 | `internal/system` | Deploys a system stack: a plain Compose file, its datasets and config hash |
-| `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`, the deployer itself last; and every other namespace's apps, `config/stacks/<name>.yaml`, from their source repos' branches and pull requests |
+| `internal/gitops` | Follows an organisation in Gitea and deploys every repo with a `compose.yaml`, the deployer itself last; and every other unit's apps, `config/stacks/<name>.yaml`, from their source repos' branches and pull requests |
 | `internal/hooks` | Gitea's webhooks: puts one on every organisation, its secret derived from the admin password, checks the signature of each call, and wakes the sync loops |
 | `internal/dashboards` | Keeps `dashboards/*.json` of every repo in Grafana |
 | `internal/agentapi` | The agent service: models, chat completions (streamed), turns in sandboxes and the API they use (LLM, tools, read-only Git), `ask_agent`, routines, the in-process loop for requests without a chat, Open WebUI's tasks |
@@ -47,8 +47,8 @@ Go runs in a container, so only Docker is needed. `make golden` rewrites the exp
 | Thing | Name |
 | --- | --- |
 | Swarm stack | the environment's hostname, e.g. `dev-jellyfin` (unique across the installation) |
-| Dataset on the host (data root `/garrison/ns`) | `<data root>/<namespace>/stacks/<environment hostname>/<dataset>` |
-| Share on the host | `<data root>/<namespace>/shares/<share>` |
+| Dataset on the host (data root `/garrison/ns`) | `<data root>/<unit>/stacks/<environment hostname>/<dataset>` |
+| Share on the host | `<data root>/<unit>/shares/<share>` |
 | Swarm secret | `<environment hostname>.<secret>` |
 
 What rendered stacks expect from the system stack is in `garrison/platform/contracts`.
@@ -60,4 +60,4 @@ SOPS, migrations, change records, approvals, and restoring code and data togethe
 ## Known gaps
 
 - GPU rendering is untested on real hardware; see the spike in `docs/spec.md`, "Testing".
-- Namespace networks are not rendered. Swarm gives every service its short name (`app`, `redis`) as a DNS alias on each network it joins, so two stacks sharing a network can resolve each other's services by accident. Routed services already share `traefik-public`. This needs a decision before stacks in a namespace are put on one network.
+- Unit networks are not rendered. Swarm gives every service its short name (`app`, `redis`) as a DNS alias on each network it joins, so two stacks sharing a network can resolve each other's services by accident. Routed services already share `traefik-public`. This needs a decision before stacks in a unit are put on one network.

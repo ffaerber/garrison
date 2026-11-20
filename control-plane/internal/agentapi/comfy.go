@@ -29,18 +29,18 @@ import (
 )
 
 // GenerateMedia is the tool that makes pictures and videos with ComfyUI, in
-// a project's style, into the namespace's media library.
+// a project's style, into the unit's media library.
 const GenerateMedia = "generate_media"
 
 var generateSpec = toolSpec{
 	Name: GenerateMedia,
-	Description: "Makes pictures or videos with ComfyUI in one of a project's styles, and puts them into the namespace's media library, /data/media/<project>/, each with a .json of how it was made. " +
-		"A project is a repo of the namespace with styles/<style>.yaml and the ComfyUI workflows they name (load the skill media-project for how they look). " +
+	Description: "Makes pictures or videos with ComfyUI in one of a project's styles, and puts them into the unit's media library, /data/media/<project>/, each with a .json of how it was made. " +
+		"A project is a repo of the unit with styles/<style>.yaml and the ComfyUI workflows they name (load the skill media-project for how they look). " +
 		"Write the prompt as what the picture shows; the style adds its own words, size and settings. Answers with the files made. Videos can take many minutes.",
 	InputSchema: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"project": map[string]any{"type": "string", "description": "the project's repo, <namespace>/<repo>, e.g. media/demo"},
+			"project": map[string]any{"type": "string", "description": "the project's repo, <unit>/<repo>, e.g. media/demo"},
 			"style":   map[string]any{"type": "string", "description": "a style of the project: the name of a file in its styles/, without .yaml"},
 			"prompt":  map[string]any{"type": "string", "description": "what to show"},
 			"count":   map[string]any{"type": "integer", "description": "how many, 1 to 8; default 1"},
@@ -118,7 +118,7 @@ type outputFile struct {
 const keepOutputs = time.Hour
 
 // mayGenerate tells whether the sandbox of c gets generate_media: its agent
-// lists it, there is a ComfyUI, and the namespace a media library.
+// lists it, there is a ComfyUI, and the unit a media library.
 func (s *Server) mayGenerate(ctx context.Context, c sandbox.Caller) bool {
 	if s.ComfyUI == nil || s.Styles == nil {
 		return false
@@ -145,7 +145,7 @@ func (s *Server) generate(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	m := projectName.FindStringSubmatch(in.Project)
 	switch {
 	case m == nil:
-		return nil, fmt.Errorf("project is <namespace>/<repo>, e.g. media/demo")
+		return nil, fmt.Errorf("project is <unit>/<repo>, e.g. media/demo")
 	case !styleName.MatchString(in.Style):
 		return nil, fmt.Errorf("style is the name of a file in the project's styles/, without .yaml")
 	case strings.TrimSpace(in.Prompt) == "":
@@ -442,7 +442,7 @@ func (s *Server) sandboxGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.mayGenerate(r.Context(), c) {
-		apiError(w, http.StatusForbidden, "this agent has no generate_media here: its agent.yaml must list it, and the namespace needs a media library (a stack of its config mounting the share media) and the installation a ComfyUI (COMFYUI_URL)")
+		apiError(w, http.StatusForbidden, "this agent has no generate_media here: its agent.yaml must list it, and the unit needs a media library (a stack of its config mounting the share media) and the installation a ComfyUI (COMFYUI_URL)")
 		return
 	}
 	raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -463,7 +463,7 @@ func (s *Server) sandboxGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Events != nil {
 		s.Events.Record(r.Context(), events.Event{Source: events.SourceAgents, Kind: events.KindMedia, Status: events.StatusOK,
-			Namespace: ns, Audience: events.AudienceMembers, Actor: c.Person, Agent: c.Agent, StartedBy: c.Run.StartedBy,
+			Unit: ns, Audience: events.AudienceMembers, Actor: c.Person, Agent: c.Agent, StartedBy: c.Run.StartedBy,
 			Title: fmt.Sprintf("%s made %s in the style %s of %s for %s", c.Agent, made, style, project, c.Person)})
 	}
 	writeJSON(w, map[string]any{"files": files})

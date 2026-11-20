@@ -4,7 +4,7 @@ section_change() {
 talk_setup || return 0
 echo "# 4. bob changes the app through the agent; carol merges"
 since=$(last_pr app)
-answer=$(ask_agent todo bob "In the repo app of the namespace todo, change the heading of page.html from Todo to Our todos, in both the <title> and the <h1>. Read the file first and propose the whole new file.")
+answer=$(ask_agent todo bob "In the repo app of the unit todo, change the heading of page.html from Todo to Our todos, in both the <title> and the <h1>. Read the file first and propose the whole new file.")
 tpr=$(newest_pr app bob "$since")
 if [ -z "$tpr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
@@ -40,7 +40,7 @@ echo "# 4f. bob has the developer agent change the app with Git"
 check "Open WebUI has the developer"       until_true 120 has_model garrison/developer
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent todo bob "Clone the repo app of the namespace todo into your workspace. Find every place the text 'Our todos' appears (grep -rn) and change it to 'Team todos'. Then propose your changes, titled: Rename the heading to Team todos." developer)
+answer=$(ask_agent todo bob "Clone the repo app of the unit todo into your workspace. Find every place the text 'Our todos' appears (grep -rn) and change it to 'Team todos'. Then propose your changes, titled: Rename the heading to Team todos." developer)
 gpr=$(newest_pr app bob "$since")
 if [ -z "$gpr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
@@ -70,7 +70,7 @@ echo "# 4h. bob has the developer change dev and merge it there"
 check "alice makes the branch dev"         make_branch alice "$hp/app" dev
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent todo bob "Clone the repo app of the namespace todo, check out its branch dev, change the text 'Our todos' to 'Dev todos' everywhere (grep -rn), and propose it with propose_workspace_changes with base dev, titled: Dev heading. Then merge that pull request into dev with merge_change, and give me the link." developer)
+answer=$(ask_agent todo bob "Clone the repo app of the unit todo, check out its branch dev, change the text 'Our todos' to 'Dev todos' everywhere (grep -rn), and propose it with propose_workspace_changes with base dev, titled: Dev heading. Then merge that pull request into dev with merge_change, and give me the link." developer)
 dvpr=$(newest_any_pr app bob "$since")
 if [ -z "$dvpr" ]; then
   printf 'retry the agent opened no pull request; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
@@ -99,7 +99,7 @@ printf 'Notes.\n' > "$tmp/notes.md"
 check "alice cannot push to app's main directly" bash -c '[ "$0" != 201 ] && [ "$0" != 200 ]' "$(set_file app main NOTES.md "$tmp/notes.md" "Notes")"
 check "her change lands there once carol approves it" to_main app NOTES.md "$tmp/notes.md" "Notes"
 since=$(last_pr app)
-answer=$(ask_agent todo bob "Clone the repo app of the namespace todo, add a file PREVIEW.md with the line: Preview test. Propose it with propose_workspace_changes, titled: Preview test. Do not merge it." developer)
+answer=$(ask_agent todo bob "Clone the repo app of the unit todo, add a file PREVIEW.md with the line: Preview test. Propose it with propose_workspace_changes, titled: Preview test. Do not merge it." developer)
 ppr=$(newest_pr app bob "$since")
 check "it proposes it"                     test -n "$ppr"
 previewed() { garrison applied | grep -q "^app todo/todo@pr-$ppr pr-$ppr-todo "; }

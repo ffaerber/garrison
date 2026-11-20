@@ -1,12 +1,12 @@
 # 7. A second person
 
-Who belongs to a namespace is in `members.yaml` of its config: its admins
+Who belongs to a unit is in `members.yaml` of its config: its admins
 and its members. A change to it is a pull request like any other. alice asks
 the operator to add bob.
 
 ## Adding bob
 
-> @operator Add bob as a member of the namespace todo; alice stays its admin.
+> @operator Add bob as a member of the unit todo; alice stays its admin.
 
 ![alice asks the operator to add bob](img/members-ask.png)
 

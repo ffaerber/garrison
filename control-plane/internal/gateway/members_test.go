@@ -252,7 +252,7 @@ func TestWhoPushedToAConfigChangeDoesNotApproveIt(t *testing.T) {
 	}
 }
 
-// main of a namespace's app repos is free for one person, and takes only
+// main of a unit's app repos is free for one person, and takes only
 // approved pull requests once there are two; config keeps its own rule.
 func TestAppReposOfSeveralPeopleNeedApprovals(t *testing.T) {
 	rules := map[string]map[string]any{} // repo -> its rule for main
@@ -389,7 +389,7 @@ func TestAConfigRepoWithoutItsFilesGoesAgain(t *testing.T) {
 	}
 }
 
-// Every repo of a namespace deletes a pull request's branch when it is
+// Every repo of a unit deletes a pull request's branch when it is
 // merged, but one an app deploys from a branch besides main keeps it; the
 // sync sets those that differ, and leaves archived ones.
 func TestMergedBranchesAreDeleted(t *testing.T) {
@@ -479,7 +479,7 @@ func TestCreateBranchSaysWhereItDeploys(t *testing.T) {
 	}))
 	defer srv.Close()
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}, Dashboard: "https://example.test"}
-	out, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Namespace: "todo", Repo: "app", Branch: "dev"})
+	out, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Unit: "todo", Repo: "app", Branch: "dev"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,10 +491,10 @@ func TestCreateBranchSaysWhereItDeploys(t *testing.T) {
 	if strings.Join(made, ",") != `alice {"new_branch_name":"dev","old_branch_name":"main"}` {
 		t.Errorf("made: %v", made)
 	}
-	if _, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Namespace: "todo", Repo: "app", Branch: "main"}); err == nil || !strings.Contains(err.Error(), "already has a branch main") {
+	if _, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Unit: "todo", Repo: "app", Branch: "main"}); err == nil || !strings.Contains(err.Error(), "already has a branch main") {
 		t.Errorf("an existing branch: %v", err)
 	}
-	if _, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Namespace: "todo", Repo: "app", Branch: "change/x"}); err == nil {
+	if _, err := tools.createBranch(context.Background(), Person{Name: "alice"}, args{Unit: "todo", Repo: "app", Branch: "change/x"}); err == nil {
 		t.Error("a change/ branch was made")
 	}
 }

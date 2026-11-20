@@ -1,7 +1,7 @@
-# The home cloud's alerts. Each names the namespace it concerns (apps carry
+# The home cloud's alerts. Each names the unit it concerns (apps carry
 # it; the platform's own alerts have none and go to garrison), and Alertmanager
 # hands it to the agent service: it appears in the dashboard's feed for the
-# namespace's people, and starts the routines that wait for it (on_alert in
+# unit's people, and starts the routines that wait for it (on_alert in
 # agents/<name>/agent.yaml).
 groups:
   - name: garrison
@@ -14,14 +14,14 @@ groups:
         labels: { severity: critical }
         annotations:
           summary: "{{ $labels.service }} keeps failing: {{ $value }} tasks failed in 10 minutes"
-          description: "The service {{ $labels.service }} of the app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.namespace }} starts and fails again. Its tasks (stack_status) and logs (service_logs) say why."
+          description: "The service {{ $labels.service }} of the app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.unit }} starts and fails again. Its tasks (stack_status) and logs (service_logs) say why."
       - alert: ServiceDown
         expr: garrison_service_replicas_running < garrison_service_replicas_desired
         for: 5m
         labels: { severity: critical }
         annotations:
           summary: "{{ $labels.service }} runs {{ $value }} of its tasks"
-          description: "The service {{ $labels.service }} of the app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.namespace }} has run fewer tasks than it should for 5 minutes."
+          description: "The service {{ $labels.service }} of the app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.unit }} has run fewer tasks than it should for 5 minutes."
       # An app's entrypoint answers with server errors. Traefik names its
       # service after the hostname, the app's stack.
       - alert: HighErrorRate
@@ -34,12 +34,12 @@ groups:
             )
             and on (stack) (sum by (stack) (label_replace(rate(traefik_service_requests_total[5m]), "stack", "$1", "service", "(.+)@swarm")) > 0.05)
           )
-          * on (stack) group_left (namespace, app, environment) group by (stack, namespace, app, environment) (garrison_service_replicas_desired{namespace!="system"})
+          * on (stack) group_left (unit, app, environment) group by (stack, unit, app, environment) (garrison_service_replicas_desired{unit!="system"})
         for: 5m
         labels: { severity: warning }
         annotations:
           summary: "{{ $labels.stack }} answers {{ $value | humanizePercentage }} of its requests with a server error"
-          description: "The app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.namespace }} has answered more than a fifth of its requests with 5xx for 5 minutes."
+          description: "The app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.unit }} has answered more than a fifth of its requests with 5xx for 5 minutes."
       - alert: DiskAlmostFull
         expr: node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs|zfs"} / node_filesystem_size_bytes < 0.1
         for: 10m

@@ -87,7 +87,7 @@ func TestCardsAsThePersonSeesThem(t *testing.T) {
 		t.Errorf("eve: %v", err)
 	}
 	if _, err := g.Card(ctx, "bob", "../x", "config", 4); err == nil {
-		t.Error("a bad namespace was asked for")
+		t.Error("a bad unit was asked for")
 	}
 
 	// bob is todo's admin, so alice's change waits for him; lab's is not his to approve.
@@ -95,7 +95,7 @@ func TestCardsAsThePersonSeesThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].Namespace != "todo" || list[0].Number != 4 {
+	if len(list) != 1 || list[0].Unit != "todo" || list[0].Number != 4 {
 		t.Errorf("bob waits for %+v", list)
 	}
 	// alice's own waits for her too.
@@ -110,7 +110,7 @@ func TestCardsAsThePersonSeesThem(t *testing.T) {
 }
 
 func TestAChangeOpenedLinksItsCard(t *testing.T) {
-	c := Change{Namespace: "todo", Repo: "config", Number: 4, URL: "https://git.example.com/todo/config/pulls/4"}
+	c := Change{Unit: "todo", Repo: "config", Number: 4, URL: "https://git.example.com/todo/config/pulls/4"}
 	got := (&Tools{Dashboard: "https://example.com"}).links(c)
 	if !strings.Contains(got, "\nReview it: https://example.com/c/todo/config/4\nIn Gitea: https://git.example.com/todo/config/pulls/4") {
 		t.Errorf("with a dashboard: %q", got)

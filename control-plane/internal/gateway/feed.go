@@ -17,14 +17,14 @@ import (
 // changing are the tools whose calls the feed gets: those that change
 // something. Reads go to the feed only when they are refused.
 var changing = map[string]bool{
-	"propose_change":   true,
-	"propose_patch":    true,
-	"merge_change":     true,
-	"screenshot":       true,
-	"create_namespace": true,
-	"create_repo":      true,
-	"create_branch":    true,
-	"add_provider":     true,
+	"propose_change": true,
+	"propose_patch":  true,
+	"merge_change":   true,
+	"screenshot":     true,
+	"create_unit":    true,
+	"create_repo":    true,
+	"create_branch":  true,
+	"add_provider":   true,
 }
 
 var (
@@ -33,7 +33,7 @@ var (
 )
 
 // toolEvent is the feed's record of a tool call, or false if it gets none.
-// Its audience is the namespace's people, and the person it was for: what
+// Its audience is the unit's people, and the person it was for: what
 // someone asks an agent is theirs and their team's to read.
 func toolEvent(p Person, agent *agents.Agent, tool string, raw json.RawMessage, out string, err error) (events.Event, bool) {
 	status := events.StatusOK
@@ -48,16 +48,16 @@ func toolEvent(p Person, agent *agents.Agent, tool string, raw json.RawMessage, 
 		return events.Event{}, false
 	}
 	var args struct {
-		Namespace string `json:"namespace"`
-		Repo      string `json:"repo"`
-		Number    int    `json:"number"`
-		Name      string `json:"name"`
-		URL       string `json:"url"`
+		Unit   string `json:"unit"`
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+		Name   string `json:"name"`
+		URL    string `json:"url"`
 	}
 	json.Unmarshal(raw, &args)
 	e := events.Event{
 		Source: events.SourceGateway, Kind: tool, Status: status,
-		Namespace: args.Namespace, Repo: args.Repo, Audience: events.AudienceMembers,
+		Unit: args.Unit, Repo: args.Repo, Audience: events.AudienceMembers,
 		Actor: p.Name, StartedBy: p.StartedBy, PR: args.Number,
 	}
 	if p.Unattended {
@@ -65,14 +65,14 @@ func toolEvent(p Person, agent *agents.Agent, tool string, raw json.RawMessage, 
 	}
 	if agent != nil {
 		e.Agent = agent.ID()
-		if e.Namespace == "" {
-			e.Namespace = agent.Namespace
+		if e.Unit == "" {
+			e.Unit = agent.Unit
 		}
 	}
-	if tool == "create_namespace" && args.Name != "" {
-		e.Namespace = args.Name
+	if tool == "create_unit" && args.Name != "" {
+		e.Unit = args.Name
 	}
-	where := e.Namespace
+	where := e.Unit
 	if e.Repo != "" {
 		where += "/" + e.Repo
 	}
@@ -127,7 +127,7 @@ func (m *MCP) record(ctx context.Context, p Person, agent *agents.Agent, tool st
 
 // Visibility is what the feed shows person: everything to a root admin
 // (Gitea's admins), else the events of the repos Gitea lets them read and,
-// of the namespaces they are in, those for its people.
+// of the units they are in, those for its people.
 func (g *Gitea) Visibility(ctx context.Context, person string) (events.Visibility, error) {
 	v := events.Visibility{Person: person, Repos: map[string]bool{}, Members: map[string]bool{}}
 	if !userName.MatchString(person) {
@@ -143,11 +143,11 @@ func (g *Gitea) Visibility(ctx context.Context, person string) (events.Visibilit
 		v.All = true
 		return v, nil
 	}
-	namespaces, err := g.Namespaces(ctx, person)
+	units, err := g.Units(ctx, person)
 	if err != nil {
 		return v, err
 	}
-	for _, ns := range namespaces {
+	for _, ns := range units {
 		repos, err := g.Repos(ctx, person, ns.Name)
 		if err != nil {
 			return v, err

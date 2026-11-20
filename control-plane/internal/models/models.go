@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	// Namespace and Repo hold the files.
-	Namespace     = "garrison"
+	// Unit and Repo hold the files.
+	Unit          = "garrison"
 	Repo          = "config"
 	ProvidersFile = "llm/providers.yaml"
 	ModelsFile    = "llm/models.yaml"

@@ -207,7 +207,7 @@ func TestALockedAgentCannotSignIn(t *testing.T) {
 // Keycloak it may not.
 func TestARunWithoutAPersonSignsInAsTheAgent(t *testing.T) {
 	_, srv := newFakeKeycloak(t)
-	agent := &agents.Agent{Namespace: "todo", Name: "media", Tools: []string{"browse", "screenshot"}}
+	agent := &agents.Agent{Unit: "todo", Name: "media", Tools: []string{"browse", "screenshot"}}
 	routine := Person{Name: AgentAccount(agent), Unattended: true, Owner: "bob"}
 	tools := &Tools{Keycloak: &Keycloak{URL: srv.URL, User: "root", Password: "pw"}}
 	if tok, err := tools.signIn(context.Background(), routine, agent); err != nil || tok != "token-of-agent-todo-media" {
@@ -223,7 +223,7 @@ func TestARunWithoutAPersonSignsInAsTheAgent(t *testing.T) {
 }
 
 // A person in a roster who never opened Gitea has no account there yet; the
-// group sync finds their email in Keycloak, so the namespace's channel shows
+// group sync finds their email in Keycloak, so the unit's channel shows
 // for them in Open WebUI anyway.
 func TestRosterEmailBeforeGitea(t *testing.T) {
 	kc, ksrv := newFakeKeycloak(t)

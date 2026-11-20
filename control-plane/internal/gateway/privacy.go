@@ -1,10 +1,10 @@
 package gateway
 
 // Private repos. Everyone signed in reads every public repo; a private repo
-// only its namespace's people read. Rights stay per namespace: there are no
+// only its unit's people read. Rights stay per unit: there are no
 // people of single repos. An agent that works on a private repo is private
-// too: only the namespace's people see it, it answers only where only they
-// read (a private chat, or the namespace's team channel), and its account
+// too: only the unit's people see it, it answers only where only they
+// read (a private chat, or the unit's team channel), and its account
 // acts only for people who may read the repo.
 
 import (
@@ -70,14 +70,14 @@ func (g *Gitea) RepoPrivate(ctx context.Context, org, repo string) (bool, error)
 	return private, nil
 }
 
-// AgentPrivate tells whether an agent is for its namespace's people only:
+// AgentPrivate tells whether an agent is for its unit's people only:
 // it says so (visible: members), or a repo it works on is private.
 func (g *Gitea) AgentPrivate(ctx context.Context, a *agents.Agent) (bool, error) {
 	if a.Visible == agents.VisibleMembers {
 		return true, nil
 	}
 	for _, r := range a.WorksOn() {
-		private, err := g.RepoPrivate(ctx, a.Namespace, r)
+		private, err := g.RepoPrivate(ctx, a.Unit, r)
 		if err != nil || private {
 			return true, err
 		}
@@ -85,7 +85,7 @@ func (g *Gitea) AgentPrivate(ctx context.Context, a *agents.Agent) (bool, error)
 	return false, nil
 }
 
-// grantProblems are the grants of a namespace's agents that would let
+// grantProblems are the grants of a unit's agents that would let
 // people outside it act on a private repo: for everyone on a private repo;
 // and private agents that would reach more of the internet than the
 // package registries.
@@ -129,9 +129,9 @@ func (t *Tools) mayRead(ctx context.Context, p Person, org, repo string) error {
 	return err
 }
 
-// stackProblems checks the stacks of a namespace's config repo at ref, as
+// stackProblems checks the stacks of a unit's config repo at ref, as
 // the deployer will read them: stacks/<name>.yaml, each valid, its source a
-// repo of the namespace. garrison has none: it holds the platform, not apps.
+// repo of the unit. garrison has none: it holds the platform, not apps.
 func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, error) {
 	f := configFiles{g: g, ns: ns, ref: ref}
 	entries, err := f.List(ctx, stack.Dir)
@@ -147,8 +147,8 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 		path := stack.Dir + "/" + e.Name
 		name, ok := strings.CutSuffix(e.Name, ".yaml")
 		switch {
-		case ns == PlatformNamespace:
-			out = append(out, path+": garrison holds the platform, not apps; put the app into a namespace of its own")
+		case ns == PlatformUnit:
+			out = append(out, path+": garrison holds the platform, not apps; put the app into a unit of its own")
 			continue
 		case e.Type != "file" || !ok:
 			out = append(out, path+": "+stack.Dir+"/ holds only <name>.yaml files")
@@ -178,7 +178,7 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 }
 
 // restoreProblems checks the restore requests, restores/<name>.yaml: each
-// names a valid stack of the namespace and one of its environments. Whether
+// names a valid stack of the unit and one of its environments. Whether
 // the snapshot exists, the deployer tells.
 func restoreProblems(ctx context.Context, f configFiles, stacks map[string]*stack.Stack) ([]string, error) {
 	entries, err := f.List(ctx, stack.RestoreDir)

@@ -1,6 +1,6 @@
-// Package secrets keeps a namespace's secrets: files secrets/<name>.yaml in
+// Package secrets keeps a unit's secrets: files secrets/<name>.yaml in
 // its config repo, encrypted with SOPS for two age keys. One is the
-// namespace's own, which only the deployer holds (Keys); the other is the
+// unit's own, which only the deployer holds (Keys); the other is the
 // installation's recovery key, whose private half is shown once at install
 // and kept offline. Everyone signed in can read the repo: they see the
 // names, never the values.
@@ -21,7 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Dir is where a namespace's secrets are, in its config repo.
+// Dir is where a unit's secrets are, in its config repo.
 const Dir = "secrets"
 
 // SOPSConfig is the file in config that tells sops whom to encrypt secrets/
@@ -83,7 +83,7 @@ func Encrypt(ctx context.Context, run Runner, recipients []string, value string)
 
 // SOPSFile is config's .sops.yaml for recipients.
 func SOPSFile(domain string, recipients []string) string {
-	return "# How secrets/ is encrypted: for this namespace's key, which only the\n" +
+	return "# How secrets/ is encrypted: for this unit's key, which only the\n" +
 		"# deployer holds, and the installation's recovery key. Set and replace\n" +
 		"# secrets at https://" + domain + "/secrets; with sops, `sops encrypt` reads\n" +
 		"# this file. Nobody can read a value back.\n" +

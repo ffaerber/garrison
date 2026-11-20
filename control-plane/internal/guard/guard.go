@@ -1,5 +1,5 @@
 // Package guard is a Docker API proxy for the Actions runner of user
-// namespaces, and for the agent service, which starts the agents' sandboxes. The runner needs Docker to run jobs in containers, but Docker's
+// units, and for the agent service, which starts the agents' sandboxes. The runner needs Docker to run jobs in containers, but Docker's
 // API is root on the machine, and a workflow can ask for container options
 // (devices, capabilities, host namespaces) that escape any container. The
 // guard lets through only what running a job needs, and refuses everything
@@ -48,11 +48,11 @@ type Policy struct {
 	MaxMemory      int64    // if set, containers must set a memory limit up to this and a process limit
 	Runtime        string   // if set, the runtime containers must run under, e.g. runsc (gVisor); else runc
 	// Share, if set, is the one host folder a container may bind, as
-	// <root>/{namespace}/<rest>, e.g. /garrison/ns/{namespace}/shares/media:
-	// only the namespace its NamespaceLabel names, and only at ShareTarget.
-	Share          string
-	ShareTarget    string
-	NamespaceLabel string
+	// <root>/{unit}/<rest>, e.g. /garrison/ns/{unit}/shares/media:
+	// only the unit its UnitLabel names, and only at ShareTarget.
+	Share       string
+	ShareTarget string
+	UnitLabel   string
 }
 
 // Guard proxies the Docker API on a Unix socket under a Policy.
@@ -84,7 +84,7 @@ func New(socket string, p Policy) *Guard {
 }
 
 var (
-	namespaceName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+	unitName      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 	versionPrefix = regexp.MustCompile(`^/v[0-9]+\.[0-9]+`)
 	containerPath = regexp.MustCompile(`^/containers/([^/]+)(/(start|stop|kill|wait|attach|logs|archive|json|resize|exec|restart|top|stats))?$`)
 	execPath      = regexp.MustCompile(`^/exec/([^/]+)/(start|json|resize)$`)
@@ -375,17 +375,17 @@ func (g *Guard) checkCreate(r *http.Request) error {
 }
 
 // shareAllowed tells whether a container labelled labels may bind source
-// at target: Policy.Share, for the namespace its label names, and nothing
+// at target: Policy.Share, for the unit its label names, and nothing
 // else.
 func (g *Guard) shareAllowed(source, target string, labels map[string]string) bool {
-	if g.Policy.Share == "" || g.Policy.NamespaceLabel == "" || target != g.Policy.ShareTarget {
+	if g.Policy.Share == "" || g.Policy.UnitLabel == "" || target != g.Policy.ShareTarget {
 		return false
 	}
-	ns := labels[g.Policy.NamespaceLabel]
-	if !namespaceName.MatchString(ns) {
+	ns := labels[g.Policy.UnitLabel]
+	if !unitName.MatchString(ns) {
 		return false
 	}
-	return source == strings.Replace(g.Policy.Share, "{namespace}", ns, 1)
+	return source == strings.Replace(g.Policy.Share, "{unit}", ns, 1)
 }
 
 func (g *Guard) checkExec(r *http.Request) error {

@@ -25,7 +25,7 @@ const SnapshotsEvery = 5 * time.Minute
 // WorkDir/snapshots.json by its Swarm stack name (the hostname) for the
 // gateway.
 type EnvSnapshots struct {
-	Namespace string       `json:"namespace"`
+	Unit      string       `json:"unit"`
 	Snapshots []apply.Snap `json:"snapshots"` // oldest first
 }
 
@@ -57,7 +57,7 @@ func (c *Config) listSnapshots(ctx context.Context) error {
 	if _, err := c.Run(ctx, nil, nil, "zfs", "list", "-H", "-o", "name", root); err != nil {
 		return nil // no app has data yet
 	}
-	// <root>/<namespace>/stacks/<hostname> are three below root; their
+	// <root>/<unit>/stacks/<hostname> are three below root; their
 	// snapshots one more.
 	all, err := apply.ListSnapshots(ctx, c.Run, root, 4)
 	if err != nil {
@@ -69,7 +69,7 @@ func (c *Config) listSnapshots(ctx context.Context) error {
 		if len(parts) != 3 || parts[1] != "stacks" {
 			continue
 		}
-		out[parts[2]] = EnvSnapshots{Namespace: parts[0], Snapshots: snaps}
+		out[parts[2]] = EnvSnapshots{Unit: parts[0], Snapshots: snaps}
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -86,7 +86,7 @@ func (c *Config) listSnapshots(ctx context.Context) error {
 	return nil
 }
 
-// restores carries out the restore requests of a namespace's config,
+// restores carries out the restore requests of a unit's config,
 // restores/*.yaml, each once: the commit that last changed the file is
 // recorded on the environment's dataset. The environment is deployed again
 // afterwards, at the commit it runs, whether the restore worked or not.
@@ -133,7 +133,7 @@ func (c *Config) restores(ctx context.Context, ns, cfgDir string, stacks map[str
 		}
 		c.restoreTried[app.Stack+"@"+id] = true
 		log.Printf("apps: restoring %s to %s, as %s asks", app.Stack, r.Snapshot, at)
-		restore := events.Event{Kind: events.KindRestore, Status: events.StatusRunning, Namespace: ns, Commit: id,
+		restore := events.Event{Kind: events.KindRestore, Status: events.StatusRunning, Unit: ns, Commit: id,
 			Title: fmt.Sprintf("restoring %s to the snapshot %s, as %s asks", app.Stack, r.Snapshot, rel), Key: "restore:" + app.Stack + "@" + id}
 		c.record(ctx, restore)
 		err = apply.RestoreEnv(ctx, c.Run, "", s, r.Environment, r.Snapshot, apply.SnapshotStamp(time.Now()), id)

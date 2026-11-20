@@ -51,7 +51,7 @@ func skill(name, desc string) string {
 // platformOnly loads garrison's agents from files, as they work in garrison.
 func platformOnly(t *testing.T, files mapFiles) ([]Agent, []string) {
 	t.Helper()
-	got, problems, err := Load(context.Background(), files, files, PlatformNamespace, tools)
+	got, problems, err := Load(context.Background(), files, files, PlatformUnit, tools)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,10 +75,10 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	}
 	// The gateway's tools, and the agent service's generate_media; the
 	// gateway's own test checks these are all.
-	all := []string{"list_namespaces", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
+	all := []string{"list_units", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_namespace", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media"}
-	got, problems, err := Load(context.Background(), files, files, PlatformNamespace, all)
+		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media"}
+	got, problems, err := Load(context.Background(), files, files, PlatformUnit, all)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		if a.Description == "" || strings.TrimSpace(a.Prompt) == "" {
 			t.Errorf("%s has no description or prompt", a.Name)
 		}
-		if a.Name != OperatorName && slices.Contains(a.Tools, "create_namespace") {
-			t.Errorf("%s may make namespaces", a.Name)
+		if a.Name != OperatorName && slices.Contains(a.Tools, "create_unit") {
+			t.Errorf("%s may make units", a.Name)
 		}
 		if (a.Name == "scout") != a.Internet.All {
 			t.Errorf("%s reaches %s", a.Name, a.Internet)
@@ -117,7 +117,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		t.Errorf("sentry: chains %+v, asks %v", s.Chains, s.Asks)
 	}
 	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == OperatorName })
-	if want := Operator(PlatformNamespace, all); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
+	if want := Operator(PlatformUnit, all); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
 		t.Errorf("written operator differs from the built-in one: %+v", got)
 	}
 	// It knows how to turn a wish into garrison's parts.
@@ -140,9 +140,9 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	}
 }
 
-// garrison's agents work in every namespace, each with that namespace's
+// garrison's agents work in every unit, each with that unit's
 // grants and routines, and nothing of another's.
-func TestTheAgentsWorkInEveryNamespace(t *testing.T) {
+func TestTheAgentsWorkInEveryUnit(t *testing.T) {
 	platform := mapFiles{
 		"agents/operator/agent.yaml": "tools: all\n", "agents/operator/prompt.md": "Operate.\n",
 		"agents/media/agent.yaml": "tools: [read_file]\n", "agents/media/prompt.md": "Shoot.\n",
@@ -158,7 +158,7 @@ func TestTheAgentsWorkInEveryNamespace(t *testing.T) {
 		t.Fatalf("got %+v %v %v", got, problems, err)
 	}
 	for _, a := range got {
-		if a.Namespace != "lab" || a.DisplayName() != a.Name {
+		if a.Unit != "lab" || a.DisplayName() != a.Name {
 			t.Errorf("%+v", a)
 		}
 		switch a.Name {
@@ -172,22 +172,22 @@ func TestTheAgentsWorkInEveryNamespace(t *testing.T) {
 			}
 		}
 	}
-	home, _, _ := Load(context.Background(), platform, platform, PlatformNamespace, tools)
+	home, _, _ := Load(context.Background(), platform, platform, PlatformUnit, tools)
 	if i := slices.IndexFunc(home, func(a Agent) bool { return a.Name == "operator" }); i < 0 || len(home[i].Grants) != 1 {
 		t.Errorf("garrison's own grants: %+v", home)
 	}
 	sys := System(got[0], "example.com")
-	if !strings.Contains(sys, `working in the namespace "lab"`) || !strings.Contains(sys, `Pass namespace "lab"`) {
+	if !strings.Contains(sys, `working in the unit "lab"`) || !strings.Contains(sys, `Pass unit "lab"`) {
 		t.Errorf("system prompt:\n%s", sys)
 	}
-	if sys := System(home[0], "example.com"); !strings.Contains(sys, "no namespace in particular") {
+	if sys := System(home[0], "example.com"); !strings.Contains(sys, "no unit in particular") {
 		t.Errorf("garrison's system prompt:\n%s", sys)
 	}
 }
 
-// A namespace's own agents folder is refused: the agents are garrison's.
-// garrison's problems are not the namespace's to fix.
-func TestANamespaceHasNoAgentsOfItsOwn(t *testing.T) {
+// A unit's own agents folder is refused: the agents are garrison's.
+// garrison's problems are not the unit's to fix.
+func TestAUnitHasNoAgentsOfItsOwn(t *testing.T) {
 	platform := mapFiles{"agents/x/agent.yaml": "tools: [rm_rf]\n", "agents/x/prompt.md": "p", "agents/ok/agent.yaml": "", "agents/ok/prompt.md": "p"}
 	lab := mapFiles{"agents/operator/agent.yaml": "tools: all\n", "agents/operator/prompt.md": "Mine.\n"}
 	got, problems, err := Load(context.Background(), platform, lab, "lab", tools)
@@ -255,7 +255,7 @@ func TestAgentsAndSkills(t *testing.T) {
 		t.Errorf("reader got skills %+v", got[1].Skills)
 	}
 	sys := System(m, "example.com")
-	for _, want := range []string{"You are marketing", `namespace "homepage"`, "You make the homepage look good.", "- thumbnail: Make a YouTube thumbnail.", "load_skill", "Rules of the platform"} {
+	for _, want := range []string{"You are marketing", `unit "homepage"`, "You make the homepage look good.", "- thumbnail: Make a YouTube thumbnail.", "load_skill", "Rules of the platform"} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt lacks %q:\n%s", want, sys)
 		}
@@ -283,7 +283,7 @@ func TestBadAgentsAreLeftOut(t *testing.T) {
 		"tool twice":       {mapFiles{"agents/x/agent.yaml": "tools: [read_file, read_file]\n", "agents/x/prompt.md": "p"}, "listed twice"},
 		"bad model":        {mapFiles{"agents/x/agent.yaml": "model: 'a b'\n", "agents/x/prompt.md": "p"}, "not a model name"},
 		"repos":            {mapFiles{"agents/x/agent.yaml": "repos: [site]\n", "agents/x/prompt.md": "p"}, "repos is not part of an agent"},
-		"grants":           {mapFiles{"agents/x/agent.yaml": "grants: [{repo: todo, level: propose}]\n", "agents/x/prompt.md": "p"}, "grants is not part of an agent: each namespace gives them in grants.yaml"},
+		"grants":           {mapFiles{"agents/x/agent.yaml": "grants: [{repo: todo, level: propose}]\n", "agents/x/prompt.md": "p"}, "grants is not part of an agent: each unit gives them in grants.yaml"},
 		"routines":         {mapFiles{"agents/x/agent.yaml": "routines: []\n", "agents/x/prompt.md": "p"}, "routines is not part of an agent"},
 		"no shared skill":  {mapFiles{"agents/x/agent.yaml": "skills: [nope]\n", "agents/x/prompt.md": "p"}, `no shared skill "nope"`},
 		"skill no front":   {mapFiles{"agents/x/agent.yaml": "", "agents/x/prompt.md": "p", "agents/x/skills/s/SKILL.md": "# s\n"}, "frontmatter"},

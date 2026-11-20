@@ -53,7 +53,7 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 		svc := s.Services[name]
 		for _, v := range svc.Volumes {
 			if v.Share != "" {
-				err = EnsureDataset(ctx, run, render.SharePath(o.DataRoot, s.Namespace, v.Share), "")
+				err = EnsureDataset(ctx, run, render.SharePath(o.DataRoot, s.Unit, v.Share), "")
 			} else {
 				err = EnsureDataset(ctx, run, render.DatasetPath(o.DataRoot, s, o.Environment, v.Dataset), v.Size)
 			}
@@ -154,7 +154,7 @@ func ensureSecret(ctx context.Context, run Runner, name string) error {
 // HostExec returns a Runner for a deployer running in a container: ZFS and
 // rsync (which copies datasets back from snapshots) run on the host, in a
 // short-lived privileged container of image that enters the host's
-// namespaces. Everything else runs directly.
+// units. Everything else runs directly.
 func HostExec(image string) Runner {
 	return func(ctx context.Context, env []string, stdin []byte, name string, args ...string) ([]byte, error) {
 		if name == "zfs" || name == "rsync" {

@@ -70,12 +70,12 @@ func TestModelChecks(t *testing.T) {
 		t.Errorf("list_models: %v\n%s", err, out)
 	}
 
-	// The agents are garrison's: a namespace's change is not refused for them.
+	// The agents are garrison's: a unit's change is not refused for them.
 	if got, _ := g.modelProblems(ctx, "todo", "abc", list); len(got) != 0 {
 		t.Errorf("todo: %v", got)
 	}
 
-	// A broken model list refuses garrison's own change, not the namespaces'.
+	// A broken model list refuses garrison's own change, not the units'.
 	files["llm/models.yaml"] = "models:\n  \"ollama-cloud/gpt-oss:120b\": {enabled: false}\n"
 	if got, _ := g.modelProblems(ctx, "garrison", "abc", nil); len(got) != 1 || !strings.Contains(got[0], "must be enabled") {
 		t.Errorf("garrison: %v", got)
@@ -226,7 +226,7 @@ func TestProposeFiles(t *testing.T) {
 // The agents a new installation starts with use only tools the gateway has.
 func TestTheShippedAgentsUseRealTools(t *testing.T) {
 	files := shippedFiles(agents.PlatformFiles())
-	got, problems, err := agents.Load(context.Background(), files, files, agents.PlatformNamespace, ToolNames())
+	got, problems, err := agents.Load(context.Background(), files, files, agents.PlatformUnit, ToolNames())
 	if err != nil || len(problems) > 0 || len(got) < 3 {
 		t.Fatalf("%d agents, %v %v", len(got), problems, err)
 	}

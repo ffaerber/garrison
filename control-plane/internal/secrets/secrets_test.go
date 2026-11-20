@@ -81,13 +81,13 @@ func TestTheStore(t *testing.T) {
 	s := &Store{Gitea: g, Run: fakeSOPS(t), Domain: "home.test",
 		Recipients: func(_ context.Context, ns string) ([]string, error) { return []string{pubTodo, pubRecovery}, nil }}
 
-	// Who manages which namespace's secrets on the Secrets page: never
+	// Who manages which unit's secrets on the Secrets page: never
 	// garrison's, whose providers' keys are on the Models page.
 	for _, c := range []struct {
 		who  string
 		want []string
 	}{{"alice", []string{"todo"}}, {"bob", nil}, {"root", []string{"media", "todo"}}} {
-		got, err := s.Namespaces(ctx, c.who)
+		got, err := s.Units(ctx, c.who)
 		if err != nil || !slices.Equal(got, c.want) {
 			t.Errorf("%s manages %v (%v), want %v", c.who, got, err, c.want)
 		}
@@ -189,9 +189,9 @@ func run(ctx context.Context, env []string, stdin []byte, name string, args ...s
 }
 
 // With sops and age installed (they are in the control plane's image): a
-// namespace's key is made on first use, a secret encrypted with the public
-// keys alone is decrypted by the namespace's key and by the recovery key,
-// and not by another namespace's.
+// unit's key is made on first use, a secret encrypted with the public
+// keys alone is decrypted by the unit's key and by the recovery key,
+// and not by another unit's.
 func TestKeysWithSOPS(t *testing.T) {
 	for _, tool := range []string{"sops", "age-keygen"} {
 		if _, err := exec.LookPath(tool); err != nil {
@@ -251,9 +251,9 @@ func TestKeysWithSOPS(t *testing.T) {
 		t.Fatal("decrypted without a key")
 	}
 
-	// The deployer's handler gives the public keys of namespaces that exist.
+	// The deployer's handler gives the public keys of units that exist.
 	h := http.NewServeMux()
-	h.Handle("GET /secrets/{namespace}/recipients", k.Handler(func(_ context.Context, ns string) (bool, error) { return ns == "todo" || ns == "new", nil }))
+	h.Handle("GET /secrets/{unit}/recipients", k.Handler(func(_ context.Context, ns string) (bool, error) { return ns == "todo" || ns == "new", nil }))
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	remote := Remote(srv.URL)
@@ -261,9 +261,9 @@ func TestKeysWithSOPS(t *testing.T) {
 		t.Errorf("remote: %v %v", got, err)
 	}
 	if _, err := remote(ctx, "ghost"); err == nil || k.Has("ghost") {
-		t.Errorf("a key for a namespace that does not exist: %v", err)
+		t.Errorf("a key for a unit that does not exist: %v", err)
 	}
 	if got, err := remote(ctx, "new"); err != nil || len(got) != 2 || !k.Has("new") {
-		t.Errorf("new namespace: %v %v", got, err)
+		t.Errorf("new unit: %v %v", got, err)
 	}
 }

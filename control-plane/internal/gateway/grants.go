@@ -1,7 +1,7 @@
 package gateway
 
 // Agents' own accounts and grants. By default an agent acts as the person
-// talking to it. A namespace can give an agent rights of its own there in
+// talking to it. A unit can give an agent rights of its own there in
 // grants.yaml of its config, used only for requests of the groups each
 // grant names, with an account of its own in Gitea. See docs/agents.md.
 
@@ -21,10 +21,10 @@ import (
 	"garrison/control-plane/internal/agents"
 )
 
-// AgentAccount is the Gitea account of an agent: agent-<namespace>-<name>,
+// AgentAccount is the Gitea account of an agent: agent-<unit>-<name>,
 // or a hash of it where that is longer than Gitea allows.
 func AgentAccount(a *agents.Agent) string {
-	name := "agent-" + a.Namespace + "-" + a.Name
+	name := "agent-" + a.Unit + "-" + a.Name
 	if len(name) <= 40 {
 		return name
 	}
@@ -45,14 +45,14 @@ func ServiceKey(adminPassword string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// Role is a person's role in a namespace, from its members.yaml on main:
+// Role is a person's role in a unit, from its members.yaml on main:
 // admin, member or "". In garrison, which has none, root admins are its
 // admins.
 func (g *Gitea) Role(ctx context.Context, ns, person string) (string, error) {
 	if err := validOrg(ns); err != nil {
 		return "", err
 	}
-	if ns == PlatformNamespace {
+	if ns == PlatformUnit {
 		var u struct {
 			IsAdmin bool `json:"is_admin"`
 		}
@@ -105,7 +105,7 @@ func (p Person) asker() string {
 }
 
 // CanUse tells whether p may talk to agent: anyone, unless it is private
-// (AgentPrivate); then the people of its namespace and root admins.
+// (AgentPrivate); then the people of its unit and root admins.
 func (g *Gitea) CanUse(ctx context.Context, a *agents.Agent, p Person) (bool, error) {
 	if a == nil || p.Admin || p.Unattended {
 		return true, nil
@@ -114,7 +114,7 @@ func (g *Gitea) CanUse(ctx context.Context, a *agents.Agent, p Person) (bool, er
 	if err != nil || !private {
 		return !private, err
 	}
-	role, err := g.Role(ctx, a.Namespace, p.Name)
+	role, err := g.Role(ctx, a.Unit, p.Name)
 	return role != "", err
 }
 
@@ -127,9 +127,9 @@ func (r refused) Error() string { return "not allowed: " + r.msg }
 // instance is the agent as it works in org, with the grants org gives it:
 // agent itself if it works there, else its instance in org, for a person
 // who asked elsewhere (e.g. in a private chat). A run without a person
-// keeps to its own namespace.
+// keeps to its own unit.
 func (t *Tools) instance(ctx context.Context, p Person, agent *agents.Agent, org string) (*agents.Agent, error) {
-	if agent == nil || agent.Namespace == org || p.Unattended || validOrg(org) != nil {
+	if agent == nil || agent.Unit == org || p.Unattended || validOrg(org) != nil {
 		return agent, nil
 	}
 	list, _, err := t.Gitea.Agents(ctx, org, "main")
@@ -157,7 +157,7 @@ func (t *Tools) proposer(ctx context.Context, p Person, agent *agents.Agent, org
 			return "", false, err
 		}
 	}
-	if agent != nil && agent.Namespace == org {
+	if agent != nil && agent.Unit == org {
 		if err := t.mayRead(ctx, p, org, repo); err != nil {
 			return "", false, err
 		}
@@ -191,7 +191,7 @@ func newBranch(p Person, agent *agents.Agent, viaAgent bool) string {
 func askedBy(p Person, agent *agents.Agent, role string) string {
 	who := p.asker()
 	if role == "" && !p.Unattended {
-		who += " (not in " + agent.Namespace + ")"
+		who += " (not in " + agent.Unit + ")"
 	}
 	via := agent.ID()
 	if p.Unattended {
@@ -216,8 +216,8 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	if err := validRepo(repo); err != nil {
 		return "", err
 	}
-	if org != agent.Namespace {
-		return "", refused{fmt.Sprintf("%s has grants only in %s", agent.ID(), agent.Namespace)}
+	if org != agent.Unit {
+		return "", refused{fmt.Sprintf("%s has grants only in %s", agent.ID(), agent.Unit)}
 	}
 	if number <= 0 {
 		return "", fmt.Errorf("%w: the pull request's number is missing", ErrInvalid)
@@ -300,7 +300,7 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	// named by an "Asked by" line, and everyone who pushed to its branch. Someone else's work needs an approval by
 	// someone who did not ask for it, so nobody puts another's unreviewed
 	// work live through an agent.
-	// An agent's account is known by being one of this namespace's, not by
+	// An agent's account is known by being one of this unit's, not by
 	// its name: a person may be called agent-something too.
 	accounts := []string{AgentAccount(agent)}
 	list, _, err := g.Agents(ctx, org, "main")
@@ -393,7 +393,7 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 
 func roleName(r string) string {
 	if r == "" {
-		return "not in the namespace"
+		return "not in the unit"
 	}
 	return r
 }
@@ -401,18 +401,18 @@ func roleName(r string) string {
 // proposePatch proposes a patch as the person, or with the agent's account
 // where only a grant allows it.
 func (t *Tools) proposePatch(ctx context.Context, p Person, agent *agents.Agent, a args) (string, error) {
-	if err := validOrg(a.Namespace); err != nil {
+	if err := validOrg(a.Unit); err != nil {
 		return "", err
 	}
 	if err := validRepo(a.Repo); err != nil {
 		return "", err
 	}
-	as, viaAgent, err := t.proposer(ctx, p, agent, a.Namespace, a.Repo)
+	as, viaAgent, err := t.proposer(ctx, p, agent, a.Unit, a.Repo)
 	if err != nil {
 		return "", err
 	}
 	pp := Proposal{
-		Org: a.Namespace, Repo: a.Repo, Base: a.Base, Branch: a.Branch,
+		Org: a.Unit, Repo: a.Repo, Base: a.Base, Branch: a.Branch,
 		Fresh: newBranch(p, agent, viaAgent), Prefixes: []string{ChangeBranch},
 		Patch: a.Patch, Title: a.Title, Description: a.Description,
 	}
@@ -420,7 +420,7 @@ func (t *Tools) proposePatch(ctx context.Context, p Person, agent *agents.Agent,
 		pp.Prefixes = append(pp.Prefixes, agent.Branch())
 		role := "member"
 		if viaAgent {
-			if role, err = t.role(ctx, p, a.Namespace); err != nil {
+			if role, err = t.role(ctx, p, a.Unit); err != nil {
 				return "", err
 			}
 		}
@@ -443,7 +443,7 @@ func (t *Tools) proposePatch(ctx context.Context, p Person, agent *agents.Agent,
 	}) && slices.Contains(agent.Tools, "merge_change") {
 		next = "Nothing is changed yet. If the person wants it live and one of your grants covers it, merge it with merge_change once its checks pass; otherwise a person merges it."
 	}
-	return fmt.Sprintf("Change %s/%s#%d now holds the patch, on branch %s.%s\nBranch: %s\n%s\n%s", c.Namespace, c.Repo, c.Number, branch, by, branch, next, t.links(c)), nil
+	return fmt.Sprintf("Change %s/%s#%d now holds the patch, on branch %s.%s\nBranch: %s\n%s\n%s", c.Unit, c.Repo, c.Number, branch, by, branch, next, t.links(c)), nil
 }
 
 // BranchHead is the commit a branch points at, as the admin; "" if there
@@ -469,12 +469,12 @@ func (g *Gitea) BranchHead(ctx context.Context, org, repo, branch string) (strin
 
 var patchedFile = regexp.MustCompile(`(?m)^diff --git a/(\S+) b/(\S+)$`)
 
-// checkPatched checks grants.yaml and routines.yaml of a namespace's config
+// checkPatched checks grants.yaml and routines.yaml of a unit's config
 // as a patch left them on its branch, as the approval check will. One that
 // would be refused is taken back: a new change is closed and its branch
 // deleted; one added to is left, and the agent hears what to fix.
 func (t *Tools) checkPatched(ctx context.Context, as string, c Change, branch string, fresh bool, patch string) error {
-	if c.Repo != ConfigRepo || c.Namespace == PlatformNamespace {
+	if c.Repo != ConfigRepo || c.Unit == PlatformUnit {
 		return nil
 	}
 	var paths []string
@@ -489,19 +489,19 @@ func (t *Tools) checkPatched(ctx context.Context, as string, c Change, branch st
 		return nil
 	}
 	slices.Sort(paths)
-	problems, err := t.bindingProblems(ctx, configFiles{g: t.Gitea, ns: c.Namespace, ref: branch}, paths)
+	problems, err := t.bindingProblems(ctx, configFiles{g: t.Gitea, ns: c.Unit, ref: branch}, paths)
 	if err != nil || len(problems) == 0 {
 		return err
 	}
 	what := fmt.Sprintf("%s would be refused: %s", strings.Join(paths, " and "), strings.Join(problems, "; "))
 	const hint = "put a task or any text with a colon in double quotes"
 	if !fresh {
-		return fmt.Errorf("%w: change %s/%s#%d holds the patch now, but %s. Fix it with another patch on branch %s; %s", ErrInvalid, c.Namespace, c.Repo, c.Number, what, branch, hint)
+		return fmt.Errorf("%w: change %s/%s#%d holds the patch now, but %s. Fix it with another patch on branch %s; %s", ErrInvalid, c.Unit, c.Repo, c.Number, what, branch, hint)
 	}
 	err = fmt.Errorf("%w: %s, so the change was taken back. Fix it and propose it again; %s", ErrInvalid, what, hint)
-	repo := fmt.Sprintf("/repos/%s/%s", c.Namespace, c.Repo)
+	repo := fmt.Sprintf("/repos/%s/%s", c.Unit, c.Repo)
 	if _, cerr := t.Gitea.do(ctx, as, http.MethodPatch, fmt.Sprintf("%s/pulls/%d", repo, c.Number), map[string]string{"state": "closed"}, nil); cerr != nil {
-		return fmt.Errorf("%w (change %s/%s#%d holds it; closing it failed: %v)", err, c.Namespace, c.Repo, c.Number, cerr)
+		return fmt.Errorf("%w (change %s/%s#%d holds it; closing it failed: %v)", err, c.Unit, c.Repo, c.Number, cerr)
 	}
 	t.Gitea.do(ctx, as, http.MethodDelete, repo+"/branches/"+escapePath(branch), nil, nil)
 	return err

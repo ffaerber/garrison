@@ -27,20 +27,20 @@ func TestAgentsFollowUpTheirChanges(t *testing.T) {
 	poster := &fakePoster{}
 	now := time.Now()
 	cards := fakeCards{
-		"lab/config#3": {Namespace: "lab", Repo: "config", Number: 3, Title: "Deploy example", URL: "https://git/lab/config/pulls/3",
+		"lab/config#3": {Unit: "lab", Repo: "config", Number: 3, Title: "Deploy example", URL: "https://git/lab/config/pulls/3",
 			Body:  "Please.\n\nAsked by alice through lab/operator.",
 			Files: []changes.File{{Path: "stacks/example.yaml", Status: "added"}}},
-		"lab/example#4": {Namespace: "lab", Repo: "example", Number: 4, Title: "Green background", Base: "dev",
+		"lab/example#4": {Unit: "lab", Repo: "example", Number: 4, Title: "Green background", Base: "dev",
 			Body: "Asked by alice through lab/coder."},
-		"todo/config#5": {Namespace: "todo", Repo: "config", Number: 5, Title: "Shots at 9",
+		"todo/config#5": {Unit: "todo", Repo: "config", Number: 5, Title: "Shots at 9",
 			Body:  "Asked by bob (not in todo) through todo/operator.",
 			Files: []changes.File{{Path: "routines.yaml", Status: "modified"}, {Path: "grants.yaml", Status: "modified"}}},
-		"todo/app#6": {Namespace: "todo", Repo: "app", Number: 6, Title: "By hand", Base: "main", Body: "No agent wrote this."},
+		"todo/app#6": {Unit: "todo", Repo: "app", Number: 6, Title: "By hand", Base: "main", Body: "No agent wrote this."},
 	}
 	f := &Followups{Feed: feed, Cards: cards, Poster: poster, Now: func() time.Time { return now }}
 
 	// What was merged before it started is not news.
-	feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Namespace: "lab", Repo: "config", PR: 3, Actor: "bob", Key: "old"})
+	feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Unit: "lab", Repo: "config", PR: 3, Actor: "bob", Key: "old"})
 	f.Check(ctx)
 	f.Check(ctx)
 	if len(poster.all()) != 0 {
@@ -49,7 +49,7 @@ func TestAgentsFollowUpTheirChanges(t *testing.T) {
 
 	merge := func(ns, repo string, n int, actor, commit string) {
 		feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK,
-			Namespace: ns, Repo: repo, PR: n, Actor: actor, Commit: commit, Key: ns + repo + itoa(n)})
+			Unit: ns, Repo: repo, PR: n, Actor: actor, Commit: commit, Key: ns + repo + itoa(n)})
 	}
 	merge("lab", "config", 3, "bob", "c3")
 	merge("lab", "example", 4, "alice", "m4")
@@ -73,7 +73,7 @@ func TestAgentsFollowUpTheirChanges(t *testing.T) {
 	// The deploys: of the config's stack, by its title; of the app, by its commit; one failed.
 	deploy := func(ns, repo, commit, title, status, link string) {
 		feed.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: status,
-			Namespace: ns, Repo: repo, Commit: commit, Title: title, Link: link, Detail: "image missing\nmore", Key: title + status})
+			Unit: ns, Repo: repo, Commit: commit, Title: title, Link: link, Detail: "image missing\nmore", Key: title + status})
 	}
 	deploy("lab", "example", "x1", "deployed lab/example@main at x1 as example", events.StatusOK, "https://example.home.test")
 	deploy("lab", "example", "x1", "deployed lab/example@main at x1 as example", events.StatusOK, "https://example.home.test") // said once
@@ -113,11 +113,11 @@ func TestAnAgentsOwnMergeIsNotRepeated(t *testing.T) {
 	ctx := context.Background()
 	feed := &events.Memory{}
 	poster := &fakePoster{}
-	cards := fakeCards{"todo/app#7": {Namespace: "todo", Repo: "app", Number: 7, Title: "Fix", Base: "dev", Body: "Asked by bob through todo/developer."}}
+	cards := fakeCards{"todo/app#7": {Unit: "todo", Repo: "app", Number: 7, Title: "Fix", Base: "dev", Body: "Asked by bob through todo/developer."}}
 	f := &Followups{Feed: feed, Cards: cards, Poster: poster}
 	f.Check(ctx)
-	feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Namespace: "todo", Repo: "app", PR: 7, Actor: "agent-todo-developer", Commit: "m7", Key: "m7"})
-	feed.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: events.StatusOK, Namespace: "todo", Repo: "app", Commit: "m7", Title: "deployed todo/todo@dev at m7 as dev-todo", Link: "https://dev-todo.x", Key: "d7"})
+	feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Unit: "todo", Repo: "app", PR: 7, Actor: "agent-todo-developer", Commit: "m7", Key: "m7"})
+	feed.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: events.StatusOK, Unit: "todo", Repo: "app", Commit: "m7", Title: "deployed todo/todo@dev at m7 as dev-todo", Link: "https://dev-todo.x", Key: "d7"})
 	f.Check(ctx)
 	if p := poster.all(); len(p) != 1 || !strings.Contains(p[0].Text, "is live: https://dev-todo.x") {
 		t.Errorf("posts: %+v", p)
@@ -138,15 +138,15 @@ func (f *failingPoster) Post(ctx context.Context, p gateway.Post) (gateway.Poste
 	return f.fakePoster.Post(ctx, p)
 }
 
-func TestANewNamespaceIsWelcomed(t *testing.T) {
+func TestANewUnitIsWelcomed(t *testing.T) {
 	ctx := context.Background()
 	feed := &events.Memory{}
 	poster := &failingPoster{fakePoster: &fakePoster{}, fail: 2}
 	now := time.Now()
 	f := &Followups{Feed: feed, Cards: fakeCards{}, Poster: poster, Dashboard: "https://home.test", Now: func() time.Time { return now }}
 	f.Check(ctx)
-	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK, Namespace: "lab", Actor: "alice", Key: "ns-lab"})
-	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK, Namespace: "gone", Actor: "bob", Key: "ns-gone"})
+	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindUnit, Status: events.StatusOK, Unit: "lab", Actor: "alice", Key: "ns-lab"})
+	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindUnit, Status: events.StatusOK, Unit: "gone", Actor: "bob", Key: "ns-gone"})
 	f.Check(ctx) // no channels yet
 	if len(poster.all()) != 0 || len(f.welcomes) != 2 {
 		t.Fatalf("posts %+v, waiting %d", poster.all(), len(f.welcomes))
@@ -164,7 +164,7 @@ func TestANewNamespaceIsWelcomed(t *testing.T) {
 
 	// A channel that never comes: it stops trying.
 	poster.fail = 1000
-	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK, Namespace: "x", Actor: "bob", Key: "ns-x"})
+	feed.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindUnit, Status: events.StatusOK, Unit: "x", Actor: "bob", Key: "ns-x"})
 	f.Check(ctx)
 	now = now.Add(welcomeWait + time.Minute)
 	f.Check(ctx)
@@ -179,14 +179,14 @@ func TestADeployReadWhileRunningIsSaidOnceItEnds(t *testing.T) {
 	ctx := context.Background()
 	feed := &events.Memory{}
 	poster := &fakePoster{}
-	cards := fakeCards{"todo/app#4": {Namespace: "todo", Repo: "app", Number: 4, Title: "White dev", Base: "dev",
+	cards := fakeCards{"todo/app#4": {Unit: "todo", Repo: "app", Number: 4, Title: "White dev", Base: "dev",
 		Body: "Asked by alice through todo/coder."}}
 	f := &Followups{Feed: feed, Cards: cards, Poster: poster}
 	f.Check(ctx)
 	feed.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK,
-		Namespace: "todo", Repo: "app", PR: 4, Actor: "alice", Commit: "c551", Key: "m4"})
+		Unit: "todo", Repo: "app", PR: 4, Actor: "alice", Commit: "c551", Key: "m4"})
 	deploy := func(status string) {
-		feed.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: status, Namespace: "todo",
+		feed.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: status, Unit: "todo",
 			Repo: "app", Commit: "c551", Title: "redeployed todo/todo@dev at c551 as dev-todo", Link: "https://dev-todo.x", Key: "deploy:todo/todo@dev@c551"})
 	}
 	deploy(events.StatusRunning)

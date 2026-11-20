@@ -1,11 +1,11 @@
 # shellcheck shell=bash
-# agent: the namespace agents answer in their channels in Open WebUI, when
+# agent: the unit agents answer in their channels in Open WebUI, when
 # mentioned, and propose through the gateway's MCP tools, with the
 # rights of the person who mentioned them. They talk to the real
 # LLM, so answers vary; the checks look at what the agents did (tools called,
 # changes in Gitea), not at their wording.
 section_agent() {
-echo "# the namespace agents"
+echo "# the unit agents"
 if [ ! -s $ETC/llm-api-key ]; then
   echo "skip  no LLM key in $ETC/llm-api-key"
   return
@@ -53,10 +53,10 @@ cleanup_channel() {
 # question whose answer shows no sign of the system is asked once more, and
 # the retry is printed so it shows in the log.
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask bob "Which stacks run in the namespace garrison? Use your tools and list their names." | reply)
+answer=$(ask bob "Which stacks run in the unit garrison? Use your tools and list their names." | reply)
 if ! grep -qi grafana <<<"$answer"; then
   printf 'retry the agent answered %q; asking again\n' "$(head -c 200 <<<"$answer")"
-  answer=$(ask bob "Which stacks run in the namespace garrison? Call list_stacks and list their names." | reply)
+  answer=$(ask bob "Which stacks run in the unit garrison? Call list_stacks and list their names." | reply)
 fi
 check "the agent answers bob in the channel" test -n "$answer"
 check "its answer names grafana"           grep -qi grafana <<<"$answer"
@@ -65,10 +65,10 @@ since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask bob "Show me the last 20 log lines of the service grafana_grafana, and how much memory the stack grafana uses." | reply)
 check "it reads logs for bob"              grep -q "mcp: bob: service_logs" <<<"$(mcp_calls "$since" bob)"
 check "it reads metrics for bob"           grep -qE "mcp: bob: (service_usage|query_metrics)" <<<"$(mcp_calls "$since" bob)"
-answer=$(ask bob "In the namespace garrison, propose a change to the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob." | reply)
+answer=$(ask bob "In the unit garrison, propose a change to the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob." | reply)
 check "bob's proposal is refused"          bash -c '! grep -q "Agent smoke test bob" <<<"$0"' "$(gitea_api "" "$api/repos/garrison/platform/pulls?state=open&limit=50")"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask alice "In the namespace garrison, propose a change to the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice." | reply)
+answer=$(ask alice "In the unit garrison, propose a change to the repo platform: add a file agent-alice.txt containing hello. Title: Agent smoke test alice." | reply)
 check "the agent proposes alice's change, as alice" grep -q "mcp: alice: propose_change" <<<"$(mcp_calls "$since" alice)"
 prs=$(gitea_api "" "$api/repos/garrison/platform/pulls?state=open&limit=50")
 check "it waits as a pull request by alice" python3 -c 'import json,sys; sys.exit(not any(p["title"].startswith("Agent smoke test alice") and p["user"]["login"] == "alice" for p in json.load(sys.stdin)))' <<<"$prs"

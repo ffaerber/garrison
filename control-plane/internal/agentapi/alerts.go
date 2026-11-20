@@ -26,14 +26,14 @@ type Alert struct {
 	GeneratorURL string            `json:"generatorURL"`
 }
 
-// PlatformNamespace gets the alerts that name no namespace.
-const PlatformNamespace = "garrison"
+// PlatformUnit gets the alerts that name no unit.
+const PlatformUnit = "garrison"
 
-func (a Alert) namespace() string {
-	if ns := a.Labels["namespace"]; ns != "" {
+func (a Alert) unit() string {
+	if ns := a.Labels["unit"]; ns != "" {
 		return ns
 	}
-	return PlatformNamespace
+	return PlatformUnit
 }
 
 // AlertHandler takes Alertmanager's webhook, which must send token as its
@@ -74,9 +74,9 @@ func matches(want map[string]string, a Alert) bool {
 }
 
 // Alert records an alert in the feed and, when it fires, starts the
-// routines of its namespace's agents that wait for it, once per firing.
+// routines of its unit's agents that wait for it, once per firing.
 func (r *Routines) Alert(ctx context.Context, a Alert) {
-	ns := a.namespace()
+	ns := a.unit()
 	name := a.Labels["alertname"]
 	summary := a.Annotations["summary"]
 	if summary == "" {
@@ -94,7 +94,7 @@ func (r *Routines) Alert(ctx context.Context, a Alert) {
 		r.mu.Lock()
 		if r.prepare(ctx) {
 			for _, ag := range list {
-				if ag.Namespace != ns {
+				if ag.Unit != ns {
 					continue
 				}
 				for _, rt := range ag.Routines {
@@ -129,7 +129,7 @@ func (r *Routines) Alert(ctx context.Context, a Alert) {
 		return
 	}
 	e := events.Event{
-		Source: events.SourceAlerts, Kind: events.KindAlert, Namespace: ns, Audience: events.AudienceMembers,
+		Source: events.SourceAlerts, Kind: events.KindAlert, Unit: ns, Audience: events.AudienceMembers,
 		Title: name + ": " + summary, Detail: alertDetail(a), At: a.StartsAt, Key: firingKey,
 	}
 	// The routines it started are in the feed on their own, saying why.

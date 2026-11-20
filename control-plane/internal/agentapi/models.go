@@ -119,10 +119,10 @@ func (m *Models) warn(ctx context.Context, agent, full, why string) {
 	}
 	ns, name, _ := strings.Cut(agent, "/")
 	m.Events.Record(ctx, events.Event{Source: events.SourceAgents, Kind: events.KindModel, Status: events.StatusRefused,
-		Namespace: ns, Agent: agent, StartedBy: "agent " + agent,
+		Unit: ns, Agent: agent, StartedBy: "agent " + agent,
 		Title:  fmt.Sprintf("%s uses the default model: its own cannot be used", agent),
 		Detail: why + fmt.Sprintf(". A root admin chooses another model in agents/%s/agent.yaml of garrison/config.", name),
-		Link:   fmt.Sprintf("https://git.%s/%s/config/src/branch/main/agents/%s/agent.yaml", m.Domain, agents.PlatformNamespace, name)})
+		Link:   fmt.Sprintf("https://git.%s/%s/config/src/branch/main/agents/%s/agent.yaml", m.Domain, agents.PlatformUnit, name)})
 }
 
 // list asks a provider for its models: GET <url>/models.
@@ -171,7 +171,7 @@ func (m *Models) list(ctx context.Context, name string, p models.Provider) ([]st
 // LLM as the first provider, and the models it offers, to main.
 func (m *Models) Sync(ctx context.Context) (string, error) {
 	g := m.Gitea
-	rawP, err := g.File(ctx, models.Namespace, models.Repo, models.ProvidersFile)
+	rawP, err := g.File(ctx, models.Unit, models.Repo, models.ProvidersFile)
 	if err != nil {
 		return "", err
 	}
@@ -186,7 +186,7 @@ func (m *Models) Sync(ctx context.Context) (string, error) {
 	if len(why) > 0 {
 		return "", fmt.Errorf("%s", strings.Join(why, "; "))
 	}
-	rawM, err := g.File(ctx, models.Namespace, models.Repo, models.ModelsFile)
+	rawM, err := g.File(ctx, models.Unit, models.Repo, models.ModelsFile)
 	if err != nil {
 		return "", err
 	}
@@ -208,21 +208,21 @@ func (m *Models) Sync(ctx context.Context) (string, error) {
 	next, changes := models.Sync(p, have, lists, errs, today)
 	want := next.Marshal()
 	if seed {
-		err := g.Commit(ctx, models.Namespace, models.Repo, "The model list, from the install's LLM", g.User,
+		err := g.Commit(ctx, models.Unit, models.Repo, "The model list, from the install's LLM", g.User,
 			map[string][]byte{models.ProvidersFile: []byte(rawP), models.ModelsFile: want})
 		m.invalidate()
 		return "", err
 	}
 	if string(want) == rawM {
 		// Nothing to propose: a pull request still open is out of date.
-		_, err := g.ProposeFiles(ctx, models.Namespace, models.Repo, models.Branch, "", "", nil)
+		_, err := g.ProposeFiles(ctx, models.Unit, models.Repo, models.Branch, "", "", nil)
 		return "", err
 	}
 	title, body, err := m.describe(ctx, changes, next)
 	if err != nil {
 		return "", err
 	}
-	return g.ProposeFiles(ctx, models.Namespace, models.Repo, models.Branch, title, body, map[string][]byte{models.ModelsFile: want})
+	return g.ProposeFiles(ctx, models.Unit, models.Repo, models.Branch, title, body, map[string][]byte{models.ModelsFile: want})
 }
 
 func (m *Models) invalidate() {
@@ -296,7 +296,7 @@ func (m *Models) Run(ctx context.Context, check, every time.Duration) {
 	var last string
 	var at time.Time
 	for {
-		raw, err := m.Gitea.File(ctx, models.Namespace, models.Repo, models.ProvidersFile)
+		raw, err := m.Gitea.File(ctx, models.Unit, models.Repo, models.ProvidersFile)
 		switch {
 		case err != nil:
 			log.Printf("models: %v", err)
@@ -308,7 +308,7 @@ func (m *Models) Run(ctx context.Context, check, every time.Duration) {
 			}
 			if raw == "" {
 				// Seeded: read what was written next round.
-				raw, _ = m.Gitea.File(ctx, models.Namespace, models.Repo, models.ProvidersFile)
+				raw, _ = m.Gitea.File(ctx, models.Unit, models.Repo, models.ProvidersFile)
 			}
 			last, at = raw, time.Now()
 			if link != "" {

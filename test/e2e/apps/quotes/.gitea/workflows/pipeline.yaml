@@ -1,7 +1,7 @@
 # Test, build and push the image for every push, in one BuildKit build: the
 # Dockerfile's test stage runs the tests, so a failing test means no image,
 # and the deployer keeps the last good commit running. The deployer
-# deploys the branches its stack in the namespace's config names (main, dev)
+# deploys the branches its stack in the unit's config names (main, dev)
 # once their image exists.
 #
 # BuildKit's layer cache is kept in Gitea's registry, as the image
@@ -9,8 +9,8 @@
 #
 # Runs on the user runner: jobs are containers on the builds network, where
 # they reach Gitea and BuildKit but not Docker. REGISTRY_USER and
-# REGISTRY_TOKEN are this namespace's build account, which may push this
-# namespace's images and nothing else.
+# REGISTRY_TOKEN are this unit's build account, which may push this
+# unit's images and nothing else.
 name: pipeline
 on:
   push:

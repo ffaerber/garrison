@@ -1,7 +1,7 @@
 # 9. Scheduled jobs
 
 Not everything needs an agent. A plain cron job of an app is a Gitea Actions
-workflow in the app's repo, on a `schedule`. It runs on the namespace's own
+workflow in the app's repo, on a `schedule`. It runs on the unit's own
 runner, with no LLM involved. Use it for backups, reports, or cleaning up.
 
 ## Adding it

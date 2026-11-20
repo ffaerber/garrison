@@ -18,12 +18,12 @@ import (
 	"garrison/control-plane/internal/hooks"
 )
 
-// OpenWebUI keeps, for every agent of every namespace, a model entry in
-// Open WebUI, and for every namespace a channel. The agents are the models of
+// OpenWebUI keeps, for every agent of every unit, a model entry in
+// Open WebUI, and for every unit a channel. The agents are the models of
 // Open WebUI's one connection, the agent service, which runs them; the entry,
-// named <namespace>/<agent>, lets everyone signed in use the agent and says
+// named <unit>/<agent>, lets everyone signed in use the agent and says
 // what it does.
-// The channel is the namespace's team chat: everyone signed in reads and
+// The channel is the unit's team chat: everyone signed in reads and
 // posts there, and mentioning an agent makes it answer, with the tools
 // acting as the person who mentioned it. Only admins may change a channel,
 // and the sync puts back what it owns. It signs in as the local admin Open
@@ -71,8 +71,8 @@ type owuiModel struct {
 const AccessMarker = "garrison_access"
 
 // want is the model entry of an agent: garrison's instance, which works in
-// whichever namespace's channel it is mentioned. A private agent
-// (AgentPrivate) goes only to its namespace's group (groups); root admins
+// whichever unit's channel it is mentioned. A private agent
+// (AgentPrivate) goes only to its unit's group (groups); root admins
 // are Open WebUI's admins and see every agent.
 func (o *OpenWebUI) want(a agents.Agent, groups map[string]string, private bool) owuiModel {
 	desc := a.Description
@@ -81,9 +81,9 @@ func (o *OpenWebUI) want(a agents.Agent, groups map[string]string, private bool)
 	}
 	access, grants := "everyone", []any{map[string]any{"principal_type": "user", "principal_id": "*", "permission": "read"}}
 	if private {
-		desc += " (for " + a.Namespace + "'s people only)"
+		desc += " (for " + a.Unit + "'s people only)"
 		access, grants = "admins", []any{}
-		if id := groups[a.Namespace]; id != "" {
+		if id := groups[a.Unit]; id != "" {
 			access, grants = "group:"+id, []any{map[string]any{"principal_type": "group", "principal_id": id, "permission": "read"}}
 		}
 	}
@@ -142,7 +142,7 @@ func (o *OpenWebUI) call(ctx context.Context, token, method, path string, body, 
 }
 
 // Sync makes Open WebUI's agents and channels match the
-// namespaces and their agents in Gitea.
+// units and their agents in Gitea.
 func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if o.channelAccess == nil {
 		o.channelAccess = map[string]string{}
@@ -155,14 +155,14 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if err := o.syncProfile(ctx, signin.Token); err != nil {
 		return err
 	}
-	namespaces, err := o.Gitea.Namespaces(ctx, "")
+	units, err := o.Gitea.Units(ctx, "")
 	if err != nil {
 		return err
 	}
 	var list []agents.Agent
 	byNS := map[string][]agents.Agent{}
 	seen := map[string]bool{}
-	for _, ns := range namespaces {
+	for _, ns := range units {
 		found, problems, err := o.Gitea.Agents(ctx, ns.Name, "main")
 		if err != nil {
 			return fmt.Errorf("agents of %s: %w", ns.Name, err)
@@ -184,13 +184,13 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if o.Agents != nil {
 		o.Agents.Set(list)
 	}
-	groups, err := o.syncGroups(ctx, signin.Token, namespaces)
+	groups, err := o.syncGroups(ctx, signin.Token, units)
 	if err != nil {
 		return err
 	}
-	// The chat's models are garrison's agents; in a namespace's channel,
+	// The chat's models are garrison's agents; in a unit's channel,
 	// the agent service runs their instance there.
-	models := byNS[PlatformNamespace]
+	models := byNS[PlatformUnit]
 	private := map[string]bool{}
 	for _, a := range models {
 		if private[a.ID()], err = o.Gitea.AgentPrivate(ctx, &a); err != nil {
@@ -200,7 +200,7 @@ func (o *OpenWebUI) Sync(ctx context.Context) error {
 	if err := o.syncModels(ctx, signin.Token, models, groups, private); err != nil {
 		return err
 	}
-	return o.syncChannels(ctx, signin.Token, namespaces, byNS, groups)
+	return o.syncChannels(ctx, signin.Token, units, byNS, groups)
 }
 
 // session returns a token, signing in only when the kept one no longer
@@ -269,7 +269,7 @@ func (o *OpenWebUI) syncModels(ctx context.Context, token string, list []agents.
 		if err := o.call(ctx, token, http.MethodPost, "/api/v1/models/model/delete", map[string]string{"id": id}, nil); err != nil {
 			return err
 		}
-		log.Printf("open webui: removed %s, whose folder or namespace is gone or which is outdated", id)
+		log.Printf("open webui: removed %s, whose folder or unit is gone or which is outdated", id)
 	}
 	return nil
 }
@@ -298,11 +298,11 @@ const HowToMarker = "**How to ask the agents**"
 
 // legacyHowTo started the how-to of an earlier version, which the sync
 // replaces.
-const legacyHowTo = "**How to ask the agent of this namespace**"
+const legacyHowTo = "**How to ask the agent of this unit**"
 
 // howTo is a channel's pinned message. commander is garrison's commander, if
 // there is one: it finds the agent for what someone wants.
-func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent, commander string) string {
+func (o *OpenWebUI) howTo(ns Unit, list []agents.Agent, commander string) string {
 	ask := ""
 	if commander != "" {
 		ask = "\n\nNot sure which agent fits? Ask `@" + commander + "`: it finds the agent for what you want, and hands the work over or tells you whom to ask."
@@ -312,8 +312,8 @@ func (o *OpenWebUI) howTo(ns Namespace, list []agents.Agent, commander string) s
 	}
 	var b strings.Builder
 	where := "here they work in " + ns.Name
-	if ns.Name == PlatformNamespace {
-		where = "here they work in whichever namespace you name"
+	if ns.Name == PlatformUnit {
+		where = "here they work in whichever unit you name"
 	}
 	b.WriteString(HowToMarker + "\n\nType `@` and pick an agent from the list, then your question. The agents are Garrison's, the same in every channel; " + where + ":\n\n")
 	example := list[0]
@@ -336,7 +336,7 @@ For example:
 It answers in a thread. To go on, use Reply on its answer there (the reply arrow on its message): it answers again without being mentioned. A plain message in the thread, like any message that does not mention an agent, is for the people here; mention the agent to ask it.%[2]s
 
 An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are defined in garrison/config, which root admins change.`, example.DisplayName(), ask)
-	if ns.Name != PlatformNamespace {
+	if ns.Name != PlatformUnit {
 		b.WriteString("\n\nOnly the people of " + ns.Name + " read this channel. Rights of the agents' own here, and work they do here by themselves, are in grants.yaml and routines.yaml of " + ns.Name + "/config.")
 	}
 	return b.String()
@@ -349,9 +349,9 @@ type owuiMessage struct {
 	IsPinned bool   `json:"is_pinned"`
 }
 
-// syncHowTo keeps the how-to pinned at the top of a namespace's channel. A
+// syncHowTo keeps the how-to pinned at the top of a unit's channel. A
 // how-to someone unpinned is pinned again; a deleted one is posted again.
-func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns Namespace, list []agents.Agent, commander string) error {
+func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns Unit, list []agents.Agent, commander string) error {
 	ours := func(m owuiMessage) bool {
 		return m.UserID == o.accountID && (strings.HasPrefix(m.Content, HowToMarker) || strings.HasPrefix(m.Content, legacyHowTo))
 	}
@@ -388,12 +388,12 @@ func (o *OpenWebUI) syncHowTo(ctx context.Context, token, channelID string, ns N
 	if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+channelID+"/messages/"+id+"/pin", map[string]bool{"is_pinned": true}, nil); err != nil {
 		return err
 	}
-	log.Printf("open webui: pinned the how-to in the channel of namespace %s", ns.Name)
+	log.Printf("open webui: pinned the how-to in the channel of unit %s", ns.Name)
 	return nil
 }
 
-// ChannelMarker in a channel's meta names the namespace it belongs to.
-const ChannelMarker = "garrison_namespace"
+// ChannelMarker in a channel's meta names the unit it belongs to.
+const ChannelMarker = "garrison_unit"
 
 type owuiChannel struct {
 	ID           string         `json:"id"`
@@ -404,11 +404,11 @@ type owuiChannel struct {
 	AccessGrants []any          `json:"access_grants,omitempty"`
 }
 
-func (o *OpenWebUI) channelDescription(ns Namespace) string {
-	if ns.Name == PlatformNamespace {
+func (o *OpenWebUI) channelDescription(ns Unit) string {
+	if ns.Name == PlatformUnit {
 		return "Chat of the platform, for everyone signed in. Ask the agents with @<agent>; see the pinned message."
 	}
-	return fmt.Sprintf("Team chat of the namespace %s: only its people read it. Ask the agents with @<agent>; here they work in %s. See the pinned message.", ns.Name, ns.Name)
+	return fmt.Sprintf("Team chat of the unit %s: only its people read it. Ask the agents with @<agent>; here they work in %s. See the pinned message.", ns.Name, ns.Name)
 }
 
 var everyoneReadsAndWrites = []any{
@@ -416,12 +416,12 @@ var everyoneReadsAndWrites = []any{
 	map[string]any{"principal_type": "user", "principal_id": "*", "permission": "write"},
 }
 
-// channelAccess is who reads and writes a namespace's channel: its people,
+// channelAccess is who reads and writes a unit's channel: its people,
 // by its Open WebUI group (root admins, Open WebUI's admins, read every
 // channel). garrison's is for everyone signed in: it has no people of its own,
 // and its repos and agents serve everyone.
 func channelAccess(ns, group string) []any {
-	if ns == PlatformNamespace {
+	if ns == PlatformUnit {
 		return everyoneReadsAndWrites
 	}
 	if group == "" {
@@ -434,14 +434,14 @@ func channelAccess(ns, group string) []any {
 }
 
 // legacyTeamMarker marked the team channels of an earlier version, which
-// the sync removes: a namespace's channel is for its people now.
+// the sync removes: a unit's channel is for its people now.
 const legacyTeamMarker = "garrison_team"
 
-// syncChannels keeps one channel per namespace, as it was made, for the
-// namespace's people.
-func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces []Namespace, byNS map[string][]agents.Agent, groups map[string]string) error {
+// syncChannels keeps one channel per unit, as it was made, for the
+// unit's people.
+func (o *OpenWebUI) syncChannels(ctx context.Context, token string, units []Unit, byNS map[string][]agents.Agent, groups map[string]string) error {
 	commander := ""
-	if slices.ContainsFunc(byNS[PlatformNamespace], func(a agents.Agent) bool { return a.Name == agents.CommanderName }) {
+	if slices.ContainsFunc(byNS[PlatformUnit], func(a agents.Agent) bool { return a.Name == agents.CommanderName }) {
 		commander = agents.CommanderName
 	}
 	var all []owuiChannel
@@ -457,10 +457,10 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 			if err := o.call(ctx, token, http.MethodDelete, "/api/v1/channels/"+c.ID+"/delete", nil, nil); err != nil {
 				return err
 			}
-			log.Printf("open webui: removed the team channel of namespace %s: its channel is for its people now", ns)
+			log.Printf("open webui: removed the team channel of unit %s: its channel is for its people now", ns)
 		}
 	}
-	for _, ns := range namespaces {
+	for _, ns := range units {
 		meta := map[string]any{ChannelMarker: ns.Name}
 		access := channelAccess(ns.Name, groups[ns.Name])
 		key, _ := json.Marshal(access)
@@ -473,7 +473,7 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 				return err
 			}
 			o.channelAccess[cur.ID] = string(key)
-			log.Printf("open webui: added the channel of namespace %s", ns.Name)
+			log.Printf("open webui: added the channel of unit %s", ns.Name)
 		case cur.Name != ns.Name || cur.Description != o.channelDescription(ns) || o.channelAccess[cur.ID] != string(key):
 			form := map[string]any{"name": ns.Name, "description": o.channelDescription(ns), "meta": meta}
 			if err := o.call(ctx, token, http.MethodPost, "/api/v1/channels/"+cur.ID+"/update", form, nil); err != nil {
@@ -483,7 +483,7 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 				return err
 			}
 			o.channelAccess[cur.ID] = string(key)
-			log.Printf("open webui: set the channel of namespace %s", ns.Name)
+			log.Printf("open webui: set the channel of unit %s", ns.Name)
 		}
 		if err := o.syncHowTo(ctx, token, cur.ID, ns, byNS[ns.Name], commander); err != nil {
 			return err
@@ -493,7 +493,7 @@ func (o *OpenWebUI) syncChannels(ctx context.Context, token string, namespaces [
 		if err := o.call(ctx, token, http.MethodDelete, "/api/v1/channels/"+c.ID+"/delete", nil, nil); err != nil {
 			return err
 		}
-		log.Printf("open webui: removed the channel of namespace %s, which is gone", ns)
+		log.Printf("open webui: removed the channel of unit %s, which is gone", ns)
 	}
 	return nil
 }
@@ -523,8 +523,8 @@ func (o *OpenWebUI) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// GroupPrefix names the Open WebUI group of a namespace's people:
-// "garrison <namespace>".
+// GroupPrefix names the Open WebUI group of a unit's people:
+// "garrison <unit>".
 const GroupPrefix = "garrison "
 
 type owuiGroup struct {
@@ -532,14 +532,14 @@ type owuiGroup struct {
 	Name string `json:"name"`
 }
 
-// syncGroups keeps one Open WebUI group per namespace with the people of its
+// syncGroups keeps one Open WebUI group per unit with the people of its
 // members.yaml who have signed in to Open WebUI, matched by email, so that
 // agents visible to members show only to them. It returns the group ids by
-// namespace. garrison has none: its people are root admins, whom Open WebUI
+// unit. garrison has none: its people are root admins, whom Open WebUI
 // shows everything.
 // email is the email address of the person name of a roster: their Gitea
 // account's, or, before their first Gitea sign-in, Keycloak's, so that being
-// added to a namespace shows its channel without opening Gitea first. ""
+// added to a unit shows its channel without opening Gitea first. ""
 // when neither knows them.
 func (o *OpenWebUI) email(ctx context.Context, name string) string {
 	var u struct {
@@ -558,7 +558,7 @@ func (o *OpenWebUI) email(ctx context.Context, name string) string {
 	return email
 }
 
-func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []Namespace) (map[string]string, error) {
+func (o *OpenWebUI) syncGroups(ctx context.Context, token string, units []Unit) (map[string]string, error) {
 	var groups []owuiGroup
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/groups/", nil, &groups); err != nil {
 		return nil, err
@@ -583,8 +583,8 @@ func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []N
 		byEmail[strings.ToLower(u.Email)] = u.ID
 	}
 	out := map[string]string{}
-	for _, ns := range namespaces {
-		if ns.Name == PlatformNamespace {
+	for _, ns := range units {
+		if ns.Name == PlatformUnit {
 			continue
 		}
 		id, ok := have[ns.Name]
@@ -592,12 +592,12 @@ func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []N
 		if !ok {
 			var g owuiGroup
 			if err := o.call(ctx, token, http.MethodPost, "/api/v1/groups/create", map[string]any{
-				"name": GroupPrefix + ns.Name, "description": "The people of the namespace " + ns.Name + ", from members.yaml in its repo config; kept by the gateway.",
+				"name": GroupPrefix + ns.Name, "description": "The people of the unit " + ns.Name + ", from members.yaml in its repo config; kept by the gateway.",
 			}, &g); err != nil {
 				return nil, err
 			}
 			id = g.ID
-			log.Printf("open webui: added the group of namespace %s", ns.Name)
+			log.Printf("open webui: added the group of unit %s", ns.Name)
 		}
 		out[ns.Name] = id
 		var raw string
@@ -644,14 +644,14 @@ func (o *OpenWebUI) syncGroups(ctx context.Context, token string, namespaces []N
 			}
 		}
 		if len(add)+len(remove) > 0 {
-			log.Printf("open webui: the group of namespace %s: %d added, %d removed", ns.Name, len(add), len(remove))
+			log.Printf("open webui: the group of unit %s: %d added, %d removed", ns.Name, len(add), len(remove))
 		}
 	}
 	for ns, id := range have {
 		if err := o.call(ctx, token, http.MethodDelete, "/api/v1/groups/id/"+id+"/delete", nil, nil); err != nil {
 			return nil, err
 		}
-		log.Printf("open webui: removed the group of namespace %s, which is gone", ns)
+		log.Printf("open webui: removed the group of unit %s, which is gone", ns)
 	}
 	return out, nil
 }

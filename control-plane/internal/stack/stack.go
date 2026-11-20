@@ -70,7 +70,7 @@ const maxLabel = 63
 
 type Stack struct {
 	Name         string                 `yaml:"stack"`
-	Namespace    string                 `yaml:"namespace"`
+	Unit         string                 `yaml:"unit"`
 	Source       string                 `yaml:"source,omitempty"` // the repo whose branches are its environments
 	Entrypoint   string                 `yaml:"entrypoint"`
 	Services     map[string]Service     `yaml:"services"`
@@ -126,29 +126,29 @@ var compiled = sync.OnceValue(func() *jsonschema.Schema {
 	return c.MustCompile(schemaURL)
 })
 
-// Dir is where a namespace's stacks are in its config repo: one file each,
+// Dir is where a unit's stacks are in its config repo: one file each,
 // stacks/<name>.yaml.
 const Dir = "stacks"
 
 // Parse validates a stack file that stands alone, e.g. one the host's CLI
-// deploys: it names its stack and namespace.
+// deploys: it names its stack and unit.
 func Parse(data []byte) (*Stack, error) {
 	s, err := parse(data)
 	if err != nil {
 		return nil, err
 	}
-	if s.Name == "" || s.Namespace == "" {
-		return nil, errors.New("a stack file on its own names its stack and namespace (stack:, namespace:)")
+	if s.Name == "" || s.Unit == "" {
+		return nil, errors.New("a stack file on its own names its stack and unit (stack:, unit:)")
 	}
 	return s, nil
 }
 
 var fileName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 
-// ParseIn validates the stack stacks/<name>.yaml of a namespace's config
-// repo, whose place names its stack and namespace. Without a source repo,
+// ParseIn validates the stack stacks/<name>.yaml of a unit's config
+// repo, whose place names its stack and unit. Without a source repo,
 // it has only main, and no image of its own build.
-func ParseIn(data []byte, namespace, name string) (*Stack, error) {
+func ParseIn(data []byte, unit, name string) (*Stack, error) {
 	if !fileName.MatchString(name) {
 		return nil, fmt.Errorf("%s/%s.yaml: the name must be lowercase letters, digits and dashes, at most 40, as it is a hostname", Dir, name)
 	}
@@ -159,9 +159,9 @@ func ParseIn(data []byte, namespace, name string) (*Stack, error) {
 	if raw == nil {
 		raw = map[string]any{}
 	}
-	for key, want := range map[string]string{"stack": name, "namespace": namespace} {
+	for key, want := range map[string]string{"stack": name, "unit": unit} {
 		if v, ok := raw[key]; ok && v != want {
-			return nil, fmt.Errorf("%s: %v, but the file is %s/%s.yaml of %s; leave it out", key, v, Dir, name, namespace)
+			return nil, fmt.Errorf("%s: %v, but the file is %s/%s.yaml of %s; leave it out", key, v, Dir, name, unit)
 		}
 		raw[key] = want
 	}

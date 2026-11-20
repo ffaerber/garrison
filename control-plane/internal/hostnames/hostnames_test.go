@@ -9,9 +9,9 @@ import (
 	"garrison/control-plane/internal/stack"
 )
 
-func mk(t *testing.T, namespace, name string, envs ...string) *stack.Stack {
+func mk(t *testing.T, unit, name string, envs ...string) *stack.Stack {
 	t.Helper()
-	y := fmt.Sprintf("stack: %s\nnamespace: %s\nentrypoint: web\nservices:\n  web: { image: a:1, port: 80 }\n  adm: { image: a:1, port: 81, public: admin }\nenvironments:\n", name, namespace)
+	y := fmt.Sprintf("stack: %s\nunit: %s\nentrypoint: web\nservices:\n  web: { image: a:1, port: 80 }\n  adm: { image: a:1, port: 81, public: admin }\nenvironments:\n", name, unit)
 	for _, e := range envs {
 		y += "  " + e + ": {}\n"
 	}
@@ -52,7 +52,7 @@ func TestClaim(t *testing.T) {
 	}
 
 	for name, s := range map[string]*stack.Stack{
-		"same name in another namespace":        mk(t, "other", "jellyfin", "main"),
+		"same name in another unit":             mk(t, "other", "jellyfin", "main"),
 		"stack named like a public service":     mk(t, "other", "jellyfin-admin", "main"),
 		"environment hostname of another stack": mk(t, "media", "jellyfin", "main", "dev"),
 		"reserved":                              mk(t, "other", "git", "main"),

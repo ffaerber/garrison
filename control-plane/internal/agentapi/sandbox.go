@@ -25,7 +25,7 @@ You run in a sandbox of your own for this conversation: a Linux container (Alpin
 
 The sandbox cannot reach the platform's services directly: use your platform tools for repos, apps and changes; they act as the person you talk to. Files in your workspace reach a repo only through a proposed change.
 
-Git: clone any repo the person may read with ` + "`git clone $GARRISON_GIT/<namespace>/<repo>.git`" + ` (read-only; ` + "`git fetch`" + ` and ` + "`git pull`" + ` work too, pushing does not).`
+Git: clone any repo the person may read with ` + "`git clone $GARRISON_GIT/<unit>/<repo>.git`" + ` (read-only; ` + "`git fetch`" + ` and ` + "`git pull`" + ` work too, pushing does not).`
 
 // Offline is added for agents without internet.
 const Offline = `
@@ -85,7 +85,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 	if len(a.Asks) > 0 {
 		system += "\n\n" + AskOthers
 	}
-	media := s.media(ctx, a.Namespace)
+	media := s.media(ctx, a.Unit)
 	if media != "" {
 		system += MediaLibrary
 	}

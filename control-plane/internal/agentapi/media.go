@@ -13,7 +13,7 @@ import (
 	"garrison/control-plane/internal/render"
 )
 
-// MediaShare is the share of a namespace that is its media library: its
+// MediaShare is the share of a unit that is its media library: its
 // agents get it at /data/media in its channel and its routines.
 const MediaShare = "media"
 
@@ -22,30 +22,30 @@ const MediaLibrary = `
 
 ## The media library
 
-/data/media is this namespace's media library: pictures, videos and other files its people and agents share, which its people browse and upload in the browser. Put finished media there, one folder per project (/data/media/<project>/), with names that say what each file is; keep drafts in /data/work. Never delete or overwrite a file there that you did not make in this conversation unless the person asks for it by name.`
+/data/media is this unit's media library: pictures, videos and other files its people and agents share, which its people browse and upload in the browser. Put finished media there, one folder per project (/data/media/<project>/), with names that say what each file is; keep drafts in /data/work. Never delete or overwrite a file there that you did not make in this conversation unless the person asks for it by name.`
 
-// MediaFiles reads a namespace's config; gateway.Gitea.
+// MediaFiles reads a unit's config; gateway.Gitea.
 type MediaFiles interface {
 	Files(ctx context.Context, org, repo, dir string) ([]string, error)
 	File(ctx context.Context, org, repo, path string) (string, error)
 }
 
-// mediaCache remembers which namespaces have a media library.
+// mediaCache remembers which units have a media library.
 type mediaCache struct {
 	mu   sync.Mutex
 	have map[string]bool
 	at   map[string]time.Time
 }
 
-// mediaFor is how long whether a namespace has a library is remembered.
+// mediaFor is how long whether a unit has a library is remembered.
 const mediaFor = time.Minute
 
 // media is the host folder of ns's media library, bound at /data/media in
 // its sandboxes, or "" if it has none: one of the stacks of its config, on
 // main, mounts the share media, which the deployer then keeps as a dataset.
-// garrison, the platform's namespace, has none.
+// garrison, the platform's unit, has none.
 func (s *Server) media(ctx context.Context, ns string) string {
-	if s.Media == nil || ns == "" || ns == agents.PlatformNamespace {
+	if s.Media == nil || ns == "" || ns == agents.PlatformUnit {
 		return ""
 	}
 	root := s.DataRoot

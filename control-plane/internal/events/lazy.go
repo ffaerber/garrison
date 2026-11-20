@@ -49,7 +49,7 @@ func (l *Lazy) get(ctx context.Context) (*Postgres, error) {
 func (l *Lazy) Record(ctx context.Context, e Event) {
 	pg, err := l.get(context.WithoutCancel(ctx))
 	if err != nil {
-		log.Printf("events: not recorded: %s %s/%s %q: %v", e.Kind, e.Namespace, e.Repo, e.Title, err)
+		log.Printf("events: not recorded: %s %s/%s %q: %v", e.Kind, e.Unit, e.Repo, e.Title, err)
 		return
 	}
 	pg.Record(ctx, e)
@@ -79,12 +79,12 @@ func (l *Lazy) Related(ctx context.Context, e Event, v Visibility) ([]Event, err
 	return pg.Related(ctx, e, v)
 }
 
-func (l *Lazy) Namespaces(ctx context.Context, v Visibility) ([]string, error) {
+func (l *Lazy) Units(ctx context.Context, v Visibility) ([]string, error) {
 	pg, err := l.get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return pg.Namespaces(ctx, v)
+	return pg.Units(ctx, v)
 }
 
 // Prune prunes once connected, every hour until ctx ends.

@@ -8,7 +8,7 @@ services:
             labels:
                 garrison.app: jellyfin
                 garrison.environment: dev
-                garrison.namespace: media
+                garrison.unit: media
                 traefik.enable: "true"
                 traefik.http.routers.dev-jellyfin-admin.entrypoints: websecure
                 traefik.http.routers.dev-jellyfin-admin.middlewares: sso@file
@@ -39,7 +39,7 @@ services:
             labels:
                 garrison.app: jellyfin
                 garrison.environment: dev
-                garrison.namespace: media
+                garrison.unit: media
                 traefik.enable: "true"
                 traefik.http.routers.dev-jellyfin.entrypoints: websecure
                 traefik.http.routers.dev-jellyfin.middlewares: sso@file
@@ -63,7 +63,7 @@ services:
             labels:
                 garrison.app: jellyfin
                 garrison.environment: dev
-                garrison.namespace: media
+                garrison.unit: media
 networks:
     traefik-public:
         external: true

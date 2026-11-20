@@ -23,16 +23,16 @@ two() { [ "$(answers)" -ge 2 ]; }
 check "a Reply to its answer, without @, gets another" until_true 300 two
 # There it works in todo: it hands work to the agents as they work in todo.
 handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
-answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the namespace todo have? Have it answer here." commander)
+answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the unit todo have? Have it answer here." commander)
 if ! handed; then
   printf 'retry it handed nothing over; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent todo bob "Please use ask_agent now: ask the operator which stacks the namespace todo has." commander)
+  answer=$(ask_agent todo bob "Please use ask_agent now: ask the operator which stacks the unit todo has." commander)
 fi
 check "it hands a task over, as the feed shows" handed
 check "which the agent finishes"           until_true 300 in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['status'] == 'ok'"
 
 echo "# 9b. the operator guides: it asks for what it cannot know, then does it"
-# orgs: the names of every namespace.
+# orgs: the names of every unit.
 orgs() { gitea_api "" "$api/admin/orgs?limit=50" | python3 -c 'import json,sys; print(" ".join(sorted(o["username"] for o in json.load(sys.stdin))))'; }
 before=$(orgs)
 answer=$(ask_agent garrison alice "Please create an organization for me.")
@@ -42,10 +42,10 @@ printf 'it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
 asked_back=$answer
 answer=$(ask_agent garrison alice "Call it family.")
 family_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/family")" = 200 ]; }
-check "told the name, it makes the namespace family, as alice" until_true 30 family_made
-# The prompt says to call it a namespace; the local model does so in its
+check "told the name, it makes the unit family, as alice" until_true 30 family_made
+# The prompt says to call it a unit; the local model does so in its
 # question or once it made it, so either answer counts.
-check "it names it a namespace"            grep -qi 'namespace' <<<"$asked_back $answer"
+check "it names it a unit"            grep -qi 'unit' <<<"$asked_back $answer"
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # routines.yaml may not exist yet: Gitea's 404 is JSON, not a list.

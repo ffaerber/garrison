@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The end-to-end test as a tree of steps on Multipass VMs. A fixture is a
-# state that scenarios start from (Garrison installed, a namespace with its
+# state that scenarios start from (Garrison installed, a unit with its
 # app deployed): green, it is saved as a VM snapshot. A scenario is a test
 # that starts from its fixture: it runs in a clone of the fixture's VM, which
 # is thrown away when it passes and kept, stopped, when it fails. So a change
@@ -58,7 +58,7 @@ cd "$ROOT"
 #                                                                                 +- 6.7 leaving
 #                                                                                 +- 6.8 guided
 #
-# deploy: the namespace todo with its app deployed, alice its only person.
+# deploy: the unit todo with its app deployed, alice its only person.
 # team: carol an admin, bob a member, and the agents the scenarios share.
 # Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
@@ -91,7 +91,7 @@ inputs() {
     deploy)   echo "$shared" templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
     ui|people|guided)
               echo "$shared" test/ui/Dockerfile test/ui/run.sh test/ui/lib.py "test/ui/$1.py" ;;
-    media)    echo "$shared" test/e2e/media templates/namespace-config/README.md ;;
+    media)    echo "$shared" test/e2e/media templates/unit-config/README.md ;;
     team|roles|change|marketing|routines|commander|operator|leaving)
               echo "$shared" test/e2e/apps ;;
     *)        echo "$shared" ;;
@@ -182,7 +182,7 @@ step_agent() {
   smoke agent
 }
 
-# A namespace with an app of its own, built by its pipeline on the user
+# A unit with an app of its own, built by its pipeline on the user
 # runner and deployed by the deployer: todo/app, from the template todo, left running.
 step_deploy() {
   sync_repo
@@ -206,7 +206,7 @@ step_commander() { scenario commander; }
 step_operator()  { scenario operator; }
 step_leaving()   { scenario leaving; }
 
-# Scenario 10 of docs/scenarios.md: alice has the agents make a namespace, a
+# Scenario 10 of docs/scenarios.md: alice has the agents make a unit, a
 # repo from a template and its stack, deploys it, changes it on dev through
 # an agent and merges dev into main. Talks to the real LLM.
 step_journey() {
@@ -216,7 +216,7 @@ step_journey() {
 }
 
 # The browser scenarios (test/ui/NAME.py): people click and type in Gitea,
-# Open WebUI and the dashboard. ui: from the namespace todo to its todo app
+# Open WebUI and the dashboard. ui: from the unit todo to its todo app
 # deployed, a screenshot, a scheduled job and a routine's question; people:
 # joining and leaving todo, as Open WebUI shows it; guided: vague requests,
 # and the agents asking what is meant. Talk to the real LLM. The screenshots
@@ -238,7 +238,7 @@ step_ui()     { browser_scenario ui; }
 step_people() { browser_scenario people; }
 step_guided() { browser_scenario guided; }
 
-# A namespace's media library and its file browser; @media makes pictures
+# A unit's media library and its file browser; @media makes pictures
 # and a video with a fake ComfyUI outside Garrison, then cuts a short.
 # Talks to the real LLM.
 step_media() {
@@ -247,8 +247,8 @@ step_media() {
   in_vm sudo bash -c "cd garrison && COMFYUI=$COMFYUI WAIT_READY=600 test/e2e/smoke.sh media"
 }
 
-# Every kind of thing a namespace holds, made, read, changed and removed:
-# the namespace itself, its people, repos, agents with grants, apps with
+# Every kind of thing a unit holds, made, read, changed and removed:
+# the unit itself, its people, repos, agents with grants, apps with
 # their data, secrets and hostnames. No LLM.
 step_crud() {
   sync_repo

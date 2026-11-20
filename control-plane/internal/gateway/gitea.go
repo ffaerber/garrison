@@ -45,10 +45,10 @@ var (
 	userName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 )
 
-// validOrg accepts a namespace, i.e. a Gitea organisation name.
+// validOrg accepts a unit, i.e. a Gitea organisation name.
 func validOrg(o string) error {
 	if !userName.MatchString(o) || o == "." || o == ".." {
-		return fmt.Errorf("%w: namespace %q", ErrInvalid, o)
+		return fmt.Errorf("%w: unit %q", ErrInvalid, o)
 	}
 	return nil
 }
@@ -148,15 +148,15 @@ func (g *Gitea) do(ctx context.Context, as, method, path string, body, out any) 
 	return resp.StatusCode, nil
 }
 
-type Namespace struct {
+type Unit struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
-// Namespaces lists the organisations person can see: all of them, page by
-// page, as the syncs treat a namespace that is not listed as gone.
-func (g *Gitea) Namespaces(ctx context.Context, as string) ([]Namespace, error) {
-	out := []Namespace{}
+// Units lists the organisations person can see: all of them, page by
+// page, as the syncs treat a unit that is not listed as gone.
+func (g *Gitea) Units(ctx context.Context, as string) ([]Unit, error) {
+	out := []Unit{}
 	for page := 1; page <= 100; page++ {
 		var raw []struct {
 			Name        string `json:"username"`
@@ -166,7 +166,7 @@ func (g *Gitea) Namespaces(ctx context.Context, as string) ([]Namespace, error) 
 			return nil, err
 		}
 		for _, o := range raw {
-			out = append(out, Namespace{Name: o.Name, Description: o.Description})
+			out = append(out, Unit{Name: o.Name, Description: o.Description})
 		}
 		if len(raw) < 50 {
 			break
@@ -184,7 +184,7 @@ type Repo struct {
 	DeleteMerged bool `json:"default_delete_branch_after_merge"`
 }
 
-// Repos lists the namespace's repos as person sees them.
+// Repos lists the unit's repos as person sees them.
 func (g *Gitea) Repos(ctx context.Context, as, org string) ([]Repo, error) {
 	if err := validOrg(org); err != nil {
 		return nil, err
@@ -253,14 +253,14 @@ func (g *Gitea) Read(ctx context.Context, as, org, repo, path string) (string, e
 }
 
 type Change struct {
-	Namespace string `json:"namespace"`
-	Repo      string `json:"repo"`
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	Author    string `json:"author"`
-	URL       string `json:"url"`
-	Diff      string `json:"diff,omitempty"`
+	Unit   string `json:"unit"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Author string `json:"author"`
+	URL    string `json:"url"`
+	Diff   string `json:"diff,omitempty"`
 }
 
 // CanWrite tells whether person may push to a repo, and so propose a
@@ -387,7 +387,7 @@ func (g *Gitea) ProposePatch(ctx context.Context, as string, pp Proposal) (Chang
 				g.do(ctx, as, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/comments", org, repo, pr.Number),
 					map[string]string{"body": "Changes added, " + strings.ToLower(pp.Note[:1]) + pp.Note[1:]}, nil)
 			}
-			return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: pr.Title, Body: pr.Body, Author: as, URL: pr.HTMLURL}, branch, nil
+			return Change{Unit: org, Repo: repo, Number: pr.Number, Title: pr.Title, Body: pr.Body, Author: as, URL: pr.HTMLURL}, branch, nil
 		}
 	}
 	var pr struct {
@@ -402,7 +402,7 @@ func (g *Gitea) ProposePatch(ctx context.Context, as string, pp Proposal) (Chang
 		map[string]any{"head": branch, "base": base, "title": title, "body": body}, &pr); err != nil {
 		return Change{}, "", err
 	}
-	return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, branch, nil
+	return Change{Unit: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, branch, nil
 }
 
 // Propose writes one file on a new branch, as person, and opens a pull
@@ -457,10 +457,10 @@ func (g *Gitea) Propose(ctx context.Context, as, org, repo, path, content, title
 		map[string]any{"head": branch, "base": "main", "title": title, "body": description}, &pr); err != nil {
 		return Change{}, err
 	}
-	return Change{Namespace: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, nil
+	return Change{Unit: org, Repo: repo, Number: pr.Number, Title: title, Body: description, Author: as, URL: pr.HTMLURL}, nil
 }
 
-// Changes lists the namespace's open pull requests, with their diffs.
+// Changes lists the unit's open pull requests, with their diffs.
 func (g *Gitea) Changes(ctx context.Context, as, org string) ([]Change, error) {
 	repos, err := g.Repos(ctx, as, org)
 	if err != nil {
@@ -484,7 +484,7 @@ func (g *Gitea) Changes(ctx context.Context, as, org string) ([]Change, error) {
 			return nil, err
 		}
 		for _, p := range prs {
-			c := Change{Namespace: org, Repo: r.Name, Number: p.Number, Title: p.Title, Body: p.Body, Author: p.User.Login, URL: p.HTMLURL}
+			c := Change{Unit: org, Repo: r.Name, Number: p.Number, Title: p.Title, Body: p.Body, Author: p.User.Login, URL: p.HTMLURL}
 			g.do(ctx, as, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d.diff", org, r.Name, p.Number), nil, &c.Diff)
 			out = append(out, c)
 		}
@@ -509,35 +509,35 @@ func (g *Gitea) Exists(ctx context.Context, org, repo string) (bool, error) {
 	return err == nil, err
 }
 
-// CreateNamespace makes a namespace, a Gitea organisation, as person. Gitea
+// CreateUnit makes a unit, a Gitea organisation, as person. Gitea
 // lets only its admins, the root admins, make organisations. Its creator is
 // its first owner; the members sync then makes its config repo, with them as
 // its first admin, and the Open WebUI sync its channel.
-func (g *Gitea) CreateNamespace(ctx context.Context, as, name, description string) (string, error) {
+func (g *Gitea) CreateUnit(ctx context.Context, as, name, description string) (string, error) {
 	if err := validOrg(name); err != nil {
 		return "", err
 	}
 	if len(name) > 40 || strings.ToLower(name) != name || strings.ContainsAny(name, "._") {
-		return "", fmt.Errorf("%w: a namespace's name is lowercase letters, digits and dashes, at most 40: %q", ErrInvalid, name)
+		return "", fmt.Errorf("%w: a unit's name is lowercase letters, digits and dashes, at most 40: %q", ErrInvalid, name)
 	}
 	status, err := g.do(ctx, as, http.MethodPost, "/orgs", map[string]any{
 		"username": name, "description": description, "visibility": "limited",
 	}, nil)
 	switch {
 	case status == http.StatusUnprocessableEntity || status == http.StatusConflict:
-		return "", fmt.Errorf("%w: there is a namespace or user %q already", ErrInvalid, name)
+		return "", fmt.Errorf("%w: there is a unit or user %q already", ErrInvalid, name)
 	case errors.Is(err, ErrForbidden):
-		return "", refused{as + " may not make namespaces: only root admins may"}
+		return "", refused{as + " may not make units: only root admins may"}
 	case err != nil:
 		return "", err
 	}
 	return name, nil
 }
 
-// CreateRepo makes an empty repo in a namespace, as person: Gitea lets the
-// namespace's admins and the root admins. It starts with a README on main,
+// CreateRepo makes an empty repo in a unit, as person: Gitea lets the
+// unit's admins and the root admins. It starts with a README on main,
 // so changes can be proposed to it; nothing in it runs until a stack in the
-// namespace's config names it as its source.
+// unit's config names it as its source.
 func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description string, private bool, template string) (string, error) {
 	if err := validOrg(org); err != nil {
 		return "", err
@@ -550,7 +550,7 @@ func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description strin
 		return "", err
 	}
 	if repo == ConfigRepo {
-		return "", fmt.Errorf("%w: config is made with the namespace", ErrInvalid)
+		return "", fmt.Errorf("%w: config is made with the unit", ErrInvalid)
 	}
 	if strings.ToLower(repo) != repo || len(repo) > 40 || strings.ContainsAny(repo, "._") {
 		return "", fmt.Errorf("%w: a repo's name is lowercase letters, digits and dashes, at most 40, as it may become a hostname: %q", ErrInvalid, repo)
@@ -566,7 +566,7 @@ func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description strin
 	case status == http.StatusConflict || status == http.StatusUnprocessableEntity:
 		return "", fmt.Errorf("%w: %s/%s exists already", ErrInvalid, org, repo)
 	case status == http.StatusNotFound:
-		return "", fmt.Errorf("%w: there is no namespace %s", ErrInvalid, org)
+		return "", fmt.Errorf("%w: there is no unit %s", ErrInvalid, org)
 	case errors.Is(err, ErrForbidden):
 		return "", refused{fmt.Sprintf("%s may not make repos in %s: its admins and root admins may", as, org)}
 	case err != nil:
@@ -595,10 +595,10 @@ func (g *Gitea) CreateRepo(ctx context.Context, as, org, repo, description strin
 }
 
 // environment is a branch of a repo that an app deploys, as stacks/*.yaml
-// in the namespace's config on main says: Host is its hostname's first label.
+// in the unit's config on main says: Host is its hostname's first label.
 type environment struct{ Stack, Repo, Branch, Host string }
 
-// environments lists the branches the namespace's apps deploy from. Stacks
+// environments lists the branches the unit's apps deploy from. Stacks
 // without a source (only main) and files that do not parse are left out:
 // the deployer says what is wrong with them.
 func (g *Gitea) environments(ctx context.Context, ns string) ([]environment, error) {

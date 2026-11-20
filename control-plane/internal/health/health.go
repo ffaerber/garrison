@@ -1,8 +1,8 @@
 // Package health tells Prometheus how the Swarm services are doing, which
 // cAdvisor cannot: it sees only running containers, so an app that exits at
 // start hardly shows. Its metrics come from Docker's API, per service, with
-// the namespace, app and environment the deployer labels each app with;
-// the platform's own services count as the namespace garrison.
+// the unit, app and environment the deployer labels each app with;
+// the platform's own services count as the unit garrison.
 package health
 
 import (
@@ -78,8 +78,8 @@ const Window = 10 * time.Minute
 
 // Service is one Swarm service's health.
 type Service struct {
-	Namespace, App, Environment, Stack, Service string
-	Desired, Running, Failed                    int
+	Unit, App, Environment, Stack, Service string
+	Desired, Running, Failed               int
 }
 
 // Services reads every service's health.
@@ -101,10 +101,10 @@ func (d *Docker) Services(ctx context.Context) ([]Service, error) {
 	for _, s := range svcs {
 		l := s.Spec.Labels
 		stack := l["com.docker.stack.namespace"]
-		h := &Service{Namespace: l[render.LabelNamespace], App: l[render.LabelApp], Environment: l[render.LabelEnvironment], Stack: stack, Service: s.Spec.Name}
-		if h.Namespace == "" {
+		h := &Service{Unit: l[render.LabelUnit], App: l[render.LabelApp], Environment: l[render.LabelEnvironment], Stack: stack, Service: s.Spec.Name}
+		if h.Unit == "" {
 			// The platform's own stacks: postgres, gitea, control-plane ...
-			h.Namespace, h.App, h.Environment = agents.PlatformNamespace, stack, "main"
+			h.Unit, h.App, h.Environment = agents.PlatformUnit, stack, "main"
 			if stack == "" {
 				h.App = s.Spec.Name
 			}
@@ -158,8 +158,8 @@ func (d *Docker) Handler() http.Handler {
 		} {
 			fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", m.name, m.help, m.name)
 			for _, s := range svcs {
-				fmt.Fprintf(&b, "%s{namespace=%q,app=%q,environment=%q,stack=%q,service=%q} %d\n",
-					m.name, s.Namespace, s.App, s.Environment, s.Stack, s.Service, m.v(s))
+				fmt.Fprintf(&b, "%s{unit=%q,app=%q,environment=%q,stack=%q,service=%q} %d\n",
+					m.name, s.Unit, s.App, s.Environment, s.Stack, s.Service, m.v(s))
 			}
 		}
 		io.WriteString(w, b.String())

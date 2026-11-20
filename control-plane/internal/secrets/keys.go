@@ -20,12 +20,12 @@ import (
 // directory; the installer writes it.
 const RecoveryFile = "recovery.pub"
 
-// namespace is what a namespace may be called (Gitea's organisations, as
+// unit is what a unit may be called (Gitea's organisations, as
 // the deployer takes them).
-var namespace = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+var unit = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 
-// Keys are the namespaces' age keys, <Dir>/<namespace>.txt, root only. Only
-// the deployer has them: it makes a namespace's key when its public half is
+// Keys are the units' age keys, <Dir>/<unit>.txt, root only. Only
+// the deployer has them: it makes a unit's key when its public half is
 // first asked for, and decrypts with it.
 type Keys struct {
 	Dir string
@@ -35,12 +35,12 @@ type Keys struct {
 
 func (k *Keys) file(ns string) string { return filepath.Join(k.Dir, ns+".txt") }
 
-// Recipients are the public keys a namespace's secrets are encrypted for:
+// Recipients are the public keys a unit's secrets are encrypted for:
 // its own, made now if it has none, and the recovery key, if the
 // installation has one.
 func (k *Keys) Recipients(ctx context.Context, ns string) ([]string, error) {
-	if !namespace.MatchString(ns) {
-		return nil, fmt.Errorf("invalid namespace %q", ns)
+	if !unit.MatchString(ns) {
+		return nil, fmt.Errorf("invalid unit %q", ns)
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -91,16 +91,16 @@ func publicKey(file string) (string, error) {
 	return "", fmt.Errorf("%s names no public key", filepath.Base(file))
 }
 
-// Has tells whether a namespace has a key yet.
+// Has tells whether a unit has a key yet.
 func (k *Keys) Has(ns string) bool {
-	if !namespace.MatchString(ns) {
+	if !unit.MatchString(ns) {
 		return false
 	}
 	_, err := os.Stat(k.file(ns))
 	return err == nil
 }
 
-// Decrypt reads the value of a namespace's secret file.
+// Decrypt reads the value of a unit's secret file.
 func (k *Keys) Decrypt(ctx context.Context, ns string, data []byte) (string, error) {
 	if !k.Has(ns) {
 		return "", fmt.Errorf("%s has no key here: its secrets were encrypted elsewhere", ns)
@@ -113,15 +113,15 @@ func (k *Keys) Decrypt(ctx context.Context, ns string, data []byte) (string, err
 	return value(plain)
 }
 
-// Handler answers GET /secrets/{namespace}/recipients with the public keys
-// to encrypt a namespace's secrets for, as a JSON list, making its key if
-// it has none. exists says whether a namespace exists, so no key is made
+// Handler answers GET /secrets/{unit}/recipients with the public keys
+// to encrypt a unit's secrets for, as a JSON list, making its key if
+// it has none. exists says whether a unit exists, so no key is made
 // for one that does not. Public keys are public: the dashboard asks.
 func (k *Keys) Handler(exists func(ctx context.Context, ns string) (bool, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ns := r.PathValue("namespace")
-		if !namespace.MatchString(ns) {
-			http.Error(w, "invalid namespace", http.StatusBadRequest)
+		ns := r.PathValue("unit")
+		if !unit.MatchString(ns) {
+			http.Error(w, "invalid unit", http.StatusBadRequest)
 			return
 		}
 		ok, err := exists(r.Context(), ns)
@@ -130,7 +130,7 @@ func (k *Keys) Handler(exists func(ctx context.Context, ns string) (bool, error)
 			return
 		}
 		if !ok {
-			http.Error(w, "no such namespace", http.StatusNotFound)
+			http.Error(w, "no such unit", http.StatusNotFound)
 			return
 		}
 		out, err := k.Recipients(r.Context(), ns)

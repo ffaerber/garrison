@@ -10,7 +10,7 @@ The others are tools for one developer at one computer: they run several coding 
 
 | | Kind | Agents | Main idea | People | License |
 | --- | --- | --- | --- | --- | --- |
-| **garrison** | Self-hosted platform (Swarm, Gitea, Keycloak) | Own agent loop (Pi) in a sandbox per chat; local or cloud models via Ollama | Agents and apps defined in Git, changed by reviewed pull requests, deployed by GitOps | Many: namespaces, roles, SSO | — |
+| **garrison** | Self-hosted platform (Swarm, Gitea, Keycloak) | Own agent loop (Pi) in a sandbox per chat; local or cloud models via Ollama | Agents and apps defined in Git, changed by reviewed pull requests, deployed by GitOps | Many: units, roles, SSO | — |
 | **Claude Code** | CLI agent | Itself, with subagents | One strong agent with tools, worktrees, review and tests | One | Proprietary |
 | **[multi-agents](https://github.com/BichengWang/multi-agents)** | Python CLI | Claude Code, Codex, an SDK agent (any model via litellm) | Teams of agents on one task (solo, reviewer, best-of-N, planner), measured against one agent | One | MIT |
 | **[Herdr](https://github.com/ogulcancelik/herdr)** | Terminal multiplexer (Rust) | Detects Claude Code, Codex, Amp… in your terminals | Agent sessions that survive a dropped SSH connection; agents can drive it through a socket API | One | Apache-2.0 |
@@ -26,7 +26,7 @@ The others are tools for one developer at one computer: they run several coding 
 | Output | Pull requests, deploys | Edits in your checkout | A patch, `--apply` or a draft PR | Whatever the agents do | Worktrees to compare and merge | Edits in the editor |
 | Rights | The person's, plus reviewed grants | Your account's | Your account's | Your account's | Your account's | Your account's |
 | Sandbox | Container per chat, internet by allow-list | Optional OS sandbox | The CLIs' own; a bypass mode | None of its own | None of its own | None of its own |
-| Secrets | SOPS/age, a key per namespace, dashboard form | Your environment | Your logins and `.env` | Your environment | Your environment | Your environment |
+| Secrets | SOPS/age, a key per unit, dashboard form | Your environment | Your logins and `.env` | Your environment | Your environment | Your environment |
 | Without a person | Routines: schedule, push, alert | Headless `claude -p` from cron or CI | From CI | No | No | No |
 | Watching | Event feed, Grafana, Loki | The terminal | JSON records with tokens and cost | Its panes | Its window, a phone app | The threads sidebar |
 | Cost tracking | Not yet | Per session | Per agent call, with `--max-cost` | No | No | Per thread |
@@ -35,14 +35,14 @@ The others are tools for one developer at one computer: they run several coding 
 ## Worth borrowing
 
 1. **ACP, from Zed.** If garrison's agent service spoke the Agent Client Protocol, Zed and other ACP editors could talk to garrison's agents directly, not only through Open WebUI. Garrison keeps the rights, sandbox and review; people keep their editor. The most useful of these.
-2. **Cost per agent call, from multi-agents.** Tokens and money per call in the event feed, with a budget per namespace.
+2. **Cost per agent call, from multi-agents.** Tokens and money per call in the event feed, with a budget per unit.
 3. **Checks as the reviewer, from multi-agents.** Tests or a build gate a pull request before it is opened, rather than a second LLM.
-4. **Attaching to a running agent, from Herdr.** Garrison's sandboxes already outlive a chat; `garrison attach <namespace>/<agent>` from a terminal would be the equivalent of Herdr's sessions.
+4. **Attaching to a running agent, from Herdr.** Garrison's sandboxes already outlive a chat; `garrison attach <unit>/<agent>` from a terminal would be the equivalent of Herdr's sessions.
 5. **Fan-out, from Orca.** One task to several agents, each pull request with its own preview to compare. Low priority: multi-agents' own benchmark (48 tasks: solo 27 solved, reviewer 29, best-of-3 28) found the gain not significant.
 
 ## Claude Code as a garrison agent
 
-Instead of going through multi-agents, a namespace could have agents that run `claude -p` in the sandbox for coding work and open a pull request like any other agent. It needs an Anthropic API key, or a subscription's token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`). A subscription is for one person: on a garrison several people use, each would store their own token as a personal secret, and the agent would run only for them. Garrison has no personal secrets yet; secrets belong to namespaces. Check Anthropic's current terms before relying on this.
+Instead of going through multi-agents, a unit could have agents that run `claude -p` in the sandbox for coding work and open a pull request like any other agent. It needs an Anthropic API key, or a subscription's token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`). A subscription is for one person: on a garrison several people use, each would store their own token as a personal secret, and the agent would run only for them. Garrison has no personal secrets yet; secrets belong to units. Check Anthropic's current terms before relying on this.
 
 ## Sources
 

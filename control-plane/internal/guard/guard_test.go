@@ -213,7 +213,7 @@ func sandboxGuard(t *testing.T) (*httptest.Server, *[]string) {
 	sock, seen := fakeDocker(t)
 	g := New(sock, Policy{Network: "garrison-sandboxes", VolumePrefixes: []string{"garrison-agent-"},
 		Image: "git.example.com/garrison/sandbox", Label: "garrison.sandbox", MaxMemory: 2 << 30, Runtime: "runsc",
-		Share: "/garrison/ns/{namespace}/shares/media", ShareTarget: "/data/media", NamespaceLabel: "garrison.namespace"})
+		Share: "/garrison/ns/{unit}/shares/media", ShareTarget: "/data/media", UnitLabel: "garrison.unit"})
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return srv, seen
@@ -374,13 +374,13 @@ func TestANameIsNotRememberedAfterItsContainer(t *testing.T) {
 	}
 }
 
-// A sandbox of a namespace's channel may bind that namespace's media
+// A sandbox of a unit's channel may bind that unit's media
 // library, at /data/media, and nothing else of the host.
-func TestASandboxGetsItsNamespacesMedia(t *testing.T) {
+func TestASandboxGetsItsUnitsMedia(t *testing.T) {
 	srv, _ := sandboxGuard(t)
 	media := func(ns, source, target string, opts map[string]any) func(c, h map[string]any) {
 		return func(c, h map[string]any) {
-			c["Labels"] = map[string]string{"garrison.sandbox": "true", "garrison.namespace": ns}
+			c["Labels"] = map[string]string{"garrison.sandbox": "true", "garrison.unit": ns}
 			m := map[string]any{"Type": "bind", "Source": source, "Target": target}
 			if opts != nil {
 				m["BindOptions"] = opts
@@ -393,20 +393,20 @@ func TestASandboxGetsItsNamespacesMedia(t *testing.T) {
 		t.Fatalf("todo's media: %d", code)
 	}
 	for name, change := range map[string]func(c, h map[string]any){
-		"another namespace's":   media("todo", "/garrison/ns/lab/shares/media", "/data/media", nil),
-		"another share":         media("todo", "/garrison/ns/todo/shares/photos", "/data/media", nil),
-		"another target":        media("todo", "/garrison/ns/todo/shares/media", "/data", nil),
-		"the host's root":       media("todo", "/", "/data/media", nil),
-		"a path out":            media("todo", "/garrison/ns/todo/shares/media/../../../..", "/data/media", nil),
-		"no namespace":          media("", "/garrison/ns//shares/media", "/data/media", nil),
-		"a namespace with dots": media("../x", "/garrison/ns/../x/shares/media", "/data/media", nil),
-		"shared propagation":    media("todo", "/garrison/ns/todo/shares/media", "/data/media", map[string]any{"Propagation": "rshared"}),
+		"another unit's":     media("todo", "/garrison/ns/lab/shares/media", "/data/media", nil),
+		"another share":      media("todo", "/garrison/ns/todo/shares/photos", "/data/media", nil),
+		"another target":     media("todo", "/garrison/ns/todo/shares/media", "/data", nil),
+		"the host's root":    media("todo", "/", "/data/media", nil),
+		"a path out":         media("todo", "/garrison/ns/todo/shares/media/../../../..", "/data/media", nil),
+		"no unit":            media("", "/garrison/ns//shares/media", "/data/media", nil),
+		"a unit with dots":   media("../x", "/garrison/ns/../x/shares/media", "/data/media", nil),
+		"shared propagation": media("todo", "/garrison/ns/todo/shares/media", "/data/media", map[string]any{"Propagation": "rshared"}),
 		"twice": func(c, h map[string]any) {
 			media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil)(c, h)
 			media("todo", "/garrison/ns/todo/shares/media", "/data/media", nil)(c, h)
 		},
 		"a bind in Binds": func(c, h map[string]any) {
-			c["Labels"] = map[string]string{"garrison.sandbox": "true", "garrison.namespace": "todo"}
+			c["Labels"] = map[string]string{"garrison.sandbox": "true", "garrison.unit": "todo"}
 			h["Binds"] = []string{"/garrison/ns/todo/shares/media:/data/media"}
 		},
 	} {

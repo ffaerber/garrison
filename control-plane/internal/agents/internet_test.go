@@ -99,7 +99,7 @@ func TestAnAgentSaysWhatItReaches(t *testing.T) {
 		"agents/bad/agent.yaml":     "internet: everything\n",
 		"agents/bad/prompt.md":      "p",
 	}
-	list, problems, err := Load(context.Background(), files, files, PlatformNamespace, nil)
+	list, problems, err := Load(context.Background(), files, files, PlatformUnit, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

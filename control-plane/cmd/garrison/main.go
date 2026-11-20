@@ -52,7 +52,7 @@ import (
 
 const usage = `usage:
   garrison validate STACK.yaml...
-  garrison validate --in NAMESPACE NAME.yaml...   (as config/stacks/NAME.yaml of NAMESPACE)
+  garrison validate --in UNIT NAME.yaml...   (as config/stacks/NAME.yaml of UNIT)
   garrison claims [-reserved FILE] STACK.yaml...
   garrison render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
   garrison apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
@@ -118,8 +118,8 @@ func load(file string) (*stack.Stack, error) {
 	return s, nil
 }
 
-// validate checks stack files: standalone ones, or with --in NAMESPACE
-// ones as stacks/<name>.yaml of that namespace's config repo.
+// validate checks stack files: standalone ones, or with --in UNIT
+// ones as stacks/<name>.yaml of that unit's config repo.
 func validate(files []string) error {
 	ns := ""
 	if len(files) >= 2 && files[0] == "--in" {
@@ -163,7 +163,7 @@ func claims(args []string) error {
 	}
 	reg := hostnames.NewRegistry(reserved)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "HOSTNAME\tNAMESPACE\tSTACK\tENVIRONMENT\tSERVICE")
+	fmt.Fprintln(w, "HOSTNAME\tUNIT\tSTACK\tENVIRONMENT\tSERVICE")
 	for _, f := range fs.Args() {
 		s, err := load(f)
 		if err != nil {
@@ -173,7 +173,7 @@ func claims(args []string) error {
 			return fmt.Errorf("%s: %w", f, err)
 		}
 		for _, c := range hostnames.Of(s) {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", c.Hostname, c.Namespace, c.Stack, c.Environment, c.Service)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", c.Hostname, c.Unit, c.Stack, c.Environment, c.Service)
 		}
 	}
 	return w.Flush()
@@ -203,7 +203,7 @@ func applyCmd(args []string) error {
 	var o render.Options
 	fs.StringVar(&o.Environment, "env", stack.MainEnvironment, "environment to deploy")
 	fs.StringVar(&o.Domain, "domain", "", "installation domain, e.g. example.com")
-	fs.StringVar(&o.DataRoot, "data-root", "", "dataset mount that holds all namespaces (default "+render.DefaultDataRoot+")")
+	fs.StringVar(&o.DataRoot, "data-root", "", "dataset mount that holds all units (default "+render.DefaultDataRoot+")")
 	state := fs.String("state", "/var/lib/garrison/control-plane/claims.json", "file that records held hostnames; shared with the deployer")
 	reservedFile := fs.String("reserved", "", "YAML file with a `reserved` list of hostnames")
 	fs.Parse(args)
@@ -231,7 +231,7 @@ func applyCmd(args []string) error {
 	if err := reg.Save(*state); err != nil {
 		return err
 	}
-	fmt.Printf("deployed %s/%s (%s) as https://%s.%s\n", s.Namespace, s.Name, o.Environment, s.Hostname(o.Environment), o.Domain)
+	fmt.Printf("deployed %s/%s (%s) as https://%s.%s\n", s.Unit, s.Name, o.Environment, s.Hostname(o.Environment), o.Domain)
 	return nil
 }
 
@@ -276,11 +276,11 @@ func deployCmd(args []string) error {
 	hostExec := fs.String("host-exec", "", "run ZFS on the host through a privileged container of this image (for a deployer in a container)")
 	grafana := fs.String("grafana", "", "Grafana's URL; when set, dashboards/*.json in the repos are kept in Grafana")
 	grafanaUser := fs.String("grafana-user", "installer", "Grafana's local admin, whose password is the admin password")
-	apps := fs.Bool("apps", true, "also deploy the apps of every other namespace (repos with a stack.yaml)")
+	apps := fs.Bool("apps", true, "also deploy the apps of every other unit (repos with a stack.yaml)")
 	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
 	dockerSocket := fs.String("docker-socket", "/var/run/docker.sock", "Docker's API, for the services' metrics on -listen (/metrics)")
-	keysDir := fs.String("keys", "", "the namespaces' age keys, which decrypt their stored secrets (e.g. "+etcDir+"/sops); empty: apps with stored secrets are left alone")
+	keysDir := fs.String("keys", "", "the units' age keys, which decrypt their stored secrets (e.g. "+etcDir+"/sops); empty: apps with stored secrets are left alone")
 	llmKeys := fs.String("llm-keys", "", "where to write the LLM providers' keys that garrison's config keeps, for the agent service (e.g. "+etcDir+"/llm-keys); empty: not written")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
@@ -298,7 +298,7 @@ func deployCmd(args []string) error {
 		User:         vars["ADMIN_USER"],
 		PasswordFile: *passwordFile,
 		CAFile:       etcDir + "/tls.crt",
-		Org:          agents.PlatformNamespace,
+		Org:          agents.PlatformUnit,
 		Apps:         *apps,
 		WorkDir:      *work,
 		Env:          env,
@@ -360,9 +360,9 @@ func deployCmd(args []string) error {
 		c.Wake = wake.Subscribe()
 		extra := map[string]http.Handler{"GET /metrics": (&health.Docker{Socket: *dockerSocket}).Handler()}
 		if keys != nil {
-			// The dashboard asks for a namespace's public keys here, to
+			// The dashboard asks for a unit's public keys here, to
 			// encrypt the secrets people set.
-			extra["GET /secrets/{namespace}/recipients"] = keys.Handler(c.KeepsSecrets)
+			extra["GET /secrets/{unit}/recipients"] = keys.Handler(c.KeepsSecrets)
 		}
 		if err := serveHook(ctx, *listen, *hookURL, wake, &hooks.Gitea{URL: giteaURL, User: c.User, Password: strings.TrimSpace(string(pw))}, onEvent, extra); err != nil {
 			return err
@@ -400,10 +400,10 @@ func appliedCmd(args []string) error {
 }
 
 // gatewayCmd serves the gateway: the MCP server Open WebUI's
-// agents use, and the sync that keeps every namespace's agents there.
+// agents use, and the sync that keeps every unit's agents there.
 func gatewayCmd(args []string) error {
 	fs := flag.NewFlagSet("gateway", flag.ExitOnError)
-	listen := fs.String("listen", ":8080", "address to serve MCP on (/mcp, /mcp/<namespace>/<agent>)")
+	listen := fs.String("listen", ":8080", "address to serve MCP on (/mcp, /mcp/<unit>/<agent>)")
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	work := fs.String("work", workDir, "the deployer's state, read-only")
 	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
@@ -482,7 +482,7 @@ func gatewayCmd(args []string) error {
 	}
 	go (&gateway.Builders{Gitea: g, Domain: domain, CA: ca, Wake: wake.Subscribe()}).Run(ctx, time.Minute)
 	go (&gateway.Members{Gitea: g, Wake: wake.Subscribe(), Events: recorder(store), Keycloak: tools.Keycloak}).Run(ctx, 20*time.Second)
-	// A namespace made through an agent: every sync at once, and the agent
+	// A unit made through an agent: every sync at once, and the agent
 	// answers once its config repo and channel are there.
 	tools.Ready = func(ctx context.Context, ns string) error {
 		wake.Poke()
@@ -548,12 +548,12 @@ func serveHook(ctx context.Context, listen, target string, wake *hooks.Wake, g *
 	return nil
 }
 
-// guardCmd serves the Docker API to the user namespaces' Actions runner,
+// guardCmd serves the Docker API to the user units' Actions runner,
 // letting through only what running jobs needs; with -image and -label, to
 // the agent service, letting through only sandboxes.
 // gateCmd stands in front of an app that believes a header naming the
 // person, e.g. Filebrowser: it takes only what came through the sign-in
-// (GARRISON_INGRESS_KEY), and lets only GARRISON_WRITERS, the namespace's
+// (GARRISON_INGRESS_KEY), and lets only GARRISON_WRITERS, the unit's
 // people ({{members}}), change anything.
 func gateCmd(args []string) error {
 	fs := flag.NewFlagSet("gate", flag.ExitOnError)
@@ -587,13 +587,13 @@ func guardCmd(args []string) error {
 	label := fs.String("label", "", "the label containers must carry, and are known by, if set")
 	maxMemory := fs.Int64("max-memory", 0, "the largest memory limit a container may ask for; if set, it must ask for one")
 	runtime := fs.String("runtime", "", "the runtime containers must run under, if set, e.g. runsc (gVisor)")
-	share := fs.String("share", "", "the one host folder a container may bind, with {namespace} for the one its -namespace-label names, e.g. /garrison/ns/{namespace}/shares/media; empty: none")
+	share := fs.String("share", "", "the one host folder a container may bind, with {unit} for the one its -unit-label names, e.g. /garrison/ns/{unit}/shares/media; empty: none")
 	shareTarget := fs.String("share-target", "/data/media", "where in the container -share is bound")
-	nsLabel := fs.String("namespace-label", "garrison.namespace", "the label that names a container's namespace, for -share")
+	nsLabel := fs.String("unit-label", "garrison.unit", "the label that names a container's unit, for -share")
 	fs.Parse(args)
 	g := guard.New(*socket, guard.Policy{Network: *network, VolumePrefixes: strings.Split(*volumes, ","),
 		Image: *image, Label: *label, MaxMemory: *maxMemory, Runtime: *runtime,
-		Share: *share, ShareTarget: *shareTarget, NamespaceLabel: *nsLabel})
+		Share: *share, ShareTarget: *shareTarget, UnitLabel: *nsLabel})
 	log.Printf("docker guard on %s for %s, containers on %s", *listen, *socket, *network)
 	return (&http.Server{Addr: *listen, Handler: g, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe()
 }
@@ -644,7 +644,7 @@ func keycloakVerifier(ctx context.Context, domain string, pem []byte, caFile str
 }
 
 // agentsCmd serves the agent service: the OpenAI-compatible API Open WebUI
-// talks to, whose models are the namespaces' agents. It runs each turn of an
+// talks to, whose models are the units' agents. It runs each turn of an
 // agent: the LLM, which only it has the key of, with the agent's tools from
 // the gateway, acting as the person chatting.
 func agentsCmd(args []string) error {
@@ -725,7 +725,7 @@ func agentsCmd(args []string) error {
 		Events:       recorder(store),
 	}
 	// ComfyUI, outside Garrison, e.g. http://192.168.1.20:8188: the agents'
-	// generate_media, into their namespace's media library.
+	// generate_media, into their unit's media library.
 	if u := vars["COMFYUI_URL"]; u != "" {
 		srv.ComfyUI, srv.Styles = &agentapi.ComfyUI{URL: u}, g
 		log.Printf("generate_media uses ComfyUI at %s", u)
@@ -877,7 +877,7 @@ func homeCmd(args []string) error {
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL, to ask what each person may read")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	deployer := fs.String("deployer", "", "the deployer's URL, which gives the namespaces' public keys, for the secrets page (e.g. http://control-plane_deployer:8090); empty: no secrets page")
+	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys, for the secrets page (e.g. http://control-plane_deployer:8090); empty: no secrets page")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 

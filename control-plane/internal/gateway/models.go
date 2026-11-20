@@ -27,7 +27,7 @@ type LLM struct {
 func (g *Gitea) LLM(ctx context.Context, ref string) (LLM, bool, error) {
 	read := func(path string) (string, bool, error) {
 		var out string
-		status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s?ref=%s", models.Namespace, models.Repo, escapePath(path), url.QueryEscape(ref)), nil, &out)
+		status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s?ref=%s", models.Unit, models.Repo, escapePath(path), url.QueryEscape(ref)), nil, &out)
 		if status == http.StatusNotFound {
 			return "", false, nil
 		}
@@ -56,21 +56,21 @@ func (g *Gitea) LLM(ctx context.Context, ref string) (LLM, bool, error) {
 	return l, true, nil
 }
 
-// modelProblems are the agents of a namespace that name a model agents may
+// modelProblems are the agents of a unit that name a model agents may
 // not use. The models are garrison's at ref for garrison's own pull requests,
 // which may change them, and on main for the others.
 func (g *Gitea) modelProblems(ctx context.Context, ns, ref string, list []agents.Agent) ([]string, error) {
-	if ns != models.Namespace {
+	if ns != models.Unit {
 		ref = "main"
 	}
 	l, ok, err := g.LLM(ctx, ref)
 	if err != nil || !ok {
 		return nil, err
 	}
-	if ns == models.Namespace && len(l.Problems) > 0 {
+	if ns == models.Unit && len(l.Problems) > 0 {
 		return l.Problems, nil
 	}
-	if len(l.Problems) > 0 || ns != models.Namespace {
+	if len(l.Problems) > 0 || ns != models.Unit {
 		// garrison's to fix, where the agents are; they fall back to the
 		// default meanwhile.
 		return nil, nil
@@ -133,7 +133,7 @@ func (g *Gitea) ProposeProvider(ctx context.Context, as, name, apiURL string, in
 		return Change{}, fmt.Errorf("%w: only root admins add LLM providers", ErrForbidden)
 	}
 	var raw string
-	status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s?ref=main", models.Namespace, models.Repo, escapePath(models.ProvidersFile)), nil, &raw)
+	status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/raw/%s?ref=main", models.Unit, models.Repo, escapePath(models.ProvidersFile)), nil, &raw)
 	if status == http.StatusNotFound {
 		return Change{}, fmt.Errorf("%w: garrison/config has no %s yet; the agent service writes it once it starts", ErrInvalid, models.ProvidersFile)
 	}
@@ -145,7 +145,7 @@ func (g *Gitea) ProposeProvider(ctx context.Context, as, name, apiURL string, in
 		return Change{}, fmt.Errorf("%w: %s", ErrInvalid, strings.TrimPrefix(err.Error(), models.ErrInvalidProvider.Error()+": "))
 	}
 	desc := fmt.Sprintf("Adds the LLM provider %s, %s, to %s. Once it is merged, the model sync asks it for its models within a minute and proposes them in %s, turned off; enable those agents may use there.\n\nIts API key is not in this change: a root admin sets it on the dashboard's Models page, which keeps it encrypted.", name, apiURL, models.ProvidersFile, models.ModelsFile)
-	return g.Propose(ctx, as, models.Namespace, models.Repo, models.ProvidersFile, string(content), "Add the LLM provider "+name, desc, "", note)
+	return g.Propose(ctx, as, models.Unit, models.Repo, models.ProvidersFile, string(content), "Add the LLM provider "+name, desc, "", note)
 }
 
 // ProposeFiles proposes files (nil: deletes) for a repo's main branch as a

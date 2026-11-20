@@ -16,31 +16,31 @@ import (
 // Secrets is what the secrets page needs (secrets.Store): it writes
 // values, and never reads one back.
 type Secrets interface {
-	Namespaces(ctx context.Context, person string) ([]string, error)
+	Units(ctx context.Context, person string) ([]string, error)
 	May(ctx context.Context, ns, person string) (bool, error)
 	Names(ctx context.Context, ns string) ([]string, error)
 	Set(ctx context.Context, ns, name, value, person string) error
 	Delete(ctx context.Context, ns, name, person string) error
 }
 
-// secretsView is the secrets page: the namespaces whose secrets the person
+// secretsView is the secrets page: the units whose secrets the person
 // manages, and the names of the one shown.
 type secretsView struct {
-	Namespaces []string
-	NS         string
-	Names      []string
-	Name       string // the name the form had, after an error
-	Notice     string
-	Error      string
+	Units  []string
+	NS     string
+	Names  []string
+	Name   string // the name the form had, after an error
+	Notice string
+	Error  string
 }
 
 func (s *Server) secretsView(ctx context.Context, person, ns string) (*secretsView, error) {
 	v := &secretsView{}
-	nss, err := s.Secrets.Namespaces(ctx, person)
+	nss, err := s.Secrets.Units(ctx, person)
 	if err != nil {
 		return nil, err
 	}
-	v.Namespaces = nss
+	v.Units = nss
 	if len(nss) == 0 {
 		return v, nil
 	}
@@ -131,7 +131,7 @@ func (s *Server) secretsPost(w http.ResponseWriter, r *http.Request, v events.Vi
 		return
 	}
 	s.Events.Record(r.Context(), events.Event{Source: events.SourceHome, Kind: events.KindSecret, Status: events.StatusOK,
-		Namespace: ns, Repo: secrets.ConfigRepo, Audience: events.AudienceMembers, Actor: v.Person, StartedBy: v.Person, Title: title,
+		Unit: ns, Repo: secrets.ConfigRepo, Audience: events.AudienceMembers, Actor: v.Person, StartedBy: v.Person, Title: title,
 		Link: "https://" + s.Domain + "/secrets?ns=" + url.QueryEscape(ns)})
 	http.Redirect(w, r, "/secrets?"+url.Values{"ns": {ns}, "done": {done}, "name": {name}}.Encode(), http.StatusSeeOther)
 }

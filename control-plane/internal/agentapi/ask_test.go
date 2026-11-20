@@ -31,7 +31,7 @@ func (f *fakePoster) Channel(_ context.Context, id string) (gateway.ChannelInfo,
 	return f.channels[id], nil
 }
 
-// Post keeps p; its message is m<n>, in the channel named or ch-<namespace>,
+// Post keeps p; its message is m<n>, in the channel named or ch-<unit>,
 // and a person mentioned is the Open WebUI user u-<name>.
 func (f *fakePoster) Post(_ context.Context, p gateway.Post) (gateway.Posted, error) {
 	f.mu.Lock()
@@ -73,9 +73,9 @@ func (f *fakePoster) all() []gateway.Post {
 
 func withTeam(s *Server) {
 	s.Agents = fakeAgents{
-		{Namespace: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"homepage/tester"}},
-		{Namespace: "homepage", Name: "tester", Prompt: "Test."},
-		{Namespace: "homepage", Name: "loner", Prompt: "Alone."},
+		{Unit: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"homepage/tester"}},
+		{Unit: "homepage", Name: "tester", Prompt: "Test."},
+		{Unit: "homepage", Name: "loner", Prompt: "Alone."},
 	}
 }
 
@@ -107,8 +107,8 @@ func TestAnAgentAsksAnother(t *testing.T) {
 	}
 }
 
-// The commander works in the namespace it is asked in: it finds the agents
-// as they work there, with that namespace's grants, and hands work to them.
+// The commander works in the unit it is asked in: it finds the agents
+// as they work there, with that unit's grants, and hands work to them.
 func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	s, _, _ := setup(t)
 	commander := agents.Agent{Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}}
@@ -118,7 +118,7 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	var list fakeAgents
 	for _, ns := range []string{"garrison", "homepage", "todo"} {
 		for _, a := range []agents.Agent{commander, media, operator} {
-			a.Namespace = ns
+			a.Unit = ns
 			if ns == "homepage" && a.Name == "media" {
 				a.Grants = []agents.Grant{{Repo: "site", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers}}
 			}
@@ -141,17 +141,17 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		}
 	}
 	if strings.Contains(got, "- commander") || strings.Contains(got, "name it as") {
-		t.Errorf("the commander lists itself, or another namespace:\n%s", got)
+		t.Errorf("the commander lists itself, or another unit:\n%s", got)
 	}
-	if got := find(c, `{"in_namespace":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- media") || !strings.Contains(got, "name it as todo/<agent>") {
-		t.Errorf("by namespace:\n%s", got)
+	if got := find(c, `{"in_unit":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- media") || !strings.Contains(got, "name it as todo/<agent>") {
+		t.Errorf("by unit:\n%s", got)
 	}
-	if got := find(c, `{"in_namespace":"nope"}`); !strings.Contains(got, "no agent you may ask") {
+	if got := find(c, `{"in_unit":"nope"}`); !strings.Contains(got, "no agent you may ask") {
 		t.Errorf("none: %q", got)
 	}
 	// An agent with a list finds only those on it.
 	lead := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice"}
-	s.Agents = append(s.Agents.(fakeAgents), agents.Agent{Namespace: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"operator"}})
+	s.Agents = append(s.Agents.(fakeAgents), agents.Agent{Unit: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"operator"}})
 	if got := find(lead, `{}`); strings.Contains(got, "- media") || !strings.Contains(got, "- operator") {
 		t.Errorf("the lead finds:\n%s", got)
 	}
@@ -169,11 +169,11 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 			ask = &e
 		}
 	}
-	if ask == nil || ask.Status != events.StatusOK || ask.Namespace != "homepage" || ask.Agent != "homepage/media" || ask.Actor != "alice" ||
+	if ask == nil || ask.Status != events.StatusOK || ask.Unit != "homepage" || ask.Agent != "homepage/media" || ask.Actor != "alice" ||
 		ask.StartedBy != "agent homepage/commander" || !strings.Contains(ask.Title, "homepage/commander asked homepage/media, for alice: Screenshot the homepage.") {
 		t.Errorf("feed: %+v", ask)
 	}
-	// Another namespace's, by <namespace>/<agent>.
+	// Another unit's, by <unit>/<agent>.
 	if _, content = chatIn(t, s, "chat-2", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"todo/operator","task":"x","done_when":"y"}`}); !strings.Contains(content, "todo/operator answers:") {
 		t.Errorf("asked todo's: %q", content)
 	}
@@ -242,7 +242,7 @@ func TestRoutines(t *testing.T) {
 	}))
 	defer gitea.Close()
 	g := &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
-	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Tools: []string{"list_repos"}, Routines: []agents.Routine{
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Tools: []string{"list_repos"}, Routines: []agents.Routine{
 		{Name: "hourly", Every: time.Hour, Raw: "1h", Owner: "bob", Task: "call list_repos {}"},
 		{Name: "on-main", OnPush: &agents.Push{Repo: "todo", Branch: "main"}, Owner: "bob", Task: "Look at main."},
 		{Name: "orphan", Every: time.Hour, Raw: "1h", Owner: "mallory", Task: "x"},
@@ -315,11 +315,11 @@ func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 	defer gitea.Close()
 	s.Gitea = &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
 	s.Poster = &fakePoster{channels: map[string]gateway.ChannelInfo{
-		"homepage": {Namespace: "homepage", Members: true}, "garrison": {Namespace: "garrison"}, "shop": {Namespace: "shop", Members: true},
+		"homepage": {Unit: "homepage", Members: true}, "garrison": {Unit: "garrison"}, "shop": {Unit: "shop", Members: true},
 	}}
 	s.Agents = fakeAgents{
-		{Namespace: "homepage", Name: "keeper", Prompt: "Keep.", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
-		{Namespace: "homepage", Name: "desk", Prompt: "Desk.", Grants: []agents.Grant{{Repo: "site", Level: agents.LevelPropose}}},
+		{Unit: "homepage", Name: "keeper", Prompt: "Keep.", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
+		{Unit: "homepage", Name: "desk", Prompt: "Desk.", Grants: []agents.Grant{{Repo: "site", Level: agents.LevelPropose}}},
 	}
 	withSandboxes(t, s)
 	for _, c := range []struct {
@@ -406,7 +406,7 @@ func TestSchedulesAndRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
 		{Name: "morning", Schedule: "30 6 * * *", Cron: morning, Owner: "bob", Task: "Sum up."},
 		{Name: "on-main", OnPush: &agents.Push{Repo: "todo", Branch: "main"}, Owner: "bob", Task: "Look at main."},
 	}}}
@@ -481,7 +481,7 @@ func TestAlertsStartRoutines(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer gitea.Close()
-	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
 		{Name: "down", OnAlert: map[string]string{"alertname": "ServiceDown"}, Owner: "bob", Task: "Find out why."},
 		{Name: "disk", OnAlert: map[string]string{"alertname": "DiskFull"}, Owner: "bob", Task: "Free some space."},
 	}}}
@@ -502,7 +502,7 @@ func TestAlertsStartRoutines(t *testing.T) {
 	}
 	alert := func(ns, status string) string {
 		return `{"alerts":[{"status":"` + status + `","fingerprint":"f1","startsAt":"2026-11-14T10:00:00Z",
- "labels":{"alertname":"ServiceDown","namespace":"` + ns + `","app":"quotes","service":"quotes_web"},
+ "labels":{"alertname":"ServiceDown","unit":"` + ns + `","app":"quotes","service":"quotes_web"},
  "annotations":{"summary":"quotes_web does not run","description":"0 of 1 tasks run."}}]}`
 	}
 	if code := send("wrong", alert("homepage", "firing")); code != http.StatusUnauthorized {
@@ -522,7 +522,7 @@ func TestAlertsStartRoutines(t *testing.T) {
 	}
 	// Alertmanager sends it again: it started its routine before.
 	send("tok", alert("homepage", "firing"))
-	// Another namespace's alert starts nothing here.
+	// Another unit's alert starts nothing here.
 	send("tok", strings.Replace(alert("shop", "firing"), `"f1"`, `"f2"`, 1))
 	time.Sleep(200 * time.Millisecond)
 	if n := len(poster.all()); n != 1 {
@@ -534,7 +534,7 @@ func TestAlertsStartRoutines(t *testing.T) {
 	send("tok", alert("homepage", "resolved"))
 	var mine []events.Event
 	for _, e := range feed.All() {
-		if e.Kind == events.KindAlert && e.Namespace == "homepage" {
+		if e.Kind == events.KindAlert && e.Unit == "homepage" {
 			mine = append(mine, e)
 		}
 	}
@@ -567,7 +567,7 @@ func TestAPushDuringARunStartsTheRoutineAfterIt(t *testing.T) {
 		}
 	}))
 	defer gitea.Close()
-	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
 		{Name: "on-main", OnPush: &agents.Push{Repo: "todo", Branch: "main"}, Owner: "bob", Task: "Look at main."},
 	}}}
 	withSandboxes(t, s)
@@ -656,7 +656,7 @@ func TestAFiringIsForgottenAWeekAfterItWasLastSent(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer gitea.Close()
-	s.Agents = fakeAgents{{Namespace: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Routines: []agents.Routine{
 		{Name: "down", OnAlert: map[string]string{"alertname": "ServiceDown"}, Owner: "bob", Task: "Find out why."},
 	}}}
 	withSandboxes(t, s)
@@ -672,7 +672,7 @@ func TestAFiringIsForgottenAWeekAfterItWasLastSent(t *testing.T) {
 	}
 	r := &Routines{Server: s, Gitea: &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}, Store: state,
 		Now: func() time.Time { clock.Lock(); defer clock.Unlock(); return now }}
-	firing := Alert{Status: "firing", Fingerprint: "f1", StartsAt: now, Labels: map[string]string{"alertname": "ServiceDown", "namespace": "homepage"}}
+	firing := Alert{Status: "firing", Fingerprint: "f1", StartsAt: now, Labels: map[string]string{"alertname": "ServiceDown", "unit": "homepage"}}
 	const mark = "homepage/dev/down#alert:f1:1794650400"
 	kept := func() bool {
 		state.mu.Lock()
@@ -706,7 +706,7 @@ func TestAFiringIsForgottenAWeekAfterItWasLastSent(t *testing.T) {
 	}
 }
 
-// find_agents names the app repos of the channel's namespace, as the person
+// find_agents names the app repos of the channel's unit, as the person
 // sees them, so the commander can tell when "the app" could mean several.
 func TestFindAgentsNamesTheApps(t *testing.T) {
 	s := &Server{}

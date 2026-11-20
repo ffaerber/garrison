@@ -10,7 +10,7 @@ import (
 // The stack.yaml the agents are shown must be one the deployer takes, or
 // they copy its mistakes.
 func TestThePlatformsExampleStackIsValid(t *testing.T) {
-	_, rest, ok := strings.Cut(Platform, "here config/stacks/immich.yaml of the namespace photos:\n")
+	_, rest, ok := strings.Cut(Platform, "here config/stacks/immich.yaml of the unit photos:\n")
 	if !ok {
 		t.Fatal("no example in Platform")
 	}
@@ -28,7 +28,7 @@ func TestThePlatformsExampleStackIsValid(t *testing.T) {
 	if s.Name != "immich" || len(s.Services) != 3 || s.Environments["main"].Hostname != "immich" {
 		t.Errorf("parsed as %+v", s)
 	}
-	if !strings.Contains(System(Agent{Namespace: "photos", Name: "operator", Prompt: OperatorPrompt}, "example.com"), "Never put an app into garrison") {
+	if !strings.Contains(System(Agent{Unit: "photos", Name: "operator", Prompt: OperatorPrompt}, "example.com"), "Never put an app into garrison") {
 		t.Error("the system prompt lacks the platform")
 	}
 }

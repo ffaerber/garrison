@@ -17,14 +17,14 @@ type Store interface {
 	// its pull request and its commits, a routine's calls, and, one step
 	// further, the pull requests and commits those name.
 	Related(ctx context.Context, e Event, v Visibility) ([]Event, error)
-	// Namespaces lists the namespaces of the events v sees.
-	Namespaces(ctx context.Context, v Visibility) ([]string, error)
+	// Units lists the units of the events v sees.
+	Units(ctx context.Context, v Visibility) ([]string, error)
 }
 
 // Query filters the feed.
 type Query struct {
 	Visibility Visibility
-	Namespace  string
+	Unit       string
 	Kinds      []string
 	Sources    []string
 	Problems   bool   // only failed or refused
@@ -44,23 +44,23 @@ func (q Query) limit() int {
 }
 
 // Visibility is what one person may see: events of the repos they may read,
-// and those for the people of the namespaces they are in.
+// and those for the people of the units they are in.
 type Visibility struct {
 	Person  string          // sees what they did, wherever
 	All     bool            // root admins
-	Repos   map[string]bool // namespace/repo
-	Members map[string]bool // namespace
+	Repos   map[string]bool // unit/repo
+	Members map[string]bool // unit
 }
 
 // Sees tells whether the person may see e.
 func (v Visibility) Sees(e Event) bool {
-	if v.All || e.Namespace == "" || (v.Person != "" && e.Actor == v.Person) {
+	if v.All || e.Unit == "" || (v.Person != "" && e.Actor == v.Person) {
 		return true
 	}
 	if e.Audience == AudienceMembers {
-		return v.Members[e.Namespace]
+		return v.Members[e.Unit]
 	}
-	return v.Repos[e.Namespace+"/"+repoOf(e)]
+	return v.Repos[e.Unit+"/"+repoOf(e)]
 }
 
 func repoOf(e Event) string {
@@ -73,14 +73,14 @@ func repoOf(e Event) string {
 // thread is what ties events together.
 type thread struct {
 	id        int64
-	commits   map[string]bool // namespace/repo@commit
-	prs       map[string]bool // namespace/repo#number
+	commits   map[string]bool // unit/repo@commit
+	prs       map[string]bool // unit/repo#number
 	startedBy string          // a routine's run: its calls ...
 	from, to  time.Time       // ... while it ran
 }
 
-func commitKey(e Event) string { return e.Namespace + "/" + repoOf(e) + "@" + e.Commit }
-func prKey(e Event) string     { return e.Namespace + "/" + repoOf(e) + "#" + strconv.Itoa(e.PR) }
+func commitKey(e Event) string { return e.Unit + "/" + repoOf(e) + "@" + e.Commit }
+func prKey(e Event) string     { return e.Unit + "/" + repoOf(e) + "#" + strconv.Itoa(e.PR) }
 
 func threadOf(e Event) thread {
 	t := thread{id: e.ID, commits: map[string]bool{}, prs: map[string]bool{}}

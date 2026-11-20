@@ -1,6 +1,6 @@
-# A namespace's file browser: Filebrowser over its media library, behind
+# A unit's file browser: Filebrowser over its media library, behind
 # Garrison's gate (garrison gate), which takes only requests that came
-# through the sign-in and lets only the namespace's people change files.
+# through the sign-in and lets only the unit's people change files.
 # Filebrowser listens on the container's loopback alone, so nothing else
 # reaches it. Built with the control plane (control-plane/ci/build.yaml);
 # context: the repo root.

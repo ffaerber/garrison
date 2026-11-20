@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs BuildKit for the user namespaces' pipelines: started by
+# Runs BuildKit for the user units' pipelines: started by
 # garrison-buildkit.service, as a container outside Swarm because it must be
 # privileged, which Swarm services cannot be. It is reachable only on the
 # builds network, as garrison-buildkit:1234, where the user runner's jobs

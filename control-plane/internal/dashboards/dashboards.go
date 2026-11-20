@@ -1,6 +1,6 @@
 // Package dashboards keeps Grafana's dashboards as they are in Git. Any repo
-// of a namespace can hold dashboards as dashboards/*.json; they go into a
-// Grafana folder named after the namespace, tagged "git". A commit adds,
+// of a unit can hold dashboards as dashboards/*.json; they go into a
+// Grafana folder named after the unit, tagged "git". A commit adds,
 // changes or removes a dashboard; edits made in Grafana are overwritten.
 package dashboards
 
@@ -48,8 +48,8 @@ var (
 	validUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
-// FolderUID is the uid of a namespace's folder.
-func FolderUID(namespace string) string { return clip("ns-" + namespace) }
+// FolderUID is the uid of a unit's folder.
+func FolderUID(unit string) string { return clip("ns-" + unit) }
 
 func clip(s string) string {
 	if len(s) > 40 {
@@ -104,7 +104,7 @@ type dashboard struct {
 	model           map[string]any
 }
 
-// read collects the dashboards of a namespace's repos, by uid. A file that is
+// read collects the dashboards of a unit's repos, by uid. A file that is
 // not a dashboard, or whose uid another file already has, is reported and
 // skipped; the others still sync.
 func read(repos map[string]string) (map[string]dashboard, []error) {
@@ -151,15 +151,15 @@ func read(repos map[string]string) (map[string]dashboard, []error) {
 	return out, errs
 }
 
-// Sync makes the namespace's Grafana folder hold exactly the dashboards in
+// Sync makes the unit's Grafana folder hold exactly the dashboards in
 // repos, which maps repo names to their checkouts.
-func (g *Grafana) Sync(ctx context.Context, namespace string, repos map[string]string) error {
+func (g *Grafana) Sync(ctx context.Context, unit string, repos map[string]string) error {
 	if g.posted == nil {
 		g.posted = map[string]sent{}
 	}
-	folder := FolderUID(namespace)
+	folder := FolderUID(unit)
 	if status, err := g.call(ctx, http.MethodGet, "/api/folders/"+folder, nil, nil); status == http.StatusNotFound {
-		if _, err := g.call(ctx, http.MethodPost, "/api/folders", map[string]string{"uid": folder, "title": namespace}, nil); err != nil {
+		if _, err := g.call(ctx, http.MethodPost, "/api/folders", map[string]string{"uid": folder, "title": unit}, nil); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -180,7 +180,7 @@ func (g *Grafana) Sync(ctx context.Context, namespace string, repos map[string]s
 		}
 		m["tags"] = tags
 		body := map[string]any{"dashboard": m, "folderUid": folder, "overwrite": true,
-			"message": fmt.Sprintf("From %s/%s/dashboards/%s", namespace, d.repo, d.file)}
+			"message": fmt.Sprintf("From %s/%s/dashboards/%s", unit, d.repo, d.file)}
 		raw, _ := json.Marshal(body)
 		sum := sha256.Sum256(raw)
 		hash := hex.EncodeToString(sum[:])

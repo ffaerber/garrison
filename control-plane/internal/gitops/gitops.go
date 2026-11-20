@@ -1,5 +1,5 @@
-// Package gitops keeps the cluster in line with a namespace in Gitea. A
-// namespace is a Gitea organisation; every repo in it that holds a
+// Package gitops keeps the cluster in line with a unit in Gitea. A
+// unit is a Gitea organisation; every repo in it that holds a
 // compose.yaml on its default branch is one stack, named after the repo.
 package gitops
 
@@ -43,16 +43,16 @@ type Config struct {
 	PasswordFile string          // its password
 	CAFile       string          // certificate the installation's TLS is verified with
 	Wake         <-chan struct{} // when set, Serve syncs before the interval is over
-	Org          string          // namespace to deploy, e.g. garrison
+	Org          string          // unit to deploy, e.g. garrison
 	WorkDir      string          // the deployer's own directory: checkouts and state
 	Env          []string        // KEY=VALUE passed to every deploy
 	Run          apply.Runner
 	HTTP         *http.Client    // for the Gitea API; built from the fields above if nil
 	Dashboards   Dashboards      // optional: keeps Grafana's dashboards as they are in Git
-	Apps         bool            // also deploy apps: stack.yaml repos of every other namespace
+	Apps         bool            // also deploy apps: stack.yaml repos of every other unit
 	ClaimsFile   string          // hostname claims; WorkDir/claims.json if empty
 	Events       events.Recorder // optional: the feed, which gets each deploy, removal and failure
-	Keys         *secrets.Keys   // the namespaces' keys, which decrypt stored secrets; nil: apps with them are left alone
+	Keys         *secrets.Keys   // the units' keys, which decrypt stored secrets; nil: apps with them are left alone
 	LLMKeysDir   string          // where the agent service reads the LLM providers' keys, which garrison's config keeps; empty: not written
 
 	password string
@@ -73,17 +73,17 @@ func (c *Config) record(ctx context.Context, e events.Event) {
 	}
 }
 
-// Dashboards syncs the dashboards/*.json of a namespace's repos, given as
+// Dashboards syncs the dashboards/*.json of a unit's repos, given as
 // repo name to checkout, to Grafana.
 type Dashboards interface {
-	Sync(ctx context.Context, namespace string, repos map[string]string) error
+	Sync(ctx context.Context, unit string, repos map[string]string) error
 }
 
 // State is what the deployer last applied, kept in WorkDir/applied.json:
 // the commit of each stack's repo.
 type State struct {
 	Stacks  map[string]string `json:"stacks"`
-	Apps    map[string]App    `json:"apps,omitempty"` // namespace/repo@environment -> deployed app
+	Apps    map[string]App    `json:"apps,omitempty"` // unit/repo@environment -> deployed app
 	Applied time.Time         `json:"applied"`
 }
 
@@ -453,7 +453,7 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	return next, errors.Join(errs...)
 }
 
-// Serve applies the namespace now and then follows it, checking every interval.
+// Serve applies the unit now and then follows it, checking every interval.
 func (c *Config) Serve(ctx context.Context, interval time.Duration) error {
 	if err := c.prepare(); err != nil {
 		return err
@@ -471,7 +471,7 @@ func (c *Config) Serve(ctx context.Context, interval time.Duration) error {
 	}
 }
 
-// Once deploys the namespace a single time and returns the result.
+// Once deploys the unit a single time and returns the result.
 func (c *Config) Once(ctx context.Context) (State, error) {
 	if err := c.prepare(); err != nil {
 		return State{}, err

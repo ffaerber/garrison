@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RestoreDir holds a namespace's restore requests in its config repo:
+// RestoreDir holds a unit's restore requests in its config repo:
 // restores/<any name>.yaml. Each is carried out once, when it is merged.
 const RestoreDir = "restores"
 
@@ -40,7 +40,7 @@ func ParseRestore(data []byte) (*Restore, error) {
 	}
 	var why []error
 	if !fileName.MatchString(r.Stack) {
-		why = append(why, fmt.Errorf("stack must name a stack of this namespace, as in stacks/<stack>.yaml"))
+		why = append(why, fmt.Errorf("stack must name a stack of this unit, as in stacks/<stack>.yaml"))
 	}
 	if !fileName.MatchString(r.Environment) {
 		why = append(why, fmt.Errorf("environment %q is not an environment name", r.Environment))

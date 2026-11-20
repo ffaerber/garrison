@@ -128,7 +128,7 @@ func (s *Server) cardPost(w http.ResponseWriter, r *http.Request, v events.Visib
 func (s *Server) record(r *http.Request, ns, repo string, n int, person, title string) {
 	if s.Events != nil {
 		s.Events.Record(r.Context(), events.Event{Source: events.SourceHome, Kind: events.KindPRUpdated, Status: events.StatusOK,
-			Namespace: ns, Repo: repo, PR: n, Actor: person, Audience: events.AudienceMembers, Title: title})
+			Unit: ns, Repo: repo, PR: n, Actor: person, Audience: events.AudienceMembers, Title: title})
 	}
 }
 

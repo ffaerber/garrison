@@ -20,7 +20,7 @@ var ErrForbidden = errors.New("not allowed")
 
 // Card is one pull request, as a person sees it.
 type Card struct {
-	Namespace string
+	Unit      string
 	Repo      string
 	Number    int
 	Title     string
@@ -35,7 +35,7 @@ type Card struct {
 	Merged    bool
 	Closed    bool
 	// NoApproval: the branch it goes into asks for no approval, as main of a
-	// namespace of one person, or a branch without a rule.
+	// unit of one person, or a branch without a rule.
 	NoApproval bool
 
 	// For the person looking at it.

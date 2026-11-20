@@ -120,7 +120,7 @@ func TestModelsRouteAndSeed(t *testing.T) {
 			t.Errorf("fallback: %s %s", model, full)
 		}
 	}
-	if len(rec.es) != 1 || rec.es[0].Kind != events.KindModel || rec.es[0].Namespace != "todo" ||
+	if len(rec.es) != 1 || rec.es[0].Kind != events.KindModel || rec.es[0].Unit != "todo" ||
 		!strings.Contains(rec.es[0].Detail, "local/large is not enabled") || !strings.Contains(rec.es[0].Link, "garrison/config/src/branch/main/agents/dev/agent.yaml") {
 		t.Errorf("feed: %+v", rec.es)
 	}

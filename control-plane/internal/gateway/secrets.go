@@ -28,7 +28,7 @@ func (g *Gitea) IsAdmin(ctx context.Context, person string) (bool, error) {
 
 // Orgs are the names of the organisations person sees.
 func (g *Gitea) Orgs(ctx context.Context, person string) ([]string, error) {
-	nss, err := g.Namespaces(ctx, person)
+	nss, err := g.Units(ctx, person)
 	if err != nil {
 		return nil, err
 	}

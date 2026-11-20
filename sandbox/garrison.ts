@@ -73,7 +73,7 @@ function git(cwd: string, ...args: string[]): Promise<string> {
 
 const config = (cwd: string, key: string) => git(cwd, "config", "--get", key).then((s) => s.trim(), () => "");
 
-// The namespace's media library, where generate_media puts what it makes.
+// The unit's media library, where generate_media puts what it makes.
 const media = "/data/media";
 
 // download writes a file the agent service holds for this turn to dest.
@@ -138,9 +138,9 @@ async function proposeWorkspace(p: Proposal, signal?: AbortSignal) {
   const origin = await config(top, "remote.origin.url");
   const m = origin.match(/\/git\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
   if (!origin.startsWith(api + "/git/") || !m) {
-    throw new Error(`${top} is not a clone of a platform repo: clone it from ${api}/git/<namespace>/<repo>.git`);
+    throw new Error(`${top} is not a clone of a platform repo: clone it from ${api}/git/<unit>/<repo>.git`);
   }
-  const [, namespace, repo] = m;
+  const [, unit, repo] = m;
   const branch = await config(top, "garrison.branch");
   let base = await config(top, "garrison.base");
   if (!branch && p.base) base = p.base;
@@ -160,7 +160,7 @@ async function proposeWorkspace(p: Proposal, signal?: AbortSignal) {
   if (!patch.trim()) throw new Error(branch ? "nothing changed since the last proposal" : `nothing differs from ${base}`);
   const text = await tool(
     "propose_patch",
-    { namespace, repo, base, branch, patch, title: p.title, description: p.description ?? "" },
+    { unit, repo, base, branch, patch, title: p.title, description: p.description ?? "" },
     signal,
   );
   const proposed = (await git(top, "write-tree")).trim();
@@ -182,7 +182,7 @@ export default async function (pi: ExtensionAPI) {
         name: "propose_workspace_changes",
         label: "propose_workspace_changes",
         description:
-          "Proposes the changes in a checkout of a platform repo in your workspace (cloned from $GARRISON_GIT/<namespace>/<repo>.git) as a pull request: by the person you talk to, or by your own account where only your grants allow it. Every file added, changed or deleted since it was cloned goes in. Called again on the same checkout, it adds what changed since to the same pull request. Give the person the link.",
+          "Proposes the changes in a checkout of a platform repo in your workspace (cloned from $GARRISON_GIT/<unit>/<repo>.git) as a pull request: by the person you talk to, or by your own account where only your grants allow it. Every file added, changed or deleted since it was cloned goes in. Called again on the same checkout, it adds what changed since to the same pull request. Give the person the link.",
         parameters: Type.Object({
           path: Type.String({ description: "the checkout, relative to /data/work, e.g. todo" }),
           title: Type.String({ description: "short title of the change" }),

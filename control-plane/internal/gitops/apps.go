@@ -29,11 +29,11 @@ import (
 	"garrison/control-plane/internal/stack"
 )
 
-// App is one deployed environment of an app: a stack of a namespace other
+// App is one deployed environment of an app: a stack of a unit other
 // than garrison, stacks/<name>.yaml in its config repo, deployed from the
 // branch of its source repo named after the environment, or as config says.
 type App struct {
-	Namespace   string `json:"namespace"`
+	Unit        string `json:"unit"`
 	Repo        string `json:"repo"` // the stack's name: config/stacks/<repo>.yaml
 	Environment string `json:"environment"`
 	Stack       string `json:"stack"`  // Swarm stack name: the environment's hostname
@@ -62,12 +62,12 @@ func (c *Config) ingressKey(stack string) string {
 }
 
 // options are how an environment of s is rendered at commit. The main
-// environment gets the namespace's stored secrets that s names, decrypted
+// environment gets the unit's stored secrets that s names, decrypted
 // from config's checkout in cfgDir; other environments, which run code not
 // yet merged, get generated values.
 func (c *Config) options(ctx context.Context, s *stack.Stack, env, commit, cfgDir string) (render.Options, error) {
 	o := render.Options{Environment: env, Domain: c.Domain, Commit: commit, IngressKey: c.ingressKey(render.StackName(s, env)),
-		Members: namespacePeople(cfgDir)}
+		Members: unitPeople(cfgDir)}
 	if env != stack.MainEnvironment {
 		return o, nil
 	}
@@ -80,7 +80,7 @@ func (c *Config) options(ctx context.Context, s *stack.Stack, env, commit, cfgDi
 	}
 	o.Secrets = map[string]render.Stored{}
 	for _, name := range slices.Sorted(maps.Keys(stored)) {
-		value, err := c.Keys.Decrypt(ctx, s.Namespace, stored[name])
+		value, err := c.Keys.Decrypt(ctx, s.Unit, stored[name])
 		if err != nil {
 			return o, fmt.Errorf("the secret %s: %w", name, err)
 		}
@@ -90,9 +90,9 @@ func (c *Config) options(ctx context.Context, s *stack.Stack, env, commit, cfgDi
 	return o, nil
 }
 
-// namespacePeople are the admins and members of members.yaml in config's
+// unitPeople are the admins and members of members.yaml in config's
 // checkout in cfgDir, sorted, each once.
-func namespacePeople(cfgDir string) []string {
+func unitPeople(cfgDir string) []string {
 	data, err := os.ReadFile(filepath.Join(cfgDir, "members.yaml"))
 	if err != nil {
 		return nil
@@ -117,7 +117,7 @@ func namespacePeople(cfgDir string) []string {
 // personName is what a Gitea user may be called.
 var personName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$`)
 
-// errNoKeys: the deployer on the host, without the namespaces' keys, leaves
+// errNoKeys: the deployer on the host, without the units' keys, leaves
 // apps with stored secrets to the one in Swarm.
 var errNoKeys = errors.New("stored secrets are decrypted only by the deployer in Swarm")
 
@@ -178,22 +178,22 @@ func (c *Config) get(ctx context.Context, path string, out any) error {
 	return decodeJSON(resp, out)
 }
 
-// Namespaces are the namespaces whose apps the deployer deploys: every
+// Units are the units whose apps the deployer deploys: every
 // organisation but its own.
-func (c *Config) Namespaces(ctx context.Context) ([]string, error) { return c.namespaces(ctx) }
+func (c *Config) Units(ctx context.Context) ([]string, error) { return c.units(ctx) }
 
 // KeepsSecrets tells whether ns keeps secrets the deployer holds keys for:
-// every namespace with apps, and the platform's own, Org, whose secrets are
+// every unit with apps, and the platform's own, Org, whose secrets are
 // the LLM providers' keys.
 func (c *Config) KeepsSecrets(ctx context.Context, ns string) (bool, error) {
 	if ns == c.Org {
 		return true, nil
 	}
-	nss, err := c.namespaces(ctx)
+	nss, err := c.units(ctx)
 	return slices.Contains(nss, ns), err
 }
 
-func (c *Config) namespaces(ctx context.Context) ([]string, error) {
+func (c *Config) units(ctx context.Context) ([]string, error) {
 	var out []string
 	for page := 1; page < 20; page++ {
 		var batch []struct {
@@ -340,23 +340,23 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 	}
 	keepApp := func(ns, repo string) {
 		for k, a := range prev {
-			if a.Namespace == ns && a.Repo == repo {
+			if a.Unit == ns && a.Repo == repo {
 				next[k] = a
 			}
 		}
 	}
-	keepNamespace := func(ns string) {
+	keepUnit := func(ns string) {
 		for k, a := range prev {
-			if a.Namespace == ns {
+			if a.Unit == ns {
 				next[k] = a
 			}
 		}
 	}
 
-	namespaces, err := c.namespaces(ctx)
+	units, err := c.units(ctx)
 	if err != nil {
 		// Without the list, nothing may be taken down.
-		return prev, []error{fmt.Errorf("list namespaces: %w", err)}
+		return prev, []error{fmt.Errorf("list units: %w", err)}
 	}
 	// Apps pull their images from the registry with the deployer's
 	// credentials. Without them, nothing is deployed; signing in is tried again
@@ -378,21 +378,21 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		log.Printf("apps: %v", err)
 		errs = append(errs, err)
 		sum := sha256.Sum256([]byte(err.Error()))
-		c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusFailed, Namespace: ns, Repo: repo, Commit: commit,
+		c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusFailed, Unit: ns, Repo: repo, Commit: commit,
 			Title: err.Error(), Key: "deployer-failed:" + hex.EncodeToString(sum[:12])})
 	}
 
 	declared := map[string]bool{} // ns/name of every stack in a config repo
-	for _, ns := range namespaces {
+	for _, ns := range units {
 		cfgDir := filepath.Join(c.WorkDir, "apps", ns, "config", "@main")
 		cfgCommit, err := c.checkout(ctx, ns, "config", "main", cfgDir)
 		if err != nil {
 			fail(ns, "", "", "fetch %s/config: %v", ns, err)
-			keepNamespace(ns)
+			keepUnit(ns)
 			continue
 		}
 		files, _ := filepath.Glob(filepath.Join(cfgDir, stack.Dir, "*.yaml"))
-		parsed := map[string]*stack.Stack{} // the namespace's stacks that could be read, by name
+		parsed := map[string]*stack.Stack{} // the unit's stacks that could be read, by name
 		for _, file := range files {
 			name := strings.TrimSuffix(filepath.Base(file), ".yaml")
 			declared[ns+"/"+name] = true
@@ -408,7 +408,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			}
 			// A stack that names {{members}} redeploys when they change.
 			if bytes.Contains(data, []byte("{{members}}")) {
-				data = append(data, []byte("\x00"+strings.Join(namespacePeople(cfgDir), ","))...)
+				data = append(data, []byte("\x00"+strings.Join(unitPeople(cfgDir), ","))...)
 			}
 			sum := sha256.Sum256(data)
 			fileSpec := hex.EncodeToString(sum[:8])
@@ -461,7 +461,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 				if env == stack.MainEnvironment {
 					spec = withSecrets
 				}
-				app := App{Namespace: ns, Repo: name, Environment: env, Stack: render.StackName(s, env), Commit: commit, Source: s.Source, Spec: spec,
+				app := App{Unit: ns, Repo: name, Environment: env, Stack: render.StackName(s, env), Commit: commit, Source: s.Source, Spec: spec,
 					Private: s.Environments[env].Private}
 				for _, svc := range s.ServiceNames() {
 					if h := s.ServiceHostname(env, svc); h != "" {
@@ -480,7 +480,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 					if c.waiting[key] != commit {
 						log.Printf("apps: %s at %.12s waits for %s", key, commit, strings.Join(missing, ", "))
 						c.waiting[key] = commit
-						c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusWaiting, Namespace: ns, Repo: s.Source, Commit: commit,
+						c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusWaiting, Unit: ns, Repo: s.Source, Commit: commit,
 							Title: fmt.Sprintf("%s at %.7s waits for its image from the pipeline", key, commit), Detail: strings.Join(missing, "\n"),
 							Key: "deploy:" + key + "@" + commit + ":" + spec})
 					}
@@ -522,7 +522,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 						how += " with a changed stack file or secret"
 					}
 				}
-				c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusOK, Namespace: ns, Repo: s.Source, Commit: commit,
+				c.record(ctx, events.Event{Kind: events.KindDeploy, Status: events.StatusOK, Unit: ns, Repo: s.Source, Commit: commit,
 					Title: fmt.Sprintf("%s %s at %.7s as %s", how, key, commit, app.Stack), Link: "https://" + app.Stack + "." + c.Domain,
 					Key: "deploy:" + key + "@" + commit + ":" + spec})
 			}
@@ -540,21 +540,21 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			continue
 		}
 		if _, err := c.Run(ctx, nil, nil, "docker", "stack", "rm", a.Stack); err != nil {
-			fail(a.Namespace, a.Source, "", "remove %s: %v", key, err)
+			fail(a.Unit, a.Source, "", "remove %s: %v", key, err)
 			next[key] = a
 			continue
 		}
 		log.Printf("apps: removed %s (%s)", key, a.Stack)
-		c.record(ctx, events.Event{Kind: events.KindUndeploy, Status: events.StatusOK, Namespace: a.Namespace, Repo: a.Source,
+		c.record(ctx, events.Event{Kind: events.KindUndeploy, Status: events.StatusOK, Unit: a.Unit, Repo: a.Source,
 			Title: fmt.Sprintf("took %s down (%s): its branch, environment or stack is gone", key, a.Stack)})
 	}
 	for _, a := range prev {
 		still := false
 		for _, n := range next {
-			still = still || (n.Namespace == a.Namespace && n.Repo == a.Repo)
+			still = still || (n.Unit == a.Unit && n.Repo == a.Repo)
 		}
-		if !still && !declared[a.Namespace+"/"+a.Repo] {
-			reg.Release(a.Namespace, a.Repo)
+		if !still && !declared[a.Unit+"/"+a.Repo] {
+			reg.Release(a.Unit, a.Repo)
 		}
 	}
 	if err := reg.Save(c.claimsFile()); err != nil {
@@ -563,11 +563,11 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 	return next, errs
 }
 
-// AppsOf lists the deployed apps of a namespace, for the gateway.
-func (s State) AppsOf(namespace string) []App {
+// AppsOf lists the deployed apps of a unit, for the gateway.
+func (s State) AppsOf(unit string) []App {
 	var out []App
 	for _, a := range s.Apps {
-		if a.Namespace == namespace {
+		if a.Unit == unit {
 			out = append(out, a)
 		}
 	}
@@ -589,7 +589,7 @@ func (c *Config) missingImages(ctx context.Context, s *stack.Stack, commit strin
 		path, tag, ok := strings.Cut(ref, ":")
 		owner, pkg, ok2 := strings.Cut(path, "/")
 		if !ok || !ok2 {
-			missing = append(missing, image+" (needs <registry>/<namespace>/<name>:<tag>)")
+			missing = append(missing, image+" (needs <registry>/<unit>/<name>:<tag>)")
 			continue
 		}
 		var out struct{}

@@ -16,8 +16,8 @@ For the app asked about, take two screenshots of https://<app>.<domain>/ with th
 
 Each becomes its own pull request. Give both links.
 SKILL
-mpr=$(add_agent marketing marketing 'list_stacks, screenshot' "Makes screenshots of the namespace's apps" \
-  "You make screenshots of the namespace's apps for its homepage and docs. Each app answers at https://<stack>.<domain>/; list_stacks shows them. Put each screenshot where the person asks." \
+mpr=$(add_agent marketing marketing 'list_stacks, screenshot' "Makes screenshots of the unit's apps" \
+  "You make screenshots of the unit's apps for its homepage and docs. Each app answers at https://<stack>.<domain>/; list_stacks shows them. Put each screenshot where the person asks." \
   homepage-screenshots "skills/homepage-screenshots/SKILL.md=$tmp/skill.md")
 check "a root admin approves the marketing agent in garrison, alice merges it" lands "$mpr"
 check "Open WebUI has the marketing agent"     until_true 120 has_model garrison/marketing
@@ -28,7 +28,7 @@ answer=$(ask_agent todo bob "Take one screenshot of https://todo.$DOMAIN/ and pu
 spr=$(pr_with app bob "$since" docs/screenshots/todo.png | cut -d' ' -f1)
 if [ -z "$spr" ]; then
   printf 'retry the agent opened no pull request with todo.png; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent todo bob "Please take that one screenshot now with the screenshot tool: url https://todo.$DOMAIN/, namespace todo, repo app, path docs/screenshots/todo.png." marketing)
+  answer=$(ask_agent todo bob "Please take that one screenshot now with the screenshot tool: url https://todo.$DOMAIN/, unit todo, repo app, path docs/screenshots/todo.png." marketing)
   spr=$(pr_with app bob "$since" docs/screenshots/todo.png | cut -d' ' -f1)
 fi
 check "the marketing agent takes it, as bob"   grep -q "mcp: bob: screenshot" <<<"$(mcp_calls "$at" bob)"
@@ -66,7 +66,7 @@ echo "# 4d. what the marketing agent may not do"
 platform_prs() { gitea_api "" "$api/repos/garrison/platform/pulls?state=all&limit=1" | python3 -c 'import json,sys; l=json.load(sys.stdin); print(l[0]["number"] if l else 0)'; }
 before=$(platform_prs)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask_agent todo bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the namespace garrison, repo platform, as docs/todo.png." marketing)
+answer=$(ask_agent todo bob "Take a screenshot of https://todo.$DOMAIN/ and put it into the unit garrison, repo platform, as docs/todo.png." marketing)
 check "bob gets no screenshot into a repo he may not change" test "$(platform_prs)" = "$before"
 check "the gateway refused every try"      refused_only "$at" bob screenshot "not allowed"
 check "the agent says so"                  test -n "$answer"
@@ -126,7 +126,7 @@ cat >> "$tmp/routines.yaml" <<YAML
   name: shots
   on_push: {repo: app, branch: shots}
   owner: bob
-  task: "Call screenshot once: url https://todo.$DOMAIN/, namespace todo, repo app, path docs/screenshots/routine.png, title Screenshot by the routine. Then say in one sentence what the page shows."
+  task: "Call screenshot once: url https://todo.$DOMAIN/, unit todo, repo app, path docs/screenshots/routine.png, title Screenshot by the routine. Then say in one sentence what the page shows."
 YAML
 spr=$(propose_config marketing-routine "The marketing agent shoots todo by itself" "grants.yaml=$tmp/grants.yaml" "routines.yaml=$tmp/routines.yaml")
 check "carol approves it in todo"          test "$(review config carol "$spr")" = 200

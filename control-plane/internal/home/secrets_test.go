@@ -23,7 +23,7 @@ func (f *fakeSecrets) May(_ context.Context, ns, person string) (bool, error) {
 	return person == "alice" && ns == "todo", nil
 }
 
-func (f *fakeSecrets) Namespaces(ctx context.Context, person string) ([]string, error) {
+func (f *fakeSecrets) Units(ctx context.Context, person string) ([]string, error) {
 	if ok, _ := f.May(ctx, "todo", person); ok {
 		return []string{"todo"}, nil
 	}
@@ -92,7 +92,7 @@ func TestTheSecretsPage(t *testing.T) {
 	}
 
 	// Setting one redirects to the page, which says so, and the feed has it
-	// for the namespace's people.
+	// for the unit's people.
 	w = post(s, "alice", origin, "/secrets/todo", url.Values{"action": {"set"}, "name": {"shop-api-key"}, "value": {"tok-123"}})
 	if w.Code != http.StatusSeeOther || f.values["todo/shop-api-key"] != "tok-123" {
 		t.Fatalf("set: %d %v", w.Code, f.values)

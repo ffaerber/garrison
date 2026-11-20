@@ -1,5 +1,5 @@
 # journey: an app with code of its own goes from nothing to main, the way
-# people do it: alice asks the agents in Open WebUI to make the namespace,
+# people do it: alice asks the agents in Open WebUI to make the unit,
 # the repo and the stack, merges in Gitea, has an agent change the page on
 # dev, looks at dev, and merges dev into main. Talks to the real LLM; the
 # checks look at what happened in Gitea, the registry and the cluster, and
@@ -35,15 +35,15 @@ for p in sorted(json.load(sys.stdin), key=lambda p: -p["number"]):
 lab_merge() { gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$lab/$1/pulls/$2/merge"; }
 check "alice signs in to the chat"         chat_login alice
 
-echo "# 1. alice has the operator make the namespace and the repo"
-answer=$(ask_agent garrison alice "Make a namespace lab for our experiments, and in it the repo example from the template todo: a todo list we will deploy. You have everything you need; do not ask back.")
+echo "# 1. alice has the operator make the unit and the repo"
+answer=$(ask_agent garrison alice "Make a unit lab for our experiments, and in it the repo example from the template todo: a todo list we will deploy. You have everything you need; do not ask back.")
 lab_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/lab")" = 200 ]; }
 example_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/page.html")" = 200 ]; }
 if ! lab_made || ! example_made; then
   printf 'retry the operator did not do both; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent garrison alice "Please go ahead now: create_namespace lab if it is missing, then create_repo example in lab with template todo.")
+  answer=$(ask_agent garrison alice "Please go ahead now: create_unit lab if it is missing, then create_repo example in lab with template todo.")
 fi
-check "it makes the namespace lab, as alice" lab_made
+check "it makes the unit lab, as alice" lab_made
 check "and the repo lab/example from the template" example_made
 check "with its pipeline"                  test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$lab/example/raw/.gitea/workflows/pipeline.yaml")" = 200
 started_by() { gitea_api "" "$lab/example/commits?sha=main&limit=1" | python3 -c 'import json,sys; print((json.load(sys.stdin)[0].get("author") or {}).get("login", ""))'; }

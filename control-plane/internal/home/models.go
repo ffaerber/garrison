@@ -52,7 +52,7 @@ type modelsView struct {
 }
 
 func (s *Server) modelsView(ctx context.Context) (*modelsView, error) {
-	v := &modelsView{ModelsURL: fmt.Sprintf("https://git.%s/%s/%s/src/branch/main/%s", s.Domain, models.Namespace, models.Repo, models.ModelsFile)}
+	v := &modelsView{ModelsURL: fmt.Sprintf("https://git.%s/%s/%s/src/branch/main/%s", s.Domain, models.Unit, models.Repo, models.ModelsFile)}
 	p, catalog, ok, err := s.Providers.Providers(ctx)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func (s *Server) modelsView(ctx context.Context) (*modelsView, error) {
 		v.None = true
 		return v, nil
 	}
-	stored, err := s.Secrets.Names(ctx, secrets.PlatformNamespace)
+	stored, err := s.Secrets.Names(ctx, secrets.PlatformUnit)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (s *Server) modelsPost(w http.ResponseWriter, r *http.Request, v events.Vis
 	_, exists := p.Providers[name]
 	record := func(title string) {
 		s.Events.Record(r.Context(), events.Event{Source: events.SourceHome, Kind: events.KindSecret, Status: events.StatusOK,
-			Namespace: models.Namespace, Repo: models.Repo, Audience: events.AudienceMembers, Actor: v.Person, StartedBy: v.Person,
+			Unit: models.Unit, Repo: models.Repo, Audience: events.AudienceMembers, Actor: v.Person, StartedBy: v.Person,
 			Title: title, Link: "https://" + s.Domain + "/models?provider=" + url.QueryEscape(name)})
 	}
 	done := url.Values{"provider": {name}}
@@ -211,7 +211,7 @@ func (s *Server) modelsPost(w http.ResponseWriter, r *http.Request, v events.Vis
 			failed(fmt.Errorf("%w: the API key is empty or not text", secrets.ErrInvalid))
 			return
 		}
-		if err := s.Secrets.Set(r.Context(), secrets.PlatformNamespace, models.KeySecret(name), key, v.Person); err != nil {
+		if err := s.Secrets.Set(r.Context(), secrets.PlatformUnit, models.KeySecret(name), key, v.Person); err != nil {
 			failed(err)
 			return
 		}
@@ -223,11 +223,11 @@ func (s *Server) modelsPost(w http.ResponseWriter, r *http.Request, v events.Vis
 				failed(fmt.Errorf("the key of %s is saved, but %s could not be proposed: %w", name, models.ProvidersFile, err))
 				return
 			}
-			http.Redirect(w, r, changes.Path(models.Namespace, models.Repo, n), http.StatusSeeOther)
+			http.Redirect(w, r, changes.Path(models.Unit, models.Repo, n), http.StatusSeeOther)
 			return
 		}
 	case "delete":
-		if err := s.Secrets.Delete(r.Context(), secrets.PlatformNamespace, models.KeySecret(name), v.Person); err != nil {
+		if err := s.Secrets.Delete(r.Context(), secrets.PlatformUnit, models.KeySecret(name), v.Person); err != nil {
 			failed(err)
 			return
 		}

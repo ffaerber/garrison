@@ -132,8 +132,8 @@ func setup(t *testing.T, answers ...Message) (*Server, *fakeLLM, *fakeMCP) {
 	t.Cleanup(ms.Close)
 	s := &Server{
 		Agents: fakeAgents{
-			{Namespace: "homepage", Name: "reader", Description: "Reads", Tools: []string{"read_file"}, Prompt: "You read files."},
-			{Namespace: "garrison", Name: "operator", Model: "big-model", Prompt: "You operate."},
+			{Unit: "homepage", Name: "reader", Description: "Reads", Tools: []string{"read_file"}, Prompt: "You read files."},
+			{Unit: "garrison", Name: "operator", Model: "big-model", Prompt: "You operate."},
 		},
 		Verifier:     fakeVerifier{"tok-alice": {Name: "alice"}},
 		LLM:          &LLM{URL: ls.URL, Key: "llm-key"},
@@ -192,7 +192,7 @@ func TestModelsAreTheAgents(t *testing.T) {
 	s, _, _ := setup(t)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
-	// garrison's agents; the instances in namespaces are not models.
+	// garrison's agents; the instances in units are not models.
 	if w.Code != 200 || strings.Contains(w.Body.String(), `"id":"homepage/reader"`) || !strings.Contains(w.Body.String(), `"id":"garrison/operator"`) || !strings.Contains(w.Body.String(), `"name":"operator"`) {
 		t.Errorf("models: %d %s", w.Code, w.Body)
 	}
@@ -237,7 +237,7 @@ func TestATurnUsesTheAgentsToolsAsThePerson(t *testing.T) {
 	first := llm.requests[0]
 	msgs := first["messages"].([]any)
 	sys := msgs[0].(map[string]any)["content"].(string)
-	if first["model"] != "small-model" || !strings.Contains(sys, `You are reader, an agent of Garrison at example.com, here working in the namespace "homepage"`) || !strings.Contains(sys, "Rules of the platform") {
+	if first["model"] != "small-model" || !strings.Contains(sys, `You are reader, an agent of Garrison at example.com, here working in the unit "homepage"`) || !strings.Contains(sys, "Rules of the platform") {
 		t.Errorf("first request: model %v, system %q", first["model"], sys)
 	}
 	if msgs[1].(map[string]any)["content"] != "Here's the thread history: bob: hi" || msgs[2].(map[string]any)["role"] != "user" {
@@ -315,16 +315,16 @@ func TestATurnEnds(t *testing.T) {
 	}
 }
 
-// A model is garrison's agent; in a namespace's channel, it works there.
+// A model is garrison's agent; in a unit's channel, it works there.
 func TestAChatRunsTheAgentWhereItsChannelIs(t *testing.T) {
 	s := &Server{Poster: &fakePoster{channels: map[string]gateway.ChannelInfo{
-		"c-lab": {Namespace: "lab", Members: true}, "c-garrison": {Namespace: "garrison"},
+		"c-lab": {Unit: "lab", Members: true}, "c-garrison": {Unit: "garrison"},
 	}}}
 	for _, c := range []struct{ model, chat, want string }{
 		{"garrison/operator", "channel:c-lab", "lab/operator"},
 		{"operator", "channel:c-lab", "lab/operator"},
 		{"garrison/operator", "channel:c-garrison", "garrison/operator"},
-		{"garrison/operator", "chat-1", "garrison/operator"}, // a private chat: in no namespace
+		{"garrison/operator", "chat-1", "garrison/operator"}, // a private chat: in no unit
 		{"todo/operator", "channel:c-lab", "todo/operator"},  // an instance named as it is
 	} {
 		if got, err := s.placed(context.Background(), c.model, c.chat); err != nil || got != c.want {

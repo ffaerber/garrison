@@ -1,4 +1,4 @@
-"""Joining and leaving a namespace, as each person sees it in Open WebUI.
+"""Joining and leaving a unit, as each person sees it in Open WebUI.
 alice, todo's only person, asks the commander, vaguely, to bring bob and
 carol in; it asks which roles, and she answers. Then bob and carol find
 todo's channel in their sidebar, with its how-to and its history. Later
@@ -91,7 +91,7 @@ check("he reads its history: alice's question", lambda: any("bob and carol help 
                                                             for m in bob.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")))
 check("and its pinned how-to", lambda: any(m.get("is_pinned") for m in bob.owui_list(f"/api/v1/channels/{cid}/messages?skip=0&limit=50")))
 answer = check("bob asks the operator there, which works in todo for him", bob.ask, NS, "operator",
-               "Which stacks does this namespace have? Use your tools and list their names.") or ""
+               "Which stacks does this unit have? Use your tools and list their names.") or ""
 check("its answer names todo's stack", lambda: "todo" in answer.lower())
 
 section("4. alice says, as vaguely, that bob has left")

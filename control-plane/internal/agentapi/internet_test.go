@@ -54,9 +54,9 @@ func agentsWith(s *Server, list ...agents.Agent) {
 func TestAnAgentReachesWhatItsInternetAllows(t *testing.T) {
 	s, _, _ := setup(t)
 	agentsWith(s,
-		agents.Agent{Namespace: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}},
-		agents.Agent{Namespace: "homepage", Name: "builder", Prompt: "p", Internet: agents.Internet{Packages: true}},
-		agents.Agent{Namespace: "homepage", Name: "secret", Prompt: "p", Internet: agents.Internet{All: true}},
+		agents.Agent{Unit: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}},
+		agents.Agent{Unit: "homepage", Name: "builder", Prompt: "p", Internet: agents.Internet{Packages: true}},
+		agents.Agent{Unit: "homepage", Name: "secret", Prompt: "p", Internet: agents.Internet{All: true}},
 	)
 	d := withSandboxes(t, s)
 	withInternet(t, s, true, "homepage/secret")
@@ -99,7 +99,7 @@ func TestAnAgentReachesWhatItsInternetAllows(t *testing.T) {
 
 func TestTheProxyRefusesTheHomeNetwork(t *testing.T) {
 	s, _, _ := setup(t)
-	agentsWith(s, agents.Agent{Namespace: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}})
+	agentsWith(s, agents.Agent{Unit: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}})
 	withSandboxes(t, s)
 	withInternet(t, s, false) // only public addresses
 	for _, u := range []string{site(t, true), site(t, false)} {
@@ -112,7 +112,7 @@ func TestTheProxyRefusesTheHomeNetwork(t *testing.T) {
 
 func TestOnlyPorts80And443(t *testing.T) {
 	s, _, _ := setup(t)
-	agentsWith(s, agents.Agent{Namespace: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}})
+	agentsWith(s, agents.Agent{Unit: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}})
 	p := &InternetProxy{Server: s}
 	c := sandbox.Caller{Agent: "homepage/web", Person: "alice"}
 	for target, want := range map[string]string{"example.org:443": "", "example.org:80": "", "example.org:22": "only ports 80 and 443", "example.org:8443": "only ports 80 and 443"} {
@@ -166,8 +166,8 @@ func TestAWideAgentClonesOnlyPublicRepos(t *testing.T) {
 	}))
 	defer gitea.Close()
 	g := &GitProxy{Gitea: &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}, Agents: fakeAgents{
-		{Namespace: "homepage", Name: "web", Internet: agents.Internet{Domains: []string{"example.org"}}},
-		{Namespace: "homepage", Name: "builder", Internet: agents.Internet{Packages: true}},
+		{Unit: "homepage", Name: "web", Internet: agents.Internet{Domains: []string{"example.org"}}},
+		{Unit: "homepage", Name: "builder", Internet: agents.Internet{Packages: true}},
 	}}
 	for _, c := range []struct {
 		agent, repo string

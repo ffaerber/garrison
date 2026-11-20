@@ -14,7 +14,7 @@ func TestMetrics(t *testing.T) {
 		switch r.URL.Path {
 		case "/services":
 			w.Write([]byte(`[
- {"ID":"s1","Spec":{"Name":"quotes_web","Labels":{"com.docker.stack.namespace":"quotes","garrison.namespace":"todo","garrison.app":"quotes","garrison.environment":"main"}}},
+ {"ID":"s1","Spec":{"Name":"quotes_web","Labels":{"com.docker.stack.namespace":"quotes","garrison.unit":"todo","garrison.app":"quotes","garrison.environment":"main"}}},
  {"ID":"s2","Spec":{"Name":"gitea_gitea","Labels":{"com.docker.stack.namespace":"gitea"}}}
 ]`))
 		case "/tasks":
@@ -36,10 +36,10 @@ func TestMetrics(t *testing.T) {
 	body := w.Body.String()
 	for _, want := range []string{
 		"garrison_docker_up 1",
-		`garrison_service_replicas_desired{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 1`,
-		`garrison_service_replicas_running{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 0`,
-		`garrison_service_failed_tasks{namespace="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 2`,
-		`garrison_service_replicas_running{namespace="garrison",app="gitea",environment="main",stack="gitea",service="gitea_gitea"} 1`,
+		`garrison_service_replicas_desired{unit="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 1`,
+		`garrison_service_replicas_running{unit="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 0`,
+		`garrison_service_failed_tasks{unit="todo",app="quotes",environment="main",stack="quotes",service="quotes_web"} 2`,
+		`garrison_service_replicas_running{unit="garrison",app="gitea",environment="main",stack="gitea",service="gitea_gitea"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s in\n%s", want, body)

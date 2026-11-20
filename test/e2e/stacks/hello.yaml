@@ -1,5 +1,5 @@
 stack: hello
-namespace: demo
+unit: demo
 entrypoint: web
 
 services:

@@ -73,7 +73,7 @@ applied 11 stacks
 ==> [4m56s] Done
   Keycloak  https://keycloak.garrison.test  (people sign in to the realm "garrison")
   Gitea     https://git.garrison.test
-  Chat      https://chat.garrison.test  (one agent per namespace)
+  Chat      https://chat.garrison.test  (one agent per unit)
   Grafana   https://grafana.garrison.test
   Admin     admin (password in /etc/garrison/admin-password)
   TLS       self-signed; certificate in /etc/garrison/tls.crt

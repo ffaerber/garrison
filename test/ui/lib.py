@@ -310,7 +310,7 @@ class Person:
 
     def mention(self, box, agent: str, retries: int = 3):
         """In the editor box: types @agent and picks it from the list. The
-        page knows the agents there were when it loaded; one of a namespace
+        page knows the agents there were when it loaded; one of a unit
         made since appears after a reload, as for a person."""
         p = self.page
         option = p.locator("button.selected-command-option-button, button[data-selected='true']").filter(has_text=agent)
@@ -364,7 +364,7 @@ class Person:
 
     def ask(self, channel: str, agent: str, text: str, seconds: float = 600) -> str:
         """Asks agent, as typed after @ (its name in the chat) in channel,
-        where it works in that namespace. The agents are garrison's: the
+        where it works in that unit. The agents are garrison's: the
         model of @operator is garrison/operator."""
         self.channel(channel)
         return self.answer(self.say(agent, text), "garrison/" + agent, seconds)

@@ -23,17 +23,17 @@ import (
 	"garrison/templates"
 )
 
-// Members keeps each namespace's config repo: who may change the namespace,
+// Members keeps each unit's config repo: who may change the unit,
 // as members.yaml there says, and the checks on its agents. For garrison,
 // which has no members.yaml, only root admins approve changes to config.
-// Who may change a namespace, as members.yaml says:
+// Who may change a unit, as members.yaml says:
 //
 //	admins: [alice]   # approve and merge changes, including to members.yaml
-//	members: [bob]    # push to the namespace's repos
+//	members: [bob]    # push to the unit's repos
 //
 // Everyone signed in may read everything. The file is the truth: Gitea's teams
 // "admins" and "members" are kept in line with it. It changes only through
-// pull requests, which need the approval of an admin of the namespace or a
+// pull requests, which need the approval of an admin of the unit or a
 // root admin who neither wrote the pull request (opened it or pushed to its
 // branch) nor has their role changed by it. Gitea cannot check that, so
 // this posts a required status, garrison/approval, on every open pull
@@ -42,7 +42,7 @@ type Members struct {
 	// Wake, when set, starts a sync before the interval is over.
 	Wake   <-chan struct{}
 	Gitea  *Gitea
-	Events events.Recorder // the feed, told when a namespace is set up; nil: none
+	Events events.Recorder // the feed, told when a unit is set up; nil: none
 	// Keycloak, when set, gives each agent account one of the same name
 	// there, enabled while the Gitea account is unlocked.
 	Keycloak *Keycloak
@@ -56,7 +56,7 @@ type Members struct {
 }
 
 const (
-	// RootTeam holds the platform's root admins in every namespace, kept from
+	// RootTeam holds the platform's root admins in every unit, kept from
 	// Gitea's site admins: Gitea counts approvals and merges only from people
 	// with write access to the repo, which root admins otherwise lack.
 	RootTeam        = "root-admins"
@@ -92,7 +92,7 @@ func ParseRoster(data []byte) (Roster, error) {
 		}
 	}
 	if len(r.Admins) == 0 {
-		return r, errors.New("members.yaml: a namespace needs at least one admin")
+		return r, errors.New("members.yaml: a unit needs at least one admin")
 	}
 	return r, nil
 }
@@ -130,16 +130,16 @@ func Changed(before, after Roster) []string {
 }
 
 // Approval decides a pull request on members.yaml: it may be merged once an
-// admin of the namespace (by the roster on main) or a root admin approves it
+// admin of the unit (by the roster on main) or a root admin approves it
 // who neither wrote it nor has their role changed by it. authors wrote it:
 // who opened it, first, and everyone who pushed to its branch, as an admin
 // could otherwise add to someone else's pull request and approve the result.
 func Approval(base, head Roster, authors []string, approvers, rootAdmins []string) (bool, string) {
 	changed := Changed(base, head)
-	// A namespace of one person has nobody else to approve: its person's own
+	// A unit of one person has nobody else to approve: its person's own
 	// change goes in, as long as they stay its admin.
 	if only, ok := base.Only(); ok && head.Role(only) == "admin" && !slices.ContainsFunc(authors, func(a string) bool { return a != only }) {
-		return true, only + " is the only person of the namespace and proposed it"
+		return true, only + " is the only person of the unit and proposed it"
 	}
 	var refused []string
 	for _, a := range approvers {
@@ -176,12 +176,12 @@ func unitsMap(access string) map[string]string {
 	return m
 }
 
-// Sync sets up and applies every namespace's members.
+// Sync sets up and applies every unit's members.
 func (m *Members) Sync(ctx context.Context) error {
 	if m.posted == nil {
 		m.posted = map[string]string{}
 	}
-	namespaces, err := m.Gitea.Namespaces(ctx, "")
+	units, err := m.Gitea.Units(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -197,13 +197,13 @@ func (m *Members) Sync(ctx context.Context) error {
 	}
 	var errs []error
 	present := map[string]bool{}
-	for _, ns := range namespaces {
+	for _, ns := range units {
 		present[ns.Name] = true
-		if ns.Name == PlatformNamespace {
+		if ns.Name == PlatformUnit {
 			if err := m.platform(ctx, roots); err != nil {
 				errs = append(errs, fmt.Errorf("config of garrison: %w", err))
 			}
-		} else if err := m.namespace(ctx, ns.Name, roots); err != nil {
+		} else if err := m.unit(ctx, ns.Name, roots); err != nil {
 			errs = append(errs, fmt.Errorf("members of %s: %w", ns.Name, err))
 		}
 		if err := m.accounts(ctx, ns.Name, users); err != nil {
@@ -213,8 +213,8 @@ func (m *Members) Sync(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("changes of %s: %w", ns.Name, err))
 		}
 	}
-	// The agents of a namespace that is gone: their accounts are locked, so
-	// a namespace made again under its name starts without them.
+	// The agents of a unit that is gone: their accounts are locked, so
+	// a unit made again under its name starts without them.
 	for _, u := range users {
 		rest, ok := strings.CutPrefix(u.FullName, AccountPrefix)
 		ns, _, ok2 := strings.Cut(rest, "/")
@@ -225,7 +225,7 @@ func (m *Members) Sync(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		log.Printf("members: locked the account %s: its namespace %s is gone", u.Login, ns)
+		log.Printf("members: locked the account %s: its unit %s is gone", u.Login, ns)
 		if err := m.keycloak(ctx, u.Login, rest, false); err != nil {
 			errs = append(errs, err)
 		}
@@ -280,7 +280,7 @@ func (g *Gitea) users(ctx context.Context) ([]giteaUser, error) {
 	return out, nil
 }
 
-// accounts keeps the Gitea accounts of a namespace's agents that have
+// accounts keeps the Gitea accounts of a unit's agents that have
 // grants or routines: made when missing, writing to the repos their grants
 // name and no others, and locked, with their access taken away, when their
 // agent is gone or switched off. Nobody signs in with them: the gateway
@@ -373,7 +373,7 @@ func (m *Members) accounts(ctx context.Context, ns string, users []giteaUser) er
 }
 
 // collaborations gives account write access to the repos in granted and
-// takes it away from every other repo of the namespace. It is applied again
+// takes it away from every other repo of the unit. It is applied again
 // only when either list changes.
 func (m *Members) collaborations(ctx context.Context, ns, account string, granted, repos []string) error {
 	key := ns + ":" + strings.Join(granted, ",") + "|" + strings.Join(repos, ",")
@@ -416,7 +416,7 @@ type team struct {
 	Name string `json:"name"`
 }
 
-// teams lists a namespace's teams, making the ones in want (name: access)
+// teams lists a unit's teams, making the ones in want (name: access)
 // that are missing.
 func (m *Members) teams(ctx context.Context, ns string, want map[string]string) (map[string]int64, error) {
 	var list []team
@@ -472,7 +472,7 @@ func (m *Members) teamMembers(ctx context.Context, id int64) ([]string, error) {
 	return out, nil
 }
 
-func (m *Members) namespace(ctx context.Context, ns string, roots []string) error {
+func (m *Members) unit(ctx context.Context, ns string, roots []string) error {
 	g := m.Gitea
 	teams, err := m.teams(ctx, ns, map[string]string{"admins": "admin", "members": "write", RootTeam: "admin"})
 	if err != nil {
@@ -491,19 +491,19 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 			return errors.New("no owner to make the first admin")
 		}
 		data, _ := yaml.Marshal(Roster{Admins: owners, Members: []string{}})
-		// templates/namespace-config: members.yaml is its header.
-		files := templates.Files(templates.Namespace)
+		// templates/unit-config: members.yaml is its header.
+		files := templates.Files(templates.Unit)
 		files[MembersFile] += string(data)
-		if err := m.createConfig(ctx, ns, "Who may change this namespace, its apps, and what the agents may do here", "First admins: the namespace's creators", files); err != nil {
+		if err := m.createConfig(ctx, ns, "Who may change this unit, its apps, and what the agents may do here", "First admins: the unit's creators", files); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made, admins %v", ns, owners)
 		if m.Events != nil {
-			m.Events.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindNamespace, Status: events.StatusOK,
-				Namespace: ns, Audience: events.AudienceMembers, Actor: owners[0],
-				Title:  fmt.Sprintf("The namespace %s is set up: its config repo, with %s as its first admin", ns, strings.Join(owners, ", ")),
+			m.Events.Record(ctx, events.Event{Source: events.SourceGateway, Kind: events.KindUnit, Status: events.StatusOK,
+				Unit: ns, Audience: events.AudienceMembers, Actor: owners[0],
+				Title:  fmt.Sprintf("The unit %s is set up: its config repo, with %s as its first admin", ns, strings.Join(owners, ", ")),
 				Detail: "Its channel and its build account follow in moments. Make its repos, and propose its apps in stacks/ of its config.",
-				Key:    "namespace:" + ns + ":" + time.Now().UTC().Format(time.RFC3339)})
+				Key:    "unit:" + ns + ":" + time.Now().UTC().Format(time.RFC3339)})
 		}
 	} else if err != nil {
 		return err
@@ -541,7 +541,7 @@ func (m *Members) namespace(ctx context.Context, ns string, roots []string) erro
 	return m.approvals(ctx, ns, &roster, roots)
 }
 
-// teamRepos gives the teams named every repo of the namespace they lack.
+// teamRepos gives the teams named every repo of the unit they lack.
 // They are made to include all repos, but Gitea misses one made while it
 // makes the team: the team's people could not merge there, and Gitea
 // leaves the team out of that repo's rule (approvals_whitelist_teams), so
@@ -574,7 +574,7 @@ func (m *Members) teamRepos(ctx context.Context, ns string, teams map[string]int
 }
 
 // deleteMerged sets Gitea's default for deleting a pull request's branch
-// when it is merged, in every repo of the namespace (Gitea has no default
+// when it is merged, in every repo of the unit (Gitea has no default
 // for the installation): on, but off in a repo that an app deploys from a
 // branch besides main, such as dev, so merging dev into main in Gitea does
 // not delete dev, and its environment with it, unless the person ticks
@@ -619,16 +619,16 @@ func (m *Members) deleteMerged(ctx context.Context, ns string) {
 }
 
 // platform keeps garrison/config, which holds the agents, for every
-// namespace. It has no members.yaml: root admins approve and merge its
+// unit. It has no members.yaml: root admins approve and merge its
 // changes.
 func (m *Members) platform(ctx context.Context, roots []string) error {
-	ns := PlatformNamespace
+	ns := PlatformUnit
 	teams, err := m.teams(ctx, ns, map[string]string{RootTeam: "admin"})
 	if err != nil {
 		return err
 	}
 	if status, err := m.Gitea.do(ctx, "", http.MethodGet, "/repos/"+ns+"/"+ConfigRepo, nil, nil); status == http.StatusNotFound {
-		if err := m.createConfig(ctx, ns, "Garrison's agents, for every namespace; root admins approve changes", "The operator and the commander", agents.PlatformFiles()); err != nil {
+		if err := m.createConfig(ctx, ns, "Garrison's agents, for every unit; root admins approve changes", "The operator and the commander", agents.PlatformFiles()); err != nil {
 			return err
 		}
 		log.Printf("members: %s/config made", ns)
@@ -645,7 +645,7 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 	return m.approvals(ctx, ns, nil, roots)
 }
 
-// createConfig makes a namespace's config repo with files, in one commit.
+// createConfig makes a unit's config repo with files, in one commit.
 // The repo is made empty, without a branch, so nobody can branch off it
 // until the commit with every file is in. The repo and its files are two
 // requests: should the files not go in (a
@@ -781,8 +781,8 @@ func (m *Members) setRule(ctx context.Context, ns, repo string, rule map[string]
 	return err
 }
 
-// protectApps keeps main of a namespace's other repos, its apps': a
-// namespace of one person pushes and merges there freely; one of more
+// protectApps keeps main of a unit's other repos, its apps': a
+// unit of one person pushes and merges there freely; one of more
 // changes main only by pull requests another of its people approved, so
 // nobody deploys alone what the others have not seen. The platform owns
 // this rule: one set by hand is replaced.
@@ -963,7 +963,7 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 				state = "success"
 			} else if len(uncounted) > 0 {
 				desc = "Gitea does not count the approval of " + strings.Join(uncounted, ", ") +
-					", given before they were in this namespace's team: approve again; " + why
+					", given before they were in this unit's team: approve again; " + why
 			}
 		}
 		if len(desc) > 250 {
@@ -984,7 +984,7 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 	return nil
 }
 
-// Roster reads a namespace's members.yaml on main, for the agent.
+// Roster reads a unit's members.yaml on main, for the agent.
 func (g *Gitea) Roster(ctx context.Context, as, ns string) (string, error) {
 	return g.Read(ctx, as, ns, ConfigRepo, MembersFile)
 }

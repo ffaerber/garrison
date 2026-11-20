@@ -2,9 +2,9 @@
 
 A routine is work an agent does by itself, on a schedule, such as "every
 Monday at 8, check the website answers and tell us". Routines are listed in
-`routines.yaml` of the namespace's config. Like everything there, a new
+`routines.yaml` of the unit's config. Like everything there, a new
 routine is a pull request, and nothing runs until it is merged. What a
-routine finds is posted in the namespace's channel.
+routine finds is posted in the unit's channel.
 
 ## Asking for one
 

@@ -130,7 +130,7 @@ func TestBuilders(t *testing.T) {
 		t.Fatalf("users = %v", f.users)
 	}
 	if _, ok := f.users["oldns-builder"]; ok {
-		t.Error("the build account of a namespace that is gone was kept")
+		t.Error("the build account of a unit that is gone was kept")
 	}
 	if _, ok := f.users["jo-builder"]; !ok {
 		t.Error("a person whose name ends in -builder was removed")

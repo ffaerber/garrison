@@ -30,12 +30,12 @@ const (
 const RestoredProperty = "garrison:restored"
 
 // EnvDataset is the ZFS dataset holding all datasets of an environment:
-// <pool>/ns/<namespace>/stacks/<hostname>.
+// <pool>/ns/<unit>/stacks/<hostname>.
 func EnvDataset(root string, s *stack.Stack, env string) string {
 	if root == "" {
 		root = render.DefaultDataRoot
 	}
-	return strings.TrimPrefix(path.Join(root, s.Namespace, "stacks", s.Hostname(env)), "/")
+	return strings.TrimPrefix(path.Join(root, s.Unit, "stacks", s.Hostname(env)), "/")
 }
 
 // SnapshotStamp names a snapshot by its time, in UTC: 20261113-150405.
@@ -138,7 +138,7 @@ var StopTimeout = 2 * time.Minute
 // snapshots the current state (restore-<stamp>), stops the environment's
 // services and copies each dataset back from the snapshot. Later snapshots
 // are kept, so the restore can be undone. Shares are not restored: they
-// belong to the whole namespace. The caller deploys the environment again
+// belong to the whole unit. The caller deploys the environment again
 // afterwards, which starts its services, whether this succeeded or not; id
 // is recorded on success.
 func RestoreEnv(ctx context.Context, run Runner, root string, s *stack.Stack, env, snapshot, stamp, id string) error {

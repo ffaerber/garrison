@@ -23,10 +23,10 @@ func (a access) Visibility(_ context.Context, who string) (events.Visibility, er
 func server() (*Server, *events.Memory) {
 	m := &events.Memory{}
 	ctx := context.Background()
-	m.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: events.StatusOK, Namespace: "todo", Repo: "app", Commit: "m1", Title: "deployed todo/todo@main"})
-	m.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPush, Namespace: "todo", Repo: "secret", Commit: "s1", Title: "alice pushed to secret"})
-	m.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Namespace: "todo", Repo: "app", PR: 3, Commit: "m1", Title: "carol merged #3 <b>Our todos</b>"})
-	m.Record(ctx, events.Event{Source: events.SourceGateway, Kind: "browse", Status: events.StatusRefused, Namespace: "todo", Audience: events.AudienceMembers, Actor: "bob", Agent: "todo/media", Title: "bob through todo/media: browse was refused"})
+	m.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: events.StatusOK, Unit: "todo", Repo: "app", Commit: "m1", Title: "deployed todo/todo@main"})
+	m.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPush, Unit: "todo", Repo: "secret", Commit: "s1", Title: "alice pushed to secret"})
+	m.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Unit: "todo", Repo: "app", PR: 3, Commit: "m1", Title: "carol merged #3 <b>Our todos</b>"})
+	m.Record(ctx, events.Event{Source: events.SourceGateway, Kind: "browse", Status: events.StatusRefused, Unit: "todo", Audience: events.AudienceMembers, Actor: "bob", Agent: "todo/media", Title: "bob through todo/media: browse was refused"})
 	a := access{
 		"alice": {All: true},
 		"dave":  {Repos: map[string]bool{"todo/app": true, "todo/config": true}},
@@ -95,7 +95,7 @@ func TestLiveUpdates(t *testing.T) {
 	if body := get(s, "alice", "/feed?after=4").Body.String(); strings.Contains(body, "<li") {
 		t.Errorf("nothing new, but:\n%s", body)
 	}
-	m.Record(context.Background(), events.Event{Kind: events.KindPipeline, Namespace: "todo", Repo: "app", Title: "pipeline on main: success"})
+	m.Record(context.Background(), events.Event{Kind: events.KindPipeline, Unit: "todo", Repo: "app", Title: "pipeline on main: success"})
 	body := get(s, "alice", "/feed?after=4").Body.String()
 	if !strings.Contains(body, "pipeline on main") || strings.Contains(body, "<html") || strings.Contains(body, "deployed todo") {
 		t.Errorf("new entries:\n%s", body)

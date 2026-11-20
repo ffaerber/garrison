@@ -1,13 +1,13 @@
-# crud: every kind of thing a namespace holds is made, read, changed and
+# crud: every kind of thing a unit holds is made, read, changed and
 # removed the way people do it (Gitea's API as alice, pull requests to
 # config), and the test checks what the platform does about each: Gitea's
 # teams and accounts, Open WebUI's channels, groups and agents (garrison's,
 # with crud's grants and routines), the
 # deployer's stacks, datasets, secrets and hostnames. No LLM. Sourced by
-# smoke.sh, whose helpers it uses; the namespace is crud.
+# smoke.sh, whose helpers it uses; the unit is crud.
 
 # change_config NS APPROVER PATH=FILE|PATH=- ...: alice proposes these files of
-# the namespace's config in one pull request (- removes the file), APPROVER
+# the unit's config in one pull request (- removes the file), APPROVER
 # ("" for the local admin, a root admin) approves, and alice merges it once
 # the approval check passes. cfg_pr is its number. Fails if a step does,
 # leaving the pull request open.
@@ -82,8 +82,8 @@ for u in alice bob; do chat_login $u; done
 ns=crud
 o=$api/orgs/$ns
 
-echo "# a namespace"
-check "alice creates the namespace crud"   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"crud","visibility":"limited","description":"Made by the crud test"}' "$api/orgs")" = 201
+echo "# a unit"
+check "alice creates the unit crud"   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"crud","visibility":"limited","description":"Made by the crud test"}' "$api/orgs")" = 201
 first_admin() { gitea_api "" "$api/repos/$ns/config/raw/members.yaml" | python3 -c 'import sys,yaml; sys.exit(0 if (yaml.safe_load(sys.stdin) or {}).get("admins") == ["alice"] else 1)'; }
 # Gitea tells nobody of a new organisation; the platform notices within
 # seconds and sets it up at once, not at its loops' next tick.
@@ -96,8 +96,8 @@ check "a channel alice sees"               until_true 20 sees_channel alice $ns
 check "but bob, not in it, does not"       not sees_channel bob crud
 check "and garrison's operator, which bob may use too" until_true 20 sees_model bob garrison/operator
 check "alice opens her dashboard"          until_true 60 home_login alice
-check "whose feed says crud is set up"     until_true 20 in_feed alice ns=$ns "e['kind'] == 'namespace' and e['actor'] == 'alice'"
-check "bob sees the namespace"             grep -q '"username":"crud"' <<<"$(gitea_api bob "$api/orgs?limit=50")"
+check "whose feed says crud is set up"     until_true 20 in_feed alice ns=$ns "e['kind'] == 'unit' and e['actor'] == 'alice'"
+check "bob sees the unit"             grep -q '"username":"crud"' <<<"$(gitea_api bob "$api/orgs?limit=50")"
 check "and reads its config"               test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/repos/$ns/config/raw/members.yaml")" = 200
 check "alice changes its description"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"description":"Changed by the crud test"}' "$o")" = 200
 check "it reads back changed"              grep -q '"description":"Changed by the crud test"' <<<"$(gitea_api bob "$o")"
@@ -164,7 +164,7 @@ echo "# an agent"
 # The agents are garrison's: alice, a root admin, adds one there, and crud
 # gives it rights and a routine in its own config.
 agent_yaml() { put_file "$1" "description: $2\ntools: [list_stacks, read_file]\n${3:-}"; }
-prompt=$(put_file prompt.md 'You help with the notes of a namespace.\n')
+prompt=$(put_file prompt.md 'You help with the notes of a unit.\n')
 check "an agent without its prompt fails the check" refused_by_check garrison "" agents/helper/agent.yaml="$(agent_yaml a0 'Helps with notes')"
 check "alice adds the agent helper to garrison" change_config garrison "" agents/helper/agent.yaml="$(agent_yaml a1 'Helps with notes')" agents/helper/prompt.md="$prompt"
 check "Open WebUI has it, as helper, for bob too" until_true 120 sees_model bob garrison/helper
@@ -229,15 +229,15 @@ check "its hostname is free again"         until_true 60 released
 check "its data is kept"                   zfs list $ds/data
 check "and its secret"                     docker secret inspect crud.token
 
-echo "# taking the namespace away"
+echo "# taking the unit away"
 check "alice adds the app keep"            change_config $ns "" stacks/keep.yaml="$(stack_yaml k1 kept 1Gi)"
 check "it is deployed"                     until_true 300 says keep 'Name: kept'
 check "and an agent with a grant there"    change_config $ns "" grants.yaml="$(put_file k2 '- { agent: operator, repo: notes, level: propose }\n')"
 keeper() { [ "$(user_status agent-$ns-operator)" = 200 ] && unlocked agent-$ns-operator; }
 check "with its account"                   until_true 120 keeper
-check "bob cannot delete the namespace"    test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X DELETE "$o")" = 403
+check "bob cannot delete the unit"    test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X DELETE "$o")" = 403
 for r in notes config; do gitea_api alice -o /dev/null -X DELETE "$api/repos/$ns/$r"; done
-check "alice deletes its repos and the namespace" test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$o")" = 204
+check "alice deletes its repos and the unit" test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$o")" = 204
 check "it is gone"                         test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$o")" = 404
 keep_down() { ! stack_up keep; }
 check "the deployer takes its app down"    until_true 180 keep_down
@@ -252,7 +252,7 @@ no_builder() { [ "$(user_status $ns-builder)" = 404 ]; }
 check "its build account is removed"       until_true 120 no_builder
 check "the agents' accounts there are locked" until_true 120 locked agent-$ns-operator
 
-echo "# the namespace made again"
+echo "# the unit made again"
 check "alice makes crud again"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"crud","visibility":"limited"}' "$api/orgs")" = 201
 check "it gets a fresh config"             until_true 180 first_admin
 check "without the old grants"             test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/$ns/config/contents/grants.yaml")" = 404

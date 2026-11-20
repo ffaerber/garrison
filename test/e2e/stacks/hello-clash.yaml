@@ -1,6 +1,6 @@
 # Claims the hostname "hello", which demo/hello already holds.
 stack: hello
-namespace: other
+unit: other
 entrypoint: web
 services:
   web: { image: traefik/whoami:v1.11, port: 80 }

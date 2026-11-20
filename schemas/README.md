@@ -1,3 +1,3 @@
 # Schemas
 
-JSON Schema for `stack.yaml`, namespace config and change records. Used by the deployer (validation), the UI (generated Config forms) and the agents (valid proposals).
+JSON Schema for `stack.yaml`, unit config and change records. Used by the deployer (validation), the UI (generated Config forms) and the agents (valid proposals).

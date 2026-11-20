@@ -28,7 +28,7 @@ const maxQuestion = 4000
 // only a person can tell it.
 var askPersonSpec = toolSpec{
 	Name: "ask_person",
-	Description: "Asks the person this routine works for a question and waits for the answer: it is posted in the namespace's channel, naming them, and shows on their dashboard. " +
+	Description: "Asks the person this routine works for a question and waits for the answer: it is posted in the unit's channel, naming them, and shows on their dashboard. " +
 		"Use it only for what you cannot find out or decide yourself: a choice, a missing fact, an approval. " +
 		"After calling it, end your turn at once with one line on what you asked; you go on, in this workspace, when they answer, for up to 24 hours.",
 	InputSchema: map[string]any{
@@ -124,7 +124,7 @@ func (s *Server) askPerson(ctx context.Context, c sandbox.Caller, raw json.RawMe
 	}
 	run, _ := json.Marshal(runRecord{StartedBy: c.Run.StartedBy, Chain: c.Run.Chain, Unattended: c.Run.Unattended, Owner: c.Run.Owner})
 	q := &events.Question{
-		At: s.Questions.now(), Namespace: ns, Agent: c.Agent, Person: person, Text: question,
+		At: s.Questions.now(), Unit: ns, Agent: c.Agent, Person: person, Text: question,
 		Channel: posted.Channel, Message: posted.ID, Root: root, User: posted.User,
 		Key: c.Run.Key, Chat: c.Chat, Run: run, Status: events.QuestionWaiting,
 		EventKey: fmt.Sprintf("question:%s:%d", c.Agent, time.Now().UnixNano()),
@@ -162,7 +162,7 @@ func (q *Questions) record(ctx context.Context, x events.Question, status, detai
 		detail = x.Text
 	}
 	s.Events.Record(ctx, events.Event{Source: events.SourceAgents, Kind: events.KindQuestion, Status: status,
-		Namespace: x.Namespace, Audience: events.AudienceMembers, Actor: x.Person, Agent: x.Agent, StartedBy: "agent " + x.Agent,
+		Unit: x.Unit, Audience: events.AudienceMembers, Actor: x.Person, Agent: x.Agent, StartedBy: "agent " + x.Agent,
 		Title:  fmt.Sprintf("%s asks %s: %s", x.Agent, x.Person, title),
 		Detail: detail, Link: s.threadLink(x), Key: x.EventKey})
 }
@@ -302,7 +302,7 @@ func (q *Questions) resume(ctx context.Context, x events.Question) {
 		return
 	}
 	ev := events.Event{Source: events.SourceAgents, Kind: events.KindRoutine, Status: events.StatusRunning,
-		Namespace: x.Namespace, Audience: events.AudienceMembers, Actor: x.Person, Agent: x.Agent, StartedBy: rec.StartedBy,
+		Unit: x.Unit, Audience: events.AudienceMembers, Actor: x.Person, Agent: x.Agent, StartedBy: rec.StartedBy,
 		Title: fmt.Sprintf("%s goes on for %s after their answer", x.Agent, x.Person), Key: fmt.Sprintf("resume:%d", x.ID),
 		Link: s.threadLink(x)}
 	record := func(status, detail string) {
@@ -317,10 +317,10 @@ func (q *Questions) resume(ctx context.Context, x events.Question) {
 	}
 	if err == nil && s.Gitea != nil && rec.Owner != "" {
 		// As when a routine starts: its person must still be one of the
-		// namespace's.
+		// unit's.
 		var role string
-		if role, err = s.Gitea.Role(ctx, x.Namespace, rec.Owner); err == nil && role == "" {
-			err = fmt.Errorf("%s is no longer in %s", rec.Owner, x.Namespace)
+		if role, err = s.Gitea.Role(ctx, x.Unit, rec.Owner); err == nil && role == "" {
+			err = fmt.Errorf("%s is no longer in %s", rec.Owner, x.Unit)
 		}
 	}
 	if err != nil {
@@ -338,7 +338,7 @@ Your question: %s
 
 Their answer: %s
 
-Go on with your task where you stopped. Nobody is watching, as before: your last message is posted in the question's thread, for %s and the namespace's people, so say plainly what you did or found, with links. Ask again with ask_person only if you must.`, x.Person, x.Text, x.Answer, x.Person)
+Go on with your task where you stopped. Nobody is watching, as before: your last message is posted in the question's thread, for %s and the unit's people, so say plainly what you did or found, with links. Ask again with ask_person only if you must.`, x.Person, x.Text, x.Answer, x.Person)
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }
 	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout())
 	defer cancel()

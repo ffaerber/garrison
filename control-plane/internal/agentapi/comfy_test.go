@@ -183,7 +183,7 @@ func TestGenerateMediaRefuses(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		"no project":         {"alice", map[string]any{"project": "demo", "style": "comic", "prompt": "x"}, "<namespace>/<repo>"},
+		"no project":         {"alice", map[string]any{"project": "demo", "style": "comic", "prompt": "x"}, "<unit>/<repo>"},
 		"a style path":       {"alice", map[string]any{"project": "media/demo", "style": "../x", "prompt": "x"}, "style is"},
 		"no prompt":          {"alice", map[string]any{"project": "media/demo", "style": "comic", "prompt": " "}, "prompt is empty"},
 		"too many":           {"alice", map[string]any{"project": "media/demo", "style": "comic", "prompt": "x", "count": 9}, "1 to 8"},

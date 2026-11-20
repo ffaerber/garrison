@@ -68,7 +68,7 @@ var page = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"group":  group,
 	"source": sourceName,
 	"entry":  func(e events.Event, now time.Time, this bool) entry { return entry{E: e, Now: now, This: this} },
-	"card":   func(c changes.Card) string { return changes.Path(c.Namespace, c.Repo, c.Number) },
+	"card":   func(c changes.Card) string { return changes.Path(c.Unit, c.Repo, c.Number) },
 	"join":   func(s []string) string { return strings.Join(s, ", ") },
 	"state": func(s string) string {
 		if s == "" {
@@ -174,7 +174,7 @@ func query(r *http.Request, v events.Visibility) (events.Query, url.Values) {
 	f := url.Values{}
 	q := events.Query{Visibility: v, Limit: 60}
 	if ns := r.URL.Query().Get("ns"); ns != "" {
-		q.Namespace = ns
+		q.Unit = ns
 		f.Set("ns", ns)
 	}
 	switch view := r.URL.Query().Get("view"); view {
@@ -209,7 +209,7 @@ type feedPage struct {
 	Waiting    []events.Event // questions agents asked this person, still open
 	Cards      []changes.Card // pull requests waiting for this person, or theirs
 	Card       *cardView      // the page of one change
-	Namespaces []string
+	Units      []string
 	Views      []struct{ Name, Label string }
 	Filter     url.Values
 	Query      string // the filter, encoded, for the live updates
@@ -246,7 +246,7 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 	if len(es) == q.Limit {
 		p.More = es[len(es)-1].ID
 	}
-	p.Namespaces, _ = s.Events.Namespaces(r.Context(), v)
+	p.Units, _ = s.Events.Units(r.Context(), v)
 	s.waitingFor(r.Context(), v, &p)
 	s.render(w, "page", p)
 }

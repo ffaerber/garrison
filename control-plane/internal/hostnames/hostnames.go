@@ -2,7 +2,7 @@
 //
 // A stack claims exactly the hostnames it declares: one per environment plus
 // one per public service. Nothing is claimed by prefix. Claims are first
-// come, first served across all namespaces, and root can reserve names.
+// come, first served across all units, and root can reserve names.
 package hostnames
 
 import (
@@ -19,7 +19,7 @@ import (
 
 type Claim struct {
 	Hostname    string
-	Namespace   string
+	Unit        string
 	Stack       string
 	Environment string
 	Service     string
@@ -31,7 +31,7 @@ func Of(s *stack.Stack) []Claim {
 	for _, env := range s.EnvironmentNames() {
 		for _, svc := range s.ServiceNames() {
 			if h := s.ServiceHostname(env, svc); h != "" {
-				out = append(out, Claim{h, s.Namespace, s.Name, env, svc})
+				out = append(out, Claim{h, s.Unit, s.Name, env, svc})
 			}
 		}
 	}
@@ -64,13 +64,13 @@ func (r *Registry) Claim(s *stack.Stack) error {
 		}
 		if h, ok := r.held[c.Hostname]; ok && !sameStack(h, c) {
 			errs = append(errs, fmt.Errorf("hostname %q is already held by stack %s/%s (environment %s)",
-				c.Hostname, h.Namespace, h.Stack, h.Environment))
+				c.Hostname, h.Unit, h.Stack, h.Environment))
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	r.Release(s.Namespace, s.Name)
+	r.Release(s.Unit, s.Name)
 	for _, c := range claims {
 		r.held[c.Hostname] = c
 	}
@@ -78,15 +78,15 @@ func (r *Registry) Claim(s *stack.Stack) error {
 }
 
 // Release drops every hostname held by a stack.
-func (r *Registry) Release(namespace, name string) {
+func (r *Registry) Release(unit, name string) {
 	for h, c := range r.held {
-		if c.Namespace == namespace && c.Stack == name {
+		if c.Unit == unit && c.Stack == name {
 			delete(r.held, h)
 		}
 	}
 }
 
-func sameStack(a, b Claim) bool { return a.Namespace == b.Namespace && a.Stack == b.Stack }
+func sameStack(a, b Claim) bool { return a.Unit == b.Unit && a.Stack == b.Stack }
 
 // Load reads the held claims saved by Save. A missing file is an empty registry.
 func (r *Registry) Load(file string) error {

@@ -3,7 +3,7 @@
 // Garrison's ingress key itself. The gate takes only requests that came
 // through Traefik's sign-in (they carry the environment's ingress key),
 // names the person to the app in a header of its own, which nobody can send
-// past it, and lets only the namespace's people change anything.
+// past it, and lets only the unit's people change anything.
 package gate
 
 import (
@@ -68,7 +68,7 @@ func (g *Gate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reads := r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions ||
 		(r.Method == http.MethodPost && slices.Contains(g.ReadPosts, strings.TrimSuffix(p, "/")))
 	if !reads && !slices.Contains(g.Writers, who) {
-		http.Error(w, "only the namespace's people change files here; "+who+" may look and download", http.StatusForbidden)
+		http.Error(w, "only the unit's people change files here; "+who+" may look and download", http.StatusForbidden)
 		return
 	}
 	// The app gets the path the gate decided on.

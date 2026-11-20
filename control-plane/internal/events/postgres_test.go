@@ -20,13 +20,13 @@ func TestPostgres(t *testing.T) {
 	if _, err := pg.Pool.Exec(ctx, "TRUNCATE events RESTART IDENTITY"); err != nil {
 		t.Fatal(err)
 	}
-	app := func(e Event) Event { e.Namespace, e.Repo = "todo", "app"; return e }
-	pg.Record(ctx, Event{Kind: KindRoutine, Namespace: "todo", Audience: AudienceMembers, Actor: "bob", StartedBy: "routine todo/dev/n", Status: StatusRunning, Title: "runs", Key: "r"})
+	app := func(e Event) Event { e.Unit, e.Repo = "todo", "app"; return e }
+	pg.Record(ctx, Event{Kind: KindRoutine, Unit: "todo", Audience: AudienceMembers, Actor: "bob", StartedBy: "routine todo/dev/n", Status: StatusRunning, Title: "runs", Key: "r"})
 	pg.Record(ctx, app(Event{Kind: "propose_patch", StartedBy: "routine todo/dev/n", PR: 7, Title: "proposes"}))
 	pg.Record(ctx, app(Event{Kind: KindPRMerged, PR: 7, Commit: "m", Title: "merged"}))
 	pg.Record(ctx, app(Event{Kind: KindDeploy, Commit: "m", Title: "deployed", Status: StatusOK}))
-	pg.Record(ctx, Event{Kind: KindPush, Namespace: "todo", Repo: "secret", Title: "private", Key: "p"})
-	pg.Record(ctx, Event{Kind: KindPush, Namespace: "todo", Repo: "secret", Title: "private, again", Key: "p"})
+	pg.Record(ctx, Event{Kind: KindPush, Unit: "todo", Repo: "secret", Title: "private", Key: "p"})
+	pg.Record(ctx, Event{Kind: KindPush, Unit: "todo", Repo: "secret", Title: "private, again", Key: "p"})
 	pg.Record(ctx, Event{Kind: KindRoutine, Status: StatusOK, Detail: "done", Key: "r"})
 
 	all := Visibility{All: true}
@@ -62,9 +62,9 @@ func TestPostgres(t *testing.T) {
 	if len(es) != 2 {
 		t.Errorf("after 3: %+v", es)
 	}
-	ns, _ := pg.Namespaces(ctx, outsider)
+	ns, _ := pg.Units(ctx, outsider)
 	if len(ns) != 1 || ns[0] != "todo" {
-		t.Errorf("namespaces: %v", ns)
+		t.Errorf("units: %v", ns)
 	}
 
 	pg.Pool.Exec(ctx, "TRUNCATE routine_state")
@@ -85,7 +85,7 @@ func TestPostgres(t *testing.T) {
 
 	// Questions, and the person's waiting ones in the feed.
 	pg.Pool.Exec(ctx, "TRUNCATE questions RESTART IDENTITY")
-	q := &Question{At: at, Namespace: "todo", Agent: "todo/dev", Person: "bob", Text: "Blue?", Channel: "ch", Message: "m1", Root: "m1",
+	q := &Question{At: at, Unit: "todo", Agent: "todo/dev", Person: "bob", Text: "Blue?", Channel: "ch", Message: "m1", Root: "m1",
 		User: "u-bob", Key: "routine\x00todo/dev/n", Chat: "routine:todo/dev/n", Run: []byte(`{"owner":"bob"}`), EventKey: "question:1", Status: QuestionWaiting}
 	if err := pg.AddQuestion(ctx, q); err != nil || q.ID != 1 {
 		t.Fatalf("add: %v %d", err, q.ID)
@@ -104,8 +104,8 @@ func TestPostgres(t *testing.T) {
 	if a, _ := pg.Questions(ctx, QuestionAnswered); len(a) != 1 || a[0].Answer != "Green" || !a[0].Answered.Equal(at.Add(time.Hour)) {
 		t.Errorf("answered: %+v", a)
 	}
-	pg.Record(ctx, Event{Kind: KindQuestion, Namespace: "todo", Audience: AudienceMembers, Actor: "bob", Status: StatusWaiting, Title: "asks bob", Key: "q:b"})
-	pg.Record(ctx, Event{Kind: KindQuestion, Namespace: "todo", Audience: AudienceMembers, Actor: "carol", Status: StatusWaiting, Title: "asks carol", Key: "q:c"})
+	pg.Record(ctx, Event{Kind: KindQuestion, Unit: "todo", Audience: AudienceMembers, Actor: "bob", Status: StatusWaiting, Title: "asks bob", Key: "q:b"})
+	pg.Record(ctx, Event{Kind: KindQuestion, Unit: "todo", Audience: AudienceMembers, Actor: "carol", Status: StatusWaiting, Title: "asks carol", Key: "q:c"})
 	mine, _ := pg.List(ctx, Query{Visibility: all, Kinds: []string{KindQuestion}, Actor: "bob", Status: StatusWaiting})
 	if len(mine) != 1 || mine[0].Title != "asks bob" {
 		t.Errorf("bob's: %+v", mine)

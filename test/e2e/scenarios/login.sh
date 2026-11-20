@@ -48,7 +48,7 @@ check "alice is shown as alice"            grep -q '"name":"alice"' <<<"$(chat_a
 check "alice is an Open WebUI admin"       grep -q '"role":"admin"' <<<"$(chat_api alice "$chat/api/v1/auths/")"
 check "bob is a user"                      grep -q '"role":"user"'  <<<"$(chat_api bob "$chat/api/v1/auths/")"
 has_agent() { chat_api bob "$chat/api/models" | grep -q "\"id\":\"$1\""; }
-check "bob has the operator agent of the namespace garrison" until_true 180 has_agent garrison/operator
+check "bob has the operator agent of the unit garrison" until_true 180 has_agent garrison/operator
 check "and the commander, which finds the agent for a task" has_agent garrison/commander
 check "the agents come from the agent service" grep -q '"owned_by":"garrison"' <<<"$(chat_api bob "$chat/api/models")"
 check "Open WebUI has no LLM key" \
@@ -60,7 +60,7 @@ check "it refuses a made-up token" \
 check "the agent service is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' "https://agents.$DOMAIN/v1/models")" = 404
 check "garrison has its config repo with the operator" \
   test "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/garrison/config/raw/agents/operator/agent.yaml")" = 200
-check "bob sees the channel of the namespace garrison" until_true 120 system_channel
+check "bob sees the channel of the unit garrison" until_true 120 system_channel
 cid=$(system_channel)
 check "bob cannot rename it" \
   test "$(chat_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-channel"}' "$chat/api/v1/channels/$cid/update")" = 403

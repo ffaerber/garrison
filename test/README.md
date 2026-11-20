@@ -44,11 +44,11 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; the test people; the system stack checked (`system`) |
 | `login` | fixture | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do |
 | `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page |
-| `crud` | scenario | Every kind of thing a namespace holds, made, read, changed and removed without the LLM |
-| `ui` | scenario | In the browser, as alice, bob and the admin: the namespace `todo` and its app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. `docs/walkthrough/make.py` takes the walkthrough's pictures from its screenshots |
+| `crud` | scenario | Every kind of thing a unit holds, made, read, changed and removed without the LLM |
+| `ui` | scenario | In the browser, as alice, bob and the admin: the unit `todo` and its app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. `docs/walkthrough/make.py` takes the walkthrough's pictures from its screenshots |
 | `agent` | fixture | Bob and alice ask the agents of `garrison` in its channel: logs, metrics, proposals, an LLM provider, the scout's browser under gVisor |
-| `media` | scenario | A namespace's media library and file browser, `@media` with a fake ComfyUI (a real one with `COMFYUI=host`), a short, and the chain `software-updates` |
-| `deploy` | fixture | The namespace `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
+| `media` | scenario | A unit's media library and file browser, `@media` with a fake ComfyUI (a real one with `COMFYUI=host`), a short, and the chain `software-updates` |
+| `deploy` | fixture | The unit `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
 | `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
 | `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
 | `team` | fixture | Carol an admin and bob a member, by a config pull request; the developer, tester and desk in `garrison/config`, with their grants in todo. No LLM |

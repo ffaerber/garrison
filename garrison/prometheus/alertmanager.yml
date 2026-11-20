@@ -3,7 +3,7 @@
 # secret alerts-token: the agents' sandboxes can reach that service too.
 route:
   receiver: garrison
-  group_by: [alertname, namespace, app, environment, service]
+  group_by: [alertname, unit, app, environment, service]
   group_wait: 10s
   group_interval: 1m
   repeat_interval: 4h

@@ -17,7 +17,7 @@ import (
 // rootKeys: alice, a root admin, keeps garrison's keys.
 type rootKeys struct{ values map[string]string }
 
-func (f *rootKeys) Namespaces(context.Context, string) ([]string, error) { return nil, nil }
+func (f *rootKeys) Units(context.Context, string) ([]string, error) { return nil, nil }
 func (f *rootKeys) May(_ context.Context, ns, p string) (bool, error) {
 	return ns == "garrison" && p == "alice", nil
 }

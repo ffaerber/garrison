@@ -3,9 +3,9 @@
 // tools, skills) and prompt.md, and skills shared by them under skills/.
 // Skills use the Agent Skills format: a folder with SKILL.md.
 //
-// Each agent works in every namespace: in a namespace it is an instance,
-// <namespace>/<agent>, with the rights (grants.yaml) and routines
-// (routines.yaml) that namespace's config repo gives it.
+// Each agent works in every unit: in a unit it is an instance,
+// <unit>/<agent>, with the rights (grants.yaml) and routines
+// (routines.yaml) that unit's config repo gives it.
 package agents
 
 import (
@@ -31,45 +31,45 @@ const (
 	// OperatorName is the agent garrison has unless its config repo says
 	// otherwise.
 	OperatorName = "operator"
-	// GrantsFile and RoutinesFile, in a namespace's config repo, give
+	// GrantsFile and RoutinesFile, in a unit's config repo, give
 	// garrison's agents rights and routines there.
 	GrantsFile   = "grants.yaml"
 	RoutinesFile = "routines.yaml"
 	// CommanderName is the agent of garrison that finds the agent for a task.
 	CommanderName = "commander"
-	// PlatformNamespace is the platform's own namespace.
-	PlatformNamespace = "garrison"
+	// PlatformUnit is the platform's own unit.
+	PlatformUnit = "garrison"
 	// AnyAgent, as agents: any, lets an agent ask every agent the person may
 	// use. Only garrison's agents, which root admins approve, may.
 	AnyAgent  = "any"
 	maxPrompt = 32000
 )
 
-// Agent is one of garrison's agents, working in a namespace: its instance
+// Agent is one of garrison's agents, working in a unit: its instance
 // there.
 type Agent struct {
-	Namespace   string // where it works: its rights, routines and channel
+	Unit        string // where it works: its rights, routines and channel
 	Name        string
 	Description string
 	Model       string   // empty: the platform's default
 	Tools       []string // gateway tools it may use
 	Prompt      string   // prompt.md
 	Skills      []Skill  // shared ones it names, then its own
-	Visible     string   // members: only the namespace's people; empty: as its repos (WorksOn)
+	Visible     string   // members: only the unit's people; empty: as its repos (WorksOn)
 	Asks        []string // agents it may ask for work, by name
-	Grants      []Grant  // rights of its own in Namespace (grants.yaml)
+	Grants      []Grant  // rights of its own in Unit (grants.yaml)
 	Routines    []Routine
 	Internet    Internet // what its sandbox reaches through the proxy
 	Chains      []Chain  // the chains of command it is part of; every one for the commander
 }
 
-// ID is the instance: <namespace>/<agent>. Garrison's, garrison/<agent>, is
+// ID is the instance: <unit>/<agent>. Garrison's, garrison/<agent>, is
 // the model id in the chat.
-func (a Agent) ID() string { return a.Namespace + "/" + a.Name }
+func (a Agent) ID() string { return a.Unit + "/" + a.Name }
 
 // DisplayName is what people see and type after @ in the chat: the agent's
 // name. It is the same agent in every channel, working in the channel's
-// namespace.
+// unit.
 func (a Agent) DisplayName() string { return a.Name }
 
 // NameOf is the agent's name in an ID or a name: operator for
@@ -131,7 +131,7 @@ type config struct {
 	Agents      askList  `yaml:"agents,omitempty"`
 	Internet    Internet `yaml:"internet,omitempty"`
 	Enabled     *bool    `yaml:"enabled,omitempty"`
-	// Not here any more: each namespace gives the agent these in its own
+	// Not here any more: each unit gives the agent these in its own
 	// config repo, or none.
 	Repos    any `yaml:"repos,omitempty"`
 	Grants   any `yaml:"grants,omitempty"`
@@ -181,21 +181,21 @@ func (l askList) MarshalYAML() (any, error) {
 	return []string(l), nil
 }
 
-// Load reads the agents as they work in namespace: garrison's agents, from
+// Load reads the agents as they work in unit: garrison's agents, from
 // platform (garrison's config repo), with the grants and routines of f
-// (namespace's config repo; platform itself for garrison). tools are the
+// (unit's config repo; platform itself for garrison). tools are the
 // names agents may list. Problems name what is wrong with each agent, skill,
 // grant or routine that is left out; garrison's own problems only for
 // garrison. err is for failing to read at all.
-func Load(ctx context.Context, platform, f Files, namespace string, tools []string) ([]Agent, []string, error) {
+func Load(ctx context.Context, platform, f Files, unit string, tools []string) ([]Agent, []string, error) {
 	defs, problems, err := Definitions(ctx, platform, tools)
 	if err != nil {
 		return nil, nil, err
 	}
-	if namespace != PlatformNamespace {
+	if unit != PlatformUnit {
 		problems = nil // garrison's to fix, in its own pull requests
 		if _, err := f.List(ctx, Dir); err == nil {
-			problems = append(problems, Dir+"/: agents are defined in garrison/config only, and work in every namespace; remove this folder, and give them rights and routines here in "+GrantsFile+" and "+RoutinesFile)
+			problems = append(problems, Dir+"/: agents are defined in garrison/config only, and work in every unit; remove this folder, and give them rights and routines here in "+GrantsFile+" and "+RoutinesFile)
 		} else if !errors.Is(err, ErrNotExist) {
 			return nil, nil, err
 		}
@@ -204,15 +204,15 @@ func Load(ctx context.Context, platform, f Files, namespace string, tools []stri
 	if err != nil {
 		return nil, nil, err
 	}
-	return Bind(defs, namespace, grants, routines), append(problems, more...), nil
+	return Bind(defs, unit, grants, routines), append(problems, more...), nil
 }
 
-// Bind makes the instances of garrison's agents in namespace, each with its
+// Bind makes the instances of garrison's agents in unit, each with its
 // grants and routines there.
-func Bind(defs []Agent, namespace string, grants map[string][]Grant, routines map[string][]Routine) []Agent {
+func Bind(defs []Agent, unit string, grants map[string][]Grant, routines map[string][]Routine) []Agent {
 	out := make([]Agent, 0, len(defs))
 	for _, d := range defs {
-		d.Namespace = namespace
+		d.Unit = unit
 		d.Grants = grants[d.Name]
 		d.Routines = routines[d.Name]
 		out = append(out, d)
@@ -220,7 +220,7 @@ func Bind(defs []Agent, namespace string, grants map[string][]Grant, routines ma
 	return out
 }
 
-// Bindings reads a namespace's grants.yaml and routines.yaml: lists, each
+// Bindings reads a unit's grants.yaml and routines.yaml: lists, each
 // entry naming one of garrison's agents (defs) with agent. Entries that are
 // wrong are left out, and named in problems.
 func Bindings(ctx context.Context, f Files, defs []Agent) (map[string][]Grant, map[string][]Routine, []string, error) {
@@ -325,10 +325,10 @@ func decodeStrict(raw string, out any) error {
 // are defined, working in garrison. Without an agents folder, garrison has
 // the operator, with every tool.
 func Definitions(ctx context.Context, f Files, tools []string) (out []Agent, problems []string, err error) {
-	namespace := PlatformNamespace
+	unit := PlatformUnit
 	entries, err := f.List(ctx, Dir)
 	if errors.Is(err, ErrNotExist) {
-		return []Agent{Operator(namespace, tools)}, nil, nil
+		return []Agent{Operator(unit, tools)}, nil, nil
 	}
 	if err != nil {
 		return nil, nil, err
@@ -341,7 +341,7 @@ func Definitions(ctx context.Context, f Files, tools []string) (out []Agent, pro
 		if e.Type != "dir" {
 			continue // e.g. a README
 		}
-		a, why, err := load(ctx, f, namespace, e.Name, tools, shared)
+		a, why, err := load(ctx, f, unit, e.Name, tools, shared)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -381,7 +381,7 @@ func Definitions(ctx context.Context, f Files, tools []string) (out []Agent, pro
 	return kept, append(problems, why...), nil
 }
 
-func load(ctx context.Context, f Files, namespace, name string, tools []string, shared map[string]Skill) (Agent, []string, error) {
+func load(ctx context.Context, f Files, unit, name string, tools []string, shared map[string]Skill) (Agent, []string, error) {
 	var why []string
 	if !agentName.MatchString(name) || len(name) > 40 {
 		return Agent{}, []string{"the folder name must be lowercase letters, digits and dashes, at most 40"}, nil
@@ -399,7 +399,7 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 	}
 	for field, n := range map[string]any{"repos": c.Repos, "grants": c.Grants, "routines": c.Routines} {
 		if n != nil {
-			where := map[string]string{"repos": "it clones what it needs", "grants": "each namespace gives them in " + GrantsFile + " of its config repo", "routines": "each namespace gives them in " + RoutinesFile + " of its config repo"}[field]
+			where := map[string]string{"repos": "it clones what it needs", "grants": "each unit gives them in " + GrantsFile + " of its config repo", "routines": "each unit gives them in " + RoutinesFile + " of its config repo"}[field]
 			why = append(why, fmt.Sprintf("%s: %s is not part of an agent: %s", ConfigFile, field, where))
 		}
 	}
@@ -434,7 +434,7 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 		seen[t] = true
 	}
 	if c.Visible != "" && c.Visible != VisibleMembers {
-		why = append(why, fmt.Sprintf("visible can only be members, to keep the agent to the namespace's people; without it the agent follows its repos: for everyone, unless one is private. Not %q", c.Visible))
+		why = append(why, fmt.Sprintf("visible can only be members, to keep the agent to the unit's people; without it the agent follows its repos: for everyone, unless one is private. Not %q", c.Visible))
 	}
 	asks, w := checkAsks(name, c.Agents)
 	why = append(why, w...)
@@ -468,7 +468,7 @@ func load(ctx context.Context, f Files, namespace, name string, tools []string, 
 		return Agent{}, nil, nil // switched off: as if it were not there
 	}
 	return Agent{
-		Namespace: namespace, Name: name, Description: c.Description, Model: c.Model,
+		Unit: unit, Name: name, Description: c.Description, Model: c.Model,
 		Tools: []string(c.Tools), Prompt: prompt, Skills: skills,
 		Visible: c.Visible, Asks: asks, Internet: c.Internet,
 	}, nil, nil
@@ -541,10 +541,10 @@ func ParseSkill(raw string) (Skill, error) {
 
 // Operator is garrison's agent when its config repo has no agents folder:
 // the operator, with every tool.
-func Operator(namespace string, tools []string) Agent {
+func Operator(unit string, tools []string) Agent {
 	return Agent{
-		Namespace: namespace, Name: OperatorName,
-		Description: "Looks at a namespace and proposes changes to it",
+		Unit: unit, Name: OperatorName,
+		Description: "Looks at a unit and proposes changes to it",
 		Tools:       tools, Prompt: OperatorPrompt,
 	}
 }
@@ -557,16 +557,16 @@ var OperatorPrompt = templates.File(templates.Platform, Dir+"/"+OperatorName+"/"
 
 // Platform is how Garrison works, in every agent's system prompt.
 const Platform = `How Garrison works:
-- A namespace is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people.
-- The agents are all garrison's, folders under agents/ in garrison/config (agent.yaml, prompt.md), which only root admins change; each works in every namespace, mentioned by its name (@operator) in the namespace's channel. A namespace gives them rights of their own in grants.yaml and routines (work they start by themselves: on a schedule, on a push, on an alert) in routines.yaml of its config, each entry naming the agent. An agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
+- A unit is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people.
+- The agents are all garrison's, folders under agents/ in garrison/config (agent.yaml, prompt.md), which only root admins change; each works in every unit, mentioned by its name (@operator) in the unit's channel. A unit gives them rights of their own in grants.yaml and routines (work they start by themselves: on a schedule, on a push, on an alert) in routines.yaml of its config, each entry naming the agent. An agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
 - More models come from another LLM provider, an OpenAI-compatible API: a root admin adds it with add_provider, a pull request on llm/providers.yaml; once merged, its models appear in llm/models.yaml, turned off until enabled. Its API key is set only on the dashboard's Models page: never ask for one, and never repeat or use one a person pastes into the chat; tell them to replace it at the provider, as the chat keeps it.
-- The namespace garrison is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into garrison.
-- A namespace's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into garrison.
+- The unit garrison is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a compose.yaml, which only root admins change. Never put an app into garrison.
+- A unit's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into garrison.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
-- A namespace's media library is its share media: once a stack mounts it, its agents see it at /data/media. A file browser over it is stacks/files.yaml (any name), with image "{{registry}}/garrison/files:current", port 8080, env GARRISON_WRITERS: "{{members}}", volumes library: { share: media, path: /srv } and data: { dataset: files, size: 1Gi, path: /database }, and main: { private: true }: everyone signed in looks, the namespace's people change files.
-- An app with its own code has a repo with it (code, Dockerfile, tests; nothing of Garrison) and names it as source. Then each branch of that repo named as an environment is deployed at its newest commit (dev as https://dev-<name>.<domain>), with an environment preview each open pull request too (https://pr-<number>-<name>.<domain>), and {{registry}}/<namespace>/<repo>:{{commit}} is the image its pipeline built for that commit.
-- A new app: a namespace for it if it needs one (create_namespace; only root admins may, so ask whether an existing one fits), a repo only for code of its own (create_repo; template todo gives a todo app on Postgres with its tests, Dockerfile and pipeline, ready to build, and its README the stack to propose), then propose stacks/<name>.yaml in config. Changes to config need the approval of an admin of the namespace; it runs once merged.
-- stacks/<name>.yaml, in full (nothing else is allowed), here config/stacks/immich.yaml of the namespace photos:
+- A unit's media library is its share media: once a stack mounts it, its agents see it at /data/media. A file browser over it is stacks/files.yaml (any name), with image "{{registry}}/garrison/files:current", port 8080, env GARRISON_WRITERS: "{{members}}", volumes library: { share: media, path: /srv } and data: { dataset: files, size: 1Gi, path: /database }, and main: { private: true }: everyone signed in looks, the unit's people change files.
+- An app with its own code has a repo with it (code, Dockerfile, tests; nothing of Garrison) and names it as source. Then each branch of that repo named as an environment is deployed at its newest commit (dev as https://dev-<name>.<domain>), with an environment preview each open pull request too (https://pr-<number>-<name>.<domain>), and {{registry}}/<unit>/<repo>:{{commit}} is the image its pipeline built for that commit.
+- A new app: a unit for it if it needs one (create_unit; only root admins may, so ask whether an existing one fits), a repo only for code of its own (create_repo; template todo gives a todo app on Postgres with its tests, Dockerfile and pipeline, ready to build, and its README the stack to propose), then propose stacks/<name>.yaml in config. Changes to config need the approval of an admin of the unit; it runs once merged.
+- stacks/<name>.yaml, in full (nothing else is allowed), here config/stacks/immich.yaml of the unit photos:
     entrypoint: server         # the service that gets the hostname; it needs a port
     services:
       server:
@@ -579,7 +579,7 @@ const Platform = `How Garrison works:
         secrets: [db-password]   # made by the deployer, one per environment, at /run/secrets/<name>
         volumes:
           upload: { dataset: upload, size: 500Gi, path: /usr/src/app/upload }   # a ZFS dataset of its own per environment
-          library: { share: photos, readonly: true }                          # a library shared by the namespace's stacks
+          library: { share: photos, readonly: true }                          # a library shared by the unit's stacks
         resources: { memory: 2Gi }
         devices: [gpu]
       redis:
@@ -591,7 +591,7 @@ const Platform = `How Garrison works:
         volumes: { data: { dataset: db, size: 20Gi, path: /var/lib/postgresql/data } }
     environments:                # private puts it behind the sign-in (Keycloak)
       main: { private: true }
-  With code of its own, add source: <repo>, take image: "{{registry}}/<namespace>/<repo>:{{commit}}" for it, and add environments such as dev and preview, which only a source has.
+  With code of its own, add source: <repo>, take image: "{{registry}}/<unit>/<repo>:{{commit}}" for it, and add environments such as dev and preview, which only a source has.
 - An environment other than main runs only once the source repo has its branch: dev deploys the branch dev, at https://dev-<hostname>.<domain>. A stack that declares dev while the repo has no dev branch shows nothing there (404). Asked to run or deploy it, make the branch with create_branch (from main unless they say otherwise), as the person, or, without that tool, ask an agent that has it (the operator); do not propose the stack again, and do not send the person to Gitea for it.
 - Another service with a port can have an address of its own: public: api makes it https://<hostname>-api.<domain>. The entrypoint has the hostname already. Services without a port are reachable only by the others.
 - Data: each environment's datasets are snapshotted before every redeploy (deploy-…) and hourly, daily and monthly (autosnap_…); list_snapshots shows them. To bring an app's data back, propose restores/<name>.yaml in config, three lines: stack: <stack name>, environment: main (or dev), snapshot: <as listed>. Once merged, the app stops, its data is copied back and it starts again; what was written since is lost but kept in a restore-… snapshot, so a restore can itself be undone. Shares are not restored. Tell the person what will be lost before proposing it.
@@ -617,10 +617,10 @@ func PlatformFiles() map[string]string {
 // skills, then the platform's rules, which a prompt cannot take back.
 func System(a Agent, domain string) string {
 	var b strings.Builder
-	if a.Namespace == PlatformNamespace {
-		fmt.Fprintf(&b, "You are %s, an agent of Garrison at %s. Here you work in no namespace in particular: work in the one the person names (ask if it is unclear) and pass it to every tool that takes one; garrison is the platform itself.\n\n", a.Name, domain)
+	if a.Unit == PlatformUnit {
+		fmt.Fprintf(&b, "You are %s, an agent of Garrison at %s. Here you work in no unit in particular: work in the one the person names (ask if it is unclear) and pass it to every tool that takes one; garrison is the platform itself.\n\n", a.Name, domain)
 	} else {
-		fmt.Fprintf(&b, "You are %s, an agent of Garrison at %s, here working in the namespace %q. Pass namespace %q to every tool that takes one, unless the person names another.\n\n", a.Name, domain, a.Namespace, a.Namespace)
+		fmt.Fprintf(&b, "You are %s, an agent of Garrison at %s, here working in the unit %q. Pass unit %q to every tool that takes one, unless the person names another.\n\n", a.Name, domain, a.Unit, a.Unit)
 	}
 	b.WriteString(strings.TrimSpace(a.Prompt))
 	b.WriteString("\n\n" + Platform)
@@ -638,7 +638,7 @@ func System(a Agent, domain string) string {
 	b.WriteString(chainsPrompt(a))
 	merges := slices.Contains(a.Tools, "merge_change") && slices.ContainsFunc(a.Grants, func(g Grant) bool { return Rank(g.Level) >= Rank(LevelMerge) })
 	if len(a.Grants) > 0 {
-		b.WriteString("\nYour grants: rights of your own, in " + a.Namespace + ", each only for requests of the people named:\n")
+		b.WriteString("\nYour grants: rights of your own, in " + a.Unit + ", each only for requests of the people named:\n")
 		for _, g := range a.Grants {
 			fmt.Fprintf(&b, "- %s", g.Repo)
 			switch g.Level {

@@ -125,9 +125,9 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 <form class="filters" method="get" action="/">
   <nav class="tabs" aria-label="Show">{{$f := .Filter}}{{range .Views}}<a href="?{{if $f.Get "ns"}}ns={{$f.Get "ns"}}&amp;{{end}}view={{.Name}}" class="{{if eq .Name ($f.Get "view")}}on{{end}}">{{.Label}}</a>{{end}}</nav>
   <input type="hidden" name="view" value="{{.Filter.Get "view"}}">
-  <select name="ns" aria-label="Namespace" onchange="this.form.submit()">
-    <option value="">All namespaces</option>
-    {{range .Namespaces}}<option value="{{.}}"{{if eq . ($f.Get "ns")}} selected{{end}}>{{.}}</option>{{end}}
+  <select name="ns" aria-label="Unit" onchange="this.form.submit()">
+    <option value="">All units</option>
+    {{range .Units}}<option value="{{.}}"{{if eq . ($f.Get "ns")}} selected{{end}}>{{.}}</option>{{end}}
   </select>
   <input type="search" name="q" value="{{.Filter.Get "q"}}" placeholder="Search titles, people, agents, repos">
   <span class="live" id="live" title="New entries appear on their own"><i></i><span>live</span></span>
@@ -226,7 +226,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
     <span class="mark g-review {{if .Ready}}ok{{else}}s-waiting waiting{{end}}" title="change{{if .Ready}}, ready{{end}}"></span>
     <div>
       <a class="title" href="{{card .}}">{{.Title}}</a>
-      <div class="meta"><span class="chip">{{.Namespace}}/{{.Repo}}</span><span>{{if .Mine}}yours{{else}}by {{.Author}}{{end}}</span><span>· {{.Waits}}</span></div>
+      <div class="meta"><span class="chip">{{.Unit}}/{{.Repo}}</span><span>{{if .Mine}}yours{{else}}by {{.Author}}{{end}}</span><span>· {{.Waits}}</span></div>
     </div>
     <time class="when" datetime="{{iso .Created}}" title="{{stamp .Created}}">{{ago $now .Created}}</time>
   </li>{{end}}</ol></div>
@@ -240,7 +240,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
     <a class="title" href="/e/{{$e.ID}}">{{$e.Title}}</a>
     <div class="meta">
       {{if ne $e.Status "info"}}{{if ne $e.Status "ok"}}<span class="status {{$e.Status}}">{{$e.Status}}</span>{{end}}{{end}}
-      {{if $e.Namespace}}<a class="chip" href="/?ns={{$e.Namespace}}">{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}</a>{{else}}<span class="chip">garrison</span>{{end}}
+      {{if $e.Unit}}<a class="chip" href="/?ns={{$e.Unit}}">{{$e.Unit}}{{if $e.Repo}}/{{$e.Repo}}{{end}}</a>{{else}}<span class="chip">garrison</span>{{end}}
       {{if $e.Agent}}<span class="chip">{{$e.Agent}}</span>{{end}}
       <span>{{$e.Kind}}</span>
       {{if $e.Detail}}{{if not .This}}<span title="{{$e.Detail}}">· details</span>{{end}}{{end}}
@@ -256,7 +256,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   <h1>{{$e.Title}}</h1>
   <dl>
     <dt>When</dt><dd><time datetime="{{iso $e.At}}">{{stamp $e.At}}</time> ({{ago $now $e.At}}){{if ne $e.Updated $e.At}}, last changed {{stamp $e.Updated}}{{end}}</dd>
-    <dt>Where</dt><dd>{{if $e.Namespace}}{{$e.Namespace}}{{if $e.Repo}}/{{$e.Repo}}{{end}}{{else}}Garrison itself (garrison){{end}}</dd>
+    <dt>Where</dt><dd>{{if $e.Unit}}{{$e.Unit}}{{if $e.Repo}}/{{$e.Repo}}{{end}}{{else}}Garrison itself (garrison){{end}}</dd>
     {{if $e.Actor}}<dt>For</dt><dd>{{$e.Actor}}</dd>{{end}}
     {{if $e.Agent}}<dt>Agent</dt><dd>{{$e.Agent}}</dd>{{end}}
     {{if $e.StartedBy}}<dt>Started by</dt><dd>{{$e.StartedBy}}</dd>{{end}}
@@ -277,7 +277,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 {{if .Notice}}<div class="notice" style="margin-top:10px">{{.Notice}}{{if $c.Merged}}{{if $c.Deploys}} The deployer takes it from here: it shows up in the feed as it deploys.{{end}}{{end}}</div>{{end}}
 {{if .Error}}<div class="error" style="margin-top:10px">{{.Error}}</div>{{end}}
 <div class="panel head card" style="margin-top:10px">
-  <div class="meta"><span class="chip">{{$c.Namespace}}/{{$c.Repo}}</span><span>#{{$c.Number}}</span><span>into {{$c.Base}}</span></div>
+  <div class="meta"><span class="chip">{{$c.Unit}}/{{$c.Repo}}</span><span>#{{$c.Number}}</span><span>into {{$c.Base}}</span></div>
   <h1>{{$c.Title}}</h1>
   <p class="says">{{if $c.Mine}}You proposed it{{else}}{{$c.Author}} proposed it{{end}}. {{$c.Waits}}</p>
   <h2>What it changes</h2>
@@ -328,15 +328,15 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 
 {{define "secrets"}}
 <h1>Secrets</h1>
-<p class="note">Keys, passwords and tokens for a namespace's apps. A value is encrypted as you save it, and nobody can read it back, here or in Git: it can only be replaced. An app's main environment gets each secret its stack file names under <code>secrets:</code>, as the file <code>/run/secrets/&lt;name&gt;</code>; its other environments get values of their own, so code not yet merged never sees one.</p>
+<p class="note">Keys, passwords and tokens for a unit's apps. A value is encrypted as you save it, and nobody can read it back, here or in Git: it can only be replaced. An app's main environment gets each secret its stack file names under <code>secrets:</code>, as the file <code>/run/secrets/&lt;name&gt;</code>; its other environments get values of their own, so code not yet merged never sees one.</p>
 {{if .Notice}}<div class="notice">{{.Notice}}</div>{{end}}
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-{{if not .Namespaces}}
-<div class="panel empty">Only a namespace's admins and root admins manage its secrets, and you are neither in any namespace.</div>
+{{if not .Units}}
+<div class="panel empty">Only a unit's admins and root admins manage its secrets, and you are neither in any unit.</div>
 {{else}}
 <form class="filters" method="get" action="/secrets">
-  <select name="ns" aria-label="Namespace" onchange="this.form.submit()">
-    {{$ns := .NS}}{{range .Namespaces}}<option value="{{.}}"{{if eq . $ns}} selected{{end}}>{{.}}</option>{{end}}
+  <select name="ns" aria-label="Unit" onchange="this.form.submit()">
+    {{$ns := .NS}}{{range .Units}}<option value="{{.}}"{{if eq . $ns}} selected{{end}}>{{.}}</option>{{end}}
   </select>
   <noscript><button>Show</button></noscript>
 </form>

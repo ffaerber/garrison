@@ -11,12 +11,12 @@ import (
 // Question is what an agent asked a person, in a run nobody watched: the
 // run waits for the answer, then goes on where it stopped.
 type Question struct {
-	ID        int64
-	At        time.Time
-	Namespace string
-	Agent     string // namespace/name
-	Person    string // whom it asks
-	Text      string
+	ID     int64
+	At     time.Time
+	Unit   string
+	Agent  string // unit/name
+	Person string // whom it asks
+	Text   string
 	// Where it was posted: an Open WebUI channel, the message, the thread it
 	// is in (itself, unless asked in an earlier question's thread), and the
 	// person's Open WebUI user, whose reply there after it is the answer.
@@ -51,7 +51,7 @@ const questionSchema = `
 CREATE TABLE IF NOT EXISTS questions (
   id        bigserial PRIMARY KEY,
   at        timestamptz NOT NULL,
-  namespace text NOT NULL,
+  unit text NOT NULL,
   agent     text NOT NULL,
   person    text NOT NULL,
   text      text NOT NULL,
@@ -74,13 +74,13 @@ func (p *Postgres) AddQuestion(ctx context.Context, q *Question) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	return p.Pool.QueryRow(ctx, `INSERT INTO questions
-(at, namespace, agent, person, text, channel, message, root, owui_user, key, chat, run, event_key, status)
+(at, unit, agent, person, text, channel, message, root, owui_user, key, chat, run, event_key, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-		q.At.UTC(), q.Namespace, q.Agent, q.Person, q.Text, q.Channel, q.Message, q.Root, q.User, []byte(q.Key), q.Chat, []byte(q.Run), q.EventKey, q.Status).Scan(&q.ID)
+		q.At.UTC(), q.Unit, q.Agent, q.Person, q.Text, q.Channel, q.Message, q.Root, q.User, []byte(q.Key), q.Chat, []byte(q.Run), q.EventKey, q.Status).Scan(&q.ID)
 }
 
 func (p *Postgres) Questions(ctx context.Context, status string) ([]Question, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT id, at, namespace, agent, person, text, channel, message, root, owui_user, key, chat, run, event_key, status, answer, answered
+	rows, err := p.Pool.Query(ctx, `SELECT id, at, unit, agent, person, text, channel, message, root, owui_user, key, chat, run, event_key, status, answer, answered
 FROM questions WHERE status = $1 ORDER BY id`, status)
 	if err != nil {
 		return nil, err
@@ -91,7 +91,7 @@ FROM questions WHERE status = $1 ORDER BY id`, status)
 		var q Question
 		var run, key []byte
 		var answered *time.Time
-		if err := rows.Scan(&q.ID, &q.At, &q.Namespace, &q.Agent, &q.Person, &q.Text, &q.Channel, &q.Message, &q.Root, &q.User,
+		if err := rows.Scan(&q.ID, &q.At, &q.Unit, &q.Agent, &q.Person, &q.Text, &q.Channel, &q.Message, &q.Root, &q.User,
 			&key, &q.Chat, &run, &q.EventKey, &q.Status, &q.Answer, &answered); err != nil {
 			return nil, err
 		}

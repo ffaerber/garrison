@@ -25,4 +25,4 @@ The LLMs Garrison's agents use. Root admins change these files by pull request.
   - a model a provider no longer offers is marked `gone` with the date; agents that name it fall back to the default model, and the pull request names them;
   - a provider that cannot be reached leaves its models as they are.
 
-An agent names its model in its `agent.yaml` as `<provider>/<model>`; a name without a known provider means the default provider. The approval check of a namespace's config refuses a model that is not enabled. Agents list the models with the tool `list_models`.
+An agent names its model in its `agent.yaml` as `<provider>/<model>`; a name without a known provider means the default provider. The approval check of a unit's config refuses a model that is not enabled. Agents list the models with the tool `list_models`.

@@ -135,16 +135,16 @@ func sscan(p, format string, n *int) bool {
 	return err == nil && fmt.Sprintf(format, *n) == p
 }
 
-// A change to a namespace's repo goes with that namespace's grants, also
+// A change to a unit's repo goes with that unit's grants, also
 // when the person asked the agent elsewhere, e.g. in a private chat.
-func TestAChangeUsesTheGrantsOfItsNamespace(t *testing.T) {
+func TestAChangeUsesTheGrantsOfItsUnit(t *testing.T) {
 	f := newGrantsGitea()
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
 	carol := Person{Name: "carol", StartedBy: "person"}
-	raw, _ := json.Marshal(map[string]any{"namespace": "homepage", "repo": "todo", "patch": "diff --git a/x b/x\n", "title": "T", "base": "dev"})
-	dev := &agents.Agent{Namespace: "garrison", Name: "dev", Tools: []string{"propose_patch"}}
+	raw, _ := json.Marshal(map[string]any{"unit": "homepage", "repo": "todo", "patch": "diff --git a/x b/x\n", "title": "T", "base": "dev"})
+	dev := &agents.Agent{Unit: "garrison", Name: "dev", Tools: []string{"propose_patch"}}
 	out, err := tools.Call(context.Background(), carol, dev, "propose_patch", raw)
 	if err != nil || !strings.Contains(out, "Branch: agent/dev/carol-") || !strings.Contains(out, "agent-homepage-dev") {
 		t.Fatalf("carol through garrison's dev: %q %v", out, err)
@@ -152,7 +152,7 @@ func TestAChangeUsesTheGrantsOfItsNamespace(t *testing.T) {
 	if body := f.prs[1]["body"].(string); !strings.Contains(body, "Asked by carol (not in homepage) through homepage/dev.") {
 		t.Errorf("body: %q", body)
 	}
-	// A run without a person keeps to its own namespace's grants.
+	// A run without a person keeps to its own unit's grants.
 	if _, err := tools.Call(context.Background(), Person{Name: "agent-garrison-dev", Unattended: true, Owner: "carol"}, dev, "propose_patch", raw); err == nil || !strings.Contains(err.Error(), "no grant with unattended") {
 		t.Errorf("unattended: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestGrants(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
-	dev := &agents.Agent{Namespace: "homepage", Name: "dev", Tools: []string{"propose_patch", "merge_change"}, Grants: []agents.Grant{
+	dev := &agents.Agent{Unit: "homepage", Name: "dev", Tools: []string{"propose_patch", "merge_change"}, Grants: []agents.Grant{
 		{Repo: "todo", Level: agents.LevelPropose, For: agents.ForEveryone},
 		{Repo: "todo", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers},
 		{Repo: "todo", Branch: "main", Level: agents.LevelAutonomous, For: agents.ForAdmins, Checks: []string{"ci"}},
@@ -171,11 +171,11 @@ func TestGrants(t *testing.T) {
 	ctx := context.Background()
 	alice, bob, carol := Person{Name: "alice", StartedBy: "person"}, Person{Name: "bob", StartedBy: "person"}, Person{Name: "carol", StartedBy: "person"}
 	propose := func(p Person, a *agents.Agent, base, branch string) (string, error) {
-		raw, _ := json.Marshal(map[string]any{"namespace": "homepage", "repo": "todo", "patch": "diff --git a/x b/x\n", "title": "T", "base": base, "branch": branch})
+		raw, _ := json.Marshal(map[string]any{"unit": "homepage", "repo": "todo", "patch": "diff --git a/x b/x\n", "title": "T", "base": base, "branch": branch})
 		return tools.Call(ctx, p, a, "propose_patch", raw)
 	}
 	merge := func(p Person, n int) (string, error) {
-		raw, _ := json.Marshal(map[string]any{"namespace": "homepage", "repo": "todo", "number": n})
+		raw, _ := json.Marshal(map[string]any{"unit": "homepage", "repo": "todo", "number": n})
 		return tools.Call(ctx, p, dev, "merge_change", raw)
 	}
 
@@ -195,7 +195,7 @@ func TestGrants(t *testing.T) {
 		t.Errorf("patched as %v", f.patched)
 	}
 	// Without that grant, carol gets nothing.
-	other := &agents.Agent{Namespace: "homepage", Name: "other", Tools: []string{"propose_patch"}}
+	other := &agents.Agent{Unit: "homepage", Name: "other", Tools: []string{"propose_patch"}}
 	if _, err := propose(carol, other, "dev", ""); err == nil || !strings.Contains(err.Error(), "has no grant") {
 		t.Errorf("carol through other: %v", err)
 	}
@@ -289,10 +289,10 @@ func TestGrants(t *testing.T) {
 }
 
 func TestAgentAccountNames(t *testing.T) {
-	if n := AgentAccount(&agents.Agent{Namespace: "homepage", Name: "dev"}); n != "agent-homepage-dev" {
+	if n := AgentAccount(&agents.Agent{Unit: "homepage", Name: "dev"}); n != "agent-homepage-dev" {
 		t.Error(n)
 	}
-	long := AgentAccount(&agents.Agent{Namespace: "a-very-long-namespace-name", Name: "and-a-long-agent"})
+	long := AgentAccount(&agents.Agent{Unit: "a-very-long-unit-name", Name: "and-a-long-agent"})
 	if len(long) > 40 || !strings.HasPrefix(long, "agent-") {
 		t.Error(long)
 	}
@@ -302,7 +302,7 @@ func TestServiceKeyRuns(t *testing.T) {
 	m, _ := setup(t)
 	m.ServiceKey = ServiceKey("pw")
 	m.Agents = &Catalog{}
-	m.Agents.Set([]agents.Agent{{Namespace: "homepage", Name: "dev", Tools: []string{"list_repos"}, Routines: []agents.Routine{{Name: "n"}}}})
+	m.Agents.Set([]agents.Agent{{Unit: "homepage", Name: "dev", Tools: []string{"list_repos"}, Routines: []agents.Routine{{Name: "n"}}}})
 	call := func(h map[string]string) int {
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
 		r := httptest.NewRequest(http.MethodPost, "/mcp/homepage/dev", strings.NewReader(string(body)))
@@ -328,21 +328,21 @@ func TestServiceKeyRuns(t *testing.T) {
 	}
 }
 
-func TestPrivateReposAreForTheNamespacesPeople(t *testing.T) {
+func TestPrivateReposAreForTheUnitsPeople(t *testing.T) {
 	f := newGrantsGitea()
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"}}
-	desk := &agents.Agent{Namespace: "homepage", Name: "desk", Tools: []string{"propose_patch", "merge_change"}, Grants: []agents.Grant{
+	desk := &agents.Agent{Unit: "homepage", Name: "desk", Tools: []string{"propose_patch", "merge_change"}, Grants: []agents.Grant{
 		{Repo: "secret", Level: agents.LevelPropose, For: agents.ForEveryone},
 		{Repo: "secret", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers},
 	}}
 	ctx := context.Background()
-	raw, _ := json.Marshal(map[string]any{"namespace": "homepage", "repo": "secret", "patch": "diff --git a/x b/x\n", "title": "T"})
+	raw, _ := json.Marshal(map[string]any{"unit": "homepage", "repo": "secret", "patch": "diff --git a/x b/x\n", "title": "T"})
 	if _, err := tools.Call(ctx, Person{Name: "carol"}, desk, "propose_patch", raw); err == nil || !strings.Contains(err.Error(), "carol cannot see homepage/secret") {
 		t.Errorf("carol proposed to a repo she cannot see: %v", err)
 	}
-	raw, _ = json.Marshal(map[string]any{"namespace": "homepage", "repo": "secret", "number": 1})
+	raw, _ = json.Marshal(map[string]any{"unit": "homepage", "repo": "secret", "number": 1})
 	if _, err := tools.Call(ctx, Person{Name: "carol"}, desk, "merge_change", raw); err == nil || !strings.Contains(err.Error(), "cannot see") {
 		t.Errorf("carol learnt about a pull request she cannot see: %v", err)
 	}
@@ -361,10 +361,10 @@ func TestPrivateAgentsReachOnlyTheRegistries(t *testing.T) {
 	defer srv.Close()
 	g := &Gitea{URL: srv.URL, User: "admin", Password: "pw"}
 	list := []agents.Agent{
-		{Namespace: "homepage", Name: "wide", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}, Internet: agents.Internet{All: true}},
-		{Namespace: "homepage", Name: "listed", Visible: agents.VisibleMembers, Internet: agents.Internet{Domains: []string{"example.org"}}},
-		{Namespace: "homepage", Name: "builder", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}, Internet: agents.Internet{Packages: true}},
-		{Namespace: "homepage", Name: "offline", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
+		{Unit: "homepage", Name: "wide", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}, Internet: agents.Internet{All: true}},
+		{Unit: "homepage", Name: "listed", Visible: agents.VisibleMembers, Internet: agents.Internet{Domains: []string{"example.org"}}},
+		{Unit: "homepage", Name: "builder", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}, Internet: agents.Internet{Packages: true}},
+		{Unit: "homepage", Name: "offline", Grants: []agents.Grant{{Repo: "secret", Level: agents.LevelPropose}}},
 	}
 	problems, err := g.grantProblems(context.Background(), "homepage", list)
 	if err != nil {

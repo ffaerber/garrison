@@ -2,7 +2,7 @@
 
 How Garrison is used, step by step: one page per step, with screenshots.
 alice and bob are two people of the Garrison installation at
-`garrison.test`. alice makes a namespace `todo`, has the agents set up a
+`garrison.test`. alice makes a unit `todo`, has the agents set up a
 todo app there and put it online, works on it on a `dev` branch, lets bob
 join, and has things done on a schedule. The todo app is Garrison's one
 example app, the template `todo`: a list of their own for everyone signed
@@ -17,7 +17,7 @@ To make them again after a change, see [Making the pictures](#making-the-picture
 | --- | --- |
 | [1. Installation](01-installation.md) | One command on a fresh Ubuntu machine |
 | [2. Signing in](02-signing-in.md) | One account for the dashboard, Gitea and the chat |
-| [3. A namespace](03-namespace.md) | `todo`: its config, its channel, its secrets |
+| [3. A unit](03-unit.md) | `todo`: its config, its channel, its secrets |
 | [4. An app and its stack](04-app-and-stack.md) | The operator makes the repo `app` from the template `todo` and proposes its stack; alice merges; it is live |
 | [5. A dev environment](05-dev-environment.md) | A branch `dev` runs as `dev-todo`; changes go there first, then to main |
 | [6. The agents at work](06-agents.md) | A screenshot for the repo; the commander finds the right agent |
