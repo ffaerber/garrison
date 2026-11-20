@@ -9,6 +9,18 @@ if ! grep -qiE "sentry|marketing" <<<"$answer"; then
   answer=$(ask_agent todo bob "Please call find_agents and tell me which agent makes screenshots." commander)
 fi
 check "it names an agent for screenshots"  grep -qiE "sentry|marketing" <<<"$answer"
+# In its thread, a Reply to its answer goes on without mentioning it: Open
+# WebUI calls the model whose message is replied to. A plain message in the
+# thread does not (AGENTS.md); the pinned how-to says so.
+read -r tcid tmid < <(tail -n1 "$tmp/posted")
+thread_json() { chat_api bob "$chat/api/v1/channels/$tcid/messages/$tmid/thread"; }
+answers() { thread_json | python3 -c 'import json,sys; print(sum(1 for m in json.load(sys.stdin) if (m.get("meta") or {}).get("model_id") == "garrison/commander" and (m.get("meta") or {}).get("done")))'; }
+its=$(thread_json | python3 -c 'import json,sys; print(next((m["id"] for m in json.load(sys.stdin) if (m.get("meta") or {}).get("model_id") == "garrison/commander"), ""))')
+chat_api bob -o /dev/null -X POST -H 'Content-Type: application/json' \
+  -d "{\"content\":\"And which one looks things up on the web? Only the name.\",\"parent_id\":\"$tmid\",\"reply_to_id\":\"$its\"}" \
+  "$chat/api/v1/channels/$tcid/messages/post"
+two() { [ "$(answers)" -ge 2 ]; }
+check "a Reply to its answer, without @, gets another" until_true 300 two
 # There it works in todo: it hands work to the agents as they work in todo.
 handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
 answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the namespace todo have? Have it answer here." commander)

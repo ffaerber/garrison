@@ -329,7 +329,7 @@ For example:
 `+"`@%[1]s which stacks are not healthy?`"+`
 `+"`@%[1]s show the last 50 log lines of grafana_grafana`"+`
 
-It answers in a thread; reply to its answer there to go on without mentioning it again. Messages that do not mention an agent are for the people here.%[2]s
+It answers in a thread. To go on, use Reply on its answer there (the reply arrow on its message): it answers again without being mentioned. A plain message in the thread, like any message that does not mention an agent, is for the people here; mention the agent to ask it.%[2]s
 
 An agent acts with your rights. A change it proposes becomes a pull request in Gitea, which only people allowed to merge can apply. The agents are defined in garrison/config, which root admins change.`, example.DisplayName(), ask)
 	if ns.Name != PlatformNamespace {
