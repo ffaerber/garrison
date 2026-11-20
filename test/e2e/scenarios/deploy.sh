@@ -94,7 +94,7 @@ check "todo has its channel in Open WebUI, where the agents work in it" until_tr
 
 echo "# a dev environment"
 check "alice creates the branch dev" \
-  test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$repo/branches")" = 201
+  make_branch alice "$repo" dev
 check "the deployer deploys dev as dev-todo" until_true 300 deployed dev "$good"
 check "alice opens dev-todo"               until_true 120 app_login dev-todo
 dev_empty() { [ "$(todo_api dev-todo "https://dev-todo.$DOMAIN/api/todos")" = "[]" ]; }

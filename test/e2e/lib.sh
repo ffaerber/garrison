@@ -295,6 +295,15 @@ admin_token=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DO
 gitea_api "" -f "$hp/config/raw/grants.yaml" > "$tmp/grants.yaml" 2>/dev/null || : > "$tmp/grants.yaml"
 gitea_api "" -f "$hp/config/raw/routines.yaml" > "$tmp/routines.yaml" 2>/dev/null || : > "$tmp/routines.yaml"
 }
+# make_branch AS REPO_URL NAME [FROM]: AS makes the branch NAME of the repo at
+# REPO_URL from FROM (main), and it exists. It looks at the branch, not at the
+# answer: Gitea can take longer than web's 20 s on a fresh clone and make it anyway.
+make_branch() {
+  local as=$1 repo=$2 name=$3 from=${4:-main}
+  gitea_api "$as" -o /dev/null -X POST -H 'Content-Type: application/json' \
+    -d "{\"new_branch_name\":\"$name\",\"old_branch_name\":\"$from\"}" "$repo/branches" || true
+  until_true 60 gitea_api "$as" -f -o /dev/null "$repo/branches/$name"
+}
 # newest_pr REPO AUTHOR [AFTER]: the newest open pull request of todo/REPO by AUTHOR, numbered above AFTER.
 newest_pr() {
   gitea_api "" "$hp/$1/pulls?state=open&limit=50" | python3 -c '

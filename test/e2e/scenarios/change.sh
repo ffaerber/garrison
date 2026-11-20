@@ -67,7 +67,7 @@ check "the sandbox cannot push"            test "$(docker exec "$sb" sh -c 'curl
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/$gpr"
 
 echo "# 4h. bob has the developer change dev and merge it there"
-check "alice makes the branch dev"         test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"dev","old_branch_name":"main"}' "$hp/app/branches")" = 201
+check "alice makes the branch dev"         make_branch alice "$hp/app" dev
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo bob "Clone the repo app of the namespace todo, check out its branch dev, change the text 'Our todos' to 'Dev todos' everywhere (grep -rn), and propose it with propose_workspace_changes with base dev, titled: Dev heading. Then merge that pull request into dev with merge_change, and give me the link." developer)

@@ -118,7 +118,7 @@ echo "# 4j3. a routine takes a screenshot, signed in as the agent, with nobody w
 # The marketing agent gets a grant on app that routines may use, and a routine
 # that shoots todo, which is behind the sign-in, when the branch shots
 # moves. Its browser signs in with the agent's own account in Keycloak.
-check "alice makes the branch shots of app" test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"new_branch_name":"shots","old_branch_name":"main"}' "$hp/app/branches")" = 201
+check "alice makes the branch shots of app" make_branch alice "$hp/app" shots
 gitea_api "" "$hp/config/raw/grants.yaml" > "$tmp/grants.yaml"
 printf -- '- {agent: marketing, repo: app, level: propose, unattended: true}\n' >> "$tmp/grants.yaml"
 cat >> "$tmp/routines.yaml" <<YAML
