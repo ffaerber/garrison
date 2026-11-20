@@ -574,6 +574,7 @@ scenario_job() {
   {
     fresh "$s"; rc=$?
     if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
+    [ $rc = 0 ] || service_logs "$s"
     multipass stop "$VM" >/dev/null 2>&1
   } > "$log" 2>&1
   release
@@ -585,6 +586,18 @@ scenario_job() {
   echo "$fp" > "$ROOT/bin/green/$s"
   [ "${KEEP:-}" = 1 ] || multipass delete --purge "$VM"
   status "$s" "green, $(minutes "$(cat "$ROOT/bin/times/$s")")"
+}
+
+# service_logs STEP: the logs of every service in the job's VM, to
+# bin/logs/STEP/<service>.log, kept from before the VM stops: a container
+# starts afresh when the VM boots again, without its old logs.
+service_logs() {
+  local dir=$ROOT/bin/logs/$1 svc
+  rm -rf "$dir" && mkdir -p "$dir"
+  for svc in $(in_vm sudo docker service ls --format '{{.Name}}' 2>/dev/null); do
+    in_vm sudo docker service logs --timestamps --no-trunc "$svc" > "$dir/$svc.log" 2>&1
+  done
+  echo "==> the services' logs are in ${dir#"$ROOT/"}/"
 }
 
 # report LOG: the failures in a job's log.

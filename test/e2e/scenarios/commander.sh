@@ -33,7 +33,8 @@ family_made() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/orgs/fami
 check "told the name, it makes the namespace family, as alice" until_true 30 family_made
 
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-routines_before=$(gitea_api "" "$hp/config/raw/routines.yaml" | python3 -c 'import sys,yaml; print(len(yaml.safe_load(sys.stdin) or []))')
+# routines.yaml may not exist yet: Gitea's 404 is JSON, not a list.
+routines_before=$(gitea_api "" "$hp/config/raw/routines.yaml" | python3 -c 'import sys,yaml; d = yaml.safe_load(sys.stdin); print(len(d) if isinstance(d, list) else 0)')
 answer=$(ask_agent todo alice "Please create me a cron job: every day at 9 o'clock in the morning, check that the todo app answers on main and tell us in this channel. Do not ask back.")
 # routine_pr: the open pull request of todo/config by alice that changes routines.yaml.
 routine_pr() {

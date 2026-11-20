@@ -215,9 +215,17 @@ class Person:
         p = self.page
         p.goto(f"{CHAT}/auth")
         p.get_by_text("Continue with Keycloak").click()
-        if p.locator("#username").count():
-            self.keycloak()
-        p.wait_for_url(re.compile(rf"^{re.escape(CHAT)}/(?!auth)"))
+        # Keycloak asks for the password unless the person is signed in
+        # there already; which one comes takes a moment to tell.
+        chat = re.compile(rf"^{re.escape(CHAT)}/(?!auth)")
+        for _ in range(120):
+            if p.locator("#username").count():
+                self.keycloak()
+                break
+            if chat.match(p.url):
+                break
+            p.wait_for_timeout(500)
+        p.wait_for_url(chat, timeout=60_000)
         self.dismiss()
         self.snap("chat")
         return True
@@ -277,11 +285,22 @@ class Person:
     def owui(self, path: str):
         """Open WebUI's API as the page itself calls it, with the person's
         session, which lives in Open WebUI's pages only."""
-        if not self.page.url.startswith(CHAT):
-            self.page.goto(f"{CHAT}/")
-            self.page.wait_for_function("() => !!localStorage.token")
-        return self.page.evaluate(
-            "path => fetch(path, {headers: {Authorization: 'Bearer ' + localStorage.token}}).then(r => r.json())", path)
+        for attempt in range(2):
+            if not self.page.url.startswith(CHAT) or "/auth" in self.page.url:
+                self.page.goto(f"{CHAT}/")
+                try:
+                    self.page.wait_for_function("() => !!localStorage.token", timeout=15_000)
+                except Exception:  # noqa: BLE001 - no session: the 401 below signs in
+                    pass
+            status, out = self.page.evaluate(
+                "path => fetch(path, {headers: {Authorization: 'Bearer ' + localStorage.token}})"
+                ".then(async r => [r.status, await r.json().catch(() => null)])", path)
+            if status != 401 or attempt:
+                return out
+            # Open WebUI ended the session (its Keycloak token was not
+            # renewed): visible in the log, then signed in again.
+            print(f"info  Open WebUI signed {self.name} out; signing in again", flush=True)
+            self.sign_in_chat()
 
     def owui_list(self, path: str) -> list:
         """A list from Open WebUI's API; empty while it answers with an

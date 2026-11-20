@@ -79,8 +79,13 @@ until_true() {
   until "$@" >/dev/null 2>&1; do [ $SECONDS -ge $deadline ] && return 1; sleep 3; done
 }
 # The dashboard's feed, at the bare domain. home_login WHO signs a person in
-# to it; feed WHO PATH calls its API as them.
-feed() { local who=$1; shift; web -b "$tmp/home-$who.jar" "https://$DOMAIN$1"; }
+# to it; feed WHO PATH calls its API as them, signing them in first if this
+# run has not: each scenario starts with no one signed in.
+feed() {
+  local who=$1; shift
+  [ -s "$tmp/home-$who.jar" ] || until_true 60 home_login "$who" || true
+  web -b "$tmp/home-$who.jar" "https://$DOMAIN$1"
+}
 home_login() {
   sso_login "$tmp/home-$1.jar" "https://$DOMAIN/" "$TEST_PASSWORD" "$tmp/home-$1.html" "$1" >/dev/null 2>&1
   [ "$(web -b "$tmp/home-$1.jar" -o /dev/null -w '%{http_code}' "https://$DOMAIN/api/events?limit=1")" = 200 ]

@@ -36,7 +36,7 @@ check "it proposes the screenshot, as bob" test -n "$spr"
 check "the pull request holds a PNG"       test "$(png_size app docs/screenshots/todo.png "$(head_sha app "$spr")")" != none
 body=$(gitea_api "" "$hp/app/pulls/$spr" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
 check "it shows the todo app, signed in as bob" \
-  bash -c 'grep -q "Screenshot of https://todo.$1/ as bob" <<<"$0" && grep -q "Our todos" <<<"$0"' "$body" "$DOMAIN"
+  bash -c 'grep -q "Screenshot of https://todo.$1/ as bob" <<<"$0" && grep -q "page title \"Todo\"" <<<"$0"' "$body" "$DOMAIN"
 check "the answer links it"                grep -q "/todo/app/pulls/$spr" <<<"$answer"
 # Close it, and whatever else it proposed (a model may follow its skill
 # unasked), so 4c starts afresh.
@@ -154,7 +154,7 @@ read -r rspr rsha <<<"$(routine_shot)"
 check "a PNG"                              test "$(png_size app docs/screenshots/routine.png "${rsha:-none}")" != none
 body=$(gitea_api "" "$hp/app/pulls/${rspr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
 check "of the todo app behind the sign-in, as the agent, for bob" \
-  bash -c 'grep -q "Screenshot of https://todo.$1/ as the agent todo/marketing" <<<"$0" && grep -q "Our todos" <<<"$0" && grep -q "Asked by bob through todo/marketing, routine todo/marketing/shots, with nobody watching" <<<"$0"' "$body" "$DOMAIN"
+  bash -c 'grep -q "Screenshot of https://todo.$1/ as the agent todo/marketing" <<<"$0" && grep -q "page title \"Todo\"" <<<"$0" && grep -q "Asked by bob through todo/marketing, routine todo/marketing/shots, with nobody watching" <<<"$0"' "$body" "$DOMAIN"
 check "the gateway shot it as the agent"   bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-marketing): todo/marketing: screenshot \[routine todo/marketing/shots\]"' "$shot_at"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/${rspr:-0}"
 
