@@ -536,9 +536,9 @@ PY
 )
   if [ -n "$detach" ]; then
     kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --overrides "$overrides" >/dev/null &&
-      kubectl --namespace garrison-check wait --for=condition=Ready "pod/$name" --timeout 180s >/dev/null
+      kubectl --namespace garrison-check wait --for=condition=Ready "pod/$name" --timeout 600s >/dev/null
   else
-    kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --rm -i --quiet --overrides "$overrides" --pod-running-timeout 3m
+    kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --rm -i --quiet --overrides "$overrides" --pod-running-timeout 10m
   fi
 }
 

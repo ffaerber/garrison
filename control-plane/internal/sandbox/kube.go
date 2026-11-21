@@ -167,9 +167,11 @@ func (k *Kubernetes) Pull(context.Context, string, string) error { return nil }
 // Attach waits until the pod runs, then attaches to its stdin and stdout
 // with kubectl attach, which lasts until the returned reader is closed.
 func (k *Kubernetes) Attach(ctx context.Context, id string, errs io.Writer) (io.WriteCloser, io.ReadCloser, error) {
-	wait, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	// Long enough for a first pull of the image, which is large, on a
+	// machine that does not have it yet (see the DaemonSet sandbox-image).
+	wait, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	if _, err := k.run(wait, nil, "wait", "--for=condition=Ready", "pod/"+id, "--timeout=170s"); err != nil {
+	if _, err := k.run(wait, nil, "wait", "--for=condition=Ready", "pod/"+id, "--timeout=590s"); err != nil {
 		logs, _ := k.run(ctx, nil, "logs", "pod/"+id, "--tail", "20")
 		events, _ := k.run(ctx, nil, "get", "events", "--field-selector", "involvedObject.name="+id, "--output", "custom-columns=REASON:.reason,MESSAGE:.message", "--no-headers")
 		return nil, nil, fmt.Errorf("%w; %s %s", err, strings.TrimSpace(string(events)), strings.TrimSpace(string(logs)))

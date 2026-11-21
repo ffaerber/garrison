@@ -276,6 +276,31 @@ spec:
         - { name: llm-api-key, hostPath: { path: /etc/garrison/llm-api-key, type: File } }
         - { name: llm-keys, hostPath: { path: /etc/garrison/llm-keys, type: Directory } }
 ---
+# Keeps the sandbox image on every machine, so a chat's first message does
+# not wait minutes for it to be pulled: the image is large (Chromium,
+# ffmpeg, Node), and the kubelet pulls each new tag here when the build
+# sets it, before a sandbox needs it.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sandbox-image
+spec:
+  selector: { matchLabels: { app: sandbox-image } }
+  template:
+    metadata:
+      labels: { app: sandbox-image }
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets: [{ name: registry-pull }]
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: hold
+          image: git.${DOMAIN}/garrison/sandbox:bootstrap
+          command: [sleep, infinity]
+          resources:
+            requests: { cpu: 1m, memory: 8Mi }
+            limits: { memory: 32Mi }
+---
 # ---------- the dashboard ----------
 # At the installation's domain, behind the sign-in: the feed of what happens
 # and how it was handled, to each person what they may read (asked of

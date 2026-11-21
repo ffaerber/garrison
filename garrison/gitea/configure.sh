@@ -68,16 +68,25 @@ if ! has_secret gitea-user-runner-token; then
 fi
 # Kubernetes pulls the platform's own images, garrison/*, from the registry
 # with a token that may only read packages, as the admin; garrison's
-# packages are visible to signed-in accounts only.
-if ! has_secret registry-pull; then
+# packages are visible to signed-in accounts only. The Secret registry-pull
+# is in each namespace that runs them: the platform's and the sandboxes'.
+pull_namespaces="garrison garrison-sandboxes"
+missing=
+for ns in $pull_namespaces; do
+  kubectl --namespace "$ns" get secret registry-pull >/dev/null 2>&1 || missing=1
+done
+if [ -n "$missing" ]; then
   gitea_api DELETE "/users/$ADMIN_USER/tokens/registry-pull" >/dev/null
   pull=$(gitea admin user generate-access-token --username "$ADMIN_USER" --token-name registry-pull \
     --scopes read:package --raw | tr -d '\r\n')
   [ -n "$pull" ] || { echo "could not create the registry's pull token" >&2; exit 1; }
   # Through a file, so the token is on no command line.
   (umask 077; printf '{"auths":{"git.%s":{"auth":"%s"}}}' "$DOMAIN" "$(printf '%s:%s' "$ADMIN_USER" "$pull" | base64 -w0)" > "$work/pull.json")
-  kubectl --namespace garrison create secret generic registry-pull --type kubernetes.io/dockerconfigjson \
-    --from-file ".dockerconfigjson=$work/pull.json" >/dev/null
+  for ns in $pull_namespaces; do
+    kubectl --namespace "$ns" delete secret registry-pull --ignore-not-found >/dev/null
+    kubectl --namespace "$ns" create secret generic registry-pull --type kubernetes.io/dockerconfigjson \
+      --from-file ".dockerconfigjson=$work/pull.json" >/dev/null
+  done
   rm -f "$work/pull.json"
 fi
 # The control plane build pushes its image and commits its tag as the admin,
