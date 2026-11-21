@@ -522,7 +522,7 @@ image_pod() {
   overrides=$(python3 - "$name" "$(sandbox_image)" "$runtime" "$vol" "$@" <<'PY'
 import json, sys
 name, image, runtime, vol, cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
-c = {"name": name, "image": image, "command": cmd, "stdin": True}
+c = {"name": name, "image": image, "command": cmd}
 spec = {"containers": [c], "imagePullSecrets": [{"name": "registry-pull"}], "automountServiceAccountToken": False, "restartPolicy": "Never"}
 if runtime:
     spec["runtimeClassName"] = runtime
@@ -538,7 +538,19 @@ PY
     kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --overrides "$overrides" >/dev/null &&
       kubectl --namespace garrison-check wait --for=condition=Ready "pod/$name" --timeout 600s >/dev/null
   else
-    kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --rm -i --quiet --overrides "$overrides" --pod-running-timeout 10m
+    # Not kubectl run -i: it attaches once the container runs, and loses
+    # what a short command printed before. The pod's log keeps it all.
+    local rc=1 phase
+    kubectl --namespace garrison-check delete pod "$name" --ignore-not-found --wait >/dev/null
+    kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --overrides "$overrides" >/dev/null
+    for _ in $(seq 300); do
+      phase=$(kubectl --namespace garrison-check get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null)
+      case $phase in Succeeded) rc=0; break ;; Failed) break ;; esac
+      sleep 2
+    done
+    kubectl --namespace garrison-check logs "pod/$name" 2>&1
+    kubectl --namespace garrison-check delete pod "$name" --wait=false >/dev/null 2>&1
+    return $rc
   fi
 }
 
