@@ -2,11 +2,15 @@
 # Garrison installer. See docs/spec.md, "Installation".
 #
 #   sudo ./install.sh --answers FILE
+#   sudo ./install.sh --join-command   on this machine: how another one joins
+#   sudo ./install.sh --join ...       on another machine, which then runs apps
+#                                      (installer/join.sh, docs/nodes.md)
 #
 # Safe to run again: every step checks what already exists.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+case ${1:-} in --join|--join-command) exec "$ROOT/installer/join.sh" "$@" ;; esac
 ETC=/etc/garrison
 POOL=garrison
 

@@ -11,6 +11,9 @@ services:
         source: /garrison/system/loki
         target: /loki
     networks: [default, system]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
 
   alloy:
     image: grafana/alloy:v1.12.0

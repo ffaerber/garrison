@@ -144,3 +144,26 @@ func TestMembersInEnv(t *testing.T) {
 		t.Errorf("%s", out)
 	}
 }
+
+// A service with data stays on the main machine, where its datasets are;
+// one without may run on any machine of the swarm.
+func TestOnlyServicesWithDataArePinned(t *testing.T) {
+	s, err := stack.ParseIn([]byte("entrypoint: web\nservices:\n  web: { image: x/y:1, port: 80 }\n  db: { image: x/db:1, volumes: { data: { dataset: data, size: 1Gi } } }\nenvironments:\n  main: {}\n"), "todo", "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Swarm(s, Options{Environment: "main", Domain: "home.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f composeFile
+	if err := yaml.Unmarshal(out, &f); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.Services["db"].Deploy.Placement; p == nil || len(p.Constraints) != 1 || p.Constraints[0] != DataNode {
+		t.Errorf("db is not pinned to the main machine:\n%s", out)
+	}
+	if f.Services["web"].Deploy.Placement != nil {
+		t.Errorf("web is pinned, though it has no data:\n%s", out)
+	}
+}

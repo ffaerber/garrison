@@ -53,6 +53,9 @@ services:
                         - discrete_resource_spec:
                             kind: GPU
                             value: 1
+            placement:
+                constraints:
+                    - node.role == manager
     redis:
         image: redis:7
         networks:

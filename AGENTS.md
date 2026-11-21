@@ -16,6 +16,7 @@ Garrison runs on one Ubuntu machine with Docker Swarm and ZFS. **Gitea is the so
   - `validate`, `render`, `apply`, `applied`, `claims`: the CLI on the host.
 - **Agents** are defined only in `garrison/config` and work in every unit. A unit gives them rights (`grants.yaml`, which gives an agent account of its own in Gitea) and routines (`routines.yaml`). The defaults come from `templates/garrison-config/agents/`: operator, commander, coder, sentry, scout, media. Design: [docs/agents.md](docs/agents.md).
 - **People** sign in through Keycloak (realm `garrison`). The group `root-admins` may change the platform. Unit roles come from `members.yaml`, applied to Gitea teams `admins` and `members`; nobody approves their own role change.
+- **Machines**: the platform runs on the main machine, the swarm's manager; others join as workers (`install.sh --join`) and run apps without data. Every system service is pinned to the manager, and so is every app service with a volume ([docs/nodes.md](docs/nodes.md)).
 - **Data**: Postgres (`garrison` database: events, routine state), ZFS datasets per app environment, Sanoid snapshots, and SOPS-encrypted secrets in Git.
 
 How a change travels: chat → agent (sandbox) → gateway tool, as the person → a pull request in Gitea → a person approves and merges → webhook → deployer → Swarm. The dashboard feed records each step.
@@ -33,6 +34,7 @@ How a change travels: chat → agent (sandbox) → gateway tool, as the person �
 | A system stack | `garrison/<stack>/compose.yaml` | Pushed at install; on a running machine, `test/vm/push-repos.sh` |
 | New repos' starting contents | `templates/` | `unit-config`, `garrison-config`, `app/todo` |
 | The installer | `install.sh`, `installer/` | Safe to run again: every step checks what exists |
+| Joining another machine | `installer/join.sh` | `install.sh --join-command` / `--join`; scenario `nodes` |
 
 ## Build and test
 

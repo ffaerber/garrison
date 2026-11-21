@@ -143,7 +143,17 @@ type composeSecret struct {
 type composeDeploy struct {
 	Labels    map[string]string `yaml:"labels,omitempty"`
 	Resources *composeResources `yaml:"resources,omitempty"`
+	Placement *composePlacement `yaml:"placement,omitempty"`
 }
+
+type composePlacement struct {
+	Constraints []string `yaml:"constraints"`
+}
+
+// DataNode is where a service with data runs: its datasets and the unit's
+// shares are on the main machine, the swarm's manager. A service without
+// data may run on any machine of the swarm.
+const DataNode = "node.role == manager"
 
 type composeResources struct {
 	Limits       *composeLimits       `yaml:"limits,omitempty"`
@@ -231,6 +241,9 @@ func Swarm(s *stack.Stack, o Options) ([]byte, error) {
 				m.Source = DatasetPath(o.DataRoot, s, o.Environment, v.Dataset)
 			}
 			out.Volumes = append(out.Volumes, m)
+		}
+		if len(out.Volumes) > 0 {
+			deploy.Placement = &composePlacement{Constraints: []string{DataNode}}
 		}
 
 		for _, sec := range svc.Secrets {

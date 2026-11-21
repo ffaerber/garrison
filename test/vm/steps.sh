@@ -49,6 +49,7 @@ cd "$ROOT"
 #                                             +- 4.4 agent [F] --- 5.1 media
 #                                             +- 4.5 deploy [F] -+- 5.2 journey
 #                                                                +- 5.3 people
+#                                                                +- 5.5 nodes
 #                                                                +- 5.4 team [F] -+- 6.1 roles
 #                                                                                 +- 6.2 change
 #                                                                                 +- 6.3 marketing
@@ -63,12 +64,12 @@ cd "$ROOT"
 # Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
 # scenario in a VM of its own, $VM-<step>, cloned from its parent's.
-STEPS=(base install login platform crud ui agent media deploy journey people team roles change marketing routines commander operator leaving guided)
+STEPS=(base install login platform crud ui agent media deploy journey people nodes team roles change marketing routines commander operator leaving guided)
 declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
-  [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [team]=deploy
+  [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [nodes]=deploy [team]=deploy
   [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
-  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [team]=5.4
+  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [nodes]=5.5 [team]=5.4
   [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8)
 FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
@@ -89,6 +90,7 @@ inputs() {
     login)    echo "$shared" test/e2e/scenarios/system.sh ;;
     platform) echo "$shared" test/e2e/stacks ;;
     deploy)   echo "$shared" templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
+    nodes)    echo "$shared" installer/join.sh ;;
     ui|people|guided)
               echo "$shared" test/ui/Dockerfile test/ui/run.sh test/ui/lib.py "test/ui/$1.py" ;;
     media)    echo "$shared" test/e2e/media templates/unit-config/README.md ;;
@@ -237,6 +239,32 @@ browser_scenario() {
 step_ui()     { browser_scenario ui; }
 step_people() { browser_scenario people; }
 step_guided() { browser_scenario guided; }
+
+# A second machine, $VM-node2, a clone of base, joins todo's with
+# `install.sh --join`; scenario nodes then checks what runs where. The
+# machine is deleted when the scenario passes and kept, stopped, when it fails.
+step_nodes() {
+  sync_repo
+  local node=$VM-node2 join rc=0
+  VM=$node exists && multipass delete --purge "$node"
+  say "Cloning 1 base into $node"
+  clone_from base "$node"
+  # Apps only: less than the main machine needs.
+  multipass set "local.$node.memory=3G"
+  multipass start "$node" >/dev/null
+  trap 'multipass stop "$node" >/dev/null 2>&1 || true' EXIT
+  VM=$node sync_repo
+  join=$(in_vm sudo garrison/install.sh --join-command)
+  VM=$node in_vm sudo bash -c "cd garrison && $join"
+  smoke nodes || rc=$?
+  trap - EXIT
+  if [ $rc = 0 ] && [ "${KEEP:-}" != 1 ]; then
+    multipass delete --purge "$node"
+  else
+    multipass stop "$node" >/dev/null 2>&1 || true
+  fi
+  return $rc
+}
 
 # A unit's media library and its file browser; @media makes pictures
 # and a video with a fake ComfyUI outside Garrison, then cuts a short.

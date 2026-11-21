@@ -26,6 +26,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+    deploy:
+      placement:
+        constraints: [node.role == manager]
 
 configs:
   init-databases:

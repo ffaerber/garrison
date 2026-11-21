@@ -172,6 +172,8 @@ services:
       timeout: 3s
       retries: 60
     deploy:
+      placement:
+        constraints: [node.role == manager]
       labels:
         traefik.enable: "true"
         traefik.swarm.network: garrison-system
@@ -198,6 +200,8 @@ services:
           --ignore-certificate-errors '--host-resolver-rules=MAP * traefik_traefik'
     networks: [browser]
     deploy:
+      placement:
+        constraints: [node.role == manager]
       resources:
         limits: { memory: 1G }
 
@@ -234,6 +238,9 @@ services:
         target: /data
     # The guard on its own network, which jobs are not on; Gitea on the builds network.
     networks: [runner-guard, builds]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
 
 configs:
   user-runner:
