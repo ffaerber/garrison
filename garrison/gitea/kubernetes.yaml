@@ -30,6 +30,7 @@ spec:
     metadata:
       labels: { app: gitea, garrison.io/net: system }
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: gitea
           image: gitea/gitea:1.25

@@ -459,7 +459,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{service=\"control-plane_agents\"} |~ \"$agent\" !~ \"GET /healthz\"",
+          "expr": "{service=\"agents\"} |~ \"$agent\" !~ \"GET /healthz\"",
           "datasource": {
             "type": "loki",
             "uid": "loki"
@@ -497,7 +497,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{service=\"control-plane_gateway\"} |~ \"mcp: .*: $agent: \"",
+          "expr": "{service=\"gateway\"} |~ \"mcp: .*: $agent: \"",
           "datasource": {
             "type": "loki",
             "uid": "loki"

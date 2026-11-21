@@ -178,15 +178,24 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 			io.WriteString(w, `{"status":"error","error":"parse error"}`)
 			return
 		}
-		io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"container_label_com_docker_swarm_service_name":"grafana_grafana"},"value":[1,"12.5"]}]}}`)
+		io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"container_label_com_docker_swarm_service_name":"grafana"},"value":[1,"12.5"]}]}}`)
 	}))
 	t.Cleanup(prom.Close)
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"},"apps":{"homepage/todo@main":{"unit":"homepage","repo":"todo","environment":"main","stack":"todo","commit":"fedcba9876543210"}}}`), 0o644)
 	os.WriteFile(filepath.Join(dir, "snapshots.json"), []byte(`{"todo":{"unit":"homepage","snapshots":[{"name":"deploy-20261113-150405-abc1234","created":"2026-11-13T15:04:05Z"}]}}`), 0o644)
 	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" && args[0] == "get" && args[1] == "deployments,statefulsets,daemonsets" {
+			return []byte(`{"items":[{"kind":"Deployment","metadata":{"name":"grafana","labels":{"garrison.io/stack":"grafana"}},
+				"spec":{"replicas":1,"template":{"spec":{"containers":[{"image":"grafana/grafana:12"}]}}},"status":{"readyReplicas":1}}]}`), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "pods" {
+			return []byte(`{"items":[{"metadata":{"name":"grafana-abc"},"status":{"phase":"Running","containerStatuses":[
+				{"name":"grafana","ready":false,"restartCount":3,"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off"}},
+				 "lastState":{"terminated":{"reason":"Error","exitCode":1}}}]}}]}`), nil
+		}
 		if name == "docker" && len(args) > 1 && args[0] == "service" && args[1] == "ls" {
-			return []byte("grafana_grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\ntodo_web\t1/1\tgit.example.com/homepage/todo:fedcba987654\n"), nil
+			return []byte("grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\ntodo_web\t1/1\tgit.example.com/homepage/todo:fedcba987654\n"), nil
 		}
 		return []byte("log line\n"), nil
 	}
@@ -286,8 +295,13 @@ func TestEveryoneMayLook(t *testing.T) {
 		t.Errorf("list_units = %q", text)
 	}
 	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"unit": "garrison"})
-	if isErr || !strings.Contains(text, "grafana (commit 0123456789ab)") || strings.Contains(text, "hello") {
+	if isErr || !strings.Contains(text, "grafana (commit 0123456789ab)") || !strings.Contains(text, "  grafana 1/1 grafana/grafana:12") || strings.Contains(text, "hello") {
 		t.Errorf("list_stacks = %q", text)
+	}
+	// The platform's stacks are Kubernetes workloads: their pods, and why one waits.
+	text, isErr = callText(t, m, "tok-bob", "stack_status", map[string]any{"unit": "garrison", "stack": "grafana"})
+	if isErr || !strings.Contains(text, "grafana-abc\tRunning") || !strings.Contains(text, "restarts=3 waiting (CrashLoopBackOff: back-off); last ended Error, exit code 1") {
+		t.Errorf("stack_status = %q", text)
 	}
 	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"unit": "homepage"})
 	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || strings.Contains(text, "grafana") {
@@ -303,13 +317,13 @@ func TestEveryoneMayLook(t *testing.T) {
 	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"unit": "homepage", "service": "todo_web"}); isErr {
 		t.Errorf("service_logs of an app = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"unit": "garrison", "service": "grafana_grafana"}); isErr || text != "log line\n" {
+	if text, isErr = callText(t, m, "tok-bob", "service_logs", map[string]any{"unit": "garrison", "service": "grafana"}); isErr || text != "log line\n" {
 		t.Errorf("service_logs = %q", text)
 	}
 	if text, isErr = callText(t, m, "tok-bob", "service_usage", map[string]any{"unit": "garrison", "stack": "grafana"}); isErr || !strings.Contains(text, "12.5") {
 		t.Errorf("service_usage = %q", text)
 	}
-	if text, isErr = callText(t, m, "tok-bob", "query_metrics", map[string]any{"query": "up"}); isErr || !strings.Contains(text, "grafana_grafana") {
+	if text, isErr = callText(t, m, "tok-bob", "query_metrics", map[string]any{"query": "up"}); isErr || !strings.Contains(text, "grafana") {
 		t.Errorf("query_metrics = %q", text)
 	}
 	if text, isErr = callText(t, m, "tok-bob", "read_file", map[string]any{"unit": "garrison", "repo": "grafana", "path": "compose.yaml"}); isErr || text != "services: {}\n" {
@@ -324,7 +338,7 @@ func TestToolsStayInTheirUnit(t *testing.T) {
 		args map[string]any
 	}{
 		{"service_logs", map[string]any{"unit": "garrison", "service": "hello_web"}},            // not a garrison stack
-		{"service_logs", map[string]any{"unit": "garrison", "service": "grafana_grafana; id"}},  // not a name
+		{"service_logs", map[string]any{"unit": "garrison", "service": "grafana; id"}},  // not a name
 		{"stack_status", map[string]any{"unit": "homepage", "stack": "grafana"}},                // wrong unit
 		{"read_file", map[string]any{"unit": "garrison", "repo": "grafana", "path": "../../x"}}, // outside the repo
 		{"read_file", map[string]any{"unit": "../admin", "repo": "grafana", "path": "a"}},       // not a unit
@@ -852,7 +866,7 @@ func TestTheBrowserStaysAtHome(t *testing.T) {
 		"http://todo.example.com/":          false, // not https
 		"https://example.com.evil.org/":     false,
 		"https://evilexample.com/":          false,
-		"https://gitea_gitea:3000/":         false,
+		"https://gitea:3000/":         false,
 		"https://10.0.0.1/":                 false,
 		"https://user:pw@todo.example.com/": false,
 		"file:///etc/passwd":                false,
@@ -881,7 +895,7 @@ func TestScreenshotChecksBeforeShooting(t *testing.T) {
 		"not a png":     {"unit": "garrison", "repo": "grafana", "path": "a.jpg", "url": "https://grafana.example.com/", "title": "t"},
 		"too wide":      {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "https://grafana.example.com/", "title": "t", "width": 9000},
 		"another site":  {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "https://example.org/", "title": "t"},
-		"internal host": {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "http://gitea_gitea:3000/", "title": "t"},
+		"internal host": {"unit": "garrison", "repo": "grafana", "path": "a.png", "url": "http://gitea:3000/", "title": "t"},
 	} {
 		if text, isErr := callText(t, m, "tok-alice", "screenshot", args); !isErr {
 			t.Errorf("%s: accepted: %q", name, text)

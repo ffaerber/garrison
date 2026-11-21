@@ -30,7 +30,7 @@ import (
 // the sign-in in front of private environments takes them, as it takes
 // Open WebUI's; the gateway's own MCP endpoint does not.
 type Keycloak struct {
-	URL      string // e.g. http://keycloak_keycloak:8080, on the system network
+	URL      string // e.g. http://keycloak:8080, on the system network
 	User     string // the master realm's admin
 	Password string
 	HTTP     *http.Client // nil: http.DefaultClient

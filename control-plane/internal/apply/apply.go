@@ -151,16 +151,15 @@ func ensureSecret(ctx context.Context, run Runner, name string) error {
 	return err
 }
 
-// HostExec returns a Runner for a deployer running in a container: ZFS and
-// rsync (which copies datasets back from snapshots) run on the host, in a
-// short-lived privileged container of image that enters the host's
-// units. Everything else runs directly.
-func HostExec(image string) Runner {
+// HostExec returns a Runner for a deployer running in a pod with the host's
+// process namespace (hostPID) and privileges: ZFS and rsync (which copies
+// datasets back from snapshots) run on the host, entering the namespaces of
+// its first process. Everything else runs directly in the pod.
+func HostExec() Runner {
 	return func(ctx context.Context, env []string, stdin []byte, name string, args ...string) ([]byte, error) {
 		if name == "zfs" || name == "rsync" {
-			args = append([]string{"run", "--rm", "--privileged", "--pid=host", "--network=none",
-				"--entrypoint", "nsenter", image, "-t", "1", "-m", "-u", "-i", "-n", "--", name}, args...)
-			name = "docker"
+			args = append([]string{"-t", "1", "-m", "-u", "-i", "-n", "--", name}, args...)
+			name = "nsenter"
 		}
 		return Exec(ctx, env, stdin, name, args...)
 	}

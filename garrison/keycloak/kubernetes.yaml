@@ -28,6 +28,7 @@ spec:
     metadata:
       labels: { app: keycloak, garrison.io/net: system }
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.4

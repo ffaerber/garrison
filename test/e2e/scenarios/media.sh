@@ -38,8 +38,8 @@ else
 fi
 trap '[ -z "$comfy_pid" ] || kill $comfy_pid 2>/dev/null; rm -rf "$tmp"' EXIT
 sed -i '/^COMFYUI_URL=/d' $ETC/install.env && echo "COMFYUI_URL=http://$host_ip:8188" >> $ETC/install.env
-docker service update --force --detach=false -q control-plane_agents >/dev/null 2>&1
-agents_say() { docker service logs --since 3m control-plane_agents 2>&1 | grep -q "generate_media uses ComfyUI at http://$host_ip:8188"; }
+docker service update --force --detach=false -q agents >/dev/null 2>&1
+agents_say() { docker service logs --since 3m agents 2>&1 | grep -q "generate_media uses ComfyUI at http://$host_ip:8188"; }
 check "the agent service uses it"          until_true 120 agents_say
 check "the project media/demo goes to Gitea" installer/push-repo.sh --update media/demo test/e2e/media/demo
 

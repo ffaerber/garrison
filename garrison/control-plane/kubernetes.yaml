@@ -1,0 +1,480 @@
+# The control plane: one image, built from this repo by Gitea Actions
+# (.gitea/workflows/build.yaml), which then sets the tag below by committing
+# here; the running deployer applies that and replaces itself.
+#
+# Its images are in Gitea's registry, which only signed-in accounts read:
+# pods pull them with the Secret registry-pull (gitea/configure.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-files
+  annotations:
+    garrison.io/files: user-runner.yaml
+---
+# ---------- the deployer ----------
+# It applies every repo of the `garrison` organisation that holds a
+# kubernetes.yaml, this one last, and the apps of every other unit, so it
+# may change anything in the cluster.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garrison-deployer
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin }
+subjects: [{ kind: ServiceAccount, name: deployer, namespace: garrison }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deployer
+spec:
+  selector: { app: deployer }
+  ports: [{ name: http, port: 8090 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployer
+spec:
+  replicas: 1
+  # One deployer at a time: it holds a lock on its state.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: deployer } }
+  template:
+    metadata:
+      labels: { app: deployer, garrison.io/net: system }
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: deployer
+      imagePullSecrets: [{ name: registry-pull }]
+      # ZFS runs on the host: the deployer enters its namespaces (nsenter)
+      # to create, snapshot and restore datasets.
+      hostPID: true
+      containers:
+        - name: deployer
+          image: git.${DOMAIN}/garrison/control-plane:bootstrap
+          args:
+            - deploy
+            - -gitea=http://gitea:3000
+            - -password-file=/run/secrets/admin-password
+            - -host-exec
+            # Keeps dashboards/*.json of the repos in Grafana.
+            - -grafana=http://grafana:3000
+            # Gitea calls this on every push, pull request and finished pipeline
+            # run, so changes deploy at once; the deployer still checks every 15 s.
+            - -listen=:8090
+            - -hook-url=http://deployer:8090/hook
+            # What it deploys, and Gitea's deliveries, go to the dashboard's feed;
+            # Prometheus reads the services' health at /metrics here.
+            - -events-db=postgres://garrison@postgres:5432/garrison
+            # The units' age keys: it decrypts their stored secrets for their
+            # apps, and gives the dashboard the public keys at /secrets/<unit>/recipients.
+            - -keys=/etc/garrison/sops
+            # The LLM providers' keys set on the dashboard's Models page, kept
+            # encrypted in garrison's config: written here for the agent service.
+            - -llm-keys=/etc/garrison/llm-keys
+          securityContext: { privileged: true }
+          ports: [{ containerPort: 8090 }]
+          volumeMounts:
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: install-env, mountPath: /etc/garrison/install.env, readOnly: true }
+            # Only the deployer has the keys; the installer made the directory.
+            - { name: sops, mountPath: /etc/garrison/sops }
+            - { name: llm-keys, mountPath: /etc/garrison/llm-keys }
+            # Shared with the CLI on the host: checkouts, state and lock.
+            - { name: state, mountPath: /var/lib/garrison/deployer }
+            # Apps are still deployed to Docker Swarm, until they move too.
+            - { name: docker, mountPath: /var/run/docker.sock }
+      volumes:
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: admin-password }
+              - secret: { name: garrison-db-password }
+              # The service account's token, where clients look for it, in this
+              # volume: Kubernetes cannot add its own mount below /run/secrets.
+              - serviceAccountToken: { path: kubernetes.io/serviceaccount/token }
+              - configMap: { name: kube-root-ca.crt, items: [{ key: ca.crt, path: kubernetes.io/serviceaccount/ca.crt }] }
+              - downwardAPI: { items: [{ path: kubernetes.io/serviceaccount/namespace, fieldRef: { fieldPath: metadata.namespace } }] }
+        - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
+        - { name: sops, hostPath: { path: /etc/garrison/sops, type: Directory } }
+        - { name: llm-keys, hostPath: { path: /etc/garrison/llm-keys, type: Directory } }
+        - { name: state, hostPath: { path: /var/lib/garrison/deployer, type: DirectoryOrCreate } }
+        - { name: docker, hostPath: { path: /var/run/docker.sock, type: Socket } }
+---
+# ---------- the gateway ----------
+# The MCP server behind the agents, and the syncs that keep each unit's
+# agents, channel, members and build account. Not routed: only the agent
+# service calls it, with each person's Keycloak token. It reads the pods and
+# logs of every namespace for stack_status and service_logs, and changes nothing.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: garrison-gateway
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garrison-gateway
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: garrison-gateway }
+subjects: [{ kind: ServiceAccount, name: gateway, namespace: garrison }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+spec:
+  selector: { app: gateway }
+  ports: [{ name: http, port: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gateway } }
+  template:
+    metadata:
+      labels: { app: gateway, garrison.io/net: system }
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: gateway
+      imagePullSecrets: [{ name: registry-pull }]
+      containers:
+        - name: gateway
+          image: git.${DOMAIN}/garrison/control-plane:bootstrap
+          args:
+            - gateway
+            - -password-file=/run/secrets/admin-password
+            # Wakes the build account, member and agent syncs on Gitea's events.
+            - -hook-url=http://gateway:8080/hook
+            # Every change an agent makes, and every refusal, goes to the feed.
+            - -events-db=postgres://garrison@postgres:5432/garrison
+          ports: [{ containerPort: 8080 }]
+          volumeMounts:
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: install-env, mountPath: /etc/garrison/install.env, readOnly: true }
+            - { name: state, mountPath: /var/lib/garrison/deployer, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+      volumes:
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: admin-password }
+              - secret: { name: garrison-db-password }
+              - secret: { name: tls, items: [{ key: tls.crt, path: tls.crt }] }
+              # The service account's token, where clients look for it, in this
+              # volume: Kubernetes cannot add its own mount below /run/secrets.
+              - serviceAccountToken: { path: kubernetes.io/serviceaccount/token }
+              - configMap: { name: kube-root-ca.crt, items: [{ key: ca.crt, path: kubernetes.io/serviceaccount/ca.crt }] }
+              - downwardAPI: { items: [{ path: kubernetes.io/serviceaccount/namespace, fieldRef: { fieldPath: metadata.namespace } }] }
+        - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
+        - { name: state, hostPath: { path: /var/lib/garrison/deployer, type: DirectoryOrCreate } }
+---
+# ---------- the agent service ----------
+# The OpenAI-compatible API Open WebUI talks to. Its models are the
+# agents. Each chat with an agent runs in a sandbox of its own (the image
+# below, built with this one): Pi, the agent harness, with a workspace kept
+# in a volume per chat. The agent service passes on the LLM, whose key only
+# it has, and the agent's tools from the gateway, acting as the person
+# chatting (Open WebUI sends their Keycloak token). Sandboxes run under
+# gVisor, as root, and reach the internet only through this service's proxy
+# (port 8072), as far as their agent.yaml says. For now the sandboxes are
+# Docker containers, started through the sandbox guard.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agents
+spec:
+  selector: { app: agents }
+  ports:
+    - { name: api, port: 8070 }
+    - { name: sandboxes, port: 8071 }
+    - { name: internet, port: 8072 }
+    - { name: alerts, port: 8073 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agents
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: agents } }
+  template:
+    metadata:
+      labels: { app: agents, garrison.io/net: system }
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets: [{ name: registry-pull }]
+      containers:
+        - name: agents
+          image: git.${DOMAIN}/garrison/control-plane:bootstrap
+          args:
+            - agents
+            - -password-file=/run/secrets/admin-password
+            - -sandbox-image=git.${DOMAIN}/garrison/sandbox:bootstrap
+            # The routines' runs go to the feed.
+            - -events-db=postgres://garrison@postgres:5432/garrison
+            # Alertmanager's alerts: into the feed, and they start routines.
+            - -alerts-listen=:8073
+          ports: [{ containerPort: 8070 }, { containerPort: 8071 }, { containerPort: 8072 }, { containerPort: 8073 }]
+          volumeMounts:
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: install-env, mountPath: /etc/garrison/install.env, readOnly: true }
+            - { name: llm-api-key, mountPath: /etc/garrison/llm-api-key, readOnly: true }
+            # The keys of the providers in llm/providers.yaml of garrison's config.
+            - { name: llm-keys, mountPath: /etc/garrison/llm-keys, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8070 }
+            periodSeconds: 5
+      volumes:
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: admin-password }
+              - secret: { name: garrison-db-password }
+              - secret: { name: alerts-token }
+              - secret: { name: tls, items: [{ key: tls.crt, path: tls.crt }] }
+        - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
+        - { name: llm-api-key, hostPath: { path: /etc/garrison/llm-api-key, type: File } }
+        - { name: llm-keys, hostPath: { path: /etc/garrison/llm-keys, type: Directory } }
+---
+# The Docker API for the agent service: only sandboxes, i.e. containers of
+# the sandbox image, labelled, with memory and process limits, under gVisor
+# (runsc, installed by install.sh), on the sandboxes network, with a volume
+# of their own.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-guard
+spec:
+  selector: { app: sandbox-guard }
+  ports: [{ name: docker, port: 2375 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-guard
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: sandbox-guard } }
+  template:
+    metadata:
+      labels: { app: sandbox-guard }
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets: [{ name: registry-pull }]
+      containers:
+        - name: guard
+          image: git.${DOMAIN}/garrison/control-plane:bootstrap
+          args:
+            - guard
+            - -listen=:2375
+            - -network=garrison-sandboxes
+            - -volumes=garrison-agent-
+            - -image=git.${DOMAIN}/garrison/sandbox
+            - -label=garrison.sandbox
+            - -max-memory=2147483648
+            - -runtime=runsc
+            # A sandbox in a unit's channel gets that unit's media
+            # library, the share media, at /data/media: no other folder of the host.
+            - -share=/garrison/ns/{unit}/shares/media
+          ports: [{ containerPort: 2375 }]
+          volumeMounts: [{ name: docker, mountPath: /var/run/docker.sock }]
+      volumes:
+        - { name: docker, hostPath: { path: /var/run/docker.sock, type: Socket } }
+---
+# ---------- the dashboard ----------
+# At the installation's domain, behind the sign-in: the feed of what happens
+# and how it was handled, to each person what they may read (asked of
+# Gitea). Traefik's login check sets the header naming the person; the
+# NetworkPolicies let nothing but Traefik reach it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: home
+spec:
+  selector: { app: home }
+  ports: [{ name: http, port: 8060 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: home
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: sso@file
+spec:
+  rules:
+    - host: ${DOMAIN}
+      http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: home, port: { name: http } } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: home } }
+  template:
+    metadata:
+      labels: { app: home, garrison.io/net: system }
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets: [{ name: registry-pull }]
+      containers:
+        - name: home
+          image: git.${DOMAIN}/garrison/control-plane:bootstrap
+          args:
+            - home
+            - -password-file=/run/secrets/admin-password
+            - -events-db=postgres://garrison@postgres:5432/garrison
+            # The secrets page encrypts with the units' public keys, which the
+            # deployer gives; it never reads a value back.
+            - -deployer=http://deployer:8090
+          ports: [{ containerPort: 8060 }]
+          volumeMounts:
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: install-env, mountPath: /etc/garrison/install.env, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8060 }
+            periodSeconds: 5
+      volumes:
+        - name: secrets
+          projected:
+            sources: [{ secret: { name: admin-password } }, { secret: { name: garrison-db-password } }]
+        - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
+---
+# ---------- the agents' browser ----------
+# Headless Chrome for the agents' screenshot tool, driven by the gateway.
+# Every name it looks up goes to Traefik, so it can load the installation's
+# pages and nothing else; its NetworkPolicy lets it reach only Traefik, and
+# only the gateway reach it; the gateway also refuses its requests to other
+# names. Its DevTools port has no password. The image's own start script
+# splits arguments, so Chrome is started here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: browser
+spec:
+  selector: { app: browser }
+  ports: [{ name: devtools, port: 9222 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browser
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: browser } }
+  template:
+    metadata:
+      labels: { app: browser }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: browser
+          image: chromedp/headless-shell:156.0.8078.48
+          command: [/bin/bash, -c]
+          args:
+            - |
+              socat TCP4-LISTEN:9222,fork TCP4:127.0.0.1:9223 &
+              exec /headless-shell/headless-shell --no-sandbox --use-gl=angle --use-angle=swiftshader \
+                --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 \
+                --ignore-certificate-errors '--host-resolver-rules=MAP * traefik.garrison.svc.cluster.local'
+          ports: [{ containerPort: 9222 }]
+          resources:
+            limits: { memory: 1Gi }
+---
+# ---------- the user units' pipelines ----------
+# The Docker API for the user runner: only what running jobs needs.
+apiVersion: v1
+kind: Service
+metadata:
+  name: guard
+spec:
+  selector: { app: guard }
+  ports: [{ name: docker, port: 2375 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guard
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: guard } }
+  template:
+    metadata:
+      labels: { app: guard }
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets: [{ name: registry-pull }]
+      containers:
+        - name: guard
+          image: git.${DOMAIN}/garrison/control-plane:bootstrap
+          args: [guard, -listen=:2375, -network=garrison-builds]
+          ports: [{ containerPort: 2375 }]
+          volumeMounts: [{ name: docker, mountPath: /var/run/docker.sock }]
+      volumes:
+        - { name: docker, hostPath: { path: /var/run/docker.sock, type: Socket } }
+---
+# Actions runner of the user units (see user-runner.yaml). The system
+# organisation has its own runner (garrison/runner), which may use Docker
+# directly. Its jobs are Docker containers on the builds network.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-runner
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: user-runner } }
+  template:
+    metadata:
+      labels: { app: user-runner }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: runner
+          image: gitea/act_runner:0.2.13
+          env:
+            - { name: CONFIG_FILE, value: /etc/act_runner/config.yaml }
+            - { name: DOCKER_HOST, value: "tcp://guard:2375" }
+            # By its full name: the jobs, outside the cluster, get this address.
+            - { name: GITEA_INSTANCE_URL, value: "http://gitea.garrison.svc.cluster.local:3000" }
+            - { name: GITEA_RUNNER_REGISTRATION_TOKEN_FILE, value: /run/secrets/gitea-user-runner-token }
+            - { name: GITEA_RUNNER_NAME, value: garrison-user }
+            - { name: GITEA_RUNNER_LABELS, value: "garrison-user:docker://alpine:3.22" }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/act_runner/config.yaml
+              subPath: user-runner.yaml
+              readOnly: true
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: data, mountPath: /data }
+      volumes:
+        - { name: config, configMap: { name: control-plane-files } }
+        - name: secrets
+          projected:
+            sources: [{ secret: { name: gitea-user-runner-token } }]
+        - { name: data, hostPath: { path: /garrison/system/user-runner, type: Directory } }

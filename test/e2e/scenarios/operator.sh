@@ -17,7 +17,7 @@ quotes_deployed() { garrison applied | grep -q "^app todo/quotes@main quotes "; 
 check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed
 quotes_crashes() { docker service ps quotes_web --format '{{.Error}}' 2>/dev/null | grep -q 'non-zero exit'; }
 check "it does not start"                  until_true 120 quotes_crashes
-am_alerts() { docker exec "$(docker ps -q -f name=prometheus_alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts; }
+am_alerts() { docker exec "$(docker ps -q -f name=alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts; }
 quotes_alert() { am_alerts | python3 -c '
 import json,sys
 sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("app") == "quotes" and a["labels"].get("unit") == "todo" for a in json.load(sys.stdin)) else 1)'; }

@@ -35,7 +35,7 @@ type Poster interface {
 
 // GatewayPoster posts through the gateway, which holds Open WebUI's account.
 type GatewayPoster struct {
-	URL        string // the gateway, e.g. http://control-plane_gateway:8080
+	URL        string // the gateway, e.g. http://gateway:8080
 	ServiceKey string
 	HTTP       *http.Client
 }

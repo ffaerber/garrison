@@ -83,6 +83,7 @@ spec:
       labels: { app: traefik }
       annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
     spec:
+      automountServiceAccountToken: false
       serviceAccountName: traefik
       hostNetwork: true
       # On the host's network, yet names of the cluster resolve.
@@ -122,3 +123,8 @@ spec:
           projected:
             sources:
               - secret: { name: tls }
+              # The service account's token, where clients look for it, in this
+              # volume: Kubernetes cannot add its own mount below /run/secrets.
+              - serviceAccountToken: { path: kubernetes.io/serviceaccount/token }
+              - configMap: { name: kube-root-ca.crt, items: [{ key: ca.crt, path: kubernetes.io/serviceaccount/ca.crt }] }
+              - downwardAPI: { items: [{ path: kubernetes.io/serviceaccount/namespace, fieldRef: { fieldPath: metadata.namespace } }] }

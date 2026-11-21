@@ -187,7 +187,7 @@ func (s *Store) Delete(ctx context.Context, ns, name, person string) error {
 	return s.Gitea.Commit(ctx, ns, ConfigRepo, fmt.Sprintf("Delete the secret %s, for %s", name, person), person, map[string][]byte{Path(name): nil})
 }
 
-// Remote asks the deployer at base (e.g. http://control-plane_deployer:8090)
+// Remote asks the deployer at base (e.g. http://deployer:8090)
 // for a unit's public keys.
 func Remote(base string) func(ctx context.Context, ns string) ([]string, error) {
 	client := &http.Client{Timeout: 30 * time.Second}

@@ -31,7 +31,7 @@ import (
 type OpenWebUI struct {
 	// Wake, when set, starts a sync before the interval is over.
 	Wake     <-chan struct{}
-	URL      string // e.g. http://openwebui_openwebui:8080
+	URL      string // e.g. http://openwebui:8080
 	Email    string
 	Password string
 	Domain   string
@@ -331,7 +331,7 @@ func (o *OpenWebUI) howTo(ns Unit, list []agents.Agent, commander string) string
 For example:
 
 `+"`@%[1]s which stacks are not healthy?`"+`
-`+"`@%[1]s show the last 50 log lines of grafana_grafana`"+`
+`+"`@%[1]s show the last 50 log lines of grafana`"+`
 
 It answers in a thread. To go on, use Reply on its answer there (the reply arrow on its message): it answers again without being mentioned. A plain message in the thread, like any message that does not mention an agent, is for the people here; mention the agent to ask it.%[2]s
 

@@ -215,9 +215,9 @@ func TestFailedDeployIsRetriedAndHoldsBackTheControlPlane(t *testing.T) {
 
 func TestNetrcNamesTheGiteaHost(t *testing.T) {
 	c, _ := setup(t)
-	c.GiteaURL = "http://gitea_gitea:3000"
+	c.GiteaURL = "http://gitea:3000"
 	c.prepare()
-	if netrc, _ := os.ReadFile(filepath.Join(c.WorkDir, "home", "gitea_gitea", ".netrc")); !strings.HasPrefix(string(netrc), "machine gitea_gitea login admin ") {
+	if netrc, _ := os.ReadFile(filepath.Join(c.WorkDir, "home", "gitea", ".netrc")); !strings.HasPrefix(string(netrc), "machine gitea login admin ") {
 		t.Errorf(".netrc = %q", netrc)
 	}
 }

@@ -27,7 +27,7 @@ import (
 const Tag = "git"
 
 type Grafana struct {
-	URL      string // e.g. http://grafana_grafana:3000
+	URL      string // e.g. http://grafana:3000
 	User     string // Grafana's local admin
 	Password string
 	HTTP     *http.Client

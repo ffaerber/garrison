@@ -32,7 +32,7 @@ for dir in garrison/*/; do
 done
 
 # The deployer only follows Gitea while it runs in Swarm.
-docker service inspect control-plane_deployer >/dev/null 2>&1 || exit 0
+docker service inspect deployer >/dev/null 2>&1 || exit 0
 
 # A changed control plane is built first; the build sets the new tag.
 if [ -n "$plane_commit" ]; then
@@ -59,7 +59,7 @@ while :; do
   [ -z "$behind" ] && break
   if [ $SECONDS -ge $deadline ]; then
     echo "the deployer has not deployed:$behind" >&2
-    docker service logs --tail 20 control-plane_deployer >&2 || true
+    docker service logs --tail 20 deployer >&2 || true
     exit 1
   fi
   sleep 5

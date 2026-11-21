@@ -148,6 +148,11 @@ func label(obj *yaml.Node, name string) error {
 	meta := child(obj, "metadata", yaml.MappingNode)
 	labels := child(meta, "labels", yaml.MappingNode)
 	set(labels, StackLabel, name)
+	// A workload's pods too, so they are found by their stack. Not added to
+	// its selector, which cannot change.
+	if tmpl := field(field(obj, "spec"), "template"); tmpl != nil && tmpl.Kind == yaml.MappingNode {
+		set(child(child(tmpl, "metadata", yaml.MappingNode), "labels", yaml.MappingNode), StackLabel, name)
+	}
 	return nil
 }
 

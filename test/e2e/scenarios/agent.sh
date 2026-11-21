@@ -62,7 +62,7 @@ check "the agent answers bob in the channel" test -n "$answer"
 check "its answer names grafana"           grep -qi grafana <<<"$answer"
 check "it asked the gateway, as bob" grep -q "mcp: bob: " <<<"$(mcp_calls "$since" bob)"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-answer=$(ask bob "Show me the last 20 log lines of the service grafana_grafana, and how much memory the stack grafana uses." | reply)
+answer=$(ask bob "Show me the last 20 log lines of the service grafana, and how much memory the stack grafana uses." | reply)
 check "it reads logs for bob"              grep -q "mcp: bob: service_logs" <<<"$(mcp_calls "$since" bob)"
 check "it reads metrics for bob"           grep -qE "mcp: bob: (service_usage|query_metrics)" <<<"$(mcp_calls "$since" bob)"
 answer=$(ask bob "In the unit garrison, propose a change to the repo platform: add a file agent-bob.txt containing hello. Title: Agent smoke test bob." | reply)

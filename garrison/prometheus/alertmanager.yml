@@ -11,7 +11,7 @@ route:
 receivers:
   - name: garrison
     webhook_configs:
-      - url: http://control-plane_agents:8073/alerts
+      - url: http://agents:8073/alerts
         send_resolved: true
         max_alerts: 50
         http_config:

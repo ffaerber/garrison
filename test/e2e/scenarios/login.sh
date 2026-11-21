@@ -52,7 +52,7 @@ check "bob has the operator agent of the unit garrison" until_true 180 has_agent
 check "and the commander, which finds the agent for a task" has_agent garrison/commander
 check "the agents come from the agent service" grep -q '"owned_by":"garrison"' <<<"$(chat_api bob "$chat/api/models")"
 check "Open WebUI has no LLM key" \
-  test -z "$(docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" printenv OPENAI_API_KEY)"
+  test -z "$(docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui | head -n1)" printenv OPENAI_API_KEY)"
 check "the agent service wants a token" \
   test "$(agents_api -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"model":"garrison/operator","messages":[]}' /v1/chat/completions)" = 401
 check "it refuses a made-up token" \

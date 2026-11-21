@@ -71,7 +71,7 @@ check "it answers carol in todo's channel" grep -qi secret <<<"$answer"
 # In garrison's channel, which everyone reads, the commander may not hand
 # work to the keeper as it works in todo.
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-refused_here() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: carol: garrison/commander may not ask todo/keeper: .*answers only where only todo's people read"; }
+refused_here() { docker service logs --since "$at" agents 2>&1 | grep -q "agents: carol: garrison/commander may not ask todo/keeper: .*answers only where only todo's people read"; }
 answer=$(ask_agent garrison carol "Use ask_agent to ask todo/keeper for the first line of README.md of the repo secret of the unit todo." commander)
 if ! refused_here; then
   printf 'retry the commander asked no keeper; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"

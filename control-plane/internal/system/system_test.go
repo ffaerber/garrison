@@ -59,6 +59,9 @@ func TestRender(t *testing.T) {
 	if n != 2 {
 		t.Errorf("rendered %d objects, want 2", n)
 	}
+	if strings.Count(out, "garrison.io/stack: 01-db") != 3 {
+		t.Errorf("the StatefulSet's pods are not labelled with the stack:\n%s", out)
+	}
 	// labels: with no value becomes a mapping holding the stack's label.
 	if !strings.Contains(string(render(t, "02-web")), "garrison.io/stack: 02-web") {
 		t.Error("an empty labels: is not filled in")

@@ -42,7 +42,7 @@ jobs:
           # and trust the installation's certificate when it is self-signed.
           echo "$(ip route | awk '/default/ { print $3 }') $REGISTRY" >> /etc/hosts
           [ -z "$REGISTRY_CA" ] || printf '%s\n' "$REGISTRY_CA" >> /etc/ssl/certs/ca-certificates.crt
-          git -c http.extraHeader="Authorization: token $TOKEN" clone -q "http://gitea_gitea:3000/$REPO.git" src
+          git -c http.extraHeader="Authorization: token $TOKEN" clone -q "http://gitea.garrison.svc.cluster.local:3000/$REPO.git" src
           git -C src checkout -q "$SHA"
           image="$REGISTRY/$REPO:$(echo "$SHA" | cut -c1-12)"
           cache="$REGISTRY/$REPO:buildcache"

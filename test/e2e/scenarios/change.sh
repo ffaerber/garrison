@@ -47,7 +47,7 @@ if [ -z "$gpr" ]; then
   answer=$(ask_agent todo bob "Please propose the changes in your checkout of app now with propose_workspace_changes." developer)
   gpr=$(newest_pr app bob "$since")
 fi
-check "it clones todo/app, as bob"             bash -c 'docker service logs --since "$0" control-plane_agents 2>&1 | grep -q "git: bob: todo/developer: fetch todo/app"' "$at"
+check "it clones todo/app, as bob"             bash -c 'docker service logs --since "$0" agents 2>&1 | grep -q "git: bob: todo/developer: fetch todo/app"' "$at"
 check "it proposes a patch, as bob"        grep -q "mcp: bob: propose_patch" <<<"$(mcp_calls "$at" bob)"
 check "a pull request by bob holds it"     test -n "$gpr"
 diff=$(gitea_api "" "$hp/app/pulls/$gpr.diff")
@@ -84,7 +84,7 @@ if [ -n "$dvpr" ] && [ -z "$(merged_by "$dvpr")" ]; then
 fi
 check "it proposes it for dev, as bob"     grep -q '"ref":"dev"' <<<"$(gitea_api "" "$hp/app/pulls/${dvpr:-0}")"
 check "it merges it with its own account"  test "$(merged_by "${dvpr:-0}")" = agent-todo-developer
-check "the gateway says it merged for bob" bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob: todo/developer: merge_change \[person\]$"' "$at"
+check "the gateway says it merged for bob" bash -c 'docker service logs --since "$0" gateway 2>&1 | grep -q "mcp: bob: todo/developer: merge_change \[person\]$"' "$at"
 dev_heading() { web -b "$tmp/dev.jar" "https://dev-todo.$DOMAIN/" | grep -q "Dev todos" && return 0; sso_login "$tmp/dev.jar" "https://dev-todo.$DOMAIN/" "$TEST_PASSWORD" "$tmp/dev.html" bob >/dev/null 2>&1; return 1; }
 check "dev-todo deploys it"                until_true 1200 dev_heading
 main_untouched() { ! gitea_api "" "$hp/app/raw/page.html?ref=main" | grep -q "Dev todos"; }
@@ -107,7 +107,7 @@ check "the pull request gets a preview"    until_true 1200 previewed
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 answer=$(ask_agent todo bob "Ask todo/tester to open https://pr-$ppr-todo.$DOMAIN/ in the browser and tell you the page's main heading. Tell me what it says." developer)
 check "the tester browses it, for bob, asked by the developer" \
-  bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob: todo/tester: browse \[agent todo/developer\]$"' "$at"
+  bash -c 'docker service logs --since "$0" gateway 2>&1 | grep -q "mcp: bob: todo/tester: browse \[agent todo/developer\]$"' "$at"
 check "the answer names the heading"       grep -q "Our todos" <<<"$answer"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/$ppr"
 unpreviewed() { ! garrison applied | grep -q "^app todo/todo@pr-$ppr "; }
@@ -129,9 +129,9 @@ fi
 check "it installs Python from Alpine's registry" installed
 check "and says what it printed"           grep -q 42 <<<"$answer"
 check "through the proxy, logged with bob and the agent" \
-  bash -c 'docker service logs --since "$0" control-plane_agents 2>&1 | grep -q "agents: internet: bob: todo/builder: CONNECT dl-cdn.alpinelinux.org:443"' "$at"
+  bash -c 'docker service logs --since "$0" agents 2>&1 | grep -q "agents: internet: bob: todo/builder: CONNECT dl-cdn.alpinelinux.org:443"' "$at"
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-refused_site() { docker service logs --since "$at" control-plane_agents 2>&1 | grep -q "agents: internet: bob: todo/builder: example.org:443 refused"; }
+refused_site() { docker service logs --since "$at" agents 2>&1 | grep -q "agents: internet: bob: todo/builder: example.org:443 refused"; }
 answer=$(ask_agent todo bob "Run exactly this command in your sandbox and show me what it printed: curl -sS -m 10 https://example.org/" builder)
 if ! refused_site; then
   printf 'retry no request to example.org; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"

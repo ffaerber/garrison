@@ -19,6 +19,7 @@ import (
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/gitops"
 	"garrison/control-plane/internal/stack"
+	"garrison/control-plane/internal/system"
 	"garrison/templates"
 )
 
@@ -49,7 +50,7 @@ type Tools struct {
 	Gitea      *Gitea
 	Run        apply.Runner // docker CLI
 	WorkDir    string       // the deployer's state, read-only
-	Prometheus string       // e.g. http://prometheus_prometheus:9090
+	Prometheus string       // e.g. http://prometheus:9090
 	Browser    *Browser     // for screenshot; nil: none
 	// Keycloak signs agents in for a run without a person: their browser
 	// then works as the agent's own account. nil: such runs cannot browse.
@@ -120,11 +121,11 @@ func SpecsFor(a *agents.Agent) []Spec {
 func baseSpecs() []Spec {
 	return []Spec{
 		spec("list_units", "Lists the units (Gitea organisations).", nil),
-		spec("list_stacks", "Lists a unit's stacks with the commit the deployer deployed, and each of their Swarm services with running/desired replicas and image.", map[string]any{"unit": nsArg}, "unit"),
-		spec("stack_status", "Shows the tasks of one stack: their state and any error, newest first. Use it to see why a service does not run.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
+		spec("list_stacks", "Lists a unit's stacks with the commit the deployer deployed, and each of their services with ready/desired replicas and image.", map[string]any{"unit": nsArg}, "unit"),
+		spec("stack_status", "Shows the pods (in garrison) or tasks (in other units) of one stack: their state and any error. Use it to see why a service does not run.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
 		spec("service_logs", "Shows the last lines of a service's logs.", map[string]any{
 			"unit":    nsArg,
-			"service": str("Swarm service name, <stack>_<service>, e.g. grafana_grafana"),
+			"service": str("service name as list_stacks shows it: in garrison a workload such as gitea or deployer; in other units <stack>_<service>, e.g. todo_web"),
 			"lines":   map[string]any{"type": "integer", "description": "how many lines, at most 500; default 100"},
 		}, "unit", "service"),
 		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
@@ -307,19 +308,25 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err := t.ownStack(a.Unit, a.Stack); err != nil {
 			return "", err
 		}
+		if a.Unit == PlatformUnit {
+			return t.podStatus(ctx, system.Namespace, a.Stack)
+		}
 		out, err := t.Run(ctx, nil, nil, "docker", "stack", "ps", "--no-trunc", "--format", "{{.Name}}\t{{.CurrentState}}\t{{.Error}}", a.Stack)
 		return firstLines(string(out), 40), err
 	case "service_logs":
+		n := a.Lines
+		if n <= 0 || n > 500 {
+			n = 100
+		}
+		if a.Unit == PlatformUnit {
+			return t.workloadLogs(ctx, system.Namespace, a.Service, n)
+		}
 		stack, _, ok := strings.Cut(a.Service, "_")
 		if !ok || !swarmName.MatchString(a.Service) {
 			return "", fmt.Errorf("%w: service %q is not <stack>_<service>", ErrInvalid, a.Service)
 		}
 		if err := t.ownStack(a.Unit, stack); err != nil {
 			return "", err
-		}
-		n := a.Lines
-		if n <= 0 || n > 500 {
-			n = 100
 		}
 		// Containers log to both streams. The names are arguments, never part of the script.
 		out, err := t.Run(ctx, nil, nil, "sh", "-c", `docker service logs --tail "$1" --no-task-ids --timestamps "$2" 2>&1`, "sh", fmt.Sprint(n), a.Service)
@@ -860,6 +867,7 @@ type Service struct {
 	Replicas string `json:"replicas"`
 	Image    string `json:"image"`
 	Healthy  bool   `json:"healthy"`
+	kind     string // of a workload: deployment, statefulset or daemonset
 }
 
 // Stacks lists a unit's deployed stacks with what Swarm runs for them.
@@ -871,6 +879,26 @@ func (t *Tools) Stacks(ctx context.Context, unit string) ([]Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	var byStack map[string][]Service
+	if unit == PlatformUnit {
+		byStack, err = t.workloads(ctx, system.Namespace)
+	} else {
+		byStack, err = t.swarmServices(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	names := stackNames(state, unit)
+	var stacks []Stack
+	for _, name := range sortedKeys(names) {
+		stacks = append(stacks, Stack{Name: name, Commit: names[name], Services: byStack[name]})
+	}
+	return stacks, nil
+}
+
+// swarmServices are the Swarm services, by stack: the apps', until they
+// move to Kubernetes too.
+func (t *Tools) swarmServices(ctx context.Context) (map[string][]Service, error) {
 	out, err := t.Run(ctx, nil, nil, "docker", "service", "ls", "--format", "{{.Name}}\t{{.Replicas}}\t{{.Image}}")
 	if err != nil {
 		return nil, err
@@ -885,12 +913,147 @@ func (t *Tools) Stacks(ctx context.Context, unit string) ([]Stack, error) {
 		running, desired, _ := strings.Cut(strings.Fields(f[1])[0], "/")
 		byStack[stack] = append(byStack[stack], Service{Name: f[0], Replicas: f[1], Image: f[2], Healthy: running == desired && desired != "0"})
 	}
-	names := stackNames(state, unit)
-	var stacks []Stack
-	for _, name := range sortedKeys(names) {
-		stacks = append(stacks, Stack{Name: name, Commit: names[name], Services: byStack[name]})
+	return byStack, nil
+}
+
+// workloads are the Deployments, StatefulSets and DaemonSets of a
+// namespace, by the stack they belong to (system.StackLabel).
+func (t *Tools) workloads(ctx context.Context, namespace string) (map[string][]Service, error) {
+	out, err := t.Run(ctx, nil, nil, "kubectl", "get", "deployments,statefulsets,daemonsets", "--namespace", namespace, "--output", "json")
+	if err != nil {
+		return nil, err
 	}
-	return stacks, nil
+	var list struct {
+		Items []struct {
+			Kind     string
+			Metadata struct {
+				Name   string
+				Labels map[string]string
+			}
+			Spec struct {
+				Replicas *int
+				Template struct {
+					Spec struct {
+						Containers []struct{ Image string }
+					}
+				}
+			}
+			Status struct {
+				ReadyReplicas          int
+				DesiredNumberScheduled int
+				NumberReady            int
+			}
+		}
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, fmt.Errorf("kubectl get: %w", err)
+	}
+	byStack := map[string][]Service{}
+	for _, w := range list.Items {
+		stack := w.Metadata.Labels[system.StackLabel]
+		if stack == "" {
+			continue
+		}
+		desired, ready := 1, w.Status.ReadyReplicas
+		if w.Spec.Replicas != nil {
+			desired = *w.Spec.Replicas
+		}
+		if w.Kind == "DaemonSet" {
+			desired, ready = w.Status.DesiredNumberScheduled, w.Status.NumberReady
+		}
+		image := ""
+		if c := w.Spec.Template.Spec.Containers; len(c) > 0 {
+			image = c[0].Image
+		}
+		byStack[stack] = append(byStack[stack], Service{Name: w.Metadata.Name, Replicas: fmt.Sprintf("%d/%d", ready, desired),
+			Image: image, Healthy: ready == desired && desired > 0, kind: strings.ToLower(w.Kind)})
+	}
+	return byStack, nil
+}
+
+// podStatus describes the pods of a stack: phase, and each container's
+// readiness, restarts and why it waits or ended.
+func (t *Tools) podStatus(ctx context.Context, namespace, stack string) (string, error) {
+	out, err := t.Run(ctx, nil, nil, "kubectl", "get", "pods", "--namespace", namespace, "--selector", system.StackLabel+"="+stack, "--output", "json")
+	if err != nil {
+		return "", err
+	}
+	var list struct {
+		Items []struct {
+			Metadata struct{ Name string }
+			Status   struct {
+				Phase             string
+				Reason, Message   string
+				ContainerStatuses []struct {
+					Name         string
+					Ready        bool
+					RestartCount int
+					State        map[string]struct{ Reason, Message string }
+					LastState    map[string]struct {
+						Reason   string
+						ExitCode int
+					} `json:"lastState"`
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return "", fmt.Errorf("kubectl get pods: %w", err)
+	}
+	if len(list.Items) == 0 {
+		return fmt.Sprintf("%s has no pods.", stack), nil
+	}
+	var b strings.Builder
+	for _, p := range list.Items {
+		fmt.Fprintf(&b, "%s\t%s", p.Metadata.Name, p.Status.Phase)
+		if p.Status.Reason != "" {
+			fmt.Fprintf(&b, "\t%s: %s", p.Status.Reason, p.Status.Message)
+		}
+		b.WriteString("\n")
+		for _, c := range p.Status.ContainerStatuses {
+			fmt.Fprintf(&b, "  %s ready=%t restarts=%d", c.Name, c.Ready, c.RestartCount)
+			for state, d := range c.State {
+				fmt.Fprintf(&b, " %s", state)
+				if d.Reason != "" {
+					fmt.Fprintf(&b, " (%s", d.Reason)
+					if d.Message != "" {
+						fmt.Fprintf(&b, ": %s", firstLines(d.Message, 3))
+					}
+					b.WriteString(")")
+				}
+			}
+			if last, ok := c.LastState["terminated"]; ok {
+				fmt.Fprintf(&b, "; last ended %s, exit code %d", last.Reason, last.ExitCode)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return firstLines(b.String(), 60), nil
+}
+
+// workloadLogs are the last lines of a workload of garrison, all containers.
+// A Swarm-style name, stack_service, names the same workload.
+func (t *Tools) workloadLogs(ctx context.Context, namespace, name string, lines int) (string, error) {
+	if i := strings.LastIndex(name, "_"); i >= 0 {
+		name = name[i+1:]
+	}
+	if !swarmName.MatchString(name) {
+		return "", fmt.Errorf("%w: service %q", ErrInvalid, name)
+	}
+	byStack, err := t.workloads(ctx, namespace)
+	if err != nil {
+		return "", err
+	}
+	for _, stack := range sortedKeys(byStack) {
+		for _, w := range byStack[stack] {
+			if w.Name == name {
+				out, err := t.Run(ctx, nil, nil, "kubectl", "logs", "--namespace", namespace, w.kind+"/"+name,
+					"--all-containers", "--prefix", "--timestamps", "--tail", fmt.Sprint(lines))
+				return string(out), err
+			}
+		}
+	}
+	return "", fmt.Errorf("%w: %s is no service of %s; list_stacks shows them", ErrInvalid, name, PlatformUnit)
 }
 
 func firstLines(s string, n int) string {

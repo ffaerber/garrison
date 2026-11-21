@@ -3,12 +3,12 @@
 section_platform() {
 echo "# deployer"
 
-check "the deployer runs in Swarm"       test "$(docker service ls --filter name=control-plane_deployer --format '{{.Replicas}}')" = 1/1
+check "the deployer runs in Swarm"       test "$(docker service ls --filter name=deployer --format '{{.Replicas}}')" = 1/1
 check "it runs an image built in Gitea"    bash -c "case '$(deployer_image)' in git.$DOMAIN/garrison/control-plane:bootstrap) exit 1 ;; git.$DOMAIN/garrison/control-plane:*) exit 0 ;; *) exit 1 ;; esac"
 tag=$(deployer_image | sed 's/.*://')
 check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/garrison/container/control-plane/$tag")" = 200
 check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/garrison/control-plane/actions/tasks?limit=1")"
-check "the runner is up"                 test "$(docker service ls --filter name=runner_runner --format '{{.Replicas}}')" = 1/1
+check "the runner is up"                 test "$(docker service ls --filter name=runner --format '{{.Replicas}}')" = 1/1
 check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/garrison/actions/secrets")" = 403
 check "the deployer no longer runs on the host" bash -c '! systemctl is-active --quiet garrison-controller'
 check "the deployer deployed grafana, prometheus and loki" \
@@ -30,7 +30,7 @@ check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --for
 echo "# monitoring data"
 check "Prometheus scrapes the node"        poll 180 '"job":"node"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
 check "Prometheus scrapes the containers"  poll 180 '"job":"cadvisor"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
-check "container metrics name their Swarm service" poll 180 'gitea_gitea' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=count%20by%20(container_label_com_docker_swarm_service_name)(container_memory_usage_bytes)"
+check "container metrics name their Swarm service" poll 180 'gitea' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=count%20by%20(container_label_com_docker_swarm_service_name)(container_memory_usage_bytes)"
 check "Loki has the logs of the Gitea stack" poll 180 '"values":\[\[' "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?query=%7Bstack%3D%22gitea%22%7D&limit=1"
 check "Prometheus is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://prometheus.$DOMAIN/)" = 404
 check "Loki is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://loki.$DOMAIN/)" = 404

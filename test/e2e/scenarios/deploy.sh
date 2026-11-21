@@ -163,13 +163,13 @@ escape=$(printf 'on: push\njobs:\n  out:\n    runs-on: garrison-user\n    contai
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Try to get out","branch":"main","content":"'$escape'"}' "$api/repos/todo/escape/contents/.gitea/workflows/out.yaml"
 escape_failed() { gitea_api "" "$api/repos/todo/escape/actions/tasks?limit=5" | grep -q '"status":"failure"'; }
 check "a job asking for the host's processes fails" until_true 300 escape_failed
-check "the guard refused it"               bash -c 'docker service logs --since 10m control-plane_guard 2>&1 | grep -q "refused.*pid namespace host"'
+check "the guard refused it"               bash -c 'docker service logs --since 10m guard 2>&1 | grep -q "refused.*pid namespace host"'
 gitea_api "" -o /dev/null -X DELETE "$api/repos/todo/escape"
 
 echo "# hostnames"
 printf 'entrypoint: web\nservices:\n  web: { image: traefik/whoami:v1.11, port: 80 }\nenvironments:\n  main: {}\n' > "$tmp/grafana.yaml"
 check "a stack named grafana passes review" set_stack todo grafana "$tmp/grafana.yaml"
-refused() { docker service logs --since 5m control-plane_deployer 2>&1 | grep -q "todo/grafana: not deployed: hostname \"grafana\" is reserved"; }
+refused() { docker service logs --since 5m deployer 2>&1 | grep -q "todo/grafana: not deployed: hostname \"grafana\" is reserved"; }
 check "but cannot take the reserved hostname" until_true 120 refused
 check "it is not deployed"                 bash -c '! garrison applied | grep -q "app todo/grafana"'
 check "alice removes it"                   set_stack todo grafana -
@@ -236,12 +236,12 @@ deleted() { [ "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H 
 check "and deletes the secret"             deleted
 
 echo "# alerts"
-health() { docker exec "$(docker ps -q -f name=prometheus_prometheus | head -n1)" wget -qO- "http://control-plane_deployer:8090/metrics"; }
+health() { docker exec "$(docker ps -q -f name=prometheus | head -n1)" wget -qO- "http://deployer:8090/metrics"; }
 check "the deployer tells Prometheus how each service does" grep -q 'garrison_service_replicas_running{unit="todo",app="todo",environment="main",stack="todo",service="todo_web"} 1' <<<"$(health)"
 # Postgres without a password exits at once: a service that keeps failing.
 printf 'entrypoint: db\nservices:\n  db: { image: postgres:17-alpine, port: 5432 }\nenvironments:\n  main: {}\n' > "$tmp/crash.yaml"
 check "alice adds an app that cannot start" set_stack todo crash "$tmp/crash.yaml"
-crash_alert() { docker exec "$(docker ps -q -f name=prometheus_alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts | python3 -c '
+crash_alert() { docker exec "$(docker ps -q -f name=alertmanager | head -n1)" wget -qO- http://localhost:9093/api/v2/alerts | python3 -c '
 import json,sys
 sys.exit(0 if any(a["labels"].get("alertname") == "ServiceFailing" and a["labels"].get("service") == "crash_db" for a in json.load(sys.stdin)) else 1)'; }
 check "it raises an alert"                 until_true 400 crash_alert

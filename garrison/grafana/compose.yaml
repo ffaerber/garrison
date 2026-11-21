@@ -7,7 +7,7 @@ services:
     environment:
       GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
       GF_DATABASE_TYPE: postgres
-      GF_DATABASE_HOST: postgres_postgres:5432
+      GF_DATABASE_HOST: postgres:5432
       GF_DATABASE_NAME: grafana
       GF_DATABASE_USER: grafana
       GF_DATABASE_PASSWORD__FILE: /run/secrets/grafana-db-password

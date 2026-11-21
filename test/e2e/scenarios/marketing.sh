@@ -91,7 +91,7 @@ check "not even past the proxy"            bash -c '! docker exec "$0" curl -sS 
 # Through the proxy, which refuses them, and around it; -f: a refusal is an
 # answer too.
 nothing_at() { ! docker exec "$sb" curl -fsS -m 5 -o /dev/null "$1" && ! docker exec "$sb" curl -fsS -m 5 -o /dev/null --noproxy "*" "$1"; }
-check "nor Gitea, nor Docker"              bash -c "$(declare -f nothing_at); sb=$sb; nothing_at http://gitea_gitea:3000 && nothing_at http://control-plane_sandbox-guard:2375/_ping"
+check "nor Gitea, nor Docker"              bash -c "$(declare -f nothing_at); sb=$sb; nothing_at http://gitea:3000 && nothing_at http://sandbox-guard:2375/_ping"
 check "between turns its token counts for nothing" \
   test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/tools"')" = 401
 has_notes() { docker exec "$(sandbox_of todo/marketing)" grep -q "pelican 42" /data/work/notes.txt; }
@@ -135,14 +135,14 @@ check "alice merges it"                    test "$(merge config alice "$spr")" =
 check "the marketing agent gets an account in Gitea" until_true 120 has_account agent-todo-marketing
 # kc_user NAME: whether the Keycloak account NAME is enabled (true, false, or nothing).
 kc_user() {
-  docker exec "$(docker ps -q -f name=keycloak_keycloak | head -n1)" bash -c '
+  docker exec "$(docker ps -q -f name=keycloak | head -n1)" bash -c '
     KC_CLI_PASSWORD=$(</run/secrets/admin-password) /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/smoke.config \
       --server http://localhost:8080 --realm master --user "$0" >/dev/null 2>&1 &&
     /opt/keycloak/bin/kcadm.sh get users --config /tmp/smoke.config -r garrison -q "username=$1" -q exact=true --fields enabled --format csv --noquotes' "$ADMIN_USER" "$1"
 }
 kc_enabled() { [ "$(kc_user "$1")" = true ]; }
 check "and the same account in Keycloak"   until_true 120 kc_enabled agent-todo-marketing
-shots_seen() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/marketing/shots'" | grep -q .; }
+shots_seen() { docker exec "$(docker ps -q -f name=postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/marketing/shots'" | grep -q .; }
 check "the routine sees shots"             until_true 180 shots_seen
 since=$(last_pr app)
 shot_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -155,7 +155,7 @@ check "a PNG"                              test "$(png_size app docs/screenshots
 body=$(gitea_api "" "$hp/app/pulls/${rspr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
 check "of the todo app behind the sign-in, as the agent, for bob" \
   bash -c 'grep -q "Screenshot of https://todo.$1/ as the agent todo/marketing" <<<"$0" && grep -q "page title \"Todo\"" <<<"$0" && grep -q "Asked by bob through todo/marketing, routine todo/marketing/shots, with nobody watching" <<<"$0"' "$body" "$DOMAIN"
-check "the gateway shot it as the agent"   bash -c 'docker service logs --since "$0" control-plane_gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-marketing): todo/marketing: screenshot \[routine todo/marketing/shots\]"' "$shot_at"
+check "the gateway shot it as the agent"   bash -c 'docker service logs --since "$0" gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-marketing): todo/marketing: screenshot \[routine todo/marketing/shots\]"' "$shot_at"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/${rspr:-0}"
 
 }

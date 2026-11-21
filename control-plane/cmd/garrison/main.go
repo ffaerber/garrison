@@ -58,7 +58,7 @@ const usage = `usage:
   garrison render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
   garrison apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
   garrison deploy [-once] [-interval DURATION] [-config FILE] [-work DIR]
-                   [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
+                   [-gitea URL] [-password-file FILE] [-host-exec]
   garrison applied [-work DIR]
   garrison system [-render] [-wait DURATION] DIR...   (a system stack, kubernetes.yaml; ${VAR} from the environment)
   garrison gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
@@ -277,7 +277,7 @@ func deployCmd(args []string) error {
 	work := fs.String("work", workDir, "the deployer's checkout and state")
 	gitea := fs.String("gitea", "", "Gitea's URL (default https://git.<domain>, through Traefik on this machine)")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	hostExec := fs.String("host-exec", "", "run ZFS on the host through a privileged container of this image (for a deployer in a container)")
+	hostExec := fs.Bool("host-exec", false, "run ZFS on the host with nsenter (for a deployer in a privileged pod with hostPID)")
 	grafana := fs.String("grafana", "", "Grafana's URL; when set, dashboards/*.json in the repos are kept in Grafana")
 	grafanaUser := fs.String("grafana-user", "installer", "Grafana's local admin, whose password is the admin password")
 	apps := fs.Bool("apps", true, "also deploy the apps of every other unit (repos with a stack.yaml)")
@@ -308,8 +308,8 @@ func deployCmd(args []string) error {
 		Env:          env,
 		Run:          apply.Exec,
 	}
-	if *hostExec != "" {
-		c.Run = apply.HostExec(*hostExec)
+	if *hostExec {
+		c.Run = apply.HostExec()
 	}
 	var keys *secrets.Keys
 	if *keysDir != "" {
@@ -444,14 +444,14 @@ func gatewayCmd(args []string) error {
 	listen := fs.String("listen", ":8080", "address to serve MCP on (/mcp, /mcp/<unit>/<agent>)")
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	work := fs.String("work", workDir, "the deployer's state, read-only")
-	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
+	gitea := fs.String("gitea", "http://gitea:3000", "Gitea's URL")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea and Open WebUI admin accounts")
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
-	prometheus := fs.String("prometheus", "http://prometheus_prometheus:9090", "Prometheus's URL")
-	openwebui := fs.String("openwebui", "http://openwebui_openwebui:8080", "Open WebUI's URL")
-	browser := fs.String("browser", "http://control-plane_browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
+	prometheus := fs.String("prometheus", "http://prometheus:9090", "Prometheus's URL")
+	openwebui := fs.String("openwebui", "http://openwebui:8080", "Open WebUI's URL")
+	browser := fs.String("browser", "http://browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
-	keycloakURL := fs.String("keycloak", "http://keycloak_keycloak:8080", "Keycloak's URL, for the agents' accounts there; empty: agents get none, and runs without a person cannot browse")
+	keycloakURL := fs.String("keycloak", "http://keycloak:8080", "Keycloak's URL, for the agents' accounts there; empty: agents get none, and runs without a person cannot browse")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
@@ -689,8 +689,8 @@ func agentsCmd(args []string) error {
 	fs := flag.NewFlagSet("agents", flag.ExitOnError)
 	listen := fs.String("listen", ":8070", "address to serve the API on (/v1)")
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
-	giteaURL := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL")
-	gatewayURL := fs.String("gateway", "http://control-plane_gateway:8080/mcp", "the gateway's MCP endpoint")
+	giteaURL := fs.String("gitea", "http://gitea:3000", "Gitea's URL")
+	gatewayURL := fs.String("gateway", "http://gateway:8080/mcp", "the gateway's MCP endpoint")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
 	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the install's LLM's API key")
 	keyDir := fs.String("llm-keys", etcDir+"/llm-keys", "the providers' API keys, a file per provider named after it")
@@ -699,17 +699,17 @@ func agentsCmd(args []string) error {
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	image := fs.String("sandbox-image", "", "the sandbox image; if empty, turns run in this process")
-	dockerAddr := fs.String("sandbox-docker", "control-plane_sandbox-guard:2375", "the Docker API sandboxes are started through")
+	dockerAddr := fs.String("sandbox-docker", "sandbox-guard:2375", "the Docker API sandboxes are started through")
 	network := fs.String("sandbox-network", "garrison-sandboxes", "the network of the sandboxes")
 	sandboxListen := fs.String("sandbox-listen", ":8071", "address to serve the sandboxes on: the LLM and the tools")
-	sandboxAPI := fs.String("sandbox-api", "http://control-plane_agents:8071", "that address, as sandboxes reach it")
+	sandboxAPI := fs.String("sandbox-api", "http://agents:8071", "that address, as sandboxes reach it")
 	memory := fs.Int64("sandbox-memory", 1<<30, "memory limit of a sandbox, in bytes")
 	cpus := fs.Float64("sandbox-cpus", 1, "CPU limit of a sandbox")
 	idle := fs.Duration("sandbox-idle", 15*time.Minute, "a sandbox without a message this long is stopped")
 	perPerson := fs.Int("sandbox-per-person", 3, "running sandboxes per person")
 	runtime := fs.String("sandbox-runtime", "runsc", "the runtime sandboxes run under (gVisor), as root; empty: Docker's default, as the image's user")
 	internetListen := fs.String("internet-listen", ":8072", "address to serve the sandboxes' proxy to the internet on")
-	internetProxy := fs.String("internet-proxy", "http://control-plane_agents:8072", "that address, as sandboxes reach it; empty: no internet for any agent")
+	internetProxy := fs.String("internet-proxy", "http://agents:8072", "that address, as sandboxes reach it; empty: no internet for any agent")
 	alertsListen := fs.String("alerts-listen", "", "address to take Alertmanager's webhook on (/alerts), which starts routines with on_alert; empty: none")
 	alertsTokenFile := fs.String("alerts-token-file", "/run/secrets/alerts-token", "the bearer token Alertmanager sends")
 	feed := eventsFlags(fs)
@@ -870,7 +870,7 @@ type feedFlags struct{ url, passwordFile *string }
 
 func eventsFlags(fs *flag.FlagSet) feedFlags {
 	return feedFlags{
-		url:          fs.String("events-db", "", "the feed's Postgres database, e.g. postgres://garrison@postgres_postgres:5432/garrison; empty: no feed"),
+		url:          fs.String("events-db", "", "the feed's Postgres database, e.g. postgres://garrison@postgres:5432/garrison; empty: no feed"),
 		passwordFile: fs.String("events-db-password-file", "/run/secrets/garrison-db-password", "its password"),
 	}
 }
@@ -913,9 +913,9 @@ func homeCmd(args []string) error {
 	fs := flag.NewFlagSet("home", flag.ExitOnError)
 	listen := fs.String("listen", ":8060", "address to serve the dashboard on")
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
-	gitea := fs.String("gitea", "http://gitea_gitea:3000", "Gitea's URL, to ask what each person may read")
+	gitea := fs.String("gitea", "http://gitea:3000", "Gitea's URL, to ask what each person may read")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys, for the secrets page (e.g. http://control-plane_deployer:8090); empty: no secrets page")
+	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys, for the secrets page (e.g. http://deployer:8090); empty: no secrets page")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 

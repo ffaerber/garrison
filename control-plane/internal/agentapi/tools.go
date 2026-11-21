@@ -18,7 +18,7 @@ import (
 // person's Keycloak token goes along, and the gateway serves the agent only
 // its own tools and acts with the person's rights.
 type Gateway struct {
-	URL        string // e.g. http://control-plane_gateway:8080/mcp
+	URL        string // e.g. http://gateway:8080/mcp
 	ServiceKey string // gateway.ServiceKey: says what started a run, and runs without a person
 	HTTP       *http.Client
 }

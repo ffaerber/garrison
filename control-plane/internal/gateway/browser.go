@@ -23,7 +23,7 @@ import (
 // accepts and removes. Each screenshot
 // gets a fresh browser context, so nothing of one person stays for the next.
 type Browser struct {
-	URL    string // Chrome's DevTools, e.g. http://control-plane_browser:9222
+	URL    string // Chrome's DevTools, e.g. http://browser:9222
 	Domain string
 	// Private tells whether a hostname (todo, of todo.<domain>) is behind
 	// the sign-in, which takes the person's token and removes it before the

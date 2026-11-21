@@ -25,7 +25,7 @@ import (
 // through the Sudo header. Gitea then checks that person's own rights, so
 // the gateway and its agent can never do more than the person could.
 type Gitea struct {
-	URL      string // e.g. http://gitea_gitea:3000
+	URL      string // e.g. http://gitea:3000
 	User     string // admin account
 	Password string
 	HTTP     *http.Client

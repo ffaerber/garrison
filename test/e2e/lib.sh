@@ -162,7 +162,7 @@ for s in json.load(sys.stdin).get("statuses") or []:
 set_stack() { set_config "$1" "stacks/$2.yaml" "$3" "${4:-}"; }
 smoke_running() { docker service ls --filter name=smoke_web --format '{{.Replicas}}' | grep -qx 1/1; }
 smoke_gone()    { ! docker stack ls --format '{{.Name}}' | grep -qx smoke; }
-deployer_image() { docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
+deployer_image() { docker service inspect deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
 json() { curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "git.$DOMAIN:443:127.0.0.1" -u "$ADMIN_USER:$PASSWORD" "$@"; }
 # grafana_api USER ARGS...: call Grafana with a signed-in person's session, or,
 # with "", as the local installer account.
@@ -205,18 +205,18 @@ chat_login() {
 # system_channel [PERSON]: the id of the channel of the unit garrison.
 system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "garrison"))' 2>/dev/null; }
 # mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
-mcp_calls() { docker service logs --since "$1" control-plane_gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
+mcp_calls() { docker service logs --since "$1" gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
 # mcp ARGS...: the gateway's MCP endpoint, which only Open WebUI reaches.
 mcp() {
-  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
-    curl -sS --max-time 20 "$@" http://control-plane_gateway:8080/mcp
+  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui | head -n1)" \
+    curl -sS --max-time 20 "$@" http://gateway:8080/mcp
 }
 
 # agents_api ARGS... PATH: the agent service, which only the system network reaches.
 agents_api() {
   local path=${!#}
-  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui_openwebui | head -n1)" \
-    curl -sS --max-time 20 "${@:1:$#-1}" "http://control-plane_agents:8070$path"
+  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui | head -n1)" \
+    curl -sS --max-time 20 "${@:1:$#-1}" "http://agents:8070$path"
 }
 
 # The agents, asked in Open WebUI channels as people do. What is posted is
@@ -415,7 +415,7 @@ import json,sys
 # refused_only SINCE PERSON TOOL WHY: every call of TOOL by PERSON since SINCE
 # was refused with WHY (also true if the agent did not try at all).
 refused_only() {
-  docker service logs --since "$1" control-plane_gateway 2>&1 | grep "mcp: $2: [^ ]*: $3" | grep -v "$4" | grep -q . && return 1
+  docker service logs --since "$1" gateway 2>&1 | grep "mcp: $2: [^ ]*: $3" | grep -v "$4" | grep -q . && return 1
   return 0
 }
 # has_model ID [PERSON]: Open WebUI offers the agent to PERSON (bob). Not the

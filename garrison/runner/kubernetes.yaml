@@ -23,6 +23,7 @@ spec:
       labels: { app: runner }
       annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: runner
           image: gitea/act_runner:0.2.13

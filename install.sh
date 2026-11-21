@@ -57,6 +57,7 @@ command -v sanoid  >/dev/null || need+=(sanoid)   # scheduled snapshots
 command -v python3 >/dev/null || need+=(python3)  # merges Docker's daemon.json
 command -v gpg     >/dev/null || need+=(gnupg)    # gVisor's repository key
 command -v age-keygen >/dev/null || need+=(age)   # the secrets' recovery key
+command -v crun    >/dev/null || need+=(crun)     # the pods' runtime (see k3s below)
 # apt waits for dpkg's lock instead of failing: on a freshly booted machine
 # unattended-upgrades often holds it for a few minutes.
 apt-get() { command apt-get -o DPkg::Lock::Timeout=600 "$@"; }
@@ -112,7 +113,7 @@ docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw ru
 # own containerd. Docker stays for what still needs it: the pipelines'
 # runners and BuildKit. Its version is pinned; its own Traefik is left out,
 # as Garrison deploys its own (garrison/traefik).
-K3S_VERSION=v1.33.1+k3s1
+K3S_VERSION=v1.37.2+k3s1
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 # containerd pulls from Gitea's registry at git.<domain> and trusts the
 # installation's certificate for it. Read when k3s starts.
@@ -124,6 +125,17 @@ configs:
     tls:
       ca_file: $ETC/tls.crt
 YAML
+# Pods run with crun, not k3s's own runc: that runc (1.4.2) puts containers
+# under the AppArmor label cri-containerd.apparmor.d//&unconfined on Ubuntu
+# 26.04, which the profile does not let signal its own processes, so
+# Postgres could not stop its helpers and never started. crun, like
+# Ubuntu's runc, applies the profile as it is. k3s finds crun on the host.
+k3s_config=$(printf '# Written by the Garrison installer; changes are overwritten.\ndefault-runtime: crun\n')
+if [ "$(cat /etc/rancher/k3s/config.yaml 2>/dev/null)" != "$k3s_config" ]; then
+  printf '%s\n' "$k3s_config" > /etc/rancher/k3s/config.yaml
+  # An installed k3s reads it when it starts again.
+  ! systemctl is-active --quiet k3s || systemctl restart k3s
+fi
 if ! command -v k3s >/dev/null || [ "$(k3s --version | awk 'NR == 1 { print $3 }')" != "$K3S_VERSION" ]; then
   say "Installing k3s $K3S_VERSION"
   curl -fsSL "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION/+/%2B}/install.sh" -o /tmp/k3s-install.sh
@@ -138,8 +150,10 @@ until kubectl get --raw /readyz >/dev/null 2>&1 && kubectl wait --for=condition=
   sleep 3
 done
 kubectl get namespace garrison >/dev/null 2>&1 || kubectl create namespace garrison >/dev/null
-# The pipelines' containers, BuildKit and Gitea's runners meet on this Docker network.
+# The pipelines' containers and BuildKit meet on this Docker network; the
+# agents' sandboxes, for now Docker containers too, on an internal one.
 docker network inspect garrison-builds >/dev/null 2>&1 || docker network create garrison-builds >/dev/null
+docker network inspect garrison-sandboxes >/dev/null 2>&1 || docker network create --internal garrison-sandboxes >/dev/null
 
 # ---------- storage ----------
 say "Setting up the ZFS pool"

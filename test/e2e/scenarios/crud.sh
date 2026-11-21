@@ -193,7 +193,7 @@ check "it says how often it may run"       grep -q "runs more often than every 1
 check "a routine at 6:30 every morning passes" change_config $ns "" routines.yaml="$(put_file r9 '- { agent: helper, name: morning, schedule: "30 6 * * *", owner: alice, task: Sum up the notes. }\n')"
 # The agent service keeps when it saw it in Postgres, so a restart does not
 # forget a run that is due.
-kept() { docker exec "$(docker ps -q -f name=postgres_postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT last IS NOT NULL FROM routine_state WHERE key = '$ns/helper/morning'" | grep -qx t; }
+kept() { docker exec "$(docker ps -q -f name=postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT last IS NOT NULL FROM routine_state WHERE key = '$ns/helper/morning'" | grep -qx t; }
 check "the agent service keeps its state"  until_true 150 kept
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"private":false}' "$api/repos/$ns/notes"
 check "alice takes its grant and routine away" change_config $ns "" grants.yaml=- routines.yaml=-

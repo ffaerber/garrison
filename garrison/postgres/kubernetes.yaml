@@ -16,19 +16,36 @@ spec:
   selector: { app: postgres }
   ports: [{ name: postgres, port: 5432 }]
 ---
+# A Deployment, not a StatefulSet: one pod on a host directory needs no
+# stable identity, and a StatefulSet does not replace a pod that never became
+# ready when its template changes (it waits for it), so a broken rollout
+# would stay broken.
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: postgres
 spec:
-  serviceName: postgres
   replicas: 1
+  # One Postgres on its data at a time.
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: postgres } }
   template:
     metadata:
       labels: { app: postgres, garrison.io/net: system }
       annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
     spec:
+      automountServiceAccountToken: false
+      # As the image's user postgres (70) from the start: its entrypoint,
+      # started as root, drops to that user with gosu, which spun at full CPU
+      # in this pod and never got there.
+      securityContext: { runAsUser: 70, runAsGroup: 70, fsGroup: 70 }
+      initContainers:
+        # The dataset is made by root; Postgres needs to own its data.
+        - name: own-data
+          image: postgres:17-alpine
+          command: [chown, "70:70", /var/lib/postgresql/data]
+          securityContext: { runAsUser: 0, runAsGroup: 0 }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
       containers:
         - name: postgres
           image: postgres:17-alpine

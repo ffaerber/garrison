@@ -16,8 +16,8 @@ scrape_configs:
   - job_name: cadvisor
     dns_sd_configs: [{ names: [tasks.cadvisor], type: A, port: 8080 }]
   - job_name: traefik
-    static_configs: [{ targets: ["traefik_traefik:8082"] }]
+    static_configs: [{ targets: ["traefik:8082"] }]
   # The deployer: each Swarm service's desired, running and failed tasks,
   # labelled with its unit, app and environment.
   - job_name: garrison
-    static_configs: [{ targets: ["control-plane_deployer:8090"] }]
+    static_configs: [{ targets: ["deployer:8090"] }]
