@@ -37,7 +37,7 @@ metadata:
   name: garrison-traefik
 rules:
   - apiGroups: [""]
-    resources: [services, endpoints, secrets, nodes]
+    resources: [services, endpoints, secrets, nodes, configmaps]
     verbs: [get, list, watch]
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]

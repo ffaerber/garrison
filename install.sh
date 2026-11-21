@@ -301,11 +301,32 @@ fi
 # which pulls the images (registries.yaml above), and its Docker, for the
 # pipelines. Both reach it through Traefik here and trust the installation's
 # certificate.
-sed -i '/# garrison registry$/d' /etc/hosts
-echo "127.0.0.1 git.$DOMAIN # garrison registry" >> /etc/hosts
-# cloud-init, where present, rewrites /etc/hosts at every boot; keep the entry.
+# cloud-init or Multipass may write /etc/hosts anew at boot: a unit puts the
+# entry back each time, before k3s and Docker start.
+install -D -m 755 "$ROOT/host/hosts.sh" /usr/local/lib/garrison/hosts.sh
+cat > /etc/systemd/system/garrison-hosts.service <<UNIT
+[Unit]
+Description=Garrison: point the registry's name at this machine in /etc/hosts
+After=local-fs.target cloud-init.service
+Before=k3s.service docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/garrison/hosts.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable garrison-hosts >/dev/null 2>&1
+/usr/local/lib/garrison/hosts.sh >/dev/null
 if [ -d /etc/cloud/cloud.cfg.d ]; then
   printf '# Written by the Garrison installer: keep its /etc/hosts entry.\nmanage_etc_hosts: false\n' > /etc/cloud/cloud.cfg.d/99-garrison.cfg
+fi
+# Earlier versions repaired Swarm's tasks at boot.
+if [ -e /etc/systemd/system/garrison-repair.service ]; then
+  systemctl disable garrison-repair >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/garrison-repair.service /usr/local/lib/garrison/repair-services.sh
 fi
 install -D -m 644 "$ETC/tls.crt" "/etc/docker/certs.d/git.$DOMAIN/ca.crt"
 # With the containerd image store, Docker fetches registry tokens without
