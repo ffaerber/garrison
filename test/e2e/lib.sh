@@ -183,15 +183,18 @@ for p in json.load(sys.stdin)["items"]:
                 sys.exit(0)
 sys.exit(1)'
 }
-# app_mounts STACK SERVICE: the service's host folders and where they are mounted, HOST:PATH each.
-app_mounts() {
+# app_claim STACK SERVICE CLAIM VOLUME PATH: whether the service mounts the
+# claim at PATH, bound to the OpenEBS volume VOLUME (its ZFSVolume).
+app_claim() {
+  local pv
+  pv=$(kubectl --namespace "app-$1" get pvc "$3" -o jsonpath='{.status.phase} {.spec.volumeName}') || return 1
+  [ "$pv" = "Bound $4" ] || { echo "claim $3: $pv"; return 1; }
+  [ "$(kubectl get pv "$4" -o jsonpath='{.spec.csi.volumeHandle}')" = "$4" ] || return 1
   kubectl --namespace "app-$1" get deployment "$2" --output json | python3 -c '
 import json, sys
 spec = json.load(sys.stdin)["spec"]["template"]["spec"]
-host = {v["name"]: v["hostPath"]["path"] for v in spec.get("volumes", []) if "hostPath" in v}
-for m in spec["containers"][0].get("volumeMounts", []):
-    if m["name"] in host:
-        print(host[m["name"]] + ":" + m["mountPath"])'
+claims = {v["name"]: v["persistentVolumeClaim"]["claimName"] for v in spec.get("volumes", []) if "persistentVolumeClaim" in v}
+sys.exit(0 if any(claims.get(m["name"]) == sys.argv[1] and m["mountPath"] == sys.argv[2] for m in spec["containers"][0].get("volumeMounts", [])) else 1)' "$3" "$5"
 }
 
 # stack_objects NAME: what the platform's stack NAME has in the cluster.

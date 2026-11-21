@@ -19,6 +19,7 @@ Each scenario starts from a fixture: `deploy` (todo with its apps deployed, alic
 | `guided` | Vague requests (in the browser) |
 | `journey` | 10 |
 | `ui` | In the browser |
+| `nodes` | More machines (no agents) |
 
 ## 1. Alice adds carol as admin and bob as member
 
@@ -241,3 +242,12 @@ Played by the `ui` step (`test/e2e/smoke.sh ui`, `test/ui/ui.py`): Playwright's 
 9. **A routine's question:** at its time the other routine asks bob whether done todos should be cleared every Sunday. His dashboard lists it under Waiting for you; its link opens the question's thread; he answers in the question's thread; the routine goes on with his answer, in the thread, and the dashboard no longer lists it.
 10. **The commander, by its name:** in todo's channel bob types `@commander`, picks it from the list and asks which agent changes the todo app; it answers in the thread, naming the coder or the operator. It is the same agent in every channel, working in todo there.
 11. **A scheduled job of the app:** alice adds `.gitea/workflows/nightly.yaml` to `todo/app` in Gitea's editor, a workflow on a cron schedule that runs on todo's runner with no agent in it, on a new branch; bob approves; she merges. Within minutes the repo's Actions tab lists a run started by the schedule, which succeeded, and its log has the job's output. She disables the workflow from the tab's menu, and it runs no more.
+
+## More machines
+
+Played by `nodes` (`test/e2e/scenarios/nodes.sh`), from the fixture `deploy`, without the agents: `steps.sh` joins a second VM with `install.sh --join` and a larger ZFS pool than the main machine's ([nodes.md](nodes.md)).
+
+1. **It joins:** the machine is Ready, runs what runs on every machine (the zfs pod, OpenEBS's agent, the collectors, the sandbox image) and nothing else of the platform, and Sanoid snapshots its pool.
+2. **An app with data goes there:** alice adds the app `notes`, an nginx serving a dataset. The deployer puts its data on the machine with the most free space, the second one: its dataset is in that machine's pool with its size as quota, and its pod runs there. Traefik, on the main machine, serves alice's page from it; another app's pod cannot reach it.
+3. **Snapshots and a restore there:** alice changes its setting; the deployer snapshots the data on the second machine first, lists the snapshot for `list_snapshots`, and deploys it again there. Alice overwrites her page by mistake and asks for a restore of that snapshot; the deployer copies it back on the second machine and her page is back.
+4. **It restarts:** the second machine reboots; it comes back, and so does the app, with its data, on the same machine.

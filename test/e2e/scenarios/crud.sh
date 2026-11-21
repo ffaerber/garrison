@@ -213,11 +213,11 @@ check "alice adds the app crud"            change_config $ns "" stacks/crud.yaml
 check "the deployer deploys it"            until_true 300 applied_app $ns/crud@main
 check "it answers at crud.<domain>"        until_true 120 says crud 'Name: first'
 check "it claims its hostname"             claimed crud
-check "with a dataset of its own"          test "$(zfs get -H -o value quota $ds/data)" = 1G
+check "with a dataset of its own"          test "$(zfs get -H -o value quota $ds/crud.data)" = 1G
 check "and a generated secret"             app_secret crud token
 check "alice changes its setting and size" change_config $ns "" stacks/crud.yaml="$(stack_yaml s2 second 2Gi)"
 check "it is deployed again"               until_true 300 says crud 'Name: second'
-check "its dataset grows"                  until_true 60 bash -c '[ "$(zfs get -H -o value quota '$ds'/data)" = 2G ]'
+check "its dataset grows"                  until_true 60 bash -c '[ "$(zfs get -H -o value quota '$ds'/crud.data)" = 2G ]'
 check "its data was snapshotted first"     bash -c "zfs list -H -t snapshot -o name -d 1 $ds | grep -q '@deploy-'"
 check "a restore of an app that does not exist fails the check" refused_by_check $ns "" restores/nothing.yaml="$(put_file r0 'stack: nothing\nsnapshot: deploy-1\n')"
 check "alice removes the app"              change_config $ns "" stacks/crud.yaml=-
@@ -226,7 +226,7 @@ check "the deployer takes it down"         until_true 180 down
 check "it is no longer recorded"           not applied_app crud/crud@main
 released() { ! claimed crud; }
 check "its hostname is free again"         until_true 60 released
-check "its data is kept"                   zfs list $ds/data
+check "its data is kept"                   zfs list $ds/crud.data
 check "and its secret"                     app_secret crud token
 
 echo "# taking the unit away"
@@ -243,7 +243,7 @@ keep_down() { ! stack_up keep; }
 check "the deployer takes its app down"    until_true 180 keep_down
 keep_free() { ! claimed keep; }
 check "and frees its hostname"             until_true 60 keep_free
-check "its data is kept"                   zfs list garrison/ns/$ns/stacks/keep/data
+check "its data is kept"                   zfs list garrison/ns/$ns/stacks/keep/keep.data
 no_ch() { ! sees_channel alice $ns; }
 check "its channel is removed"             until_true 120 no_ch
 no_group() { ! has_group $ns; }

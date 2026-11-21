@@ -97,12 +97,12 @@ check "an edit made in Grafana is put back" until_true 120 title_back
 echo "# deploying a stack"
 check "the CLI deploys hello (main)"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "hello is reachable at its hostname" status_is 200 hello /
-check "hello got its dataset with a quota" test "$(zfs get -H -o value quota garrison/ns/demo/stacks/hello/hello-data)" = 1G
+check "hello got its dataset with a quota" test "$(zfs get -H -o value quota garrison/ns/demo/stacks/hello/hello.hello-data)" = 1G
 check "hello's dataset is mounted in the container" \
-  bash -c "$(declare -f app_mounts); app_mounts hello web | grep -qx /garrison/ns/demo/stacks/hello/hello-data:/data"
+  bash -c "$(declare -f app_claim); app_claim hello web data-hello-data hello.hello-data /data"
 check "hello got a generated secret"       app_secret hello hello-token
 check "the CLI deploys hello (dev)"       $CTL apply -domain "$DOMAIN" -env dev -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
-check "dev has its own dataset"            zfs list garrison/ns/demo/stacks/dev-hello/hello-data
+check "dev has its own dataset"            zfs list garrison/ns/demo/stacks/dev-hello/dev-hello.hello-data
 check "redeploying hello is accepted"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 
 echo "# private environments"

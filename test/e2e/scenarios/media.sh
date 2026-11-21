@@ -5,7 +5,10 @@
 
 section_media() {
 echo "# media: a library, its file browser, and agents making media into it"
-lib=/garrison/ns/media/shares/media
+# The library's dataset; OpenEBS mounts it only into pods, so the checks
+# read it through a mount of their own on the machine, as restores do.
+lib_ds=garrison/ns/media/shares/media.shares.media
+lib=$tmp/library
 check "alice signs in to the chat"         chat_login alice
 
 echo "# the unit media, with its file browser"
@@ -20,7 +23,8 @@ print(re.search(r"## Media\n.*?```yaml\n(.*?)```", open(sys.argv[1]).read(), re.
 check "alice adds the file browser of its README" set_stack media files "$tmp/files.yaml"
 files_up() { garrison applied | grep -q "^app media/files@main files "; }
 check "the deployer deploys it"            until_true 600 files_up
-check "which makes the media library"      zfs list "${lib#/}"
+check "which makes the media library"      zfs list "$lib_ds"
+mkdir -p "$lib" && mount -t zfs "$lib_ds" "$lib"
 
 echo "# ComfyUI, outside Garrison"
 # COMFYUI=host: a real one on the computer running the VM, at the VM's

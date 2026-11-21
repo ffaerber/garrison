@@ -85,7 +85,7 @@ check "alice does not see it"              bash -c '! grep -q "Fix the bike" <<<
 alice_todo=$(todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')
 bob_api -o /dev/null -X POST "https://todo.$DOMAIN/todos/$alice_todo/delete"
 check "he cannot delete hers"              grep -q 'Water the plants' <<<"$(todo_api todo "https://todo.$DOMAIN/api/todos")"
-check "its database has its own dataset"   test "$(zfs get -H -o value quota garrison/ns/todo/stacks/todo/todo-db)" = 2G
+check "its database has its own dataset"   test "$(zfs get -H -o value quota garrison/ns/todo/stacks/todo/todo.todo-db)" = 2G
 check "its password is a generated secret" app_secret todo db-password
 chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
@@ -123,13 +123,13 @@ echo "# snapshots and restore"
 todo_ds=garrison/ns/todo/stacks/todo
 snap=$(zfs list -H -t snapshot -o name -s creation -d 1 "$todo_ds" | grep "@deploy-.*-${fixed:0:7}$" | tail -n1 | cut -d@ -f2)
 check "the deployer snapshots todo before redeploying it" test -n "$snap"
-check "with its database"                  zfs list "$todo_ds/todo-db@$snap"
+check "with its database"                  zfs list "$todo_ds/todo.todo-db@$snap"
 listed() { grep -q "\"$snap\"" /var/lib/garrison/deployer/snapshots.json; }
 check "and lists it for the agents"        until_true 60 listed
 check "Sanoid snapshots on a schedule"     systemctl is-active sanoid.timer
 # As its timer does every 15 minutes.
 systemctl start sanoid.service
-autosnap() { zfs list -H -t snapshot -o name "$todo_ds/todo-db" | grep -q '@autosnap_.*_hourly$'; }
+autosnap() { zfs list -H -t snapshot -o name "$todo_ds/todo.todo-db" | grep -q '@autosnap_.*_hourly$'; }
 check "the apps' data too"                 autosnap
 # plants: the ids of the todo "Water the plants"; fails, saying what came, on
 # an answer that is not the list.
@@ -178,7 +178,7 @@ echo "# taking an environment down"
 check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$repo/branches/dev")" = 204
 gone() { app_gone dev-todo; }
 check "the deployer takes dev-todo down" until_true 120 gone
-check "its data is kept"                   zfs list garrison/ns/todo/stacks/dev-todo/todo-db
+check "its data is kept"                   zfs list garrison/ns/todo/stacks/dev-todo/dev-todo.todo-db
 # main may have been redeployed just before; Traefik follows within seconds.
 check "todo keeps running"                 until_true 30 up todo
 
