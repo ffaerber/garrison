@@ -3,34 +3,34 @@
 section_platform() {
 echo "# deployer"
 
-check "the deployer runs in Swarm"       test "$(docker service ls --filter name=deployer --format '{{.Replicas}}')" = 1/1
+check "the deployer runs in the cluster"  test "$(kubectl --namespace garrison get deployment deployer -o jsonpath='{.status.readyReplicas}')" = 1
 check "it runs an image built in Gitea"    bash -c "case '$(deployer_image)' in git.$DOMAIN/garrison/control-plane:bootstrap) exit 1 ;; git.$DOMAIN/garrison/control-plane:*) exit 0 ;; *) exit 1 ;; esac"
 tag=$(deployer_image | sed 's/.*://')
 check "the image is in Gitea's registry"   test "$(json -o /dev/null -w '%{http_code}' "$api/packages/garrison/container/control-plane/$tag")" = 200
 check "its build succeeded in Gitea Actions" grep -q '"status":"success"' <<<"$(json "$api/repos/garrison/control-plane/actions/tasks?limit=1")"
-check "the runner is up"                 test "$(docker service ls --filter name=runner --format '{{.Replicas}}')" = 1/1
+check "the runner is up"                 test "$(kubectl --namespace garrison get deployment runner -o jsonpath='{.status.readyReplicas}')" = 1
 check "bob cannot see the build's secrets" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$api/orgs/garrison/actions/secrets")" = 403
 check "the deployer no longer runs on the host" bash -c '! systemctl is-active --quiet garrison-controller'
 check "the deployer deployed grafana, prometheus and loki" \
   bash -c 'a=$(garrison applied | cut -d" " -f1); for n in grafana prometheus loki; do grep -qx $n <<<"$a" || exit 1; done'
 
-docker stack rm smoke >/dev/null 2>&1 || true
+kubectl delete all --all-namespaces --selector garrison.io/stack=smoke >/dev/null 2>&1 || true
 gitea_api "" -o /dev/null -X DELETE "$api/repos/garrison/smoke" 2>/dev/null || true
-compose=$(printf 'services:\n  web:\n    image: traefik/whoami:v1.11\n' | base64 -w0)
+manifest=$(printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata: { name: smoke }\nspec:\n  selector: { matchLabels: { app: smoke } }\n  template:\n    metadata: { labels: { app: smoke } }\n    spec:\n      automountServiceAccountToken: false\n      containers: [{ name: web, image: "traefik/whoami:v1.11" }]\n' | base64 -w0)
 check "bob cannot add a repo to the garrison organisation" \
   test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"bobs-stack"}' "$api/orgs/garrison/repos")" = 403
 check "alice adds a repo to the garrison organisation" \
   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"smoke","auto_init":true,"default_branch":"main"}' "$api/orgs/garrison/repos")" = 201
-check "alice gives it a compose.yaml"      test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"message":"smoke test","branch":"main","content":"'$compose'"}' "$api/repos/garrison/smoke/contents/compose.yaml")" = 201
+check "alice gives it a kubernetes.yaml"   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"message":"smoke test","branch":"main","content":"'$manifest'"}' "$api/repos/garrison/smoke/contents/kubernetes.yaml")" = 201
 check "the deployer deploys it as the stack smoke" until_true 120 smoke_running
 check "alice deletes the repo"             test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$api/repos/garrison/smoke")" = 204
 check "the deployer takes the stack down" until_true 120 smoke_gone
-check "the other system stacks are untouched" bash -c 'l=$(docker stack ls --format "{{.Name}}"); grep -qx grafana <<<"$l" && grep -qx gitea <<<"$l" && grep -qx control-plane <<<"$l"'
+check "the other system stacks are untouched" bash -c "$(declare -f stack_objects); for s in grafana gitea control-plane; do [ -n \"\$(stack_objects \$s)\" ] || exit 1; done"
 
 echo "# monitoring data"
 check "Prometheus scrapes the node"        poll 180 '"job":"node"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
-check "Prometheus scrapes the containers"  poll 180 '"job":"cadvisor"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
-check "container metrics name their Swarm service" poll 180 'gitea' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=count%20by%20(container_label_com_docker_swarm_service_name)(container_memory_usage_bytes)"
+check "Prometheus scrapes the containers"  poll 180 '"job":"kubelet"[^]]*\},"value":\[[0-9.]+,"1"\]' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=up"
+check "container metrics join their stack's service" poll 180 'gitea' "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=count%20by%20(service)%20(container_memory_usage_bytes%7Bcontainer!%3D%22%22%7D%20*%20on%20(namespace%2C%20pod)%20group_left%20(service)%20garrison_pod_info)"
 check "Loki has the logs of the Gitea stack" poll 180 '"values":\[\[' "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?query=%7Bstack%3D%22gitea%22%7D&limit=1"
 check "Prometheus is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://prometheus.$DOMAIN/)" = 404
 check "Loki is not reachable from outside" test "$(web -o /dev/null -w '%{http_code}' https://loki.$DOMAIN/)" = 404
@@ -75,7 +75,7 @@ PY
 check "every panel's query runs"           queries_run "$g" "$PASSWORD" installer "$(declare -f web); ETC=$ETC; DOMAIN=$DOMAIN"
 prom_has() { grafana_api "" "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1")" | grep -q '"value":\['; }
 check "the overview shows the machine's CPU" until_true 120 prom_has '100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))'
-check "the stack dashboard shows grafana's services" until_true 120 prom_has 'sum by (container_label_com_docker_swarm_service_name) (rate(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace="grafana"}[5m]))'
+check "the stack dashboard shows grafana's services" until_true 120 prom_has 'sum by (service) (rate(container_cpu_usage_seconds_total{container!=""}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack="grafana"})'
 check "Prometheus scrapes Traefik"        until_true 180 prom_has 'up{job="traefik"} == 1'
 check "the traffic dashboard has requests" until_true 120 prom_has 'sum(rate(traefik_entrypoint_requests_total[5m])) > 0'
 check "Traefik's metrics are not reachable from outside" bash -c '! (ss -ltn | grep -q ":8082 ")'
@@ -99,8 +99,8 @@ check "the CLI deploys hello (main)"      $CTL apply -domain "$DOMAIN" -reserved
 check "hello is reachable at its hostname" status_is 200 hello /
 check "hello got its dataset with a quota" test "$(zfs get -H -o value quota garrison/ns/demo/stacks/hello/hello-data)" = 1G
 check "hello's dataset is mounted in the container" \
-  bash -c 'c=$(docker ps -q --filter label=com.docker.swarm.service.name=hello_web | head -n1); docker inspect "$c" --format "{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}" | grep -q "/garrison/ns/demo/stacks/hello/hello-data:/data"'
-check "hello got a generated secret"       docker secret inspect hello.hello-token
+  bash -c "$(declare -f app_mounts); app_mounts hello web | grep -qx /garrison/ns/demo/stacks/hello/hello-data:/data"
+check "hello got a generated secret"       app_secret hello hello-token
 check "the CLI deploys hello (dev)"       $CTL apply -domain "$DOMAIN" -env dev -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
 check "dev has its own dataset"            zfs list garrison/ns/demo/stacks/dev-hello/hello-data
 check "redeploying hello is accepted"      $CTL apply -domain "$DOMAIN" -reserved $ETC/reserved-hostnames.yaml $STACKS/hello.yaml
@@ -126,7 +126,7 @@ check "the public environment needs no login" status_is 200 hello / 30
 echo "# hostname claims"
 check "a stack claiming a held hostname is rejected"     bash -c "! $CTL apply -domain $DOMAIN -reserved $ETC/reserved-hostnames.yaml $STACKS/hello-clash.yaml"
 check "a stack claiming a reserved hostname is rejected" bash -c "! $CTL apply -domain $DOMAIN -reserved $ETC/reserved-hostnames.yaml $STACKS/git-reserved.yaml"
-check "rejected stacks were not deployed"  bash -c '! (docker stack ls --format "{{.Name}}" | grep -qx git)'
+check "rejected stacks were not deployed"  bash -c '! kubectl get namespace app-git >/dev/null 2>&1'
 check "hello still answers after the rejected deploys"   status_is 200 hello / 30
 
 echo "# models"

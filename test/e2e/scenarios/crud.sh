@@ -73,7 +73,7 @@ has_group() { chat_api alice "$chat/api/v1/groups/" | grep -q "\"name\":\"garris
 model_says() { chat_api alice "$chat/api/v1/models/model?id=$1" | grep -q "$2"; }   # ID TEXT
 # the deployer
 applied_app() { garrison applied | grep -q "^app $1 "; }                          # NS/NAME@ENV
-stack_up() { docker stack ls --format '{{.Name}}' | grep -qx "$1"; }
+stack_up() { app_up "$1"; }
 claimed() { python3 -c 'import json,sys; sys.exit(0 if any(c["Hostname"]==sys.argv[2] for c in json.load(open(sys.argv[1]))) else 1)' /var/lib/garrison/deployer/claims.json "$1"; }
 says() { req "$1" "https://$1.$DOMAIN/" | grep -q "$2"; }                            # HOST TEXT
 
@@ -214,7 +214,7 @@ check "the deployer deploys it"            until_true 300 applied_app $ns/crud@m
 check "it answers at crud.<domain>"        until_true 120 says crud 'Name: first'
 check "it claims its hostname"             claimed crud
 check "with a dataset of its own"          test "$(zfs get -H -o value quota $ds/data)" = 1G
-check "and a generated secret"             docker secret inspect crud.token
+check "and a generated secret"             app_secret crud token
 check "alice changes its setting and size" change_config $ns "" stacks/crud.yaml="$(stack_yaml s2 second 2Gi)"
 check "it is deployed again"               until_true 300 says crud 'Name: second'
 check "its dataset grows"                  until_true 60 bash -c '[ "$(zfs get -H -o value quota '$ds'/data)" = 2G ]'
@@ -227,7 +227,7 @@ check "it is no longer recorded"           not applied_app crud/crud@main
 released() { ! claimed crud; }
 check "its hostname is free again"         until_true 60 released
 check "its data is kept"                   zfs list $ds/data
-check "and its secret"                     docker secret inspect crud.token
+check "and its secret"                     app_secret crud token
 
 echo "# taking the unit away"
 check "alice adds the app keep"            change_config $ns "" stacks/keep.yaml="$(stack_yaml k1 kept 1Gi)"

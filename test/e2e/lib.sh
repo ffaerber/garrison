@@ -162,6 +162,37 @@ for s in json.load(sys.stdin).get("statuses") or []:
 }
 # set_stack NS NAME FILE|- [APPROVER]: set_config for config/stacks/NAME.yaml.
 set_stack() { set_config "$1" "stacks/$2.yaml" "$3" "${4:-}"; }
+# ---------- apps: each environment a namespace, app-<stack> ----------
+# app_up STACK: whether the environment's namespace has its Deployments.
+app_up() { [ -n "$(kubectl --namespace "app-$1" get deployments --output name 2>/dev/null)" ]; }
+# app_gone STACK: whether the environment's namespace is gone (or going).
+app_gone() { [ "$(kubectl get namespace "app-$1" -o jsonpath='{.status.phase}' 2>/dev/null)" != Active ]; }
+# app_secret STACK NAME: whether the environment has the Secret NAME.
+app_secret() { kubectl --namespace "app-$1" get secret "$2" >/dev/null 2>&1; }
+# in_app STACK SERVICE COMMAND...: runs COMMAND in the service's pod.
+in_app() { local st=$1 svc=$2; shift 2; kubectl --namespace "app-$st" exec -i "deployment/$svc" -- "$@"; }
+# app_crashes STACK SERVICE: whether the service's container ended in an error.
+app_crashes() {
+  kubectl --namespace "app-$1" get pods --selector "garrison.io/service=$2" --output json 2>/dev/null | python3 -c '
+import json, sys
+for p in json.load(sys.stdin)["items"]:
+    for c in p["status"].get("containerStatuses") or []:
+        for t in ((c.get("lastState") or {}).get("terminated"), (c.get("state") or {}).get("terminated")):
+            if t and t.get("exitCode", 0) != 0:
+                sys.exit(0)
+sys.exit(1)'
+}
+# app_mounts STACK SERVICE: the service's host folders and where they are mounted, HOST:PATH each.
+app_mounts() {
+  kubectl --namespace "app-$1" get deployment "$2" --output json | python3 -c '
+import json, sys
+spec = json.load(sys.stdin)["spec"]["template"]["spec"]
+host = {v["name"]: v["hostPath"]["path"] for v in spec.get("volumes", []) if "hostPath" in v}
+for m in spec["containers"][0].get("volumeMounts", []):
+    if m["name"] in host:
+        print(host[m["name"]] + ":" + m["mountPath"])'
+}
+
 # stack_objects NAME: what the platform's stack NAME has in the cluster.
 stack_objects() { kubectl --namespace garrison get all --selector "garrison.io/stack=$1" --output name 2>/dev/null; }
 smoke_running() { [ "$(kubectl --namespace garrison get deployment smoke -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = 1 ]; }

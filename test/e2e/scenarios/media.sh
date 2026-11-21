@@ -110,7 +110,7 @@ check "nobody makes a public link"         test "$(files_api alice -o /dev/null 
 # wget fails on the 403 it is meant to get: its output says which it was.
 past() {
   local out
-  out=$(docker exec "$(docker ps -q -f name=files_web | head -n1)" wget -S -O /dev/null --header 'X-Garrison-User: alice' --header 'X-Auth-Request-Preferred-Username: alice' http://127.0.0.1:8080/api/resources/ 2>&1)
+  out=$(in_app files web wget -S -O /dev/null --header 'X-Garrison-User: alice' --header 'X-Auth-Request-Preferred-Username: alice' http://127.0.0.1:8080/api/resources/ 2>&1)
   grep -q ' 403 ' <<<"$out"
 }
 check "past the sign-in, it takes nothing" past

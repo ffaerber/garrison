@@ -15,7 +15,7 @@ check "alice merges it"                    test "$(merge config alice "$opr")" =
 check "alice adds its stack, carol approves" set_stack todo quotes test/e2e/apps/stacks/quotes.yaml carol
 quotes_deployed() { garrison applied | grep -q "^app todo/quotes@main quotes "; }
 check "its pipeline builds it and the deployer deploys it" until_true 900 quotes_deployed
-quotes_crashes() { docker service ps quotes_web --format '{{.Error}}' 2>/dev/null | grep -q 'non-zero exit'; }
+quotes_crashes() { app_crashes quotes web; }
 check "it does not start"                  until_true 120 quotes_crashes
 am_alerts() { kubectl --namespace garrison exec -i deployment/alertmanager -- wget -qO- http://localhost:9093/api/v2/alerts; }
 quotes_alert() { am_alerts | python3 -c '
@@ -42,7 +42,7 @@ answer=$(ask_agent todo alice "The quotes app of the unit todo, https://quotes.$
 check "it looks at the stack, as alice"    grep -qE "mcp: alice: (stack_status|service_logs)" <<<"$(mcp_calls "$at" alice)"
 check "it names the missing setting"       grep -q QUOTES_FILE <<<"$answer"
 check "alice removes its stack, carol approves" set_stack todo quotes - carol
-quotes_gone() { ! docker service inspect quotes_web >/dev/null 2>&1; }
+quotes_gone() { app_gone quotes; }
 check "that takes the app down"            until_true 120 quotes_gone
 check "and the alert resolves"             until_true 300 in_feed carol ns=todo "e['kind'] == 'alert' and e['status'] == 'ok' and 'quotes_web' in e['title']"
 gitea_api "" -o /dev/null -X DELETE "$hp/quotes"

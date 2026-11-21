@@ -86,7 +86,7 @@ alice_todo=$(todo_api todo "https://todo.$DOMAIN/api/todos" | python3 -c 'import
 bob_api -o /dev/null -X POST "https://todo.$DOMAIN/todos/$alice_todo/delete"
 check "he cannot delete hers"              grep -q 'Water the plants' <<<"$(todo_api todo "https://todo.$DOMAIN/api/todos")"
 check "its database has its own dataset"   test "$(zfs get -H -o value quota garrison/ns/todo/stacks/todo/todo-db)" = 2G
-check "its password is a generated secret" docker secret inspect todo.db-password
+check "its password is a generated secret" app_secret todo db-password
 chat_admin=$(curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "chat.$DOMAIN:443:127.0.0.1" -H 'Content-Type: application/json' \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))' "installer@$DOMAIN" "$PASSWORD")" "$chat/api/v1/auths/signin" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 ns_channel() { web -H "Authorization: Bearer $chat_admin" "$chat/api/v1/channels/" | grep -q '"name":"todo"'; }
@@ -176,7 +176,7 @@ check "alice removes it"                   set_stack todo grafana -
 
 echo "# taking an environment down"
 check "alice deletes the branch dev"       test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X DELETE "$repo/branches/dev")" = 204
-gone() { ! docker stack ls --format '{{.Name}}' | grep -qx dev-todo; }
+gone() { app_gone dev-todo; }
 check "the deployer takes dev-todo down" until_true 120 gone
 check "its data is kept"                   zfs list garrison/ns/todo/stacks/dev-todo/todo-db
 # main may have been redeployed just before; Traefik follows within seconds.
@@ -226,11 +226,11 @@ check "only the deployer holds todo's key" bash -c 'test -s /etc/garrison/sops/t
 # Postgres takes its password from the stored secret.
 printf 'entrypoint: db\nservices:\n  db:\n    image: postgres:17-alpine\n    port: 5432\n    secrets: [smoke-token]\n    env: { POSTGRES_PASSWORD_FILE: /run/secrets/smoke-token }\nenvironments:\n  main: {}\n' > "$tmp/keyed.yaml"
 check "alice adds an app that uses it"     set_stack todo keyed "$tmp/keyed.yaml"
-in_app() { local c; c=$(docker ps -q -f name=keyed_db | head -n1) && [ -n "$c" ] && [ "$(docker exec "$c" cat /run/secrets/smoke-token)" = "$1" ]; }
-check "the app gets the value"             until_true 240 in_app "$token"
+has_value() { [ "$(in_app keyed db cat /run/secrets/smoke-token 2>/dev/null)" = "$1" ]; }
+check "the app gets the value"             until_true 240 has_value "$token"
 token2=$(openssl rand -hex 16)
 check "alice replaces it"                  test "$(set_secret alice todo smoke-token "$token2")" = 303
-check "the app is redeployed with the new value" until_true 240 in_app "$token2"
+check "the app is redeployed with the new value" until_true 240 has_value "$token2"
 check "alice removes the app"              set_stack todo keyed -
 deleted() { [ "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://$DOMAIN" --data-urlencode action=delete --data-urlencode name=smoke-token "https://$DOMAIN/secrets/todo")" = 303 ] && ! stored >/dev/null 2>&1; }
 check "and deletes the secret"             deleted
