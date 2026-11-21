@@ -108,10 +108,13 @@ var Pruned = []string{
 	"networking.k8s.io/v1/NetworkPolicy", "traefik.io/v1alpha1/Middleware",
 }
 
-// Remove takes an environment off the cluster: its namespace, with all in
-// it, its secrets too. Its datasets are kept.
+// Remove takes an environment off the cluster: everything the deployer
+// applied in its namespace (Pruned). Its datasets are kept, and so are its
+// Secrets and the namespace that holds them: data kept with a generated
+// password needs that password when the app comes back.
 func Remove(ctx context.Context, run Runner, stackName string) error {
-	_, err := run(ctx, nil, nil, "kubectl", "delete", "namespace", render.NamespaceOf(stackName), "--ignore-not-found", "--wait=false")
+	_, err := run(ctx, nil, nil, "kubectl", "delete", "deployments,services,ingresses,networkpolicies,middlewares.traefik.io",
+		"--namespace", render.NamespaceOf(stackName), "--all", "--ignore-not-found", "--wait=false")
 	return err
 }
 

@@ -164,12 +164,12 @@ func TestAStoredSecretGoesBackToAGeneratedOne(t *testing.T) {
 	}
 }
 
-func TestRemoveDeletesTheNamespace(t *testing.T) {
+func TestRemoveKeepsTheSecrets(t *testing.T) {
 	f := &fake{stdin: map[string]string{}}
 	if err := Remove(context.Background(), f.run, "dev-todo"); err != nil {
 		t.Fatal(err)
 	}
-	if f.calls[0] != "kubectl delete namespace app-dev-todo --ignore-not-found --wait=false" {
+	if f.calls[0] != "kubectl delete deployments,services,ingresses,networkpolicies,middlewares.traefik.io --namespace app-dev-todo --all --ignore-not-found --wait=false" {
 		t.Errorf("%v", f.calls)
 	}
 }

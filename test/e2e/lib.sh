@@ -165,8 +165,9 @@ set_stack() { set_config "$1" "stacks/$2.yaml" "$3" "${4:-}"; }
 # ---------- apps: each environment a namespace, app-<stack> ----------
 # app_up STACK: whether the environment's namespace has its Deployments.
 app_up() { [ -n "$(kubectl --namespace "app-$1" get deployments --output name 2>/dev/null)" ]; }
-# app_gone STACK: whether the environment's namespace is gone (or going).
-app_gone() { [ "$(kubectl get namespace "app-$1" -o jsonpath='{.status.phase}' 2>/dev/null)" != Active ]; }
+# app_gone STACK: whether the environment's Deployments are gone. Its
+# namespace stays, with its Secrets.
+app_gone() { ! app_up "$1"; }
 # app_secret STACK NAME: whether the environment has the Secret NAME.
 app_secret() { kubectl --namespace "app-$1" get secret "$2" >/dev/null 2>&1; }
 # in_app STACK SERVICE COMMAND...: runs COMMAND in the service's pod.

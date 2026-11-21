@@ -78,7 +78,7 @@ check "the overview shows the machine's CPU" until_true 120 prom_has '100 * (1 -
 check "the stack dashboard shows grafana's services" until_true 120 prom_has 'sum by (service) (rate(container_cpu_usage_seconds_total{container!=""}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack="grafana"})'
 check "Prometheus scrapes Traefik"        until_true 180 prom_has 'up{job="traefik"} == 1'
 check "the traffic dashboard has requests" until_true 120 prom_has 'sum(rate(traefik_entrypoint_requests_total[5m])) > 0'
-check "Traefik's metrics are not reachable from outside" bash -c '! (ss -ltn | grep -q ":8082 ")'
+check "Traefik's metrics are not reachable from outside" bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" "http://$(hostname -I | cut -d" " -f1):8082/metrics")" != 200'
 # A dashboard committed to a repo appears; deleting the file removes it.
 smoke_dash=$(printf '{"uid":"smoke-test","title":"Smoke test","panels":[]}' | base64 -w0)
 gitea_api alice -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"message":"Add a dashboard","branch":"main","content":"'$smoke_dash'"}' "$api/repos/garrison/platform/contents/dashboards/smoke.json"

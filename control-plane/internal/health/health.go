@@ -188,6 +188,11 @@ func (k *Kubernetes) collect(ctx context.Context) ([]Service, []Sandbox, error) 
 		if h.Unit == "" {
 			// The platform's own stacks: postgres, gitea, control-plane ...
 			h.Unit, h.App, h.Environment = agents.PlatformUnit, stack, "main"
+		} else {
+			// An app's service is <stack>_<service>, as the gateway's tools,
+			// the alerts and the feed name it: each environment is a
+			// namespace, so the name alone says nothing of whose it is.
+			h.Service = stack + "_" + w.Metadata.Name
 		}
 		h.Desired = 1
 		if w.Spec.Replicas != nil {

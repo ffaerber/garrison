@@ -110,10 +110,13 @@ spec:
             - --entrypoints.websecure.http.tls=true
             - --ping=true
             - --ping.entrypoint=metrics
-            # Metrics for Prometheus on an entry point not routed to.
+            # Metrics for Prometheus on an entry point of their own. Traefik
+            # shares the host's network, so the port is on the machine's
+            # address too: the router metrics (dynamic.yaml) answers only
+            # the pod network.
             - --entrypoints.metrics.address=:8082
             - --metrics.prometheus=true
-            - --metrics.prometheus.entrypoint=metrics
+            - --metrics.prometheus.manualrouting=true
             - --metrics.prometheus.addrouterslabels=true
           volumeMounts:
             - { name: files, mountPath: /etc/traefik, readOnly: true }

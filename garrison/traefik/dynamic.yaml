@@ -6,7 +6,18 @@ tls:
         keyFile: /run/secrets/tls.key
 
 http:
+  routers:
+    # Prometheus's metrics, for pods only (Prometheus): Traefik is on the
+    # host's network, so the entry point is on the machine's address too.
+    metrics:
+      entryPoints: [metrics]
+      rule: PathPrefix(`/metrics`)
+      service: prometheus@internal
+      middlewares: [pods-only]
   middlewares:
+    pods-only:
+      ipAllowList:
+        sourceRange: [10.42.0.0/16]
     # Login check for private environments: every request is checked with
     # the login proxy (04-sso). Without a session the proxy redirects to
     # Keycloak. If the proxy is down, requests fail; nothing is let through.

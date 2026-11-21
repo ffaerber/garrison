@@ -180,7 +180,7 @@ func deployOf(call string) string {
 
 // removal is the call that takes the stack down: its namespace goes.
 func removal(stack string) string {
-	return "kubectl delete namespace app-" + stack + " --ignore-not-found --wait=false"
+	return "kubectl delete deployments,services,ingresses,networkpolicies,middlewares.traefik.io --namespace app-" + stack + " --all --ignore-not-found --wait=false"
 }
 
 func (f *fakeApps) deployed() []string {
@@ -517,7 +517,7 @@ func TestEnvironmentsSurviveManyBranches(t *testing.T) {
 	if _, ok := apps["homepage/todo@main"]; !ok {
 		t.Errorf("main is gone: %+v", apps)
 	}
-	if rm := f.called("kubectl delete namespace"); len(rm) != 0 {
+	if rm := f.called("kubectl delete deployments"); len(rm) != 0 {
 		t.Errorf("took down %v", rm)
 	}
 }
