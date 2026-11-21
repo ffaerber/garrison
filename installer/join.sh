@@ -62,6 +62,8 @@ done
 
 say "Installing ZFS, gVisor and crun"
 . "$ROOT/installer/node.sh"
+# A freshly made machine may still be setting itself up, apt included.
+! command -v cloud-init >/dev/null || cloud-init status --wait >/dev/null 2>&1 || true
 node_packages
 
 say "Trusting the installation's registry"

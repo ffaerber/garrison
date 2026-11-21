@@ -8,8 +8,19 @@
 K3S_VERSION=v1.37.2+k3s1
 
 # apt waits for dpkg's lock instead of failing: on a freshly booted machine
-# unattended-upgrades often holds it for a few minutes.
-apt-get() { command apt-get -o DPkg::Lock::Timeout=600 "$@"; }
+# cloud-init or unattended-upgrades often holds it for a few minutes. The
+# timeout covers dpkg's lock but not the package lists' one, which
+# `apt-get update` takes: that is retried, for up to 10 minutes.
+apt-get() {
+  if [ "${1:-}" = update ]; then
+    local i
+    for i in $(seq 120); do
+      command apt-get -o DPkg::Lock::Timeout=600 "$@" 2>/dev/null && return 0
+      sleep 5
+    done
+  fi
+  command apt-get -o DPkg::Lock::Timeout=600 "$@"
+}
 
 # node_packages [PACKAGE...]: installs what a machine needs, and the given
 # packages, and gVisor (runsc) from its own repository.
