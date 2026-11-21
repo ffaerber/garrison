@@ -10,7 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"garrison/control-plane/internal/agents"
-	"garrison/control-plane/internal/render"
 )
 
 // MediaShare is the share of a unit that is its media library: its
@@ -40,17 +39,14 @@ type mediaCache struct {
 // mediaFor is how long whether a unit has a library is remembered.
 const mediaFor = time.Minute
 
-// media is the host folder of ns's media library, bound at /data/media in
-// its sandboxes, or "" if it has none: one of the stacks of its config, on
-// main, mounts the share media, which the deployer then keeps as a dataset.
-// garrison, the platform's unit, has none.
+// media is ns itself if it has a media library, which its sandboxes mount
+// at /data/media, or "" if it has none: one of the stacks of its config, on
+// main, mounts the share media, which the deployer then keeps as a volume,
+// with a claim in the sandboxes' namespace. garrison, the platform's unit,
+// has none.
 func (s *Server) media(ctx context.Context, ns string) string {
 	if s.Media == nil || ns == "" || ns == agents.PlatformUnit {
 		return ""
-	}
-	root := s.DataRoot
-	if root == "" {
-		root = render.DefaultDataRoot
 	}
 	s.mediaCache.mu.Lock()
 	if s.mediaCache.have == nil {
@@ -73,7 +69,7 @@ func (s *Server) media(ctx context.Context, ns string) string {
 	if !have {
 		return ""
 	}
-	return render.SharePath(root, ns, MediaShare)
+	return ns
 }
 
 // hasMediaShare tells whether a stack of ns's config mounts the share media.

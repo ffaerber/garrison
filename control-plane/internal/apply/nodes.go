@@ -107,6 +107,22 @@ func MainNode(ctx context.Context, run Runner) (string, error) {
 	return "", fmt.Errorf("no machine is labelled %s", MainNodeLabel)
 }
 
+// MainAddress is the main machine's own address on the pod network, the
+// first of its pod range, as a CIDR of one address (10.42.0.0/32): where its
+// host's traffic, Traefik's, comes from to pods on other machines. "" if
+// k3s does not say (render.Options.MainAddress).
+func MainAddress(ctx context.Context, run Runner) string {
+	out, err := run(ctx, nil, nil, "kubectl", "get", "nodes", "--selector", MainNodeLabel, "--output", "jsonpath={.items[0].spec.podCIDR}")
+	if err != nil {
+		return ""
+	}
+	ip, _, ok := strings.Cut(strings.TrimSpace(string(out)), "/")
+	if !ok || strings.Count(ip, ".") != 3 {
+		return ""
+	}
+	return ip + "/32"
+}
+
 // Nodes are the machines with a zfs pod, which hold data.
 func Nodes(ctx context.Context, run Runner) ([]string, error) {
 	out, err := run(ctx, nil, nil, "kubectl", "get", "pods", "--namespace", "garrison", "--selector", ZFSPods, "--output", "jsonpath={.items[*].spec.nodeName}")

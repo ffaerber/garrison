@@ -3,7 +3,6 @@ package apply
 import (
 	"context"
 	"fmt"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,7 +34,17 @@ func EnvDataset(root string, s *stack.Stack, env string) string {
 	if root == "" {
 		root = render.DefaultDataRoot
 	}
-	return strings.TrimPrefix(path.Join(root, s.Unit, "stacks", s.Hostname(env)), "/")
+	return render.EnvParent(root, s, env)
+}
+
+// onEnv names, in ctx, the machine that holds an environment's data, for
+// the zfs and rsync commands that follow (WithNode).
+func onEnv(ctx context.Context, run Runner, s *stack.Stack, env string) (context.Context, error) {
+	node, err := EnvNode(ctx, run, render.StackName(s, env))
+	if err != nil {
+		return ctx, err
+	}
+	return WithNode(ctx, node), nil
 }
 
 // SnapshotStamp names a snapshot by its time, in UTC: 20261113-150405.
@@ -50,6 +59,10 @@ func exists(ctx context.Context, run Runner, name string) bool {
 // prunes the oldest of the same kind. It does nothing for an environment
 // without datasets and tells whether it took one.
 func SnapshotEnv(ctx context.Context, run Runner, root string, s *stack.Stack, env, name string) (bool, error) {
+	ctx, err := onEnv(ctx, run, s, env)
+	if err != nil {
+		return false, err
+	}
 	ds := EnvDataset(root, s, env)
 	if !exists(ctx, run, ds) {
 		return false, nil
@@ -121,6 +134,10 @@ func ListSnapshots(ctx context.Context, run Runner, ds string, depth int) (map[s
 
 // Restored is the restore request last carried out on an environment, or "".
 func Restored(ctx context.Context, run Runner, root string, s *stack.Stack, env string) string {
+	ctx, err := onEnv(ctx, run, s, env)
+	if err != nil {
+		return ""
+	}
 	out, err := run(ctx, nil, nil, "zfs", "get", "-H", "-o", "value", RestoredProperty, EnvDataset(root, s, env))
 	if err != nil {
 		return ""
@@ -145,22 +162,26 @@ func RestoreEnv(ctx context.Context, run Runner, root string, s *stack.Stack, en
 	if root == "" {
 		root = render.DefaultDataRoot
 	}
+	ctx, err := onEnv(ctx, run, s, env)
+	if err != nil {
+		return err
+	}
 	ds := EnvDataset(root, s, env)
 	if !exists(ctx, run, ds+"@"+snapshot) {
 		return fmt.Errorf("%s has no snapshot %s", s.Hostname(env), snapshot)
 	}
-	var paths []string
+	var datasets []string
 	for _, name := range s.ServiceNames() {
 		for _, v := range s.Services[name].Volumes {
 			if v.Dataset == "" {
 				continue
 			}
-			p := render.DatasetPath(root, s, env, v.Dataset)
-			if !exists(ctx, run, strings.TrimPrefix(p, "/")+"@"+snapshot) {
+			d := render.VolumeDataset(root, s, env, v.Dataset)
+			if !exists(ctx, run, d+"@"+snapshot) {
 				return fmt.Errorf("the dataset %s did not exist at %s; nothing was changed", v.Dataset, snapshot)
 			}
-			if !slices.Contains(paths, p) {
-				paths = append(paths, p)
+			if !slices.Contains(datasets, d) {
+				datasets = append(datasets, d)
 			}
 		}
 	}
@@ -170,14 +191,32 @@ func RestoreEnv(ctx context.Context, run Runner, root string, s *stack.Stack, en
 	if err := stopStack(ctx, run, render.StackName(s, env)); err != nil {
 		return err
 	}
-	for _, p := range paths {
-		// The snapshot's files, through ZFS's hidden .zfs directory; --delete
-		// removes what was written since.
-		if _, err := run(ctx, nil, nil, "rsync", "-aH", "--numeric-ids", "--delete", p+"/.zfs/snapshot/"+snapshot+"/", p+"/"); err != nil {
+	for _, d := range datasets {
+		if err := copyBack(ctx, run, d, snapshot); err != nil {
 			return err
 		}
 	}
-	_, err := run(ctx, nil, nil, "zfs", "set", RestoredProperty+"="+id, ds)
+	_, err = run(ctx, nil, nil, "zfs", "set", RestoredProperty+"="+id, ds)
+	return err
+}
+
+// copyBack copies a dataset's files back from its snapshot, on its machine.
+// OpenEBS mounts a dataset only into its pods (mountpoint legacy), and a pod
+// sees no snapshots; so it is mounted on the machine for the copy, through
+// ZFS's hidden .zfs directory, and unmounted again. --delete removes what
+// was written since.
+func copyBack(ctx context.Context, run Runner, ds, snapshot string) error {
+	dir := volumeMount(ds)
+	if _, err := run(ctx, nil, nil, "mkdir", "-p", dir); err != nil {
+		return err
+	}
+	if _, err := run(ctx, nil, nil, "mount", "-t", "zfs", ds, dir); err != nil {
+		return err
+	}
+	_, err := run(ctx, nil, nil, "rsync", "-aH", "--numeric-ids", "--delete", dir+"/.zfs/snapshot/"+snapshot+"/", dir+"/")
+	if _, uerr := run(ctx, nil, nil, "umount", dir); err == nil {
+		err = uerr
+	}
 	return err
 }
 

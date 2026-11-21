@@ -37,8 +37,8 @@ type Want struct {
 	Model      string
 	Prompt     string // the system prompt
 	Definition string // changes when the agent's definition does
-	// Media, if set, is the host folder of the unit's media library,
-	// bound at /data/media; a change restarts the sandbox between turns.
+	// Media, if set, is the unit whose media library the sandbox mounts at
+	// /data/media; a change restarts the sandbox between turns.
 	Media string
 }
 

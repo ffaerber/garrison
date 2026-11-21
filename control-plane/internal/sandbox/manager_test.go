@@ -188,7 +188,7 @@ func TestOwnAddress(t *testing.T) {
 // guard checks it against; a sandbox that gains or loses it restarts.
 func TestTheMediaLibraryIsBound(t *testing.T) {
 	m, d := manager(t)
-	w := sandbox.Want{Key: "k", Agent: "media/operator", Person: "alice", Media: "/garrison/ns/media/shares/media"}
+	w := sandbox.Want{Key: "k", Agent: "media/operator", Person: "alice", Media: "media"}
 	ask(t, m, w, "hi")
 	for _, c := range d.Containers {
 		if c.Labels[sandbox.UnitLabel] != "media" {

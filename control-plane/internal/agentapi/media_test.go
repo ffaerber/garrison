@@ -40,7 +40,7 @@ func TestTheMediaLibrary(t *testing.T) {
 		"lab/stacks/bad.yaml":     "services: [",
 	}}
 	s := &Server{Media: f}
-	if got := s.media(ctx, "media"); got != "/garrison/ns/media/shares/media" {
+	if got := s.media(ctx, "media"); got != "media" {
 		t.Errorf("media: %q", got)
 	}
 	for _, ns := range []string{"todo", "lab", "garrison", ""} {

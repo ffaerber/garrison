@@ -56,6 +56,9 @@ func volumesOf(ctx context.Context, run Runner, selector string) ([]zfsVolume, e
 	var l struct {
 		Items []zfsVolume `json:"items"`
 	}
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return nil, nil
+	}
 	if err := json.Unmarshal(out, &l); err != nil {
 		return nil, fmt.Errorf("kubectl get zfsvolumes: %w", err)
 	}

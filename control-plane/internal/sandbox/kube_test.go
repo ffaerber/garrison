@@ -25,7 +25,7 @@ func TestKubernetesPod(t *testing.T) {
 	k := &Kubernetes{Namespace: "garrison-sandboxes", PullSecret: "registry-pull", Kubectl: kubectl}
 	labels := map[string]string{Label: "true", "garrison.agent": "todo/developer", "garrison.chat": "channel:abc", UnitLabel: "todo"}
 	id, err := k.Create(context.Background(), Spec{Name: "garrison-agent-1", Image: "git.example.com/garrison/sandbox:1", Labels: labels,
-		Volume: "garrison-agent-1", Media: "/garrison/ns/todo/shares/media", Memory: 2 << 30, CPUs: 1.5, Runtime: "gvisor",
+		Volume: "garrison-agent-1", Media: "todo", Memory: 2 << 30, CPUs: 1.5, Runtime: "gvisor",
 		Env: []string{"GARRISON_API=http://agents.garrison.svc.cluster.local:8071", "GARRISON_PROMPT=a=b"}})
 	if err != nil || id != "garrison-agent-1" {
 		t.Fatal(id, err)
@@ -75,7 +75,7 @@ func TestKubernetesPod(t *testing.T) {
 		t.Errorf("limits %v", c.Resources.Limits)
 	case c.Env[1].Name != "GARRISON_PROMPT" || c.Env[1].Value != "a=b":
 		t.Errorf("env %+v", c.Env)
-	case pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName != "garrison-agent-1" || pod.Spec.Volumes[1].HostPath.Path != "/garrison/ns/todo/shares/media":
+	case pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName != "garrison-agent-1" || pod.Spec.Volumes[1].PersistentVolumeClaim.ClaimName != "media-todo":
 		t.Errorf("volumes %+v", pod.Spec.Volumes)
 	}
 }

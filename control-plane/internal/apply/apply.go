@@ -46,6 +46,9 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 	if o.DataRoot == "" {
 		o.DataRoot = render.DefaultDataRoot
 	}
+	if o.MainAddress == "" {
+		o.MainAddress = MainAddress(ctx, run)
+	}
 	manifests, err := render.Kubernetes(s, o)
 	if err != nil {
 		return err
@@ -209,16 +212,4 @@ func EnsureDataset(ctx context.Context, run Runner, path, size string) error {
 	return err
 }
 
-// HostExec returns a Runner for a deployer running in a pod with the host's
-// process namespace (hostPID) and privileges: ZFS and rsync (which copies
-// datasets back from snapshots) run on the host, entering the namespaces of
-// its first process. Everything else runs directly in the pod.
-func HostExec() Runner {
-	return func(ctx context.Context, env []string, stdin []byte, name string, args ...string) ([]byte, error) {
-		if name == "zfs" || name == "rsync" {
-			args = append([]string{"-t", "1", "-m", "-u", "-i", "-n", "--", name}, args...)
-			name = "nsenter"
-		}
-		return Exec(ctx, env, stdin, name, args...)
-	}
-}
+

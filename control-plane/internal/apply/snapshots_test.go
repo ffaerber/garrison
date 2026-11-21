@@ -88,7 +88,7 @@ const env = "garrison/ns/homepage/stacks/todo"
 
 func newZFS() *zfsFake {
 	return &zfsFake{
-		datasets: map[string]bool{env: true, env + "/todo-db": true},
+		datasets: map[string]bool{env: true, env + "/todo.todo-db": true},
 		snaps:    map[string][]string{},
 		props:    map[string]string{},
 	}
@@ -103,8 +103,8 @@ func TestSnapshotEnvKeepsTheNewest(t *testing.T) {
 		}
 	}
 	got := f.snaps[env]
-	if len(got) != KeepDeploys || got[0] != DeploySnapshot+"03" || f.snaps[env+"/todo-db"][0] != DeploySnapshot+"03" {
-		t.Errorf("snapshots = %v, children %v", got, f.snaps[env+"/todo-db"])
+	if len(got) != KeepDeploys || got[0] != DeploySnapshot+"03" || f.snaps[env+"/todo.todo-db"][0] != DeploySnapshot+"03" {
+		t.Errorf("snapshots = %v, children %v", got, f.snaps[env+"/todo.todo-db"])
 	}
 	// Sanoid's are not the deployer's to prune.
 	f.snaps[env] = append([]string{"autosnap_old"}, f.snaps[env]...)
@@ -126,7 +126,7 @@ func TestRestoreEnv(t *testing.T) {
 	StopTimeout = 10 * time.Second
 	f, s := newZFS(), todoStack(t)
 	f.snaps[env] = []string{"deploy-1"}
-	f.snaps[env+"/todo-db"] = []string{"deploy-1"}
+	f.snaps[env+"/todo.todo-db"] = []string{"deploy-1"}
 	f.running = 1
 	ctx := context.Background()
 	if err := RestoreEnv(ctx, f.run, "", s, "main", "deploy-1", "20261113-150405", "c0ffee"); err != nil {
@@ -134,12 +134,17 @@ func TestRestoreEnv(t *testing.T) {
 	}
 	// The state before is kept, the services stopped before copying, and
 	// the request recorded.
-	if !slices.Contains(f.snaps[env+"/todo-db"], RestoreSnapshot+"20261113-150405") {
+	if !slices.Contains(f.snaps[env+"/todo.todo-db"], RestoreSnapshot+"20261113-150405") {
 		t.Errorf("no snapshot of the state before: %v", f.snaps)
 	}
 	scale := slices.Index(f.calls, "kubectl scale deployment --all --replicas 0 --namespace app-todo")
-	copy := slices.Index(f.calls, "rsync -aH --numeric-ids --delete /garrison/ns/homepage/stacks/todo/todo-db/.zfs/snapshot/deploy-1/ /garrison/ns/homepage/stacks/todo/todo-db/")
-	if scale < 0 || copy < scale {
+	// The dataset is mounted on its machine for the copy (OpenEBS mounts it
+	// only into pods), and unmounted after.
+	dir := "/run/garrison/restore/garrison_ns_homepage_stacks_todo_todo.todo-db"
+	mount := slices.Index(f.calls, "mount -t zfs garrison/ns/homepage/stacks/todo/todo.todo-db "+dir)
+	copy := slices.Index(f.calls, "rsync -aH --numeric-ids --delete "+dir+"/.zfs/snapshot/deploy-1/ "+dir+"/")
+	umount := slices.Index(f.calls, "umount "+dir)
+	if scale < 0 || mount < scale || copy < mount || umount < copy {
 		t.Errorf("calls = %v", f.calls)
 	}
 	if got := Restored(ctx, f.run, "", s, "main"); got != "c0ffee" {
@@ -152,7 +157,7 @@ func TestRestoreEnv(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 	for _, c := range f.calls {
-		if !strings.HasPrefix(c, "zfs list") {
+		if !strings.HasPrefix(c, "zfs list") && !strings.HasPrefix(c, "kubectl get") {
 			t.Errorf("changed something: %s", c)
 		}
 	}

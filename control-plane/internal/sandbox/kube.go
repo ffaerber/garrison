@@ -124,7 +124,9 @@ func (k *Kubernetes) Create(ctx context.Context, s Spec) (string, error) {
 	volumes := []map[string]any{{"name": "workspace", "persistentVolumeClaim": map[string]string{"claimName": s.Volume}}}
 	if s.Media != "" {
 		mounts = append(mounts, map[string]any{"name": "media", "mountPath": MediaTarget})
-		volumes = append(volumes, map[string]any{"name": "media", "hostPath": map[string]string{"path": s.Media, "type": "Directory"}})
+		// The unit's media share, through its claim here, which the deployer
+		// keeps (apply.MediaClaim); the pod then runs on the share's machine.
+		volumes = append(volumes, map[string]any{"name": "media", "persistentVolumeClaim": map[string]string{"claimName": "media-" + s.Media}})
 	}
 	limits := map[string]string{"memory": fmt.Sprint(s.Memory)}
 	if s.CPUs > 0 {

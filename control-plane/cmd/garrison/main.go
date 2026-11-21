@@ -58,7 +58,7 @@ const usage = `usage:
   garrison render -domain DOMAIN [-env ENV] [-data-root DIR] STACK.yaml
   garrison apply  -domain DOMAIN [-env ENV] [-data-root DIR] [-state FILE] [-reserved FILE] STACK.yaml
   garrison deploy [-once] [-interval DURATION] [-config FILE] [-work DIR]
-                   [-gitea URL] [-password-file FILE] [-host-exec]
+                   [-gitea URL] [-password-file FILE]
   garrison applied [-work DIR]
   garrison system [-render] [-wait DURATION] DIR...   (a system stack, kubernetes.yaml; ${VAR} from the environment)
   garrison gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
@@ -229,7 +229,7 @@ func applyCmd(args []string) error {
 	if err := reg.Claim(s); err != nil {
 		return err
 	}
-	if err := apply.Stack(context.Background(), apply.Exec, s, o); err != nil {
+	if err := apply.Stack(context.Background(), apply.NodeExec(apply.Exec), s, o); err != nil {
 		return err
 	}
 	if err := reg.Save(*state); err != nil {
@@ -277,7 +277,6 @@ func deployCmd(args []string) error {
 	work := fs.String("work", workDir, "the deployer's checkout and state")
 	gitea := fs.String("gitea", "", "Gitea's URL (default https://git.<domain>, through Traefik on this machine)")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	hostExec := fs.Bool("host-exec", false, "run ZFS on the host with nsenter (for a deployer in a privileged pod with hostPID)")
 	grafana := fs.String("grafana", "", "Grafana's URL; when set, dashboards/*.json in the repos are kept in Grafana")
 	grafanaUser := fs.String("grafana-user", "installer", "Grafana's local admin, whose password is the admin password")
 	apps := fs.Bool("apps", true, "also deploy the apps of every other unit (repos with a stack.yaml)")
@@ -305,10 +304,8 @@ func deployCmd(args []string) error {
 		Apps:         *apps,
 		WorkDir:      *work,
 		Env:          env,
-		Run:          apply.Exec,
-	}
-	if *hostExec {
-		c.Run = apply.HostExec()
+		// ZFS, rsync and mount on the machine of the data, through its zfs pod.
+		Run: apply.NodeExec(apply.Exec),
 	}
 	var keys *secrets.Keys
 	if *keysDir != "" {

@@ -204,8 +204,9 @@ spec:
   variables:
     - name: c
       expression: "object.spec.containers[0]"
+    # The claim of the unit's media share here (the deployer's, apply.MediaClaim).
     - name: media
-      expression: "'/garrison/ns/' + object.metadata.labels[?'garrison.unit'].orValue('-') + '/shares/media'"
+      expression: "'media-' + object.metadata.labels[?'garrison.unit'].orValue('-')"
   validations:
     - expression: "object.metadata.labels[?'garrison.sandbox'].orValue('') == 'true'"
       message: "a sandbox carries the label garrison.sandbox=true"
@@ -227,7 +228,7 @@ spec:
       message: "a sandbox has a memory limit of at most 2Gi"
     - expression: "!has(object.spec.automountServiceAccountToken) ? false : !object.spec.automountServiceAccountToken"
       message: "a sandbox gets no token of the Kubernetes API"
-    - expression: "object.spec.volumes.all(v, (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == object.metadata.name) || (has(v.hostPath) && v.hostPath.path == variables.media))"
+    - expression: "object.spec.volumes.all(v, has(v.persistentVolumeClaim) && (v.persistentVolumeClaim.claimName == object.metadata.name || v.persistentVolumeClaim.claimName == variables.media))"
       message: "a sandbox mounts only its own workspace and its unit's media library"
 ---
 apiVersion: admissionregistration.k8s.io/v1

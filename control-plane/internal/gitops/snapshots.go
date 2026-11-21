@@ -54,14 +54,29 @@ func (c *Config) listSnapshots(ctx context.Context) error {
 		return nil
 	}
 	root := strings.TrimPrefix(render.DefaultDataRoot, "/")
-	if _, err := c.Run(ctx, nil, nil, "zfs", "list", "-H", "-o", "name", root); err != nil {
-		return nil // no app has data yet
-	}
-	// <root>/<unit>/stacks/<hostname> are three below root; their
-	// snapshots one more.
-	all, err := apply.ListSnapshots(ctx, c.Run, root, 4)
+	// Every machine's: an environment's data is on one of them.
+	nodes, err := apply.Nodes(ctx, c.Run)
 	if err != nil {
 		return err
+	}
+	if len(nodes) == 0 {
+		nodes = []string{""} // the main machine, before the zfs pods run
+	}
+	all := map[string][]apply.Snap{}
+	for _, n := range nodes {
+		on := apply.WithNode(ctx, n)
+		if _, err := c.Run(on, nil, nil, "zfs", "list", "-H", "-o", "name", root); err != nil {
+			continue // no app has data there yet
+		}
+		// <root>/<unit>/stacks/<hostname> are three below root; their
+		// snapshots one more.
+		m, err := apply.ListSnapshots(on, c.Run, root, 4)
+		if err != nil {
+			return err
+		}
+		for ds, snaps := range m {
+			all[ds] = append(all[ds], snaps...)
+		}
 	}
 	out := map[string]EnvSnapshots{}
 	for ds, snaps := range all {

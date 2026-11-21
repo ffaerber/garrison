@@ -127,7 +127,9 @@ type Spec struct {
 func (d *Docker) Create(ctx context.Context, s Spec) (string, error) {
 	mounts := []map[string]any{{"Type": "volume", "Source": s.Volume, "Target": "/data"}}
 	if s.Media != "" {
-		mounts = append(mounts, map[string]any{"Type": "bind", "Source": s.Media, "Target": MediaTarget})
+		// Where the share was on the host before shares became OpenEBS's
+		// volumes; the Docker engine predates them.
+		mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/garrison/ns/" + s.Media + "/shares/media", "Target": MediaTarget})
 	}
 	host := map[string]any{
 		"NetworkMode": s.Network,
