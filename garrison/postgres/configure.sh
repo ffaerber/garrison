@@ -7,9 +7,9 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../../installer/lib.sh"
 
-ready() { docker exec "$(container postgres_postgres)" pg_isready -h 127.0.0.1 -U postgres; }
+ready() { in_pod statefulset/postgres pg_isready -h 127.0.0.1 -U postgres; }
 wait_for 300 "Postgres to answer" ready
-docker exec -i "$(container postgres_postgres)" sh -s <<'SH'
+in_pod statefulset/postgres sh -s <<'SH'
 set -eu
 password=$(cat /run/secrets/garrison-db-password)
 q() { psql -v ON_ERROR_STOP=1 -U postgres -tAc "$1"; }

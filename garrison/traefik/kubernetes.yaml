@@ -1,0 +1,124 @@
+# Routing and TLS. Provides the names in platform/contracts.
+#
+# Traefik runs on the host's network, listening on its ports 80 and 443:
+# people reach the installation there, and so do the host's Docker and
+# containerd when they pull from Gitea's registry at git.<domain>, which
+# /etc/hosts points at this machine. Routes are Ingress objects of the class
+# traefik, in any namespace; the middlewares, such as the login check sso,
+# and the default certificate are in dynamic.yaml (the file provider), named
+# <name>@file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traefik-files
+  annotations:
+    garrison.io/files: dynamic.yaml
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: traefik
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: traefik.io/ingress-controller
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik
+---
+# What Traefik's Ingress provider reads, in every namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: garrison-traefik
+rules:
+  - apiGroups: [""]
+    resources: [services, endpoints, secrets, nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, ingressclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses/status]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garrison-traefik
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: garrison-traefik }
+subjects: [{ kind: ServiceAccount, name: traefik, namespace: garrison }]
+---
+# Inside the cluster, every name of the installation resolves to this
+# Service (CoreDNS, see install.sh), so pods reach Keycloak, Gitea and the
+# apps at their public names, with one URL inside and out. Prometheus
+# scrapes the metrics port here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+spec:
+  selector: { app: traefik }
+  ports:
+    - { name: web, port: 80 }
+    - { name: websecure, port: 443 }
+    - { name: metrics, port: 8082 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+spec:
+  replicas: 1
+  # The host's ports are taken until the old pod stops.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: traefik } }
+  template:
+    metadata:
+      labels: { app: traefik }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      serviceAccountName: traefik
+      hostNetwork: true
+      # On the host's network, yet names of the cluster resolve.
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: traefik
+          image: traefik:v3.6
+          args:
+            - --providers.kubernetesingress.ingressclass=traefik
+            - --providers.file.filename=/etc/traefik/dynamic.yaml
+            - --entrypoints.web.address=:80
+            - --entrypoints.web.http.redirections.entrypoint.to=websecure
+            - --entrypoints.web.http.redirections.entrypoint.scheme=https
+            - --entrypoints.websecure.address=:443
+            # Routes from Ingress objects are on websecure, with TLS.
+            - --entrypoints.websecure.http.tls=true
+            - --ping=true
+            - --ping.entrypoint=metrics
+            # Metrics for Prometheus on an entry point not routed to.
+            - --entrypoints.metrics.address=:8082
+            - --metrics.prometheus=true
+            - --metrics.prometheus.entrypoint=metrics
+            - --metrics.prometheus.addrouterslabels=true
+          volumeMounts:
+            - { name: files, mountPath: /etc/traefik, readOnly: true }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /ping, port: 8082 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /ping, port: 8082 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - { name: files, configMap: { name: traefik-files } }
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: tls }

@@ -1,0 +1,47 @@
+# Gitea Actions runner for the `garrison` organisation: builds the platform's
+# own images, such as the deployer. It is registered for that organisation
+# only, because its jobs reach the Docker daemon, which is root on this
+# machine, and only root admins can write to repos in `garrison`. Its jobs
+# are Docker containers, not pods (act_runner runs jobs with Docker only).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-files
+  annotations:
+    garrison.io/files: config.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runner
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: runner } }
+  template:
+    metadata:
+      labels: { app: runner }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      containers:
+        - name: runner
+          image: gitea/act_runner:0.2.13
+          env:
+            - { name: CONFIG_FILE, value: /etc/act_runner/config.yaml }
+            # By its full name: the jobs, outside the cluster, get this address.
+            - { name: GITEA_INSTANCE_URL, value: "http://gitea.garrison.svc.cluster.local:3000" }
+            - { name: GITEA_RUNNER_REGISTRATION_TOKEN_FILE, value: /run/secrets/gitea-runner-token }
+            - { name: GITEA_RUNNER_NAME, value: garrison }
+            - { name: GITEA_RUNNER_LABELS, value: "garrison:docker://docker:29-cli" }
+          volumeMounts:
+            - { name: config, mountPath: /etc/act_runner, readOnly: true }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: docker, mountPath: /var/run/docker.sock }
+      volumes:
+        - { name: config, configMap: { name: runner-files } }
+        - name: secrets
+          projected:
+            sources: [{ secret: { name: gitea-runner-token } }]
+        - { name: data, hostPath: { path: /garrison/system/gitea-runner, type: Directory } }
+        - { name: docker, hostPath: { path: /var/run/docker.sock, type: Socket } }

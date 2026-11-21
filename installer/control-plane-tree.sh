@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # control-plane-tree.sh OUTDIR: assembles the contents of the repo
-# garrison/control-plane: its stack (compose.yaml), the source, the
+# garrison/control-plane: its stack (kubernetes.yaml), the source, the
 # Dockerfiles (the control plane's, the agents' sandbox's and the
 # units' file browser's) and the build
 # workflow.
@@ -16,12 +16,12 @@ rmdir "$out/control-plane/ci"
 cat > "$out/README.md" <<'MD'
 # Control plane
 
-Deploys every repo of the `garrison` organisation that holds a `compose.yaml`, itself included.
+Deploys every repo of the `garrison` organisation that holds a `kubernetes.yaml`, itself included.
 
 - `control-plane/`, `schemas/`, `templates/`, `go.mod`: the source.
 - `control-plane/Dockerfile`: the image.
 - `sandbox/`: the agents' sandbox image: Pi, the agent harness, and what agents work with.
 - `files/`: the units' file browser image, `garrison/files`: Filebrowser behind Garrison's gate.
-- `.gitea/workflows/build.yaml`: on every push to `main`, builds the images, pushes them to this Gitea's registry and sets their tag in `compose.yaml`; the running deployer then deploys them.
-- `compose.yaml`: the stack.
+- `.gitea/workflows/build.yaml`: on every push to `main`, builds the images, pushes them to this Gitea's registry and sets their tag in `kubernetes.yaml`; the running deployer then deploys them.
+- `kubernetes.yaml`: the stack.
 MD

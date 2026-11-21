@@ -4,7 +4,7 @@
 # Creates the repo in Gitea if it is missing and fills its main branch with
 # SOURCE_DIR. An existing repo is left alone unless --update is given; then
 # main is made to match SOURCE_DIR in a new commit. Image tags that the repo's
-# own build has set (ORG/NAME:<tag> in compose.yaml) are kept.
+# own build has set (ORG/NAME:<tag> in kubernetes.yaml) are kept.
 #
 # Runs as root on the machine. Prints created, updated <commit> or unchanged.
 set -euo pipefail
@@ -43,11 +43,11 @@ fi
 
 # Remember tags this repo's build set, replace the contents, put the tags back.
 tag=
-[ -f "$work/repo/compose.yaml" ] && tag=$(grep -oE "/$full:[A-Za-z0-9._-]+" "$work/repo/compose.yaml" | head -n1 | sed 's/.*://')
+[ -f "$work/repo/kubernetes.yaml" ] && tag=$(grep -oE "/$full:[A-Za-z0-9._-]+" "$work/repo/kubernetes.yaml" | head -n1 | sed 's/.*://')
 find "$work/repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 cp -r "$src"/. "$work/repo/"
 if [ -n "$tag" ] && [ "$tag" != bootstrap ]; then
-  sed -i -E "s#(/$full:)[A-Za-z0-9._-]+#\1$tag#g" "$work/repo/compose.yaml"
+  sed -i -E "s#(/$full:)[A-Za-z0-9._-]+#\1$tag#g" "$work/repo/kubernetes.yaml"
 fi
 
 gitea_git -C "$work/repo" add -A

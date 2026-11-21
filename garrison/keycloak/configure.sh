@@ -7,4 +7,4 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../../installer/lib.sh"
 
 wait_for 600 "Keycloak to accept the admin login" keycloak_login
-docker exec -i -e DOMAIN -e ADMIN_USER -e ADMIN_EMAIL "$(container keycloak_keycloak)" bash -s < "$here/realm.sh"
+in_pod deployment/keycloak DOMAIN="$DOMAIN" ADMIN_USER="$ADMIN_USER" ADMIN_EMAIL="$ADMIN_EMAIL" bash -s < "$here/realm.sh"

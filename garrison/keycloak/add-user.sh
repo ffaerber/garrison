@@ -23,8 +23,8 @@ fi
 export USER_PASSWORD
 
 keycloak_login >/dev/null
-# `-e VAR` without a value hands the variable over without putting it on a command line.
-docker exec -i -e NAME -e EMAIL -e ADMIN -e USER_PASSWORD "$(container keycloak_keycloak)" bash -s <<'IN_CONTAINER'
+# The password goes in on stdin, ahead of the script, so it is on no command line.
+{ printf '%s\n' "$USER_PASSWORD"; cat; } <<'IN_CONTAINER' | in_pod deployment/keycloak NAME="$NAME" EMAIL="$EMAIL" ADMIN="$ADMIN" bash -c 'read -r USER_PASSWORD; export USER_PASSWORD; exec bash -s'
 set -euo pipefail
 realm=garrison
 kc() { /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm.config; }

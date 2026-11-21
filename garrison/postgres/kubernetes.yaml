@@ -1,0 +1,63 @@
+# Shared database for Keycloak, Gitea, Grafana and the dashboard's feed
+# (garrison, made by configure.sh). One pod, its data on the ZFS dataset
+# /garrison/system/postgres.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-files
+  annotations:
+    garrison.io/files: init-databases.sh
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports: [{ name: postgres, port: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres, garrison.io/net: system }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_PASSWORD_FILE, value: /run/secrets/postgres-password }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+          readinessProbe:
+            # Over TCP: during first-run initialisation Postgres listens on the socket only.
+            exec: { command: [pg_isready, -h, 127.0.0.1, -U, postgres] }
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: [pg_isready, -h, 127.0.0.1, -U, postgres] }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+      volumes:
+        - { name: data, hostPath: { path: /garrison/system/postgres, type: Directory } }
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: postgres-password }
+              - secret: { name: keycloak-db-password }
+              - secret: { name: gitea-db-password }
+              - secret: { name: grafana-db-password }
+              - secret: { name: garrison-db-password }
+        - name: init
+          configMap:
+            name: postgres-files
+            items: [{ key: init-databases.sh, path: 10-databases.sh, mode: 0555 }]

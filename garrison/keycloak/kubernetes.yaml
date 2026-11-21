@@ -1,0 +1,71 @@
+# Single sign-on. Reachable at https://keycloak.<domain>.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  selector: { app: keycloak }
+  ports: [{ name: http, port: 8080 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+spec:
+  rules:
+    - host: keycloak.${DOMAIN}
+      http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: keycloak, port: { name: http } } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: keycloak } }
+  template:
+    metadata:
+      labels: { app: keycloak, garrison.io/net: system }
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.4
+          # Keycloak cannot read passwords from files, so a wrapper exports them.
+          command: [/bin/bash, -c]
+          args:
+            - |
+              export KC_DB_PASSWORD="$(</run/secrets/keycloak-db-password)"
+              export KC_BOOTSTRAP_ADMIN_PASSWORD="$(</run/secrets/admin-password)"
+              exec /opt/keycloak/bin/kc.sh start
+          env:
+            - { name: KC_DB, value: postgres }
+            - { name: KC_DB_URL, value: "jdbc:postgresql://postgres:5432/keycloak" }
+            - { name: KC_DB_USERNAME, value: keycloak }
+            - { name: KC_HOSTNAME, value: "https://keycloak.${DOMAIN}" }
+            - { name: KC_HTTP_ENABLED, value: "true" }
+            - { name: KC_PROXY_HEADERS, value: xforwarded }
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME, value: "${ADMIN_USER}" }
+          ports: [{ containerPort: 8080 }]
+          volumeMounts: [{ name: secrets, mountPath: /run/secrets, readOnly: true }]
+          # Keycloak answers its health checks on the management port.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 9000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /health/live, port: 9000 }
+            initialDelaySeconds: 120
+            periodSeconds: 10
+      volumes:
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: keycloak-db-password }
+              - secret: { name: admin-password }
+              # Client secrets, read by configure.sh when it creates the clients.
+              - secret: { name: gitea-oidc-secret }
+              - secret: { name: sso-oidc-secret }
+              - secret: { name: grafana-oidc-secret }
+              - secret: { name: openwebui-oidc-secret }

@@ -104,23 +104,42 @@ PYTHON
 )
 if [ "$changed" = yes ] || ! docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw runsc; then
   systemctl restart docker
-  # Services of an existing install come back without their secrets and configs.
-  [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ] || "$ROOT/host/repair-services.sh"
 fi
 docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' | grep -qw runsc || fail "Docker does not know the runtime runsc (gVisor)"
 
-# ---------- swarm ----------
-say "Setting up Docker Swarm"
-state=$(docker info --format '{{.Swarm.LocalNodeState}}')
-if [ "$state" = inactive ]; then
-  addr=$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')
-  docker swarm init --advertise-addr "$addr" >/dev/null
-elif [ "$(docker info --format '{{.Swarm.ControlAvailable}}')" != true ]; then
-  fail "this machine is already a worker in another swarm"
+# ---------- Kubernetes ----------
+# k3s, a Kubernetes in one binary, runs the platform and the apps, in its
+# own containerd. Docker stays for what still needs it: the pipelines'
+# runners and BuildKit. Its version is pinned; its own Traefik is left out,
+# as Garrison deploys its own (garrison/traefik).
+K3S_VERSION=v1.33.1+k3s1
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+# containerd pulls from Gitea's registry at git.<domain> and trusts the
+# installation's certificate for it. Read when k3s starts.
+mkdir -p /etc/rancher/k3s
+cat > /etc/rancher/k3s/registries.yaml <<YAML
+# Written by the Garrison installer; changes are overwritten.
+configs:
+  "git.$DOMAIN":
+    tls:
+      ca_file: $ETC/tls.crt
+YAML
+if ! command -v k3s >/dev/null || [ "$(k3s --version | awk 'NR == 1 { print $3 }')" != "$K3S_VERSION" ]; then
+  say "Installing k3s $K3S_VERSION"
+  curl -fsSL "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION/+/%2B}/install.sh" -o /tmp/k3s-install.sh
+  INSTALL_K3S_VERSION=$K3S_VERSION INSTALL_K3S_EXEC="server --disable traefik --write-kubeconfig-mode 600" \
+    sh /tmp/k3s-install.sh >/dev/null
+  rm -f /tmp/k3s-install.sh
 fi
-for net in traefik-public garrison-system garrison-builds; do
-  docker network inspect "$net" >/dev/null 2>&1 || docker network create --driver overlay --attachable "$net" >/dev/null
+say "Waiting for Kubernetes"
+deadline=$((SECONDS + 300))
+until kubectl get --raw /readyz >/dev/null 2>&1 && kubectl wait --for=condition=Ready node --all --timeout=10s >/dev/null 2>&1; do
+  [ $SECONDS -lt $deadline ] || fail "k3s did not become ready within 5 minutes; see journalctl -u k3s"
+  sleep 3
 done
+kubectl get namespace garrison >/dev/null 2>&1 || kubectl create namespace garrison >/dev/null
+# The pipelines' containers, BuildKit and Gitea's runners meet on this Docker network.
+docker network inspect garrison-builds >/dev/null 2>&1 || docker network create garrison-builds >/dev/null
 
 # ---------- storage ----------
 say "Setting up the ZFS pool"
@@ -177,26 +196,29 @@ systemctl enable --now sanoid.timer >/dev/null
 say "Generating secrets"
 mkdir -p "$ETC"
 chmod 700 "$ETC"
-has_secret() { docker secret inspect "$1" >/dev/null 2>&1; }
+# Kubernetes Secrets in the namespace garrison, one key each named like the
+# Secret: a pod mounts the ones it needs at /run/secrets/<name>.
+. "$ROOT/installer/lib.sh"
 for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password garrison-db-password alerts-token gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
-  has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | docker secret create "$s" - >/dev/null
+  has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | put_secret "$s"
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.
-has_secret sso-cookie-secret || openssl rand -hex 16 | tr -d '\n' | docker secret create sso-cookie-secret - >/dev/null
+has_secret sso-cookie-secret || openssl rand -hex 16 | tr -d '\n' | put_secret sso-cookie-secret
 
 # The admin password is kept on disk, root-only, so a re-run can use it.
 if [ ! -s "$ETC/admin-password" ]; then
   (umask 077; printf '%s' "${ADMIN_PASSWORD:-$(openssl rand -hex 16)}" > "$ETC/admin-password")
 fi
-has_secret admin-password || docker secret create admin-password "$ETC/admin-password" >/dev/null
+has_secret admin-password || put_secret admin-password < "$ETC/admin-password"
 
 if [ ! -s "$ETC/tls.crt" ]; then
   (umask 077; openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
     -subj "/CN=$DOMAIN" -addext "subjectAltName=DNS:$DOMAIN,DNS:*.$DOMAIN" \
     -keyout "$ETC/tls.key" -out "$ETC/tls.crt" 2>/dev/null)
 fi
-has_secret tls-cert || docker secret create tls-cert "$ETC/tls.crt" >/dev/null
-has_secret tls-key  || docker secret create tls-key  "$ETC/tls.key" >/dev/null
+# One Secret of type tls, keys tls.crt and tls.key: Traefik's default
+# certificate; other pods mount only tls.crt, to trust it.
+has_secret tls || kubectl --namespace garrison create secret tls tls --cert "$ETC/tls.crt" --key "$ETC/tls.key" >/dev/null
 
 cat > "$ETC/install.env" <<ENV
 DOMAIN=$DOMAIN
@@ -233,9 +255,10 @@ if [ ! -s "$ETC/sops/recovery.pub" ]; then
   age-keygen -y "$ETC/sops/recovery-key.txt" > "$ETC/sops/recovery.pub"
 fi
 
-# Gitea's registry, at git.<domain>, is used by this machine's Docker daemon:
-# builds push to it and Swarm pulls from it. The daemon reaches it through
-# Traefik here and trusts the installation's certificate.
+# Gitea's registry, at git.<domain>, is used by this machine's containerd,
+# which pulls the images (registries.yaml above), and its Docker, for the
+# pipelines. Both reach it through Traefik here and trust the installation's
+# certificate.
 sed -i '/# garrison registry$/d' /etc/hosts
 echo "127.0.0.1 git.$DOMAIN # garrison registry" >> /etc/hosts
 # cloud-init, where present, rewrites /etc/hosts at every boot; keep the entry.
@@ -250,30 +273,35 @@ if [ "$TLS_MODE" = selfsigned ] && ! cmp -s "$ETC/tls.crt" /usr/local/share/ca-c
   install -D -m 644 "$ETC/tls.crt" /usr/local/share/ca-certificates/garrison.crt
   update-ca-certificates >/dev/null 2>&1
   systemctl restart docker
-  # Services of an existing install come back without their secrets and configs.
-  "$ROOT/host/repair-services.sh" >/dev/null
 fi
+# Inside the cluster, every name of the installation is Traefik's Service,
+# as outside it is this machine: one URL for Keycloak, Gitea and the apps
+# everywhere. k3s's CoreDNS reads *.override files of this ConfigMap.
+domain_re=$(printf '%s' "$DOMAIN" | sed 's/\./\\./g')
+kubectl apply -f - >/dev/null <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  garrison.override: |
+    rewrite stop {
+      name regex ^(.+\.)?$domain_re\.$ traefik.garrison.svc.cluster.local.
+      answer auto
+    }
+YAML
 
 # ---------- system stack ----------
-# Wait until every service of a stack has all its replicas running and healthy
-# and has finished rolling out. During an update the old container still counts
-# as a running replica, so the replica count alone is not enough.
+# wait_stack NAME: waits until every Deployment, StatefulSet and DaemonSet
+# of the stack has rolled out.
 wait_stack() {
-  local stack=$1 deadline=$((SECONDS + 600)) pending name replicas id update
-  while :; do
-    pending=
-    while read -r id name replicas; do
-      update=$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}' "$id")
-      case $update in ""|completed) ;; *) pending+=" $name"; continue ;; esac
-      [ "${replicas%/*}" = "${replicas#*/}" ] && [ "${replicas#*/}" != 0 ] || pending+=" $name"
-    done < <(docker service ls --filter "label=com.docker.stack.namespace=$stack" --format '{{.ID}} {{.Name}} {{.Replicas}}')
-    [ -z "$pending" ] && return 0
-    if [ $SECONDS -ge $deadline ]; then
-      # shellcheck disable=SC2086
-      docker service ps --no-trunc $pending >&2 || true
-      fail "stack $stack did not become ready:$pending"
-    fi
-    sleep 3
+  local w
+  for w in $(kubectl --namespace garrison get deployments,statefulsets,daemonsets -l "garrison.io/stack=$1" -o name); do
+    kubectl --namespace garrison rollout status "$w" --timeout 600s >/dev/null || {
+      kubectl --namespace garrison get pods -l "garrison.io/stack=$1" >&2 || true
+      fail "stack $1 did not become ready: $w"
+    }
   done
 }
 
@@ -283,17 +311,19 @@ wait_stack() {
 # deploys every repo of that organisation, these included.
 BOOTSTRAP="postgres traefik keycloak sso gitea runner"
 
+# The host has the CLI too: it applies these stacks as the deployer later
+# does, and stays for admins (garrison applied, apply, ...).
+# Interim: it is built into bin/ before installing; it will ship as a release binary.
+if [ -x "$ROOT/bin/garrison" ]; then
+  install -m 755 "$ROOT/bin/garrison" /usr/local/bin/garrison
+fi
+command -v garrison >/dev/null || fail "garrison binary missing: run 'make build' first"
+
 export DOMAIN ADMIN_USER ADMIN_EMAIL ETC
 for name in $BOOTSTRAP; do
   dir=$ROOT/garrison/$name
   say "Deploying $name"
-  # Swarm configs cannot change, so their names carry a hash of the stack's
-  # files. The deployer computes the same hash (control-plane/internal/system).
-  CONFIG_HASH=$(export LC_ALL=C; cat "$dir"/* | sha256sum | cut -c1-12)
-  export CONFIG_HASH
-  # Images are not resolved to digests: versions are pinned by tag, and a
-  # registry that is briefly unreachable must not change the services.
-  docker stack deploy --detach=true --resolve-image never --compose-file "$dir/compose.yaml" "$name" >/dev/null
+  garrison system -wait 0 "$dir" || fail "stack $name was not applied"
   wait_stack "$name"
   # Optional step that needs the running service, e.g. creating accounts.
   if [ -x "$dir/configure.sh" ]; then
@@ -301,27 +331,6 @@ for name in $BOOTSTRAP; do
     wait_stack "$name"
   fi
 done
-
-# ---------- boot repair ----------
-install -D -m 755 "$ROOT/host/repair-services.sh" /usr/local/lib/garrison/repair-services.sh
-cat > /etc/systemd/system/garrison-repair.service <<UNIT
-[Unit]
-Description=Garrison: give Swarm services back their secrets and configs after Docker starts
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/garrison/repair-services.sh
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload
-systemctl enable garrison-repair >/dev/null 2>&1
-# Also now: a container left without its secrets by an earlier Docker restart
-# is replaced instead of being taken for healthy.
-/usr/local/lib/garrison/repair-services.sh
 
 # ---------- BuildKit, for the user units' pipelines ----------
 # It pushes to Gitea's registry at its public name, which it reaches on the
@@ -362,13 +371,13 @@ systemctl restart garrison-buildkit
 say "Building the control plane in Gitea"
 # Pushing garrison/control-plane started its build in Gitea Actions. The build
 # pushes the image to Gitea's registry and sets its tag in the repo's
-# compose.yaml; until then the tag is "bootstrap".
+# kubernetes.yaml; until then the tag is "bootstrap".
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 . "$ROOT/installer/lib.sh"
 gitea_session "$work"
 deadline=$((SECONDS + 1800))
-until [ "$(gitea_api GET /repos/garrison/control-plane/raw/compose.yaml)" = 200 ] && ! grep -q 'garrison/control-plane:bootstrap' "$work/body"; do
+until [ "$(gitea_api GET /repos/garrison/control-plane/raw/kubernetes.yaml)" = 200 ] && ! grep -q 'garrison/control-plane:bootstrap' "$work/body"; do
   gitea_api GET "/repos/garrison/control-plane/actions/tasks?limit=1" >/dev/null
   if grep -q '"status":"failure"' "$work/body"; then
     run=$(grep -o '"id":[0-9]*' "$work/body" | head -n1 | cut -d: -f2)
@@ -388,13 +397,7 @@ done
 echo "  built $(grep -oE 'garrison/control-plane:[A-Za-z0-9._-]+' "$work/body" | head -n1)"
 
 say "Handing over to the deployer"
-# The host has the CLI too: it deploys once here, so that failures stop
-# the install, and stays for admins (garrison applied, apply, ...).
-# Interim: it is built into bin/ before installing; it will ship as a release binary.
-if [ -x "$ROOT/bin/garrison" ]; then
-  install -m 755 "$ROOT/bin/garrison" /usr/local/bin/garrison
-fi
-command -v garrison >/dev/null || fail "garrison binary missing: run 'make build' first"
+# The deployer deploys once here, from the host, so that failures stop the install.
 # Earlier versions ran the deployer as a host service; it now runs in Swarm.
 if [ -e /etc/systemd/system/garrison-controller.service ]; then
   systemctl disable --now garrison-controller >/dev/null 2>&1 || true
@@ -406,7 +409,7 @@ garrison deploy -once
 for name in $(garrison applied | awk '{ print $1 }'); do
   wait_stack "$name"
 done
-image=$(docker service inspect control-plane_deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+image=$(kubectl --namespace garrison get deployment deployer -o jsonpath='{.spec.template.spec.containers[0].image}')
 case $image in "git.$DOMAIN/garrison/control-plane:"*) ;; *) fail "the deployer runs $image, not an image built in Gitea" ;; esac
 echo "  the deployer runs $image"
 

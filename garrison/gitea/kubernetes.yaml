@@ -1,0 +1,84 @@
+# Code, config and history. Reachable at https://git.<domain>.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+spec:
+  selector: { app: gitea }
+  ports: [{ name: http, port: 3000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitea
+spec:
+  rules:
+    - host: git.${DOMAIN}
+      http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: gitea, port: { name: http } } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+spec:
+  replicas: 1
+  # One Gitea on its data at a time.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: gitea } }
+  template:
+    metadata:
+      labels: { app: gitea, garrison.io/net: system }
+    spec:
+      containers:
+        - name: gitea
+          image: gitea/gitea:1.25
+          env:
+            - { name: GITEA__database__DB_TYPE, value: postgres }
+            - { name: GITEA__database__HOST, value: "postgres:5432" }
+            - { name: GITEA__database__NAME, value: gitea }
+            - { name: GITEA__database__USER, value: gitea }
+            - { name: GITEA__database__PASSWD__FILE, value: /run/secrets/gitea-db-password }
+            - { name: GITEA__server__DOMAIN, value: "git.${DOMAIN}" }
+            - { name: GITEA__server__ROOT_URL, value: "https://git.${DOMAIN}/" }
+            - { name: GITEA__server__DISABLE_SSH, value: "true" }
+            - { name: GITEA__security__INSTALL_LOCK, value: "true" }
+            # Builds run on the runner of the garrison organisation (garrison/runner) and
+            # on the user runner of every other unit (garrison/control-plane).
+            - { name: GITEA__actions__ENABLED, value: "true" }
+            - { name: GITEA__repository__DEFAULT_REPO_UNITS, value: "repo.code,repo.releases,repo.issues,repo.pulls,repo.wiki,repo.projects,repo.packages,repo.actions" }
+            # Units are made by root admins only.
+            - { name: GITEA__admin__DISABLE_REGULAR_ORG_CREATION, value: "true" }
+            # The container registry, for images built here.
+            - { name: GITEA__packages__ENABLED, value: "true" }
+            # Nothing is visible without signing in.
+            - { name: GITEA__service__REQUIRE_SIGNIN_VIEW, value: "true" }
+            # People sign in through Keycloak; an account is created on first login.
+            - { name: GITEA__service__ALLOW_ONLY_EXTERNAL_REGISTRATION, value: "true" }
+            - { name: GITEA__oauth2_client__ENABLE_AUTO_REGISTRATION, value: "true" }
+            - { name: GITEA__oauth2_client__USERNAME, value: preferred_username }
+            - { name: GITEA__oauth2_client__ACCOUNT_LINKING, value: auto }
+            # Webhooks go to outside addresses, and to the deployer and the
+            # gateway, which Gitea tells about pushes, pull requests and pipeline runs.
+            - { name: GITEA__webhook__ALLOWED_HOST_LIST, value: "external,deployer,gateway" }
+            # Trust the installation's certificate when calling Keycloak.
+            - { name: SSL_CERT_FILE, value: /run/secrets/tls.crt }
+          ports: [{ containerPort: 3000 }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /api/healthz, port: 3000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /api/healthz, port: 3000 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+      volumes:
+        - { name: data, hostPath: { path: /garrison/system/gitea, type: Directory } }
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: gitea-db-password }
+              - secret: { name: gitea-oidc-secret }
+              - secret: { name: tls, items: [{ key: tls.crt, path: tls.crt }] }

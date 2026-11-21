@@ -1,9 +1,22 @@
 # Helpers for the configure.sh steps the installer runs after deploying a stack.
 # They get DOMAIN, ADMIN_USER, ADMIN_EMAIL and ETC from the installer.
 
-# container SERVICE: the ID of the running container of a Swarm service.
-container() {
-  docker ps --quiet --filter "label=com.docker.swarm.service.name=$1" --filter status=running | head -n1
+# in_pod WORKLOAD [VAR=VALUE...] COMMAND...: runs COMMAND in the first pod of
+# WORKLOAD (e.g. deployment/keycloak) in the namespace garrison, with stdin,
+# and with the variables set (kubectl exec has no -e).
+in_pod() {
+  local w=$1; shift
+  kubectl --namespace garrison exec -i "$w" -- env "$@"
+}
+
+# has_secret NAME: whether the Secret exists in the namespace garrison.
+has_secret() { kubectl --namespace garrison get secret "$1" >/dev/null 2>&1; }
+# put_secret NAME: makes the Secret NAME from stdin, one key of the same name,
+# which a pod's projected volume mounts at /run/secrets/NAME.
+put_secret() {
+  local f; f=$(mktemp); cat > "$f"
+  kubectl --namespace garrison create secret generic "$1" --from-file="$1=$f" >/dev/null
+  rm -f "$f"
 }
 
 # wait_for SECONDS DESCRIPTION COMMAND...: retry a command until it succeeds.
@@ -22,8 +35,7 @@ wait_for() {
 # keycloak_login: log the admin CLI inside the Keycloak container in.
 # Fails while Keycloak is still starting, so it doubles as a readiness check.
 keycloak_login() {
-  local id
-  id=$(container keycloak_keycloak) && [ -n "$id" ] && docker exec "$id" bash -c '
+  in_pod deployment/keycloak bash -c '
     KC_CLI_PASSWORD=$(</run/secrets/admin-password) /opt/keycloak/bin/kcadm.sh config credentials \
       --config /tmp/kcadm.config --server http://localhost:8080 --realm master --user "$0"' "$ADMIN_USER"
 }

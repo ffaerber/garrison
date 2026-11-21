@@ -10,7 +10,8 @@ http:
     # Login check for private environments: every request is checked with
     # the login proxy (04-sso). Without a session the proxy redirects to
     # Keycloak. If the proxy is down, requests fail; nothing is let through.
-    # The address is the full Swarm service name, which no stack can imitate.
+    # The address is the full name of the Service in the namespace garrison,
+    # which no unit can imitate.
     # A Keycloak access token in Authorization also passes the check (an
     # agent's browser, as the person); it is removed before the request
     # reaches the app, so no app can reuse it elsewhere.
@@ -23,7 +24,7 @@ http:
           Authorization: ""
     sso-check:
       forwardAuth:
-        address: http://sso_oauth2-proxy:4180/
+        address: http://sso.garrison.svc.cluster.local:4180/
         authResponseHeaders:
           - X-Auth-Request-User
           - X-Auth-Request-Email

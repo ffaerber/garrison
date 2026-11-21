@@ -7,8 +7,11 @@ runner:
   labels:
     - garrison:docker://docker:29-cli
 container:
-  # Jobs reach Gitea at http://gitea_gitea:3000 on the system network.
-  network: garrison-system
+  # Jobs are Docker containers outside the cluster. They look names up in its
+  # DNS (k3s's CoreDNS, at its fixed address), where Gitea is
+  # gitea.garrison.svc.cluster.local and the installation's names are Traefik.
+  network: garrison-builds
+  options: --dns 10.43.0.10
   privileged: false
   # Empty: the Docker socket is mounted into job containers, so they can build images.
   docker_host: ""

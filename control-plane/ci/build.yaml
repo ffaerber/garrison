@@ -2,14 +2,14 @@
 # On every push to main: build the control plane image, the agents'
 # sandbox image and the units' file browser (garrison/files, also
 # tagged current, which stacks name), push them to Gitea's registry, and deploy them by committing
-# their tag to compose.yaml in this repo.
+# their tag to kubernetes.yaml in this repo.
 # The running deployer then applies that commit and replaces itself.
 name: build
 on:
   push:
     branches: [main]
-    # The tag commit below changes only compose.yaml and must not build again.
-    paths-ignore: [compose.yaml]
+    # The tag commit below changes only kubernetes.yaml and must not build again.
+    paths-ignore: [kubernetes.yaml]
 
 defaults:
   run:
@@ -37,7 +37,7 @@ jobs:
           sandbox=$registry/garrison/sandbox:$tag
           files=$registry/garrison/files
           auth="Authorization: token $TOKEN"
-          internal=http://gitea_gitea:3000
+          internal=http://gitea.garrison.svc.cluster.local:3000
 
           git -c http.extraHeader="$auth" clone -q "$internal/garrison/control-plane.git" src
           git -C src checkout -q "$SHA"
@@ -56,8 +56,8 @@ jobs:
           for attempt in 1 2 3; do
             rm -rf deploy
             git -c http.extraHeader="$auth" clone -q "$internal/garrison/control-plane.git" deploy
-            sed -i -E "s#(/garrison/(control-plane|sandbox):)[A-Za-z0-9._-]+#\1$tag#g" deploy/compose.yaml
-            git -C deploy add compose.yaml
+            sed -i -E "s#(/garrison/(control-plane|sandbox):)[A-Za-z0-9._-]+#\1$tag#g" deploy/kubernetes.yaml
+            git -C deploy add kubernetes.yaml
             if git -C deploy diff --cached --quiet; then echo "already deploys $tag"; exit 0; fi
             git -C deploy commit -q -m "Deploy control plane $tag [skip ci]"
             if git -C deploy -c http.extraHeader="$auth" push -q origin main; then
@@ -65,5 +65,5 @@ jobs:
             fi
             sleep 5
           done
-          echo "could not set the tag in compose.yaml" >&2
+          echo "could not set the tag in kubernetes.yaml" >&2
           exit 1

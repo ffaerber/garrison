@@ -7,7 +7,8 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../../installer/lib.sh"
 
-gitea() { docker exec -u git "$(container gitea_gitea)" gitea "$@"; }
+# As the user git, as Gitea refuses to run as root.
+gitea() { in_pod deployment/gitea su-exec git gitea "$@"; }
 wait_for 300 "Gitea to start" gitea admin user list
 
 # Local admin: used by the installer and, later, the deployer. People sign in through Keycloak.
@@ -21,7 +22,7 @@ fi
 # A running Gitea keeps using the old settings after an update, so a changed
 # login source is followed by a restart, at the end of this script. A
 # fingerprint of the settings, kept in Gitea's data, tells whether they changed.
-auth=$(docker exec -u git "$(container gitea_gitea)" sh -c '
+auth=$(in_pod deployment/gitea su-exec git sh -c '
   set -- --name keycloak --provider openidConnect --key gitea \
     --secret "$(cat /run/secrets/gitea-oidc-secret)" --scopes "openid email profile" \
     --auto-discover-url "https://keycloak.$0/realms/garrison/.well-known/openid-configuration" \
@@ -57,13 +58,27 @@ fi
 
 # ---------- Actions: runner and build credentials ----------
 # The runner registers for this organisation only (garrison/runner explains why).
-if ! docker secret inspect gitea-runner-token >/dev/null 2>&1; then
-  gitea actions generate-runner-token --scope garrison | tr -d '\r\n' | docker secret create gitea-runner-token - >/dev/null
+if ! has_secret gitea-runner-token; then
+  gitea actions generate-runner-token --scope garrison | tr -d '\r\n' | put_secret gitea-runner-token
 fi
 # The user runner registers for the whole instance; jobs pick it with
 # runs-on: garrison-user. Only the system runner can reach Docker directly.
-if ! docker secret inspect gitea-user-runner-token >/dev/null 2>&1; then
-  gitea actions generate-runner-token | tr -d '\r\n' | docker secret create gitea-user-runner-token - >/dev/null
+if ! has_secret gitea-user-runner-token; then
+  gitea actions generate-runner-token | tr -d '\r\n' | put_secret gitea-user-runner-token
+fi
+# Kubernetes pulls the platform's own images, garrison/*, from the registry
+# with a token that may only read packages, as the admin; garrison's
+# packages are visible to signed-in accounts only.
+if ! has_secret registry-pull; then
+  gitea_api DELETE "/users/$ADMIN_USER/tokens/registry-pull" >/dev/null
+  pull=$(gitea admin user generate-access-token --username "$ADMIN_USER" --token-name registry-pull \
+    --scopes read:package --raw | tr -d '\r\n')
+  [ -n "$pull" ] || { echo "could not create the registry's pull token" >&2; exit 1; }
+  # Through a file, so the token is on no command line.
+  (umask 077; printf '{"auths":{"git.%s":{"auth":"%s"}}}' "$DOMAIN" "$(printf '%s:%s' "$ADMIN_USER" "$pull" | base64 -w0)" > "$work/pull.json")
+  kubectl --namespace garrison create secret generic registry-pull --type kubernetes.io/dockerconfigjson \
+    --from-file ".dockerconfigjson=$work/pull.json" >/dev/null
+  rm -f "$work/pull.json"
 fi
 # The control plane build pushes its image and commits its tag as the admin,
 # with a token limited to repositories and packages. Kept root-only in $ETC
@@ -106,5 +121,5 @@ done
 [ "$(gitea_api PATCH /repos/garrison/control-plane '{"has_actions":true}')" = 200 ] || { echo "could not enable Actions on garrison/control-plane" >&2; exit 1; }
 
 if [ "$auth" = updated ]; then
-  docker service update --quiet --detach --force gitea_gitea >/dev/null
+  kubectl --namespace garrison rollout restart deployment/gitea >/dev/null
 fi
