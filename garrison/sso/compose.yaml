@@ -32,8 +32,6 @@ services:
       - { source: tls-cert, target: tls.crt }
     networks: [traefik-public]
     deploy:
-      placement:
-        constraints: [node.role == manager]
       labels:
         traefik.enable: "true"
         traefik.swarm.network: traefik-public

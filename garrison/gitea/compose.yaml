@@ -48,8 +48,6 @@ services:
       timeout: 3s
       retries: 60
     deploy:
-      placement:
-        constraints: [node.role == manager]
       labels:
         traefik.enable: "true"
         traefik.swarm.network: traefik-public

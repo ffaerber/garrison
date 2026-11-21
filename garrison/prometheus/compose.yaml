@@ -26,9 +26,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 60
-    deploy:
-      placement:
-        constraints: [node.role == manager]
 
   alertmanager:
     image: prom/alertmanager:v0.28.1
@@ -48,9 +45,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 60
-    deploy:
-      placement:
-        constraints: [node.role == manager]
 
   node-exporter:
     image: prom/node-exporter:v1.10.2
