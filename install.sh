@@ -157,8 +157,18 @@ done
 kubectl get namespace garrison >/dev/null 2>&1 || kubectl create namespace garrison >/dev/null
 # The pipelines' containers and BuildKit meet on this Docker network; the
 # agents' sandboxes, for now Docker containers too, on an internal one.
-docker network inspect garrison-builds >/dev/null 2>&1 || docker network create garrison-builds >/dev/null
-docker network inspect garrison-sandboxes >/dev/null 2>&1 || docker network create --internal garrison-sandboxes >/dev/null
+# Fixed ranges, which the platform's NetworkPolicies name (garrison/platform):
+# jobs may reach Gitea, sandboxes the agent service, and nothing else of it.
+docker_net() {
+  local name=$1 subnet=$2; shift 2
+  if docker network inspect "$name" >/dev/null 2>&1; then
+    [ "$(docker network inspect "$name" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')" = "$subnet" ] && return 0
+    docker network rm "$name" >/dev/null || fail "Docker network $name is in use with another range; stop its containers and run the installer again"
+  fi
+  docker network create --subnet "$subnet" "$@" "$name" >/dev/null
+}
+docker_net garrison-builds 10.200.0.0/24
+docker_net garrison-sandboxes 10.201.0.0/24 --internal
 
 # ---------- storage ----------
 say "Setting up the ZFS pool"
