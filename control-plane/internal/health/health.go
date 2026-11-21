@@ -45,9 +45,10 @@ type Service struct {
 type object struct {
 	Kind     string `json:"kind"`
 	Metadata struct {
-		Name      string            `json:"name"`
-		Namespace string            `json:"namespace"`
-		Labels    map[string]string `json:"labels"`
+		Name        string            `json:"name"`
+		Namespace   string            `json:"namespace"`
+		Labels      map[string]string `json:"labels"`
+		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
 		Replicas *int `json:"replicas"`
@@ -91,15 +92,36 @@ func (k *Kubernetes) list(ctx context.Context, kinds string) ([]object, error) {
 	return l.Items, nil
 }
 
+// Sandbox is an agent's sandbox, a pod of its own (garrison.sandbox), and
+// whom it works for: its annotations, which keep what labels cannot hold.
+type Sandbox struct {
+	Namespace, Pod, Unit, Agent, Person, Chat string
+}
+
 // Services reads every workload's health.
 func (k *Kubernetes) Services(ctx context.Context) ([]Service, error) {
+	svcs, _, err := k.collect(ctx)
+	return svcs, err
+}
+
+// collect reads every workload's health, and the sandboxes.
+func (k *Kubernetes) collect(ctx context.Context) ([]Service, []Sandbox, error) {
 	workloads, err := k.list(ctx, "deployments,statefulsets,daemonsets")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pods, err := k.list(ctx, "pods")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	var sandboxes []Sandbox
+	for _, p := range pods {
+		if p.Metadata.Labels["garrison.sandbox"] != "true" || p.Status.Phase != "Running" {
+			continue
+		}
+		a := p.Metadata.Annotations
+		sandboxes = append(sandboxes, Sandbox{Namespace: p.Metadata.Namespace, Pod: p.Metadata.Name,
+			Unit: a["garrison.unit"], Agent: a["garrison.agent"], Person: a["garrison.person"], Chat: a["garrison.chat"]})
 	}
 	now := time.Now()
 	if k.Now != nil {
@@ -149,7 +171,7 @@ func (k *Kubernetes) Services(ctx context.Context) ([]Service, error) {
 		res = append(res, h)
 	}
 	sort.Slice(res, func(i, j int) bool { return res[i].Service < res[j].Service })
-	return res, nil
+	return res, sandboxes, nil
 }
 
 // selects tells whether a selector's labels are all among labels.
@@ -168,7 +190,7 @@ func selects(selector, labels map[string]string) bool {
 // Handler serves the metrics in Prometheus's text format.
 func (k *Kubernetes) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		svcs, err := k.Services(r.Context())
+		svcs, sandboxes, err := k.collect(r.Context())
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		var b strings.Builder
 		up := 1
@@ -201,6 +223,12 @@ func (k *Kubernetes) Handler() http.Handler {
 				fmt.Fprintf(&b, "garrison_pod_info{namespace=%q,pod=%q,unit=%q,app=%q,environment=%q,stack=%q,service=%q} 1\n",
 					s.Namespace, p, s.Unit, s.App, s.Environment, s.Stack, s.Service)
 			}
+		}
+		// Joined the same way, a sandbox's metrics name its agent and person.
+		b.WriteString("# HELP garrison_sandbox_info An agent's sandbox, by namespace and pod; always 1.\n# TYPE garrison_sandbox_info gauge\n")
+		for _, s := range sandboxes {
+			fmt.Fprintf(&b, "garrison_sandbox_info{namespace=%q,pod=%q,unit=%q,agent=%q,person=%q,chat=%q} 1\n",
+				s.Namespace, s.Pod, s.Unit, s.Agent, s.Person, s.Chat)
 		}
 		io.WriteString(w, b.String())
 	})

@@ -97,18 +97,14 @@ check "the test left no messages in the channel" bash -c '[ "$(python3 -c "impor
 echo "# the scout's browser, under gVisor"
 # The command web of the sandbox image, as the scout runs it: Chromium
 # under gVisor reads a page built by JavaScript and takes a picture of it.
-# The page comes from a container next to it, so no model and no internet.
-sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
-docker network create smoke-web >/dev/null 2>&1
-docker run -d --rm --name smoke-page --network smoke-web --entrypoint node "$sandbox_image" -e '
+# The page comes from a pod next to it, so no model and no internet.
+image_pod smoke-page -d -- node -e '
 require("http").createServer((q, r) => { r.setHeader("Content-Type", "text/html");
-  r.end("<title>Smoke page</title><p id=p></p><script>document.getElementById(\"p\").textContent = \"built by \" + \"script\"</script>") }).listen(8000)' >/dev/null
-sleep 2
-# By address: under gVisor a container does not ask Docker's DNS, and the
-# sandboxes need none, as their proxy looks names up.
-page_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' smoke-page)
-read_page=$(docker run --rm --runtime=runsc --network smoke-web --entrypoint web "$sandbox_image" read "http://$page_ip:8000/" 2>&1)
+  r.end("<title>Smoke page</title><p id=p></p><script>document.getElementById(\"p\").textContent = \"built by \" + \"script\"</script>") }).listen(8000)'
+page_ip=$(kubectl --namespace garrison-check get pod smoke-page -o jsonpath='{.status.podIP}')
+read_page=$(image_pod smoke-read -g -- web read "http://$page_ip:8000/" 2>&1)
 check "it reads a page built by JavaScript" bash -c 'grep -q "Title: Smoke page" <<<"$0" && grep -q "built by script" <<<"$0" || { echo "$0" | head -5; exit 1; }' "$read_page"
-check "and takes a picture of it"          bash -c 'docker run --rm --runtime=runsc --network smoke-web --entrypoint sh "$0" -c "web shot http://$1:8000/ /tmp/p.png 390x844 >/dev/null && head -c 8 /tmp/p.png | od -An -c | grep -q P"' "$sandbox_image" "$page_ip"
-docker rm -f smoke-page >/dev/null 2>&1; docker network rm smoke-web >/dev/null 2>&1
+shot=$(image_pod smoke-shot -g -- sh -c "web shot http://$page_ip:8000/ /tmp/p.png 390x844 >/dev/null && head -c 8 /tmp/p.png | od -An -c" 2>&1)
+check "and takes a picture of it"          grep -q P <<<"$shot"
+kubectl --namespace garrison-check delete pod smoke-page --wait=false >/dev/null 2>&1
 }

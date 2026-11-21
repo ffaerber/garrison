@@ -59,6 +59,9 @@ func TestRender(t *testing.T) {
 	if n != 2 {
 		t.Errorf("rendered %d objects, want 2", n)
 	}
+	if strings.Count(out, "namespace: garrison") != 2 {
+		t.Errorf("objects without a namespace are not put in garrison:\n%s", out)
+	}
 	if strings.Count(out, "garrison.io/stack: 01-db") != 3 {
 		t.Errorf("the StatefulSet's pods are not labelled with the stack:\n%s", out)
 	}
@@ -116,7 +119,7 @@ func TestDeploy(t *testing.T) {
 	for _, want := range []string{
 		"zfs list -H -o name garrison/system/db",
 		"zfs list -H -o name garrison/system/db-backup",
-		"kubectl apply --namespace garrison --filename - --prune --selector garrison.io/stack=01-db --prune-allowlist core/v1/ConfigMap",
+		"kubectl apply --filename - --prune --selector garrison.io/stack=01-db --prune-allowlist core/v1/Namespace",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -146,8 +149,8 @@ func TestWaitAndRemove(t *testing.T) {
 	for _, want := range []string{
 		"kubectl rollout status deployment.apps/web --namespace garrison --timeout 60s",
 		"kubectl rollout status statefulset.apps/db --namespace garrison --timeout 60s",
-		"kubectl delete configmap,service,serviceaccount,persistentvolumeclaim,deployment,statefulset,daemonset,job.batch,ingress.networking.k8s.io,networkpolicy.networking.k8s.io,role.rbac.authorization.k8s.io",
-		"--selector garrison.io/stack=db --ignore-not-found",
+		"kubectl delete namespace,runtimeclass.node.k8s.io,validatingadmissionpolicy.admissionregistration.k8s.io,validatingadmissionpolicybinding.admissionregistration.k8s.io,configmap,service,serviceaccount,persistentvolumeclaim,deployment,statefulset,daemonset,job.batch,ingress.networking.k8s.io,networkpolicy.networking.k8s.io,role.rbac.authorization.k8s.io",
+		"--all-namespaces --selector garrison.io/stack=db --ignore-not-found",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)

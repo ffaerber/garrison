@@ -14,7 +14,7 @@ import (
 
 func manager(t *testing.T) (*sandbox.Manager, *sandboxtest.Docker) {
 	d := sandboxtest.New(t)
-	return &sandbox.Manager{Docker: &sandbox.Docker{Addr: d.Addr()}, Image: "reg/garrison/sandbox:2", Network: "sandboxes", API: "http://agents", Memory: 1 << 30, CPUs: 1, Pids: 100}, d
+	return &sandbox.Manager{Engine: &sandbox.Docker{Addr: d.Addr()}, Image: "reg/garrison/sandbox:2", Network: "sandboxes", API: "http://agents", Memory: 1 << 30, CPUs: 1, Pids: 100}, d
 }
 
 func ask(t *testing.T, m *sandbox.Manager, want sandbox.Want, msg string) string {
@@ -122,7 +122,7 @@ func TestAllBusyIsRefused(t *testing.T) {
 func TestCleanRemovesEarlierContainers(t *testing.T) {
 	m, d := manager(t)
 	ask(t, m, sandbox.Want{Key: "a", Person: "alice"}, "hi")
-	m2 := &sandbox.Manager{Docker: m.Docker, Image: m.Image}
+	m2 := &sandbox.Manager{Engine: m.Engine, Image: m.Image}
 	if err := m2.Clean(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -83,35 +83,35 @@ echo "# 4e. the marketing agent works in a sandbox of its own"
 sb=$(sandbox_of todo/marketing)
 check "the channel's turns with it ran in its sandbox" test -n "$sb"
 check "the sandbox holds no LLM key and no token" \
-  bash -c 'k=$(cat "$1"); { [ ${#k} -lt 16 ] || ! docker inspect "$0" | grep -qF -- "$k"; } && [ "$(docker exec "$0" env | grep -c "^GARRISON_")" = 4 ] && ! docker exec "$0" ls /etc/garrison 2>/dev/null' "$sb" "$ETC/llm-api-key"
-check "it runs under gVisor"               test "$(docker inspect -f '{{.HostConfig.Runtime}}' "$sb")" = runsc
-check "as root, in gVisor's own kernel"    bash -c '[ "$(docker exec "$0" id -u)" = 0 ] && docker exec "$0" dmesg | grep -q gVisor' "$sb"
-check "it cannot reach the internet"       bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null https://example.org' "$sb"
-check "not even past the proxy"            bash -c '! docker exec "$0" curl -sS -m 5 -o /dev/null --noproxy "*" https://1.1.1.1' "$sb"
+  bash -c 'k=$(cat "$1"); p() { kubectl --namespace garrison-sandboxes "$@"; }; { [ ${#k} -lt 16 ] || ! p get pod "$0" -o yaml | grep -qF -- "$k"; } && [ "$(p exec "$0" -- env | grep -c "^GARRISON_")" = 4 ] && ! p exec "$0" -- ls /etc/garrison 2>/dev/null && ! p exec "$0" -- ls /var/run/secrets/kubernetes.io 2>/dev/null' "$sb" "$ETC/llm-api-key"
+check "it runs under gVisor"               test "$(kubectl --namespace garrison-sandboxes get pod "$sb" -o jsonpath='{.spec.runtimeClassName}')" = gvisor
+check "as root, in gVisor's own kernel"    bash -c "$(declare -f in_sandbox); [ \"\$(in_sandbox $sb id -u)\" = 0 ] && in_sandbox $sb dmesg | grep -q gVisor"
+check "it cannot reach the internet"       bash -c "$(declare -f in_sandbox); ! in_sandbox $sb curl -sS -m 5 -o /dev/null https://example.org"
+check "not even past the proxy"            bash -c "$(declare -f in_sandbox); ! in_sandbox $sb curl -sS -m 5 -o /dev/null --noproxy '*' https://1.1.1.1"
 # Through the proxy, which refuses them, and around it; -f: a refusal is an
 # answer too.
-nothing_at() { ! docker exec "$sb" curl -fsS -m 5 -o /dev/null "$1" && ! docker exec "$sb" curl -fsS -m 5 -o /dev/null --noproxy "*" "$1"; }
-check "nor Gitea, nor Docker"              bash -c "$(declare -f nothing_at); sb=$sb; nothing_at http://gitea:3000 && nothing_at http://sandbox-guard:2375/_ping"
+nothing_at() { ! in_sandbox "$sb" curl -fsS -m 5 -o /dev/null "$1" && ! in_sandbox "$sb" curl -fsS -m 5 -o /dev/null --noproxy "*" "$1"; }
+check "nor Gitea, nor the Kubernetes API"  bash -c "$(declare -f in_sandbox nothing_at); sb=$sb; nothing_at http://gitea.garrison.svc.cluster.local:3000 && nothing_at https://kubernetes.default.svc.cluster.local/version"
 check "between turns its token counts for nothing" \
-  test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/tools"')" = 401
-has_notes() { docker exec "$(sandbox_of todo/marketing)" grep -q "pelican 42" /data/work/notes.txt; }
+  test "$(in_sandbox "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/tools"')" = 401
+has_notes() { in_sandbox "$(sandbox_of todo/marketing)" grep -q "pelican 42" /data/work/notes.txt; }
 answer=$(ask_agent todo bob "Please keep a note for our next screenshots in your workspace: use bash to write the line 'pelican 42' (the name of the next release) into notes.txt, then say done." marketing)
 if ! has_notes; then
   printf 'retry the agent wrote no notes.txt; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent todo bob "That note is just for you and me: please run echo 'pelican 42' > notes.txt in your workspace now." marketing)
 fi
 check "it writes a file in its workspace"  has_notes
-# Its container goes, as when it is idle; the workspace and the conversation stay.
-docker rm -f "$sb" >/dev/null
+# Its pod goes, as when it is idle; the workspace (its claim) and the conversation stay.
+kubectl --namespace garrison-sandboxes delete pod "$sb" --wait >/dev/null
 answer=$(ask_agent todo bob "Which line did you write into notes.txt just before? Check your workspace." marketing)
-check "a new container resumes the chat"   test -n "$(sandbox_of todo/marketing)" -a "$(sandbox_of todo/marketing)" != "$sb"
+check "a new pod resumes the chat"         test -n "$(sandbox_of todo/marketing)" -a "$(sandbox_of todo/marketing)" != "$sb"
 check "it still has the file"              grep -q "pelican 42" <<<"$answer"
 # Grafana's Agents dashboard: the sandbox's metrics carry its agent and
 # person; its output, the conversation, stays out of Loki.
 prom_value() { grafana_api "" "$g/api/datasources/proxy/uid/prometheus/api/v1/query?query=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1")" | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)'; }
-shooter_measured() { [ "$(prom_value 'count(container_memory_working_set_bytes{container_label_garrison_sandbox="true", container_label_garrison_agent="todo/marketing", container_label_garrison_person="bob"})')" != 0 ]; }
+shooter_measured() { [ "$(prom_value 'count(container_memory_working_set_bytes{namespace="garrison-sandboxes", container!=""} * on (namespace, pod) group_left (agent, person) garrison_sandbox_info{agent="todo/marketing", person="bob"})')" != 0 ]; }
 check "Prometheus measures the sandbox, by agent and person" until_true 120 shooter_measured
-sandbox_logs() { grafana_api "" "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=5&since=2h&query=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("{container=~\"garrison-agent-.*\"}"))')"; }
+sandbox_logs() { grafana_api "" "$g/api/datasources/proxy/uid/loki/loki/api/v1/query_range?limit=5&since=2h&query=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("{namespace=\"garrison-sandboxes\"}"))')"; }
 check "Loki holds nothing a sandbox printed" bash -c 'grep -q "\"result\":\[\]" <<<"$0"' "$(sandbox_logs)"
 
 echo "# 4j3. a routine takes a screenshot, signed in as the agent, with nobody watching"

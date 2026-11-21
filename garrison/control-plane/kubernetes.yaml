@@ -198,8 +198,15 @@ spec:
 # it has, and the agent's tools from the gateway, acting as the person
 # chatting (Open WebUI sends their Keycloak token). Sandboxes run under
 # gVisor, as root, and reach the internet only through this service's proxy
-# (port 8072), as far as their agent.yaml says. For now the sandboxes are
-# Docker containers, started through the sandbox guard.
+# (port 8072), as far as their agent.yaml says. Each sandbox is a pod in the
+# namespace garrison-sandboxes, which this service's account may start
+# there and nothing else (garrison/platform: its Role, the admission policy
+# that refuses anything but a sandbox, and its NetworkPolicy).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agents
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -223,6 +230,7 @@ spec:
     metadata:
       labels: { app: agents, garrison.io/net: system }
     spec:
+      serviceAccountName: agents
       automountServiceAccountToken: false
       imagePullSecrets: [{ name: registry-pull }]
       containers:
@@ -232,6 +240,11 @@ spec:
             - agents
             - -password-file=/run/secrets/admin-password
             - -sandbox-image=git.${DOMAIN}/garrison/sandbox:bootstrap
+            - -sandbox-namespace=garrison-sandboxes
+            - -sandbox-runtime=gvisor
+            # As the sandboxes, in another namespace, reach this service.
+            - -sandbox-api=http://agents.garrison.svc.cluster.local:8071
+            - -internet-proxy=http://agents.garrison.svc.cluster.local:8072
             # The routines' runs go to the feed.
             - -events-db=postgres://garrison@postgres:5432/garrison
             # Alertmanager's alerts: into the feed, and they start routines.
@@ -254,54 +267,14 @@ spec:
               - secret: { name: garrison-db-password }
               - secret: { name: alerts-token }
               - secret: { name: tls, items: [{ key: tls.crt, path: tls.crt }] }
+              # The service account's token, where kubectl looks for it, in this
+              # volume: Kubernetes cannot add its own mount below /run/secrets.
+              - serviceAccountToken: { path: kubernetes.io/serviceaccount/token }
+              - configMap: { name: kube-root-ca.crt, items: [{ key: ca.crt, path: kubernetes.io/serviceaccount/ca.crt }] }
+              - downwardAPI: { items: [{ path: kubernetes.io/serviceaccount/namespace, fieldRef: { fieldPath: metadata.namespace } }] }
         - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
         - { name: llm-api-key, hostPath: { path: /etc/garrison/llm-api-key, type: File } }
         - { name: llm-keys, hostPath: { path: /etc/garrison/llm-keys, type: Directory } }
----
-# The Docker API for the agent service: only sandboxes, i.e. containers of
-# the sandbox image, labelled, with memory and process limits, under gVisor
-# (runsc, installed by install.sh), on the sandboxes network, with a volume
-# of their own.
-apiVersion: v1
-kind: Service
-metadata:
-  name: sandbox-guard
-spec:
-  selector: { app: sandbox-guard }
-  ports: [{ name: docker, port: 2375 }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: sandbox-guard
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: sandbox-guard } }
-  template:
-    metadata:
-      labels: { app: sandbox-guard }
-    spec:
-      automountServiceAccountToken: false
-      imagePullSecrets: [{ name: registry-pull }]
-      containers:
-        - name: guard
-          image: git.${DOMAIN}/garrison/control-plane:bootstrap
-          args:
-            - guard
-            - -listen=:2375
-            - -network=garrison-sandboxes
-            - -volumes=garrison-agent-
-            - -image=git.${DOMAIN}/garrison/sandbox
-            - -label=garrison.sandbox
-            - -max-memory=2147483648
-            - -runtime=runsc
-            # A sandbox in a unit's channel gets that unit's media
-            # library, the share media, at /data/media: no other folder of the host.
-            - -share=/garrison/ns/{unit}/shares/media
-          ports: [{ containerPort: 2375 }]
-          volumeMounts: [{ name: docker, mountPath: /var/run/docker.sock }]
-      volumes:
-        - { name: docker, hostPath: { path: /var/run/docker.sock, type: Socket } }
 ---
 # ---------- the dashboard ----------
 # At the installation's domain, behind the sign-in: the feed of what happens

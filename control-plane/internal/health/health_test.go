@@ -20,7 +20,9 @@ func TestMetrics(t *testing.T) {
  {"metadata":{"name":"web-3","namespace":"todo","labels":{"app":"web"}},"status":{"phase":"Running","containerStatuses":[
    {"ready":false,"lastState":{"terminated":{"exitCode":1,"finishedAt":"2026-11-14T11:00:00Z"}}}]}},
  {"metadata":{"name":"gitea-x","namespace":"garrison","labels":{"app":"gitea"}},"status":{"phase":"Running","containerStatuses":[{"ready":true}]}},
- {"metadata":{"name":"web-elsewhere","namespace":"garrison","labels":{"app":"web"}},"status":{"phase":"Running","containerStatuses":[{"ready":true}]}}
+ {"metadata":{"name":"web-elsewhere","namespace":"garrison","labels":{"app":"web"}},"status":{"phase":"Running","containerStatuses":[{"ready":true}]}},
+ {"metadata":{"name":"garrison-agent-1","namespace":"garrison-sandboxes","labels":{"garrison.sandbox":"true","garrison.agent":"todo_developer"},
+   "annotations":{"garrison.unit":"todo","garrison.agent":"todo/developer","garrison.person":"bob","garrison.chat":"channel:abc"}},"status":{"phase":"Running"}}
 ]}`), nil
 		}
 		return []byte(`{"items":[
@@ -43,6 +45,7 @@ func TestMetrics(t *testing.T) {
 		`garrison_service_failed_tasks{unit="todo",app="quotes",environment="main",stack="quotes",service="quotes-web"} 2`,
 		`garrison_service_replicas_running{unit="garrison",app="gitea",environment="main",stack="gitea",service="gitea"} 1`,
 		`garrison_pod_info{namespace="garrison",pod="gitea-x",unit="garrison",app="gitea",environment="main",stack="gitea",service="gitea"} 1`,
+		`garrison_sandbox_info{namespace="garrison-sandboxes",pod="garrison-agent-1",unit="todo",agent="todo/developer",person="bob",chat="channel:abc"} 1`,
 		`garrison_pod_info{namespace="todo",pod="web-2",unit="todo",app="quotes",environment="main",stack="quotes",service="quotes-web"} 1`,
 	} {
 		if !strings.Contains(body, want) {

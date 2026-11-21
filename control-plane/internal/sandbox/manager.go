@@ -50,12 +50,12 @@ func (w Want) Unit() string {
 
 // Manager starts, reuses and stops the sandboxes.
 type Manager struct {
-	Docker       *Docker
+	Engine       Engine // Docker or Kubernetes
 	Image        string
 	Network      string
 	API          string // the agent service, as sandboxes reach it
 	Proxy        string // its proxy to the internet, as sandboxes reach it; empty: none
-	Runtime      string // e.g. runsc: gVisor, where sandboxes are root; empty: Docker's default
+	Runtime      string // gVisor, where sandboxes are root: runsc (Docker) or the RuntimeClass gvisor (Kubernetes); empty: the default
 	Memory       int64
 	CPUs         float64
 	Pids         int64
@@ -256,10 +256,10 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 		UnitLabel: want.Unit()}
 	// A container left from before (this service restarted) is replaced; the
 	// volume, with the workspace and Pi's session, stays.
-	if err := m.Docker.Remove(ctx, s.name); err != nil {
+	if err := m.Engine.Remove(ctx, s.name); err != nil {
 		return err
 	}
-	if err := m.Docker.CreateVolume(ctx, s.name, labels); err != nil {
+	if err := m.Engine.CreateVolume(ctx, s.name, labels); err != nil {
 		return err
 	}
 	api, proxy, err := m.addresses(ctx)
@@ -292,12 +292,12 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 			spec.Env = append(spec.Env, k+"="+apiURL.Hostname())
 		}
 	}
-	id, err := m.Docker.Create(ctx, spec)
+	id, err := m.Engine.Create(ctx, spec)
 	if errors.Is(err, ErrNotFound) {
-		if perr := m.Docker.Pull(ctx, m.Image, m.RegistryAuth); perr != nil {
+		if perr := m.Engine.Pull(ctx, m.Image, m.RegistryAuth); perr != nil {
 			return perr
 		}
-		id, err = m.Docker.Create(ctx, spec)
+		id, err = m.Engine.Create(ctx, spec)
 	}
 	if err != nil {
 		return err
@@ -311,12 +311,12 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	m.tokens[token] = s
 	m.mu.Unlock()
 
-	in, out, err := m.Docker.Attach(ctx, id, s.stderr)
+	in, out, err := m.Engine.Attach(ctx, id, s.stderr)
 	if err != nil {
 		return err
 	}
 	pi := NewPi(in, out)
-	if err := m.Docker.Start(ctx, id); err != nil {
+	if err := m.Engine.Start(ctx, id); err != nil {
 		pi.Close()
 		return err
 	}
@@ -338,17 +338,18 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 }
 
 // addresses are the API's and the proxy's, as sandboxes reach them. Under
-// gVisor a sandbox has no Docker DNS, so names become this service's own
-// address on the sandboxes' network.
+// gVisor in Docker a sandbox has no Docker DNS, so names become this
+// service's own address on the sandboxes' network. In Kubernetes (no
+// Network) pods look the names up as any pod does.
 func (m *Manager) addresses(ctx context.Context) (api, proxy string, err error) {
-	if m.Runtime == "" {
+	if m.Runtime == "" || m.Network == "" {
 		return m.API, m.Proxy, nil
 	}
 	m.mu.Lock()
 	here := m.here
 	m.mu.Unlock()
 	if here == "" {
-		subnets, err := m.Docker.Subnets(ctx, m.Network)
+		subnets, err := m.Engine.Subnets(ctx, m.Network)
 		if err != nil {
 			return "", "", fmt.Errorf("the sandboxes' network: %w", err)
 		}
@@ -417,7 +418,7 @@ func (m *Manager) stop(ctx context.Context, s *Session) {
 	if id == "" {
 		id = s.name
 	}
-	if err := m.Docker.Remove(ctx, id); err != nil {
+	if err := m.Engine.Remove(ctx, id); err != nil {
 		log.Printf("sandbox %s: %v", s.name, err)
 	}
 }
@@ -455,12 +456,12 @@ func (m *Manager) Caller(token string) (Caller, bool) {
 // Clean removes the sandbox containers left from before this service
 // started: their turns ended with it.
 func (m *Manager) Clean(ctx context.Context) error {
-	list, err := m.Docker.List(ctx, Label)
+	list, err := m.Engine.List(ctx, Label)
 	if err != nil {
 		return err
 	}
 	for _, c := range list {
-		if err := m.Docker.Remove(ctx, c.ID); err != nil {
+		if err := m.Engine.Remove(ctx, c.ID); err != nil {
 			log.Printf("sandbox: %v", err)
 		}
 	}

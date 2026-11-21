@@ -63,7 +63,7 @@ check "the follow-up goes into the same pull request" grep -qw CHANGELOG.md <<<"
 commits=$(gitea_api "" "$hp/app/pulls/$gpr/commits" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
 check "as another commit, with no new pull request" test "$commits" -ge 2 -a -z "$(newest_pr app bob "$gpr")"
 sb=$(sandbox_of todo/developer)
-check "the sandbox cannot push"            test "$(docker exec "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/git/todo/app.git/info/refs?service=git-receive-pack"')" = 403
+check "the sandbox cannot push"            test "$(in_sandbox "$sb" sh -c 'curl -sS -m 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $GARRISON_TOKEN" "$GARRISON_API/git/todo/app.git/info/refs?service=git-receive-pack"')" = 403
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/$gpr"
 
 echo "# 4h. bob has the developer change dev and merge it there"
@@ -120,7 +120,7 @@ bpr=$(REPO=$gc propose_config builder "Add the builder" "agents/builder/agent.ya
 check "a root admin approves the builder, alice merges it" lands "$bpr"
 check "Open WebUI has the builder"         until_true 120 has_model garrison/builder
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-installed() { docker exec "$(sandbox_of todo/builder)" python3 -c 'print(6*7)' 2>/dev/null | grep -qx 42; }
+installed() { in_sandbox "$(sandbox_of todo/builder)" python3 -c 'print(6*7)' 2>/dev/null | grep -qx 42; }
 answer=$(ask_agent todo bob "Install Python in your sandbox with: apk add python3. Then run python3 -c 'print(6*7)' and tell me what it printed." builder)
 if ! installed; then
   printf 'retry python3 is not installed; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
@@ -131,7 +131,7 @@ check "and says what it printed"           grep -q 42 <<<"$answer"
 check "through the proxy, logged with bob and the agent" \
   bash -c 'kubectl --namespace garrison logs deployment/agents --since-time="$0" 2>&1 | grep -q "agents: internet: bob: todo/builder: CONNECT dl-cdn.alpinelinux.org:443"' "$at"
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-refused_site() { docker service logs --since "$at" agents 2>&1 | grep -q "agents: internet: bob: todo/builder: example.org:443 refused"; }
+refused_site() { logs_since "$at" agents | grep -q "agents: internet: bob: todo/builder: example.org:443 refused"; }
 answer=$(ask_agent todo bob "Run exactly this command in your sandbox and show me what it printed: curl -sS -m 10 https://example.org/" builder)
 if ! refused_site; then
   printf 'retry no request to example.org; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"

@@ -135,6 +135,19 @@ YAML
 # the pods would wait on the old one, unreachable, for minutes.
 node_name=$(sed -n 's/^node-name: //p' /etc/rancher/k3s/config.yaml 2>/dev/null || true)
 [ -n "$node_name" ] || node_name=$(hostname -s)
+# gVisor as a runtime of containerd, runsc, for the agents' sandboxes (the
+# RuntimeClass gvisor, garrison/platform). k3s writes containerd's config
+# from this template when it starts: its own, and this.
+containerd_tmpl=/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl
+containerd_want='{{ template "base" . }}
+
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"'
+if [ "$(cat "$containerd_tmpl" 2>/dev/null)" != "$containerd_want" ]; then
+  mkdir -p "$(dirname "$containerd_tmpl")"
+  printf '%s\n' "$containerd_want" > "$containerd_tmpl"
+  ! systemctl is-active --quiet k3s || systemctl restart k3s
+fi
 k3s_config=$(printf '# Written by the Garrison installer; changes are overwritten.\ndefault-runtime: crun\nnode-name: %s\n' "$node_name")
 if [ "$(cat /etc/rancher/k3s/config.yaml 2>/dev/null)" != "$k3s_config" ]; then
   printf '%s\n' "$k3s_config" > /etc/rancher/k3s/config.yaml
@@ -155,8 +168,7 @@ until kubectl get --raw /readyz >/dev/null 2>&1 && kubectl wait --for=condition=
   sleep 3
 done
 kubectl get namespace garrison >/dev/null 2>&1 || kubectl create namespace garrison >/dev/null
-# The pipelines' containers and BuildKit meet on this Docker network; the
-# agents' sandboxes, for now Docker containers too, on an internal one.
+# The pipelines' containers and BuildKit meet on this Docker network.
 # Fixed ranges, which the platform's NetworkPolicies name (garrison/platform):
 # jobs may reach Gitea, sandboxes the agent service, and nothing else of it.
 docker_net() {
@@ -168,7 +180,8 @@ docker_net() {
   docker network create --subnet "$subnet" "$@" "$name" >/dev/null
 }
 docker_net garrison-builds 10.200.0.0/24
-docker_net garrison-sandboxes 10.201.0.0/24 --internal
+# The agents' sandboxes were Docker containers on this network before they were pods.
+! docker network inspect garrison-sandboxes >/dev/null 2>&1 || docker network rm garrison-sandboxes >/dev/null 2>&1 || true
 
 # ---------- storage ----------
 say "Setting up the ZFS pool"

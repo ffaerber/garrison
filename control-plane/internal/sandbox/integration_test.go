@@ -18,7 +18,7 @@ func TestRealSandbox(t *testing.T) {
 	if len(f) != 4 {
 		t.Skip("GARRISON_SANDBOX_TEST is not set")
 	}
-	m := &sandbox.Manager{Docker: &sandbox.Docker{Addr: f[0]}, Image: f[1], Network: f[2], API: f[3], Memory: 1 << 30, CPUs: 1, Pids: 256}
+	m := &sandbox.Manager{Engine: &sandbox.Docker{Addr: f[0]}, Image: f[1], Network: f[2], API: f[3], Memory: 1 << 30, CPUs: 1, Pids: 256}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	want := sandbox.Want{Key: "integration", Chat: "test", Agent: "homepage/operator", Person: "alice", Model: "gpt-oss:120b",

@@ -7,8 +7,11 @@
 # network) reaches every routed service and the kubelet its probes; and
 # within a pod. Pods of other namespaces, the apps' later, reach nothing
 # here. Docker containers outside the cluster are known by their network's
-# range: the pipelines' jobs (garrison-builds, 10.200.0.0/24) and the
-# agents' sandboxes (garrison-sandboxes, 10.201.0.0/24), both made by install.sh.
+# range: the pipelines' jobs (garrison-builds, 10.200.0.0/24, made by
+# install.sh).
+#
+# Further down: the namespace garrison-sandboxes, where the agent service
+# runs each chat's sandbox as a pod under gVisor, and what may run there.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -68,18 +71,6 @@ spec:
     - from: [{ podSelector: { matchLabels: { app: user-runner } } }]
       ports: [{ port: 2375 }]
 ---
-# The guarded Docker API for sandboxes: only the agent service.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: sandbox-guard
-spec:
-  podSelector: { matchLabels: { app: sandbox-guard } }
-  policyTypes: [Ingress]
-  ingress:
-    - from: [{ podSelector: { matchLabels: { app: agents } } }]
-      ports: [{ port: 2375 }]
----
 # The agents' browser, whose DevTools have no password: only the gateway.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -114,7 +105,7 @@ spec:
   podSelector: { matchLabels: { app: agents } }
   policyTypes: [Ingress]
   ingress:
-    - from: [{ ipBlock: { cidr: 10.201.0.0/24 } }]
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: garrison-sandboxes } } }]
       ports: [{ port: 8071 }, { port: 8072 }]
 ---
 # The login proxy waits for Keycloak's realm before it starts (its init
@@ -129,3 +120,123 @@ spec:
   ingress:
     - from: [{ podSelector: { matchLabels: { app: sso } } }]
       ports: [{ port: 8080 }]
+
+# ---------- the agents' sandboxes ----------
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: garrison-sandboxes
+---
+# gVisor: the sandboxes' processes meet its kernel, in user space, before
+# Linux's. containerd knows it as the runtime runsc (install.sh).
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+---
+# The agent service may start, watch, attach to and remove pods there, and
+# keep the sandboxes' workspaces (claims), and nothing else; the admission
+# policy below decides which pods.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agents
+  namespace: garrison-sandboxes
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, delete, get, list, watch, patch]
+  - apiGroups: [""]
+    resources: [pods/attach]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [pods/log, events]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete, get, list, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agents
+  namespace: garrison-sandboxes
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: agents }
+subjects: [{ kind: ServiceAccount, name: agents, namespace: garrison }]
+---
+# Nothing reaches a sandbox; a sandbox reaches the cluster's DNS and the
+# agent service's LLM, tools and internet proxy, and nothing else: no
+# platform, no app, no internet but through the proxy, as far as the
+# agent's agent.yaml says.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandboxes
+  namespace: garrison-sandboxes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: garrison } }, podSelector: { matchLabels: { app: agents } } }]
+      ports: [{ port: 8071 }, { port: 8072 }]
+---
+# What a pod there must be: a sandbox. Kubernetes checks every pod and claim
+# made in garrison-sandboxes against these rules (CEL) and refuses the rest,
+# so the agent service's rights there let it start sandboxes only, whatever
+# it asks for. It takes the place of the sandbox guard, which checked
+# Docker containers the same way.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: garrison-sandboxes
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: c
+      expression: "object.spec.containers[0]"
+    - name: media
+      expression: "'/garrison/ns/' + object.metadata.labels[?'garrison.unit'].orValue('-') + '/shares/media'"
+  validations:
+    - expression: "object.metadata.labels[?'garrison.sandbox'].orValue('') == 'true'"
+      message: "a sandbox carries the label garrison.sandbox=true"
+    - expression: "object.spec.runtimeClassName == 'gvisor'"
+      message: "a sandbox runs under gVisor (runtimeClassName gvisor)"
+    - expression: "size(object.spec.containers) == 1 && !has(object.spec.initContainers) && !has(object.spec.ephemeralContainers)"
+      message: "a sandbox has one container"
+    - expression: "variables.c.image.startsWith('git.${DOMAIN}/garrison/sandbox:')"
+      message: "a sandbox runs the sandbox image"
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+      message: "no host network"
+    - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: "no host processes"
+    - expression: "!has(variables.c.securityContext) || ((!has(variables.c.securityContext.privileged) || !variables.c.securityContext.privileged) && (!has(variables.c.securityContext.capabilities) || !has(variables.c.securityContext.capabilities.add)))"
+      message: "no privileges, no added capabilities"
+    - expression: "!has(variables.c.ports) || variables.c.ports.all(p, !has(p.hostPort))"
+      message: "no ports on the host"
+    - expression: "has(variables.c.resources.limits) && has(variables.c.resources.limits.memory) && quantity(variables.c.resources.limits.memory).compareTo(quantity('2Gi')) <= 0"
+      message: "a sandbox has a memory limit of at most 2Gi"
+    - expression: "!has(object.spec.automountServiceAccountToken) ? false : !object.spec.automountServiceAccountToken"
+      message: "a sandbox gets no token of the Kubernetes API"
+    - expression: "object.spec.volumes.all(v, (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == object.metadata.name) || (has(v.hostPath) && v.hostPath.path == variables.media))"
+      message: "a sandbox mounts only its own workspace and its unit's media library"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: garrison-sandboxes
+spec:
+  policyName: garrison-sandboxes
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: garrison-sandboxes }

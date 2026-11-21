@@ -43,6 +43,8 @@ const (
 // longer has an object of them. Secrets are not among them: the installer
 // makes those, and they carry no stack's label.
 var Pruned = []string{
+	"core/v1/Namespace", "node.k8s.io/v1/RuntimeClass",
+	"admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy", "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicyBinding",
 	"core/v1/ConfigMap", "core/v1/Service", "core/v1/ServiceAccount", "core/v1/PersistentVolumeClaim",
 	"apps/v1/Deployment", "apps/v1/StatefulSet", "apps/v1/DaemonSet", "batch/v1/Job",
 	"networking.k8s.io/v1/Ingress", "networking.k8s.io/v1/NetworkPolicy",
@@ -140,12 +142,24 @@ func Render(s Stack, env []string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// label puts StackLabel=name into obj's metadata.labels.
+// clusterScoped are the kinds without a namespace that stacks use.
+var clusterScoped = map[string]bool{
+	"Namespace": true, "ClusterRole": true, "ClusterRoleBinding": true, "IngressClass": true, "RuntimeClass": true,
+	"ValidatingAdmissionPolicy": true, "ValidatingAdmissionPolicyBinding": true, "StorageClass": true,
+	"PersistentVolume": true, "PriorityClass": true, "CustomResourceDefinition": true,
+}
+
+// label puts StackLabel=name into obj's metadata.labels, and Namespace into
+// its metadata.namespace if it is namespaced and names none.
 func label(obj *yaml.Node, name string) error {
-	if scalar(obj, "kind") == "" {
+	kind := scalar(obj, "kind")
+	if kind == "" {
 		return errors.New("a document without kind")
 	}
 	meta := child(obj, "metadata", yaml.MappingNode)
+	if !clusterScoped[kind] && scalar(meta, "namespace") == "" {
+		set(meta, "namespace", Namespace)
+	}
 	labels := child(meta, "labels", yaml.MappingNode)
 	set(labels, StackLabel, name)
 	// A workload's pods too, so they are found by their stack. Not added to
@@ -212,8 +226,9 @@ func Datasets(manifests []byte) ([]string, error) {
 	return out, nil
 }
 
-// Deploy creates the datasets a system stack mounts and applies it in the
-// namespace garrison, pruning what of it the stack no longer has. env is
+// Deploy creates the datasets a system stack mounts and applies it, in the
+// namespace garrison unless an object names another, pruning what of it the
+// stack no longer has. env is
 // for ${VAR} substitution (Render). It does not wait for the rollout; Wait does.
 func Deploy(ctx context.Context, run apply.Runner, s Stack, env []string) error {
 	manifests, err := Render(s, env)
@@ -229,7 +244,7 @@ func Deploy(ctx context.Context, run apply.Runner, s Stack, env []string) error 
 			return err
 		}
 	}
-	args := []string{"apply", "--namespace", Namespace, "--filename", "-", "--prune", "--selector", StackLabel + "=" + s.Name}
+	args := []string{"apply", "--filename", "-", "--prune", "--selector", StackLabel + "=" + s.Name}
 	for _, k := range Pruned {
 		args = append(args, "--prune-allowlist", k)
 	}
@@ -263,7 +278,7 @@ func Remove(ctx context.Context, run apply.Runner, name string) error {
 			kinds[i] += "." + g
 		}
 	}
-	_, err := run(ctx, nil, nil, "kubectl", "delete", strings.Join(kinds, ","), "--namespace", Namespace,
+	_, err := run(ctx, nil, nil, "kubectl", "delete", strings.Join(kinds, ","), "--all-namespaces",
 		"--selector", StackLabel+"="+name, "--ignore-not-found")
 	return err
 }

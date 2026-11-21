@@ -483,8 +483,64 @@ print(json.dumps({"branch":"main","new_branch":branch,"message":title,"files":op
     python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])'
 }
 has_account() { gitea_api "" "$api/users/$1" | grep -q '"full_name":"Agent todo/'; }
-# sandbox_of AGENT: the sandbox container of AGENT for todo's channel.
-sandbox_of() { docker ps -q --filter label=garrison.sandbox=true --filter "label=garrison.agent=$1" --filter "label=garrison.chat=channel:$(channel_of todo)" | head -n1; }
+# label_value V: V as a label value, as the agent service writes it on a
+# sandbox's pod (sandbox.labelValue): other characters become _.
+label_value() { printf '%s' "$1" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/^[_.-]+//; s/[_.-]+$//' | cut -c1-63; }
+# sandbox_of AGENT: the running sandbox pod of AGENT for todo's channel.
+sandbox_of() {
+  kubectl --namespace garrison-sandboxes get pods --field-selector status.phase=Running --output name \
+    --selector "garrison.sandbox=true,garrison.agent=$(label_value "$1"),garrison.chat=$(label_value "channel:$(channel_of todo)")" | head -n1 | sed 's#^pod/##'
+}
+# in_sandbox POD COMMAND...: runs COMMAND in a sandbox, as the agent would.
+in_sandbox() { local pod=$1; shift; kubectl --namespace garrison-sandboxes exec -i "$pod" -- "$@"; }
+# sandbox_image: the sandbox image the agent service runs.
+sandbox_image() {
+  kubectl --namespace garrison get deployment agents -o jsonpath='{.spec.template.spec.containers[0].args}' |
+    grep -oE "git\.$DOMAIN/garrison/sandbox:[A-Za-z0-9._-]+" | head -n1
+}
+# check_namespace: garrison-check, for the tests' own pods, with the pull
+# secret of the platform's images.
+check_namespace() {
+  kubectl get namespace garrison-check >/dev/null 2>&1 || kubectl create namespace garrison-check >/dev/null
+  kubectl --namespace garrison-check get secret registry-pull >/dev/null 2>&1 ||
+    kubectl --namespace garrison get secret registry-pull -o json |
+      python3 -c 'import json,sys; s=json.load(sys.stdin); s["metadata"]={"name":"registry-pull"}; print(json.dumps(s))' |
+      kubectl --namespace garrison-check apply -f - >/dev/null
+}
+# image_pod NAME [-g] [-d] [-v HOST:PATH] -- COMMAND...: runs COMMAND in a pod
+# of the sandbox image in garrison-check, under gVisor with -g, with the host
+# folder HOST read-only at PATH with -v. It prints the output and is gone
+# after, or with -d is left running in the background.
+image_pod() {
+  local name=$1 runtime= detach= vol= overrides; shift
+  while [ "$1" != -- ]; do
+    case $1 in -g) runtime=gvisor ;; -d) detach=1 ;; -v) vol=$2; shift ;; esac
+    shift
+  done
+  shift
+  check_namespace
+  overrides=$(python3 - "$name" "$(sandbox_image)" "$runtime" "$vol" "$@" <<'PY'
+import json, sys
+name, image, runtime, vol, cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+c = {"name": name, "image": image, "command": cmd, "stdin": True}
+spec = {"containers": [c], "imagePullSecrets": [{"name": "registry-pull"}], "automountServiceAccountToken": False, "restartPolicy": "Never"}
+if runtime:
+    spec["runtimeClassName"] = runtime
+    c["securityContext"] = {"runAsUser": 0}
+if vol:
+    host, path = vol.split(":", 1)
+    c["volumeMounts"] = [{"name": "v", "mountPath": path, "readOnly": True}]
+    spec["volumes"] = [{"name": "v", "hostPath": {"path": host}}]
+print(json.dumps({"spec": spec}))
+PY
+)
+  if [ -n "$detach" ]; then
+    kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --overrides "$overrides" >/dev/null &&
+      kubectl --namespace garrison-check wait --for=condition=Ready "pod/$name" --timeout 180s >/dev/null
+  else
+    kubectl --namespace garrison-check run "$name" --image "$(sandbox_image)" --restart Never --rm -i --quiet --overrides "$overrides" --pod-running-timeout 3m
+  fi
+}
 
 # ui_run NAME: the browser scenario test/ui/NAME.py, its checks counted with
 # the others.

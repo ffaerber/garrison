@@ -26,10 +26,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\"}, container_label_garrison_agent)",
+          "query": "label_values(garrison_sandbox_info, agent)",
           "refId": "v"
         },
-        "definition": "label_values(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\"}, container_label_garrison_agent)",
+        "definition": "label_values(garrison_sandbox_info, agent)",
         "refresh": 2,
         "sort": 1,
         "multi": false,
@@ -73,7 +73,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}) or vector(0)",
+          "expr": "count(garrison_sandbox_info{agent=~\"$agent\"}) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -118,7 +118,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}) or vector(0)",
+          "expr": "sum(container_memory_working_set_bytes{container!=\"\"} * on (namespace, pod) group_left (agent) garrison_sandbox_info{agent=~\"$agent\"}) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -162,7 +162,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}[5m])) or vector(0)",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * on (namespace, pod) group_left (agent) garrison_sandbox_info{agent=~\"$agent\"}) or vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -207,12 +207,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count by (container_label_garrison_agent) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
+          "expr": "count by (agent) (garrison_sandbox_info{agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_garrison_agent}}",
+          "legendFormat": "{{agent}}",
           "range": true
         }
       ],
@@ -249,12 +249,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count by (container_label_garrison_person) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
+          "expr": "count by (person) (garrison_sandbox_info{agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_garrison_person}}",
+          "legendFormat": "{{person}}",
           "range": true
         }
       ],
@@ -292,12 +292,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_garrison_agent) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
+          "expr": "sum by (agent) (container_memory_working_set_bytes{container!=\"\"} * on (namespace, pod) group_left (agent) garrison_sandbox_info{agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_garrison_agent}}",
+          "legendFormat": "{{agent}}",
           "range": true
         }
       ],
@@ -334,12 +334,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_garrison_agent) (rate(container_cpu_usage_seconds_total{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"}[5m]))",
+          "expr": "sum by (agent) (rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * on (namespace, pod) group_left (agent) garrison_sandbox_info{agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_garrison_agent}}",
+          "legendFormat": "{{agent}}",
           "range": true
         }
       ],
@@ -377,7 +377,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_garrison_agent, container_label_garrison_person, container_label_garrison_chat, name) (container_memory_working_set_bytes{container_label_garrison_sandbox=\"true\", container_label_garrison_agent=~\"$agent\"})",
+          "expr": "sum by (agent, person, chat, pod) (container_memory_working_set_bytes{container!=\"\"} * on (namespace, pod) group_left (agent, person, chat) garrison_sandbox_info{agent=~\"$agent\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -416,10 +416,10 @@
               "Time": true
             },
             "renameByName": {
-              "container_label_garrison_agent": "Agent",
-              "container_label_garrison_person": "Person",
-              "container_label_garrison_chat": "Chat",
-              "name": "Container"
+              "agent": "Agent",
+              "person": "Person",
+              "chat": "Chat",
+              "pod": "Pod"
             }
           }
         }

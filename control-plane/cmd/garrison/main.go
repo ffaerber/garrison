@@ -698,6 +698,7 @@ func agentsCmd(args []string) error {
 	caFile := fs.String("ca", "/run/secrets/tls.crt", "certificate the installation's TLS is verified with")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	image := fs.String("sandbox-image", "", "the sandbox image; if empty, turns run in this process")
+	namespace := fs.String("sandbox-namespace", "", "run the sandboxes as pods in this Kubernetes namespace; empty: as Docker containers through -sandbox-docker")
 	dockerAddr := fs.String("sandbox-docker", "sandbox-guard:2375", "the Docker API sandboxes are started through")
 	network := fs.String("sandbox-network", "garrison-sandboxes", "the network of the sandboxes")
 	sandboxListen := fs.String("sandbox-listen", ":8071", "address to serve the sandboxes on: the LLM and the tools")
@@ -776,8 +777,14 @@ func agentsCmd(args []string) error {
 		// The sandbox image is pulled from Gitea's registry as the admin, if
 		// the build did not leave it on this machine.
 		auth, _ := json.Marshal(map[string]string{"username": vars["ADMIN_USER"], "password": strings.TrimSpace(string(password)), "serveraddress": "git." + domain})
+		var engine sandbox.Engine = &sandbox.Docker{Addr: *dockerAddr}
+		if *namespace != "" {
+			// Pods: the kubelet pulls the image with the platform's pull secret,
+			// and pods look the agent service up by name, on no Docker network.
+			engine, *network = &sandbox.Kubernetes{Namespace: *namespace, PullSecret: "registry-pull"}, ""
+		}
 		srv.Sandboxes = &sandbox.Manager{
-			Docker: &sandbox.Docker{Addr: *dockerAddr}, Image: *image, Network: *network, API: *sandboxAPI,
+			Engine: engine, Image: *image, Network: *network, API: *sandboxAPI,
 			Proxy: *internetProxy, Runtime: *runtime,
 			Memory: *memory, CPUs: *cpus, Pids: 512, Idle: *idle, PerPerson: *perPerson,
 			RegistryAuth: base64.URLEncoding.EncodeToString(auth),

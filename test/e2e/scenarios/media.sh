@@ -38,7 +38,7 @@ else
 fi
 trap '[ -z "$comfy_pid" ] || kill $comfy_pid 2>/dev/null; rm -rf "$tmp"' EXIT
 sed -i '/^COMFYUI_URL=/d' $ETC/install.env && echo "COMFYUI_URL=http://$host_ip:8188" >> $ETC/install.env
-docker service update --force --detach=false -q agents >/dev/null 2>&1
+kubectl --namespace garrison rollout restart deployment/agents >/dev/null && kubectl --namespace garrison rollout status deployment/agents --timeout 300s >/dev/null 2>&1
 agents_say() { kubectl --namespace garrison logs "deployment/agents" --since=3m 2>&1 | grep -q "generate_media uses ComfyUI at http://$host_ip:8188"; }
 check "the agent service uses it"          until_true 120 agents_say
 check "the project media/demo goes to Gitea" installer/push-repo.sh --update media/demo test/e2e/media/demo
@@ -55,7 +55,6 @@ fi
 check "two pictures and a video, in the library" made
 first=$(ls "$lib"/demo/comic-*.png 2>/dev/null | head -n1)
 check "each with a .json of how it was made" bash -c 'grep -q "\"style\": \"comic\"" "$0.json" && grep -q "\"project\": \"media/demo\"" "$0.json"' "$first"
-sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
 if [ -n "$comfy_pid" ]; then
   check "ComfyUI got the style's prompt, size and length in their nodes" python3 -c '
 import json,sys
@@ -65,7 +64,7 @@ vid=any(r.get("12",{}).get("inputs",{}).get("length") == 49 for r in runs)
 sys.exit(0 if pic and vid else 1)' "$tmp/comfy/prompts.jsonl"
 else
   # What the real one drew: the style's size, and its number of frames.
-  probe() { docker run --rm -v "$lib/demo:/d:ro" --entrypoint ffprobe "$sandbox_image" -v error -select_streams v:0 "$@"; }
+  probe() { image_pod "probe-$RANDOM" -v "$lib/demo:/d" -- ffprobe -v error -select_streams v:0 "$@"; }
   check "a picture, drawn in the style's 768x1024" test "$(probe -show_entries stream=width,height -of csv=p=0 "/d/${first##*/}")" = 768,1024
   video=$(ls "$lib"/demo/motion-*.mp4 2>/dev/null | head -n1)
   check "a video of the style's 49 frames" test "$(probe -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "/d/${video##*/}")" = 49
@@ -83,10 +82,9 @@ if ! short; then
   answer=$(ASK_WAIT=660 ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." media)
 fi
 check "a short in the library"             short
-sandbox_image=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '/garrison/sandbox:' | head -n1)
 # The short with its .json beside it, the finished one; else the newest
 # non-empty one, as an agent running ffmpeg itself writes no .json.
-size=$(docker run --rm -v "$lib/demo/shorts:/s:ro" --entrypoint sh "$sandbox_image" -c '
+size=$(image_pod short-size -v "$lib/demo/shorts:/s" -- sh -c '
   f=$(ls /s/short-*.mp4.json 2>/dev/null | head -n1); f=${f%.json}
   [ -n "$f" ] || f=$(find /s -name "short-*.mp4" -size +0 | sort | tail -n1)
   ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$f"' 2>/dev/null)

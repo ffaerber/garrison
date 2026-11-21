@@ -17,7 +17,7 @@ func withSandboxes(t *testing.T, s *Server) *sandboxtest.Docker {
 	d := sandboxtest.New(t)
 	api := httptest.NewServer(s.SandboxHandler())
 	t.Cleanup(api.Close)
-	s.Sandboxes = &sandbox.Manager{Docker: &sandbox.Docker{Addr: d.Addr()}, Image: "registry/garrison/sandbox:1", Network: "sandboxes", API: api.URL, Memory: 1 << 30, CPUs: 1, Pids: 100}
+	s.Sandboxes = &sandbox.Manager{Engine: &sandbox.Docker{Addr: d.Addr()}, Image: "registry/garrison/sandbox:1", Network: "sandboxes", API: api.URL, Memory: 1 << 30, CPUs: 1, Pids: 100}
 	return d
 }
 
