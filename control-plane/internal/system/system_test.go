@@ -206,3 +206,24 @@ func TestPlatformRunsOnTheMainMachine(t *testing.T) {
 		}
 	}
 }
+
+// Strings that YAML 1.1, kubectl's, reads as booleans stay quoted: OpenEBS's
+// CRDs allow only "yes" and "no" for a ZFSVolume's shared.
+func TestYAML11BooleansStayStrings(t *testing.T) {
+	out, err := Render(Stack{Name: "openebs", Dir: "../../../garrison/openebs"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `- "yes"`) || strings.Contains(string(out), "- yes\n") {
+		t.Errorf(`"yes" is not quoted in the enums of openebs's CRDs`)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte("a: \"on\"\nb: true\nc: plain\n"), &doc); err != nil {
+		t.Fatal(err)
+	}
+	plain(&doc)
+	got, _ := yaml.Marshal(&doc)
+	if want := "a: \"on\"\nb: true\nc: plain\n"; string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

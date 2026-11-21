@@ -305,15 +305,23 @@ func Remove(ctx context.Context, run apply.Runner, name string) error {
 }
 
 // plain writes n in block style, as kubectl shows objects, whatever style
-// its file used; scalars are quoted again only where YAML needs it.
+// its file used; scalars are quoted again only where YAML needs it. yaml.v3
+// follows YAML 1.2, where yes and no are strings, but kubectl reads YAML
+// 1.1, where they are booleans: such strings stay quoted (OpenEBS's CRDs
+// allow "yes" and "no").
 func plain(n *yaml.Node) {
-	if n.Style&yaml.LiteralStyle == 0 {
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!str" && yaml11Bool[strings.ToLower(n.Value)] {
+		n.Style = yaml.DoubleQuotedStyle
+	} else if n.Style&yaml.LiteralStyle == 0 {
 		n.Style = 0
 	}
 	for _, c := range n.Content {
 		plain(c)
 	}
 }
+
+// yaml11Bool are the words YAML 1.1 reads as booleans, in lower case.
+var yaml11Bool = map[string]bool{"y": true, "yes": true, "n": true, "no": true, "on": true, "off": true, "true": true, "false": true}
 
 // field is the value of key in the mapping n, or nil.
 func field(n *yaml.Node, key string) *yaml.Node {
