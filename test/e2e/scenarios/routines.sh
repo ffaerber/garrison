@@ -72,7 +72,10 @@ sys.exit(1)'
 }
 check "it asks bob in the channel, naming him" until_true 600 question_post
 qid=$(question_post)
-waiting_page() { feed bob / | grep -q "Waiting for you" && feed bob / | grep -q "todo/asker asks bob"; }
+# The page is read whole first: grep -q stops at its first match, and curl,
+# writing the rest of a large page into the closed pipe, fails, which fails
+# the pipeline (pipefail).
+waiting_page() { local page; page=$(feed bob /) && grep -q "Waiting for you" <<<"$page" && grep -q "todo/asker asks bob" <<<"$page"; }
 check "bob's dashboard lists it as waiting for him" until_true 60 waiting_page
 check "the feed has it, waiting"           in_feed bob ns=todo "e['kind'] == 'question' and e['agent'] == 'todo/asker' and e['actor'] == 'bob' and e['status'] == 'waiting'"
 check "bob answers in its thread" \
@@ -90,7 +93,7 @@ check "the routine goes on, and says so in the thread" until_true 600 asker_repl
 check "with bob's answer"                  grep -qi green <<<"$(asker_reply)"
 check "the question is answered in the feed" in_feed bob ns=todo "e['kind'] == 'question' and e['agent'] == 'todo/asker' and e['status'] == 'ok' and 'Green' in e['detail']"
 # The feed itself still lists the question; the list above it is gone.
-not_waiting() { ! feed bob / | grep -q "Waiting for you"; }
+not_waiting() { local page; page=$(feed bob /) && ! grep -q "Waiting for you" <<<"$page"; }
 check "bob's dashboard no longer lists it" until_true 60 not_waiting
 
 }
