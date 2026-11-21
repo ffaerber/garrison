@@ -102,9 +102,13 @@ if ! has_notes; then
 fi
 check "it writes a file in its workspace"  has_notes
 # Its pod goes, as when it is idle; the workspace (its claim) and the conversation stay.
+# The new pod has the old one's name, which comes from the chat; its uid is new.
+pod_uid() { kubectl --namespace garrison-sandboxes get pod "$1" -o jsonpath='{.metadata.uid}' 2>/dev/null; }
+old_uid=$(pod_uid "$sb")
 kubectl --namespace garrison-sandboxes delete pod "$sb" --wait >/dev/null
 answer=$(ask_agent todo bob "Which line did you write into notes.txt just before? Check your workspace." marketing)
-check "a new pod resumes the chat"         test -n "$(sandbox_of todo/marketing)" -a "$(sandbox_of todo/marketing)" != "$sb"
+new_pod() { local p; p=$(sandbox_of todo/marketing) && [ -n "$p" ] && [ "$(pod_uid "$p")" != "$old_uid" ]; }
+check "a new pod resumes the chat"         new_pod
 check "it still has the file"              grep -q "pelican 42" <<<"$answer"
 # Grafana's Agents dashboard: the sandbox's metrics carry its agent and
 # person; its output, the conversation, stays out of Loki.
