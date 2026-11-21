@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"garrison/control-plane/internal/agents"
@@ -27,6 +28,17 @@ import (
 type Kubernetes struct {
 	Run apply.Runner
 	Now func() time.Time
+
+	mu       sync.Mutex
+	restarts map[string]*restarts // by namespace/pod/container
+}
+
+// restarts is what is known of one container's failures. Kubernetes
+// restarts a failing container in the same pod and keeps only its last
+// exit, so the failures are counted as its restart count grows.
+type restarts struct {
+	count  int         // its restart count, when last seen
+	failed []time.Time // its failures within Window
 }
 
 // Window is how far back failed containers count.
@@ -77,8 +89,10 @@ type object struct {
 		// Of a pod:
 		Phase             string `json:"phase"`
 		ContainerStatuses []struct {
-			Ready     bool `json:"ready"`
-			LastState struct {
+			Name         string `json:"name"`
+			Ready        bool   `json:"ready"`
+			RestartCount int    `json:"restartCount"`
+			LastState    struct {
 				Terminated *struct {
 					ExitCode   int       `json:"exitCode"`
 					FinishedAt time.Time `json:"finishedAt"`
@@ -176,6 +190,7 @@ func (k *Kubernetes) collect(ctx context.Context) ([]Service, []Sandbox, error) 
 	if k.Now != nil {
 		now = k.Now()
 	}
+	seen := map[string]bool{}
 	var res []Service
 	for _, w := range workloads {
 		l := w.Metadata.Labels
@@ -209,14 +224,8 @@ func (k *Kubernetes) collect(ctx context.Context) ([]Service, []Sandbox, error) 
 			ready := p.Status.Phase == "Running" && len(p.Status.ContainerStatuses) > 0
 			for _, c := range p.Status.ContainerStatuses {
 				ready = ready && c.Ready
-				for _, t := range []*struct {
-					ExitCode   int       `json:"exitCode"`
-					FinishedAt time.Time `json:"finishedAt"`
-				}{c.LastState.Terminated, c.State.Terminated} {
-					if t != nil && t.ExitCode != 0 && now.Sub(t.FinishedAt) < Window {
-						h.Failed++
-					}
-				}
+				h.Failed += k.failures(p.Metadata.Namespace+"/"+p.Metadata.Name+"/"+c.Name, c.RestartCount,
+					c.LastState.Terminated, c.State.Terminated, now, seen)
 			}
 			if ready {
 				h.Running++
@@ -224,8 +233,65 @@ func (k *Kubernetes) collect(ctx context.Context) ([]Service, []Sandbox, error) 
 		}
 		res = append(res, h)
 	}
+	k.forget(seen)
 	sort.Slice(res, func(i, j int) bool { return res[i].Service < res[j].Service })
 	return res, sandboxes, nil
+}
+
+// terminated is how a container last ended.
+type terminated = struct {
+	ExitCode   int       `json:"exitCode"`
+	FinishedAt time.Time `json:"finishedAt"`
+}
+
+// failures counts the container key's failures within Window, from what
+// it shows now (restartCount, its last and current termination) and what
+// was seen of it before. The first time, only the terminations it shows
+// count; after that, each restart after an error counts, at the time it is
+// seen, so none is lost between two looks.
+func (k *Kubernetes) failures(key string, count int, last, current *terminated, now time.Time, seen map[string]bool) int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.restarts == nil {
+		k.restarts = map[string]*restarts{}
+	}
+	seen[key] = true
+	r, known := k.restarts[key]
+	if !known {
+		r = &restarts{count: count}
+		k.restarts[key] = r
+		for _, t := range []*terminated{last, current} {
+			if t != nil && t.ExitCode != 0 {
+				r.failed = append(r.failed, t.FinishedAt)
+			}
+		}
+	} else {
+		if count > r.count && last != nil && last.ExitCode != 0 {
+			for i := r.count; i < count; i++ {
+				r.failed = append(r.failed, now)
+			}
+		}
+		r.count = count
+	}
+	kept := r.failed[:0]
+	for _, t := range r.failed {
+		if now.Sub(t) < Window {
+			kept = append(kept, t)
+		}
+	}
+	r.failed = kept
+	return len(kept)
+}
+
+// forget drops the containers not seen this time: their pods are gone.
+func (k *Kubernetes) forget(seen map[string]bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for key := range k.restarts {
+		if !seen[key] {
+			delete(k.restarts, key)
+		}
+	}
 }
 
 // selects tells whether a selector's labels are all among labels.

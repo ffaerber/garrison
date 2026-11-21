@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -63,5 +64,45 @@ func TestMetrics(t *testing.T) {
 	}
 	if strings.Contains(body, "coredns") {
 		t.Errorf("Kubernetes's own workloads are counted:\n%s", body)
+	}
+}
+
+// A container that keeps failing restarts in the same pod, which shows only
+// its last exit: each restart after an error counts, while within Window.
+func TestRestartsInTheSamePodCount(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	restarts := 1
+	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
+		switch args[1] {
+		case "pods":
+			return []byte(`{"items":[{"metadata":{"name":"db-1","namespace":"app-crash","labels":{"app":"db"}},"status":{"phase":"Running","containerStatuses":[
+ {"name":"db","ready":false,"restartCount":` + fmt.Sprint(restarts) + `,"lastState":{"terminated":{"exitCode":1,"finishedAt":"` + now.Add(-5*time.Second).Format(time.RFC3339) + `"}}}]}}]}`), nil
+		case "ingresses":
+			return []byte(`{"items":[]}`), nil
+		}
+		return []byte(`{"items":[{"kind":"Deployment","metadata":{"name":"db","namespace":"app-crash","labels":{"garrison.unit":"todo","garrison.app":"crash","garrison.environment":"main","garrison.io/stack":"crash"}},
+  "spec":{"replicas":1,"selector":{"matchLabels":{"app":"db"}}}}]}`), nil
+	}
+	k := &Kubernetes{Run: run, Now: func() time.Time { return now }}
+	failed := func() int {
+		svcs, err := k.Services(context.Background())
+		if err != nil || len(svcs) != 1 {
+			t.Fatal(svcs, err)
+		}
+		return svcs[0].Failed
+	}
+	if n := failed(); n != 1 {
+		t.Errorf("first look: %d failed, want 1", n)
+	}
+	now, restarts = now.Add(time.Minute), 3
+	if n := failed(); n != 3 {
+		t.Errorf("two restarts later: %d failed, want 3", n)
+	}
+	if n := failed(); n != 3 {
+		t.Errorf("looking again counts again: %d", n)
+	}
+	now = now.Add(Window)
+	if n := failed(); n != 0 {
+		t.Errorf("after the window: %d failed, want 0", n)
 	}
 }
