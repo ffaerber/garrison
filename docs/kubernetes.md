@@ -2,7 +2,7 @@
 
 Garrison runs on k3s, a complete Kubernetes in one binary. This page explains how Garrison uses Kubernetes, and how what it did on Docker Swarm maps to Kubernetes. It is meant for learning: each section names the files to read.
 
-The move is in progress, on the branch `k3s`. The platform runs on Kubernetes. The agents' sandboxes, the apps and more machines follow, in that order (see "Still to move").
+The move is in progress, on the branch `k3s`. The platform and the agents' sandboxes run on Kubernetes. The apps and more machines follow (see "Still to move").
 
 ## The pieces
 
@@ -18,6 +18,9 @@ The move is in progress, on the branch `k3s`. The platform runs on Kubernetes. T
 | **Secret** | Like a ConfigMap, for secrets | The passwords the installer makes, mounted at `/run/secrets/<name>` |
 | **ServiceAccount**, **Role**, **ClusterRole**, **…Binding** | Who in the cluster may do what with the Kubernetes API | The deployer may do everything; the gateway only reads pods and logs; Traefik reads Ingresses; Prometheus reads node metrics |
 | **NetworkPolicy** | Which pods may reach which | Replaces Swarm's separate networks |
+| **RuntimeClass** | Which runtime runs a pod | `gvisor`: the agents' sandboxes, under gVisor's kernel |
+| **PersistentVolumeClaim** | A request for storage, which a provisioner fills | Each chat's sandbox workspace, on k3s's local-path |
+| **ValidatingAdmissionPolicy** | Rules (in CEL) the API server checks every object against before accepting it | What a pod in `garrison-sandboxes` must be: a sandbox |
 
 `kubectl` is the command-line client: `kubectl -n garrison get pods`, `kubectl -n garrison logs deploy/gitea`, `kubectl -n garrison describe pod <name>` (why a pod does not start), `kubectl -n garrison exec -it deploy/postgres -- sh`. On the machine, as root, it works as is.
 
@@ -59,12 +62,27 @@ Images of `garrison/*` are in Gitea's registry, which only signed-in accounts re
 - The deployer's health metrics (`garrison_service_replicas_desired`, `_running`, `_failed_tasks`) come from the Kubernetes API, so the alerts stay as they were.
 - Alloy, one per machine, ships pod logs to Loki with the labels `namespace`, `stack`, `service`, `pod` and `container` (`garrison/loki/config.alloy`).
 
+## The agents' sandboxes
+
+Each chat with an agent runs in a pod of its own in the namespace `garrison-sandboxes`, which the agent service starts (`control-plane/internal/sandbox/kube.go`):
+- **Runtime:** `runtimeClassName: gvisor`. containerd knows gVisor as the runtime `runsc`, which `install.sh` adds to k3s's containerd template. The agent is root inside gVisor's kernel, so it can install what a task needs.
+- **Workspace:** a PersistentVolumeClaim named like the pod, on k3s's `local-path` storage. It stays when the pod goes, idle or replaced.
+- **Talking to Pi:** Pi's RPC goes over the container's stdin and stdout. The pod has `stdin: true`, and the agent service runs `kubectl attach --stdin` to it.
+- **No zombies:** `shareProcessNamespace: true` makes the pod's pause process PID 1, which reaps what Pi leaves behind, as Docker's init did.
+- **Labels:** values such as `todo/developer` are not valid label values. Labels get `todo_developer`; annotations keep the real values.
+
+Who may do what (`garrison/platform/kubernetes.yaml`):
+- **Role `agents`:** the agent service may create, attach to and delete pods and claims there, and nothing else.
+- **ValidatingAdmissionPolicy `garrison-sandboxes`:** the API server refuses any pod there that is not a sandbox. It must have the sandbox image, gVisor, one container, no privileges, no host network or processes, a memory limit of at most 2Gi and no API token, and it may mount only its own claim and its unit's media library. This takes the place of the sandbox guard, which checked Docker containers the same way.
+- **NetworkPolicy `sandboxes`:** a sandbox reaches the cluster's DNS and the agent service's LLM, tools and internet proxy (ports 8071 and 8072), nothing else. Nothing reaches a sandbox.
+
+The image is large (Chromium, ffmpeg, Node). The DaemonSet `sandbox-image` keeps it on every machine, so a chat's first message does not wait minutes for a pull. The deployer exports `garrison_sandbox_info{pod, agent, person, chat}`, which the Agents dashboard joins with the kubelet's metrics.
+
 ## What still uses Docker
 
 Docker stays on the machine for what has no Kubernetes way yet:
 - **Gitea's Actions runners.** act_runner runs jobs as Docker containers. Those containers look names up in the cluster's DNS (`--dns 10.43.0.10`), where Gitea is `gitea.garrison.svc.cluster.local`.
 - **BuildKit**, which builds the apps' images.
-- **The agents' sandboxes**, until phase 2.
 
 ## Traps found
 
@@ -72,12 +90,13 @@ Docker stays on the machine for what has no Kubernetes way yet:
 - **A StatefulSet does not replace a pod that never became ready** when its template changes: it waits for it. One pod on a host directory needs no StatefulSet. Postgres is a Deployment with `strategy: Recreate`.
 - **A new hostname is a new node.** k3s names its node after the hostname; a clone with a new hostname would register a second node, with every pod stuck on the old one. The installer pins `node-name`.
 - **The service-account token and `/run/secrets`:** see Secrets above.
+- **A pull secret works only in its own namespace.** The sandboxes' namespace needs its own copy of `registry-pull` (`garrison/gitea/configure.sh`).
+- **`kubectl run -i` loses the output of a short command**, which may end before kubectl attaches. The tests read a finished pod's log instead (`image_pod` in `test/e2e/lib.sh`).
 
 ## Still to move
 
-1. **Sandboxes as pods** under the RuntimeClass `gvisor`. The sandbox guard becomes RBAC and an admission policy.
-2. **Apps**:
+1. **Apps**:
    - `internal/render` writes Deployments, Services and Ingresses instead of a Compose file;
    - one namespace per unit;
    - snapshots, restores, previews, secrets and the gate move with it.
-3. **More machines**: `k3s agent` joins; app data moves to OpenEBS ZFS LocalPV volumes, or Longhorn where copies are wanted.
+2. **More machines**: `k3s agent` joins; app data moves to OpenEBS ZFS LocalPV volumes, or Longhorn where copies are wanted.

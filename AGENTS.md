@@ -6,7 +6,7 @@ A guide for people and coding agents changing this repository: how the system fi
 
 Garrison runs on one Ubuntu machine with Kubernetes (k3s) and ZFS. **Gitea is the source of truth**: everything that runs is described in a repo, and the control plane makes the machine match `main`. How it uses Kubernetes, for learning: [docs/kubernetes.md](docs/kubernetes.md).
 
-**Moving from Docker Swarm to k3s**, on the branch `k3s`: the platform runs on k3s; the agents' sandboxes and the apps still use Docker and Swarm code and move next (docs/kubernetes.md, "Still to move"). Until then only base, install and login of the VM tests are green on this branch.
+**Moving from Docker Swarm to k3s**, on the branch `k3s`: the platform and the agents' sandboxes (pods under gVisor) run on k3s; the apps still use Swarm code and move next (docs/kubernetes.md, "Still to move"). Until then base, install, login and agent are green on this branch.
 
 - **Units** are Gitea organisations. `garrison` is the platform's own: one repo per system stack (`garrison/<stack>` in this repo, with a `kubernetes.yaml` each: Kubernetes manifests, applied in the namespace `garrison`), plus `garrison/config`, which holds **the agents** (`agents/<name>/agent.yaml`, `prompt.md`, skills), the chains of command (`chains/`) and the LLM providers and models (`llm/`). Every other unit has a `config` repo (`members.yaml`, `stacks/<name>.yaml`, `grants.yaml`, `routines.yaml`, `secrets/`, `restores/`) and app repos holding only code.
 - **The control plane** (`control-plane/`) is one Go binary, `garrison`, with one role per subcommand (`control-plane/cmd/garrison/main.go`):
