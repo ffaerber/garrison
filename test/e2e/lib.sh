@@ -50,10 +50,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 PASSWORD=$(cat $ETC/admin-password)
 
-# After a reboot, give every workload of the platform time to come back before checking.
+# After a reboot, give every pod of the platform time to come back before checking.
 if [ -n "${WAIT_READY:-}" ]; then
-  kubectl --namespace garrison wait --for=condition=Available deployment --all --timeout="${WAIT_READY}s" >/dev/null ||
-    echo "workloads not ready after reboot: $(kubectl --namespace garrison get deployments --no-headers | awk '{ split($2, r, "/"); if (r[1] != r[2]) print $1 }' | tr '\n' ' ')"
+  test/e2e/ready.sh "$WAIT_READY" || true
 fi
 
 # logs_since SINCE NAME: the logs of the platform's Deployment NAME since

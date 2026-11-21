@@ -82,7 +82,7 @@ case $LLM in local|cloud) ;; *) echo "LLM must be local or cloud" >&2; exit 2 ;;
 # Files each step depends on, besides this script's own definition of the
 # step: its scenario file, and what every scenario shares.
 inputs() {
-  local shared="test/e2e/smoke.sh test/e2e/lib.sh test/e2e/scenarios/$1.sh"
+  local shared="test/e2e/smoke.sh test/e2e/lib.sh test/e2e/ready.sh test/e2e/scenarios/$1.sh"
   case $1 in
     base)     ;;
     install)  echo install.sh installer garrison control-plane schemas templates files sandbox go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
@@ -382,8 +382,8 @@ readdress() {
 # again; this waits until each is available.
 settle() {
   in_vm sudo bash -c '
-    if ! kubectl --namespace garrison wait --for=condition=Available deployment --all --timeout=300s >/dev/null; then
-      echo "workloads still starting after 5 minutes:" >&2
+    # Every pod running and ready since this boot (test/e2e/ready.sh).
+    if ! garrison/test/e2e/ready.sh 600; then
       kubectl --namespace garrison get pods >&2
       exit 1
     fi
