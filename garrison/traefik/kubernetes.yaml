@@ -6,7 +6,9 @@
 # /etc/hosts points at this machine. Routes are Ingress objects of the class
 # traefik, in any namespace; the middlewares, such as the login check sso,
 # and the default certificate are in dynamic.yaml (the file provider), named
-# <name>@file.
+# <name>@file. An app's own middleware, such as the header with its ingress
+# key, is a Middleware object in its namespace (Traefik's CRD, in
+# crds.kubernetes.yaml), named <namespace>-<name>@kubernetescrd.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -46,6 +48,9 @@ rules:
   - apiGroups: [networking.k8s.io]
     resources: [ingresses/status]
     verbs: [update]
+  - apiGroups: [traefik.io]
+    resources: [middlewares, middlewaretcps, ingressroutes, ingressroutetcps, ingressrouteudps, tlsoptions, tlsstores, traefikservices, serverstransports, serverstransporttcps]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -93,6 +98,9 @@ spec:
           image: traefik:v3.6
           args:
             - --providers.kubernetesingress.ingressclass=traefik
+            # Only for Middleware objects, each used in its own namespace.
+            - --providers.kubernetescrd
+            - --providers.kubernetescrd.allowCrossNamespace=false
             - --providers.file.filename=/etc/traefik/dynamic.yaml
             - --entrypoints.web.address=:80
             - --entrypoints.web.http.redirections.entrypoint.to=websecure

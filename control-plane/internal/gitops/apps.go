@@ -358,15 +358,8 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		// Without the list, nothing may be taken down.
 		return prev, []error{fmt.Errorf("list units: %w", err)}
 	}
-	// Apps pull their images from the registry with the deployer's
-	// credentials. Without them, nothing is deployed; signing in is tried again
-	// on every sync, since after a boot Gitea may still be starting.
-	if !c.signedIn {
-		if err := c.registryLogin(ctx); err != nil {
-			return prev, []error{fmt.Errorf("sign in to the registry, needed to deploy apps: %w", err)}
-		}
-		c.signedIn = true
-	}
+	// Apps pull their images from the registry with the platform's pull
+	// secret, which apply.Stack copies into each app's namespace.
 	reg := hostnames.NewRegistry(c.reserved())
 	if err := reg.Load(c.claimsFile()); err != nil {
 		return prev, []error{err}
@@ -539,7 +532,7 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 		if _, ok := next[key]; ok {
 			continue
 		}
-		if _, err := c.Run(ctx, nil, nil, "docker", "stack", "rm", a.Stack); err != nil {
+		if err := apply.Remove(ctx, c.Run, a.Stack); err != nil {
 			fail(a.Unit, a.Source, "", "remove %s: %v", key, err)
 			next[key] = a
 			continue
@@ -600,9 +593,3 @@ func (c *Config) missingImages(ctx context.Context, s *stack.Stack, commit strin
 	return missing
 }
 
-// registryLogin signs the deployer's Docker client in to the installation's
-// registry, so deploys can hand Swarm the credentials to pull app images.
-func (c *Config) registryLogin(ctx context.Context) error {
-	_, err := c.Run(ctx, nil, []byte(c.password), "docker", "login", render.Registry(c.Domain), "--username", c.User, "--password-stdin")
-	return err
-}

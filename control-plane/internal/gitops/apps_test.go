@@ -127,11 +127,11 @@ func (f *fakeApps) run(_ context.Context, _ []string, stdin []byte, name string,
 	defer f.mu.Unlock()
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
-	if strings.HasPrefix(call, "docker stack deploy") {
+	if deployOf(call) != "" {
 		if f.composes == nil {
 			f.composes = map[string]string{}
 		}
-		f.composes[args[len(args)-1]] = string(stdin)
+		f.composes[deployOf(call)] = string(stdin)
 	}
 	dirArg := func() string {
 		if i := slices.Index(args, "-C"); i >= 0 {
@@ -140,6 +140,8 @@ func (f *fakeApps) run(_ context.Context, _ []string, stdin []byte, name string,
 		return args[len(args)-1]
 	}
 	switch {
+	case strings.HasPrefix(call, "kubectl get secret registry-pull"):
+		return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"registry-pull"},"data":{".dockerconfigjson":"e30="}}`), nil
 	case name == "git" && (slices.Contains(args, "clone") || slices.Contains(args, "reset")):
 		dir := dirArg()
 		os.RemoveAll(dir)
@@ -165,11 +167,27 @@ func (f *fakeApps) run(_ context.Context, _ []string, stdin []byte, name string,
 	return nil, nil
 }
 
+// deployOf is the stack a call applies, as apply.Stack does: kubectl apply
+// into the environment's namespace, pruning by the stack's label; or "".
+func deployOf(call string) string {
+	if !strings.HasPrefix(call, "kubectl apply --namespace app-") || !strings.Contains(call, " --prune ") {
+		return ""
+	}
+	_, after, _ := strings.Cut(call, "--selector garrison.io/stack=")
+	stack, _, _ := strings.Cut(after, " ")
+	return stack
+}
+
+// removal is the call that takes the stack down: its namespace goes.
+func removal(stack string) string {
+	return "kubectl delete namespace app-" + stack + " --ignore-not-found --wait=false"
+}
+
 func (f *fakeApps) deployed() []string {
 	var out []string
 	for _, c := range f.calls {
-		if strings.HasPrefix(c, "docker stack deploy") {
-			out = append(out, c[strings.LastIndex(c, " ")+1:])
+		if st := deployOf(c); st != "" {
+			out = append(out, st)
 		}
 	}
 	return out
@@ -221,11 +239,9 @@ func TestAppsDeployOnceTheirImageExists(t *testing.T) {
 	if _, ok := apps["homepage/todo@dev"]; ok {
 		t.Error("dev deployed without its image")
 	}
-	// The image's placeholders were filled in for the commit.
-	for _, call := range f.calls {
-		if strings.HasPrefix(call, "docker stack deploy") && !strings.Contains(call, "--with-registry-auth") {
-			t.Errorf("deploy without registry credentials: %s", call)
-		}
+	// Its namespace gets the platform's pull secret, for the image.
+	if !slices.Contains(f.calls, "kubectl get secret registry-pull --namespace garrison --output json") {
+		t.Errorf("deploy without the pull secret: %v", f.calls)
 	}
 
 	// The pipeline pushes dev's image: dev is deployed as dev-todo; main is not redeployed.
@@ -248,7 +264,7 @@ func TestAppsDeployOnceTheirImageExists(t *testing.T) {
 	delete(f.commits, "homepage/todo@dev")
 	f.calls = nil
 	apps, _ = c.syncApps(ctx, false, apps)
-	if !slices.Contains(f.calls, "docker stack rm dev-todo") || slices.Contains(f.calls, "docker stack rm todo") {
+	if !slices.Contains(f.calls, removal("dev-todo")) || slices.Contains(f.calls, removal("todo")) {
 		t.Errorf("calls = %v", f.calls)
 	}
 	if _, ok := apps["homepage/todo@dev"]; ok {
@@ -277,37 +293,12 @@ func TestAppsDeployOnceTheirImageExists(t *testing.T) {
 	delete(f.files["homepage/config@main"], "stacks/todo.yaml")
 	f.calls = nil
 	apps, _ = c.syncApps(ctx, false, apps)
-	if !slices.Contains(f.calls, "docker stack rm todo") || len(apps) != 0 {
+	if !slices.Contains(f.calls, removal("todo")) || len(apps) != 0 {
 		t.Errorf("calls = %v, apps = %v", f.calls, apps)
 	}
 	data, _ := os.ReadFile(c.claimsFile())
 	if strings.Contains(string(data), `"todo"`) {
 		t.Errorf("claims still hold todo: %s", data)
-	}
-}
-
-func TestNoAppIsDeployedWithoutRegistryCredentials(t *testing.T) {
-	c, f := setupApps(t)
-	failLogin := true
-	run := c.Run
-	c.Run = func(ctx context.Context, env []string, stdin []byte, name string, args ...string) ([]byte, error) {
-		if name == "docker" && len(args) > 0 && args[0] == "login" && failLogin {
-			return nil, os.ErrDeadlineExceeded
-		}
-		return run(ctx, env, stdin, name, args...)
-	}
-	apps, errs := c.syncApps(context.Background(), false, map[string]App{})
-	if len(errs) == 0 || len(f.deployed()) != 0 || len(apps) != 0 {
-		t.Errorf("deployed without credentials: errs %v, deployed %v", errs, f.deployed())
-	}
-	// Gitea is up now: the next sync signs in and deploys.
-	failLogin = false
-	apps, errs = c.syncApps(context.Background(), false, apps)
-	if len(errs) != 0 || strings.Join(f.deployed(), " ") != "todo" {
-		t.Errorf("after signing in: errs %v, deployed %v", errs, f.deployed())
-	}
-	if !slices.Contains(f.calls, "docker login git.example.com --username admin --password-stdin") {
-		t.Errorf("calls = %v", f.calls)
 	}
 }
 
@@ -402,7 +393,7 @@ func TestPullRequestsGetPreviews(t *testing.T) {
 	}
 	removed := false
 	for _, call := range f.calls {
-		removed = removed || call == "docker stack rm pr-7-todo"
+		removed = removed || call == removal("pr-7-todo")
 	}
 	if !removed {
 		t.Errorf("not taken down: %v", f.calls)
@@ -437,7 +428,7 @@ func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
 	f.calls = nil
 	apps, _ = c.syncApps(ctx, false, apps)
 	snap := f.called("zfs snapshot -r garrison/ns/homepage/stacks/todo@deploy-")
-	deploy := slices.IndexFunc(f.calls, func(s string) bool { return strings.HasPrefix(s, "docker stack deploy") })
+	deploy := slices.IndexFunc(f.calls, func(s string) bool { return deployOf(s) != "" })
 	if len(snap) != 1 || !strings.HasSuffix(snap[0], "-eeeeeee") || deploy < slices.Index(f.calls, snap[0]) {
 		t.Errorf("calls = %v", f.calls)
 	}
@@ -460,7 +451,7 @@ func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
 	f.calls = nil
 	c.restoreTried = nil
 	c.syncApps(ctx, false, apps)
-	if got := f.called("docker service scale"); len(got) != 0 {
+	if got := f.called("kubectl scale deployment"); len(got) != 0 {
 		t.Errorf("restored twice: %v", got)
 	}
 
@@ -526,7 +517,7 @@ func TestEnvironmentsSurviveManyBranches(t *testing.T) {
 	if _, ok := apps["homepage/todo@main"]; !ok {
 		t.Errorf("main is gone: %+v", apps)
 	}
-	if rm := f.called("docker stack rm"); len(rm) != 0 {
+	if rm := f.called("kubectl delete namespace"); len(rm) != 0 {
 		t.Errorf("took down %v", rm)
 	}
 }
@@ -544,7 +535,7 @@ func TestPrivateEnvironmentsGetTheirIngressKey(t *testing.T) {
 		t.Fatalf("keys %q and %q", main, dev)
 	}
 	for stack, key := range map[string]string{"todo": main, "dev-todo": dev} {
-		if got := f.composes[stack]; !strings.Contains(got, "GARRISON_INGRESS_KEY: "+key) || !strings.Contains(got, "X-Garrison-Ingress: "+key) {
+		if got := f.composes[stack]; !strings.Contains(got, "name: GARRISON_INGRESS_KEY\n              value: "+key) || !strings.Contains(got, "X-Garrison-Ingress: "+key) {
 			t.Errorf("%s deployed without its key:\n%s", stack, got)
 		}
 	}
@@ -576,11 +567,8 @@ func TestOnlyMainGetsStoredSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	o, err := c.options(ctx, s, "main", "c1", cfg)
-	if err != nil || o.Secrets["api-key"].Value != "the key" || len(o.Secrets) != 1 || o.SwarmSecret(s, "other") != "todo.other" {
+	if err != nil || o.Secrets["api-key"].Value != "the key" || len(o.Secrets) != 1 || o.Secrets["api-key"].Version == "" {
 		t.Fatalf("main: %+v %v", o.Secrets, err)
-	}
-	if !strings.HasPrefix(o.SwarmSecret(s, "api-key"), "todo.api-key.") {
-		t.Errorf("swarm secret %s", o.SwarmSecret(s, "api-key"))
 	}
 	if o, err := c.options(ctx, s, "dev", "c1", cfg); err != nil || o.Secrets != nil || len(decrypted) != 1 {
 		t.Errorf("dev got stored secrets: %+v %v", o.Secrets, err)

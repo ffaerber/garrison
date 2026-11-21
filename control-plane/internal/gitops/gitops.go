@@ -58,7 +58,6 @@ type Config struct {
 	password string
 	home     string            // HOME for git, holding the .netrc
 	waiting  map[string]string // app environment -> commit whose image is awaited, to log it once
-	signedIn bool              // the Docker client is signed in to the registry
 
 	snapsChanged bool            // the deployer took or restored a snapshot since snapshots.json was written
 	snapsListed  time.Time       // when snapshots.json was last written

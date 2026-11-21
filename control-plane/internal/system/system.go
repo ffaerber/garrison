@@ -24,7 +24,8 @@ import (
 
 const (
 	// Manifest is the file that makes a directory, or a repo of garrison, a
-	// system stack.
+	// system stack. Files named *.kubernetes.yaml beside it are applied with
+	// it, after it, e.g. a vendored CustomResourceDefinition.
 	Manifest = "kubernetes.yaml"
 	// Namespace is where the platform runs.
 	Namespace = "garrison"
@@ -89,6 +90,17 @@ func Render(s Stack, env []string) ([]byte, error) {
 	data, err := os.ReadFile(filepath.Join(s.Dir, Manifest))
 	if err != nil {
 		return nil, err
+	}
+	more, err := filepath.Glob(filepath.Join(s.Dir, "*."+Manifest))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range more {
+		extra, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		data = append(append(data, "\n---\n"...), extra...)
 	}
 	hash, err := Hash(s.Dir)
 	if err != nil {

@@ -23,18 +23,16 @@ groups:
           summary: "{{ $labels.service }} runs {{ $value }} of its tasks"
           description: "The service {{ $labels.service }} of the app {{ $labels.app }} ({{ $labels.environment }}) in {{ $labels.unit }} has run fewer tasks than it should for 5 minutes."
       # An app's entrypoint answers with server errors. Traefik names its
-      # service after the hostname, the app's stack.
+      # service as Kubernetes does; garrison_route_info, the deployer's,
+      # says whose it is.
       - alert: HighErrorRate
         expr: |
           (
-            (
-              sum by (stack) (label_replace(rate(traefik_service_requests_total{code=~"5.."}[5m]), "stack", "$1", "service", "(.+)@swarm"))
-              / sum by (stack) (label_replace(rate(traefik_service_requests_total[5m]), "stack", "$1", "service", "(.+)@swarm"))
-              > 0.2
-            )
-            and on (stack) (sum by (stack) (label_replace(rate(traefik_service_requests_total[5m]), "stack", "$1", "service", "(.+)@swarm")) > 0.05)
+            sum by (stack, unit, app, environment) (rate(traefik_service_requests_total{code=~"5.."}[5m]) * on (service) group_left (stack, unit, app, environment) garrison_route_info)
+            / sum by (stack, unit, app, environment) (rate(traefik_service_requests_total[5m]) * on (service) group_left (stack, unit, app, environment) garrison_route_info)
+            > 0.2
           )
-          * on (stack) group_left (unit, app, environment) group by (stack, unit, app, environment) (garrison_service_replicas_desired{unit!="system"})
+          and on (stack) (sum by (stack) (rate(traefik_service_requests_total[5m]) * on (service) group_left (stack) garrison_route_info) > 0.05)
         for: 5m
         labels: { severity: warning }
         annotations:

@@ -185,6 +185,10 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 	os.WriteFile(filepath.Join(dir, "applied.json"), []byte(`{"stacks":{"grafana":"0123456789abcdef"},"apps":{"homepage/todo@main":{"unit":"homepage","repo":"todo","environment":"main","stack":"todo","commit":"fedcba9876543210"}}}`), 0o644)
 	os.WriteFile(filepath.Join(dir, "snapshots.json"), []byte(`{"todo":{"unit":"homepage","snapshots":[{"name":"deploy-20261113-150405-abc1234","created":"2026-11-13T15:04:05Z"}]}}`), 0o644)
 	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" && args[0] == "get" && args[1] == "deployments,statefulsets,daemonsets" && slices.Contains(args, "--all-namespaces") {
+			return []byte(`{"items":[{"kind":"Deployment","metadata":{"name":"web","labels":{"garrison.io/stack":"todo","garrison.unit":"homepage"}},
+				"spec":{"replicas":1,"template":{"spec":{"containers":[{"image":"git.example.com/homepage/todo:fedcba987654"}]}}},"status":{"readyReplicas":1}}]}`), nil
+		}
 		if name == "kubectl" && args[0] == "get" && args[1] == "deployments,statefulsets,daemonsets" {
 			return []byte(`{"items":[{"kind":"Deployment","metadata":{"name":"grafana","labels":{"garrison.io/stack":"grafana"}},
 				"spec":{"replicas":1,"template":{"spec":{"containers":[{"image":"grafana/grafana:12"}]}}},"status":{"readyReplicas":1}}]}`), nil
@@ -193,9 +197,6 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 			return []byte(`{"items":[{"metadata":{"name":"grafana-abc"},"status":{"phase":"Running","containerStatuses":[
 				{"name":"grafana","ready":false,"restartCount":3,"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off"}},
 				 "lastState":{"terminated":{"reason":"Error","exitCode":1}}}]}}]}`), nil
-		}
-		if name == "docker" && len(args) > 1 && args[0] == "service" && args[1] == "ls" {
-			return []byte("grafana\t1/1\tgrafana/grafana:12\nhello_web\t1/1\twhoami\ntodo_web\t1/1\tgit.example.com/homepage/todo:fedcba987654\n"), nil
 		}
 		return []byte("log line\n"), nil
 	}
@@ -304,7 +305,7 @@ func TestEveryoneMayLook(t *testing.T) {
 		t.Errorf("stack_status = %q", text)
 	}
 	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"unit": "homepage"})
-	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || strings.Contains(text, "grafana") {
+	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || !strings.Contains(text, "  todo_web 1/1 git.example.com/homepage/todo:fedcba987654") || strings.Contains(text, "grafana") {
 		t.Errorf("list_stacks homepage = %q", text)
 	}
 	text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"unit": "homepage", "stack": "todo"})

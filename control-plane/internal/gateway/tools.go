@@ -18,6 +18,7 @@ import (
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/changes"
 	"garrison/control-plane/internal/gitops"
+	"garrison/control-plane/internal/render"
 	"garrison/control-plane/internal/stack"
 	"garrison/control-plane/internal/system"
 	"garrison/templates"
@@ -311,8 +312,7 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if a.Unit == PlatformUnit {
 			return t.podStatus(ctx, system.Namespace, a.Stack)
 		}
-		out, err := t.Run(ctx, nil, nil, "docker", "stack", "ps", "--no-trunc", "--format", "{{.Name}}\t{{.CurrentState}}\t{{.Error}}", a.Stack)
-		return firstLines(string(out), 40), err
+		return t.podStatus(ctx, render.NamespaceOf(a.Stack), a.Stack)
 	case "service_logs":
 		n := a.Lines
 		if n <= 0 || n > 500 {
@@ -321,15 +321,15 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if a.Unit == PlatformUnit {
 			return t.workloadLogs(ctx, system.Namespace, a.Service, n)
 		}
-		stack, _, ok := strings.Cut(a.Service, "_")
+		stack, svc, ok := strings.Cut(a.Service, "_")
 		if !ok || !swarmName.MatchString(a.Service) {
 			return "", fmt.Errorf("%w: service %q is not <stack>_<service>", ErrInvalid, a.Service)
 		}
 		if err := t.ownStack(a.Unit, stack); err != nil {
 			return "", err
 		}
-		// Containers log to both streams. The names are arguments, never part of the script.
-		out, err := t.Run(ctx, nil, nil, "sh", "-c", `docker service logs --tail "$1" --no-task-ids --timestamps "$2" 2>&1`, "sh", fmt.Sprint(n), a.Service)
+		out, err := t.Run(ctx, nil, nil, "kubectl", "logs", "--namespace", render.NamespaceOf(stack), "deployment/"+svc,
+			"--all-containers", "--timestamps", "--tail", fmt.Sprint(n))
 		return string(out), err
 	case "list_snapshots":
 		if err := t.ownStack(a.Unit, a.Stack); err != nil {
@@ -883,9 +883,10 @@ func (t *Tools) Stacks(ctx context.Context, unit string) ([]Stack, error) {
 	}
 	var byStack map[string][]Service
 	if unit == PlatformUnit {
-		byStack, err = t.workloads(ctx, system.Namespace)
+		byStack, err = t.workloads(ctx, false, "--namespace", system.Namespace)
 	} else {
-		byStack, err = t.swarmServices(ctx)
+		// Every environment of the unit's apps, each in its own namespace.
+		byStack, err = t.workloads(ctx, true, "--all-namespaces", "--selector", render.LabelUnit+"="+unit)
 	}
 	if err != nil {
 		return nil, err
@@ -898,30 +899,12 @@ func (t *Tools) Stacks(ctx context.Context, unit string) ([]Stack, error) {
 	return stacks, nil
 }
 
-// swarmServices are the Swarm services, by stack: the apps', until they
-// move to Kubernetes too.
-func (t *Tools) swarmServices(ctx context.Context) (map[string][]Service, error) {
-	out, err := t.Run(ctx, nil, nil, "docker", "service", "ls", "--format", "{{.Name}}\t{{.Replicas}}\t{{.Image}}")
-	if err != nil {
-		return nil, err
-	}
-	byStack := map[string][]Service{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		f := strings.Split(line, "\t")
-		if len(f) != 3 {
-			continue
-		}
-		stack, _, _ := strings.Cut(f[0], "_")
-		running, desired, _ := strings.Cut(strings.Fields(f[1])[0], "/")
-		byStack[stack] = append(byStack[stack], Service{Name: f[0], Replicas: f[1], Image: f[2], Healthy: running == desired && desired != "0"})
-	}
-	return byStack, nil
-}
-
-// workloads are the Deployments, StatefulSets and DaemonSets of a
-// namespace, by the stack they belong to (system.StackLabel).
-func (t *Tools) workloads(ctx context.Context, namespace string) (map[string][]Service, error) {
-	out, err := t.Run(ctx, nil, nil, "kubectl", "get", "deployments,statefulsets,daemonsets", "--namespace", namespace, "--output", "json")
+// workloads are the Deployments, StatefulSets and DaemonSets that kubectl
+// finds with where (a namespace, or a selector), by the stack they belong to
+// (system.StackLabel). An app's are named <stack>_<service>, as service_logs
+// takes them, and as they were on Swarm.
+func (t *Tools) workloads(ctx context.Context, apps bool, where ...string) (map[string][]Service, error) {
+	out, err := t.Run(ctx, nil, nil, "kubectl", append([]string{"get", "deployments,statefulsets,daemonsets", "--output", "json"}, where...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -967,7 +950,11 @@ func (t *Tools) workloads(ctx context.Context, namespace string) (map[string][]S
 		if c := w.Spec.Template.Spec.Containers; len(c) > 0 {
 			image = c[0].Image
 		}
-		byStack[stack] = append(byStack[stack], Service{Name: w.Metadata.Name, Replicas: fmt.Sprintf("%d/%d", ready, desired),
+		name := w.Metadata.Name
+		if apps {
+			name = stack + "_" + name
+		}
+		byStack[stack] = append(byStack[stack], Service{Name: name, Replicas: fmt.Sprintf("%d/%d", ready, desired),
 			Image: image, Healthy: ready == desired && desired > 0, kind: strings.ToLower(w.Kind)})
 	}
 	return byStack, nil
@@ -1042,7 +1029,7 @@ func (t *Tools) workloadLogs(ctx context.Context, namespace, name string, lines 
 	if !swarmName.MatchString(name) {
 		return "", fmt.Errorf("%w: service %q", ErrInvalid, name)
 	}
-	byStack, err := t.workloads(ctx, namespace)
+	byStack, err := t.workloads(ctx, false, "--namespace", namespace)
 	if err != nil {
 		return "", err
 	}

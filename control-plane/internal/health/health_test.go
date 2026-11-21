@@ -11,6 +11,14 @@ import (
 func TestMetrics(t *testing.T) {
 	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
 	run := func(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
+		if args[1] == "ingresses" {
+			return []byte(`{"items":[
+ {"kind":"Ingress","metadata":{"name":"web","namespace":"app-todo","labels":{"garrison.unit":"todo","garrison.app":"todo","garrison.environment":"main","garrison.io/stack":"todo"}},
+  "spec":{"rules":[{"host":"todo.example.com","http":{"paths":[{"backend":{"service":{"name":"web","port":{"name":"http"}}}}]}}]}},
+ {"kind":"Ingress","metadata":{"name":"gitea","namespace":"garrison","labels":{"garrison.io/stack":"gitea"}},
+  "spec":{"rules":[{"http":{"paths":[{"backend":{"service":{"name":"gitea","port":{"name":"http"}}}}]}}]}}
+]}`), nil
+		}
 		if args[1] == "pods" {
 			return []byte(`{"items":[
  {"metadata":{"name":"web-1","namespace":"todo","labels":{"app":"web"}},"status":{"phase":"Running","containerStatuses":[
@@ -45,6 +53,7 @@ func TestMetrics(t *testing.T) {
 		`garrison_service_failed_tasks{unit="todo",app="quotes",environment="main",stack="quotes",service="quotes-web"} 2`,
 		`garrison_service_replicas_running{unit="garrison",app="gitea",environment="main",stack="gitea",service="gitea"} 1`,
 		`garrison_pod_info{namespace="garrison",pod="gitea-x",unit="garrison",app="gitea",environment="main",stack="gitea",service="gitea"} 1`,
+		`garrison_route_info{service="app-todo-web-http@kubernetes",unit="todo",app="todo",environment="main",stack="todo"} 1`,
 		`garrison_sandbox_info{namespace="garrison-sandboxes",pod="garrison-agent-1",unit="todo",agent="todo/developer",person="bob",chat="channel:abc"} 1`,
 		`garrison_pod_info{namespace="todo",pod="web-2",unit="todo",app="quotes",environment="main",stack="quotes",service="quotes-web"} 1`,
 	} {

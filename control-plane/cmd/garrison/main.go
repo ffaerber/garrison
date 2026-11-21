@@ -649,7 +649,7 @@ func renderCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	out, err := render.Swarm(s, o)
+	out, err := render.Kubernetes(s, o)
 	if err != nil {
 		return err
 	}

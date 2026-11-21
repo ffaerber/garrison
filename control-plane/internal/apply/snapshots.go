@@ -181,33 +181,21 @@ func RestoreEnv(ctx context.Context, run Runner, root string, s *stack.Stack, en
 	return err
 }
 
-// stopStack scales a stack's services to nothing and waits until their
-// containers are gone.
+// stopStack scales an environment's Deployments to nothing and waits until
+// their pods are gone. Applying the stack again brings them back.
 func stopStack(ctx context.Context, run Runner, name string) error {
-	label := "label=com.docker.stack.namespace=" + name
-	out, err := run(ctx, nil, nil, "docker", "service", "ls", "-q", "--filter", label)
-	if err != nil {
-		return err
-	}
-	ids := strings.Fields(string(out))
-	if len(ids) == 0 {
-		return nil
-	}
-	args := []string{"service", "scale", "--detach"}
-	for _, id := range ids {
-		args = append(args, id+"=0")
-	}
-	if _, err := run(ctx, nil, nil, "docker", args...); err != nil {
+	ns := render.NamespaceOf(name)
+	if _, err := run(ctx, nil, nil, "kubectl", "scale", "deployment", "--all", "--replicas", "0", "--namespace", ns); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(StopTimeout)
 	for {
-		out, err := run(ctx, nil, nil, "docker", "ps", "-q", "--filter", label)
+		out, err := run(ctx, nil, nil, "kubectl", "get", "pods", "--namespace", ns, "--output", "name")
 		if err == nil && strings.TrimSpace(string(out)) == "" {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the services of %s did not stop within %s", name, StopTimeout)
+			return fmt.Errorf("the pods of %s did not stop within %s", name, StopTimeout)
 		}
 		select {
 		case <-ctx.Done():

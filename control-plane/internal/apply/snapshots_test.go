@@ -17,7 +17,7 @@ type zfsFake struct {
 	datasets map[string]bool
 	snaps    map[string][]string // dataset -> snapshot names, oldest first
 	props    map[string]string
-	running  int // containers left; each docker ps sees one fewer
+	running  int // pods left; each kubectl get pods sees one fewer
 	calls    []string
 }
 
@@ -59,12 +59,10 @@ func (f *zfsFake) run(_ context.Context, _ []string, _ []byte, name string, args
 			return []byte(v + "\n"), nil
 		}
 		return []byte("-\n"), nil
-	case strings.HasPrefix(call, "docker service ls"):
-		return []byte("svc1\nsvc2\n"), nil
-	case strings.HasPrefix(call, "docker ps"):
+	case strings.HasPrefix(call, "kubectl get pods"):
 		if f.running > 0 {
 			f.running--
-			return []byte("c1\n"), nil
+			return []byte("pod/todo-db-1\n"), nil
 		}
 	}
 	return nil, nil
@@ -139,7 +137,7 @@ func TestRestoreEnv(t *testing.T) {
 	if !slices.Contains(f.snaps[env+"/todo-db"], RestoreSnapshot+"20261113-150405") {
 		t.Errorf("no snapshot of the state before: %v", f.snaps)
 	}
-	scale := slices.Index(f.calls, "docker service scale --detach svc1=0 svc2=0")
+	scale := slices.Index(f.calls, "kubectl scale deployment --all --replicas 0 --namespace app-todo")
 	copy := slices.Index(f.calls, "rsync -aH --numeric-ids --delete /garrison/ns/homepage/stacks/todo/todo-db/.zfs/snapshot/deploy-1/ /garrison/ns/homepage/stacks/todo/todo-db/")
 	if scale < 0 || copy < scale {
 		t.Errorf("calls = %v", f.calls)

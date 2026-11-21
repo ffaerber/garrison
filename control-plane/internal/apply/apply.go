@@ -1,5 +1,5 @@
-// Package apply deploys a rendered stack to the local Swarm: it creates the
-// ZFS datasets and Swarm secrets the stack needs, then runs the deploy.
+// Package apply deploys a rendered stack to Kubernetes: it creates the ZFS
+// datasets, the namespace and the secrets the stack needs, then applies it.
 package apply
 
 import (
@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,20 +39,21 @@ func Exec(ctx context.Context, env []string, stdin []byte, name string, args ...
 	return out, nil
 }
 
-// Stack deploys one environment of s. It is safe to run again: existing
-// datasets and secrets are kept, and Swarm updates the stack in place.
+// Stack deploys one environment of s, in its own namespace. It is safe to
+// run again: existing datasets and secrets are kept, and kubectl apply
+// changes only what differs, and prunes what the stack no longer has.
 func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) error {
 	if o.DataRoot == "" {
 		o.DataRoot = render.DefaultDataRoot
 	}
-	compose, err := render.Swarm(s, o)
+	manifests, err := render.Kubernetes(s, o)
 	if err != nil {
 		return err
 	}
+	ns := render.Namespace(s, o.Environment)
 
 	for _, name := range s.ServiceNames() {
-		svc := s.Services[name]
-		for _, v := range svc.Volumes {
+		for _, v := range s.Services[name].Volumes {
 			if v.Share != "" {
 				err = EnsureDataset(ctx, run, render.SharePath(o.DataRoot, s.Unit, v.Share), "")
 			} else {
@@ -61,43 +63,19 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 				return err
 			}
 		}
-		for _, sec := range svc.Secrets {
-			name := o.SwarmSecret(s, sec)
-			if st, ok := o.Secrets[sec]; ok {
-				err = ensureStored(ctx, run, name, st.Value)
-			} else {
-				err = ensureSecret(ctx, run, name)
-			}
-			if err != nil {
-				return err
-			}
-		}
 	}
-
-	// --with-registry-auth: images from the installation's registry need the
-	// credentials the deployer signed in with.
-	_, err = run(ctx, nil, compose, "docker", "stack", "deploy", "--detach=true", "--resolve-image", "never", "--with-registry-auth", "--compose-file", "-", render.StackName(s, o.Environment))
+	// The namespace first, then what its pods need before they start: the
+	// pull secret and the secrets; then the rest.
+	namespace, err := json.Marshal(render.NamespaceObject(s, o.Environment))
 	if err != nil {
 		return err
 	}
-	pruneStored(ctx, run, s, o)
-	return nil
-}
-
-// ensureStored creates the Swarm secret holding a version of a stored
-// secret, if it is missing. The value goes to Docker on stdin.
-func ensureStored(ctx context.Context, run Runner, name, value string) error {
-	if _, err := run(ctx, nil, nil, "docker", "secret", "inspect", "--format", "{{.ID}}", name); err == nil {
-		return nil
+	if _, err := run(ctx, nil, namespace, "kubectl", "apply", "--filename", "-"); err != nil {
+		return err
 	}
-	_, err := run(ctx, nil, []byte(value), "docker", "secret", "create", "--label", "garrison.stored=true", name, "-")
-	return err
-}
-
-// pruneStored removes the earlier versions of an environment's stored
-// secrets. Swarm refuses while a task still uses one, as during the update
-// just started: those go on a later deploy.
-func pruneStored(ctx context.Context, run Runner, s *stack.Stack, o render.Options) {
+	if err := copyPullSecret(ctx, run, ns); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, name := range s.ServiceNames() {
 		for _, sec := range s.Services[name].Secrets {
@@ -105,18 +83,113 @@ func pruneStored(ctx context.Context, run Runner, s *stack.Stack, o render.Optio
 				continue
 			}
 			seen[sec] = true
-			prefix := render.SecretName(s, o.Environment, sec) + "."
-			out, err := run(ctx, nil, nil, "docker", "secret", "ls", "--filter", "name="+prefix, "--filter", "label=garrison.stored", "--format", "{{.Name}}")
-			if err != nil {
-				continue
+			if st, ok := o.Secrets[sec]; ok {
+				err = ensureStored(ctx, run, ns, sec, st)
+			} else {
+				err = ensureSecret(ctx, run, ns, sec)
 			}
-			for _, have := range strings.Fields(string(out)) {
-				if strings.HasPrefix(have, prefix) && have != o.SwarmSecret(s, sec) {
-					run(ctx, nil, nil, "docker", "secret", "rm", have)
-				}
+			if err != nil {
+				return err
 			}
 		}
 	}
+	args := []string{"apply", "--namespace", ns, "--filename", "-", "--prune", "--selector", render.LabelStack + "=" + render.StackName(s, o.Environment)}
+	for _, k := range Pruned {
+		args = append(args, "--prune-allowlist", k)
+	}
+	_, err = run(ctx, nil, manifests, "kubectl", args...)
+	return err
+}
+
+// Pruned are the kinds an app's objects are of, which kubectl apply
+// deletes when the stack no longer has one of them.
+var Pruned = []string{
+	"apps/v1/Deployment", "core/v1/Service", "networking.k8s.io/v1/Ingress",
+	"networking.k8s.io/v1/NetworkPolicy", "traefik.io/v1alpha1/Middleware",
+}
+
+// Remove takes an environment off the cluster: its namespace, with all in
+// it, its secrets too. Its datasets are kept.
+func Remove(ctx context.Context, run Runner, stackName string) error {
+	_, err := run(ctx, nil, nil, "kubectl", "delete", "namespace", render.NamespaceOf(stackName), "--ignore-not-found", "--wait=false")
+	return err
+}
+
+// copyPullSecret puts the platform's pull secret (render.PullSecret, in
+// garrison) into ns, for the installation's images.
+func copyPullSecret(ctx context.Context, run Runner, ns string) error {
+	out, err := run(ctx, nil, nil, "kubectl", "get", "secret", render.PullSecret, "--namespace", "garrison", "--output", "json")
+	if err != nil {
+		return err
+	}
+	var sec map[string]any
+	if err := json.Unmarshal(out, &sec); err != nil {
+		return err
+	}
+	sec["metadata"] = map[string]any{"name": render.PullSecret, "namespace": ns}
+	data, err := json.Marshal(sec)
+	if err != nil {
+		return err
+	}
+	_, err = run(ctx, nil, data, "kubectl", "apply", "--filename", "-")
+	return err
+}
+
+// secretObject is a Secret of one key, both named name, as a pod mounts it
+// at /run/secrets/<name>. The value goes to kubectl on stdin.
+func secretObject(ns, name, value string, labels, annotations map[string]string) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata":   map[string]any{"name": name, "namespace": ns, "labels": labels, "annotations": annotations},
+		"stringData": map[string]string{name: value},
+	})
+}
+
+// ensureStored puts a stored secret's value into its Secret, unless that
+// holds this version already. A new version restarts the pods, whose
+// template carries the version.
+func ensureStored(ctx context.Context, run Runner, ns, name string, st render.Stored) error {
+	out, err := run(ctx, nil, nil, "kubectl", "get", "secret", name, "--namespace", ns, "--ignore-not-found",
+		"--output", `jsonpath={.metadata.annotations.garrison\.io/version}`)
+	if err == nil && strings.TrimSpace(string(out)) == st.Version {
+		return nil
+	}
+	data, err := secretObject(ns, name, st.Value, map[string]string{render.LabelStored: "true"}, map[string]string{"garrison.io/version": st.Version})
+	if err != nil {
+		return err
+	}
+	_, err = run(ctx, nil, data, "kubectl", "apply", "--filename", "-")
+	return err
+}
+
+// ensureSecret makes a Secret with a random value if it is missing, or if
+// it held a stored secret that is gone. The value never leaves this
+// function but to kubectl, on stdin.
+func ensureSecret(ctx context.Context, run Runner, ns, name string) error {
+	out, err := run(ctx, nil, nil, "kubectl", "get", "secret", name, "--namespace", ns, "--ignore-not-found",
+		"--output", `jsonpath={.metadata.name} {.metadata.labels.garrison\.stored}`)
+	if err != nil {
+		return err
+	}
+	switch strings.TrimSpace(string(out)) {
+	case name:
+		return nil // generated earlier
+	case name + " true":
+		// Was a stored secret: it gets a value of its own again.
+		if _, err := run(ctx, nil, nil, "kubectl", "delete", "secret", name, "--namespace", ns); err != nil {
+			return err
+		}
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return err
+	}
+	data, err := secretObject(ns, name, hex.EncodeToString(buf), nil, nil)
+	if err != nil {
+		return err
+	}
+	_, err = run(ctx, nil, data, "kubectl", "create", "--filename", "-")
+	return err
 }
 
 // EnsureDataset creates the ZFS dataset mounted at path if it is missing and,
@@ -134,20 +207,6 @@ func EnsureDataset(ctx context.Context, run Runner, path, size string) error {
 	}
 	// ZFS spells 5Gi as 5G; both mean powers of 1024.
 	_, err := run(ctx, nil, nil, "zfs", "set", "quota="+strings.TrimSuffix(size, "i"), dataset)
-	return err
-}
-
-// ensureSecret creates a Swarm secret with a random value if it is missing.
-// The value never leaves this function.
-func ensureSecret(ctx context.Context, run Runner, name string) error {
-	if _, err := run(ctx, nil, nil, "docker", "secret", "inspect", "--format", "{{.ID}}", name); err == nil {
-		return nil
-	}
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return err
-	}
-	_, err := run(ctx, nil, []byte(hex.EncodeToString(buf)), "docker", "secret", "create", name, "-")
 	return err
 }
 

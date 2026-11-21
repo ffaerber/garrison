@@ -1,0 +1,272 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: app-dev-jellyfin
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: stack
+  namespace: app-dev-jellyfin
+spec:
+  ingress:
+    - from:
+        - podSelector: {}
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: admin
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: admin
+  namespace: app-dev-jellyfin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      garrison.io/service: admin
+  template:
+    metadata:
+      labels:
+        garrison.app: jellyfin
+        garrison.environment: dev
+        garrison.io/service: admin
+        garrison.io/stack: dev-jellyfin
+        garrison.unit: media
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - image: example/jellyfin-admin:1.0
+          name: admin
+          ports:
+            - containerPort: 8080
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: registry-pull
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: admin
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: admin
+  namespace: app-dev-jellyfin
+spec:
+  clusterIP: None
+  ports:
+    - name: http
+      port: 8080
+  selector:
+    garrison.io/service: admin
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: sso@file
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: admin
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: admin
+  namespace: app-dev-jellyfin
+spec:
+  rules:
+    - host: dev-jellyfin-admin.example.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: admin
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: app
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: app
+  namespace: app-dev-jellyfin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      garrison.io/service: app
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        garrison.app: jellyfin
+        garrison.environment: dev
+        garrison.io/service: app
+        garrison.io/stack: dev-jellyfin
+        garrison.unit: media
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - env:
+            - name: JELLYFIN_PublishedServerUrl
+              value: https://dev-jellyfin.example.com/
+            - name: PRICE
+              value: 5$
+          image: jellyfin/jellyfin:10.10
+          name: app
+          ports:
+            - containerPort: 8096
+          resources:
+            limits:
+              memory: 4Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - mountPath: /config
+              name: v-config
+            - mountPath: /media
+              name: v-media
+              readOnly: true
+            - mountPath: /run/secrets
+              name: secrets
+              readOnly: true
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: registry-pull
+      volumes:
+        - hostPath:
+            path: /tank/media/stacks/dev-jellyfin/jellyfin-config
+            type: Directory
+          name: v-config
+        - hostPath:
+            path: /tank/media/shares/media-library
+            type: Directory
+          name: v-media
+        - name: secrets
+          projected:
+            sources:
+              - secret:
+                  name: jellyfin-api-key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: app
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: app
+  namespace: app-dev-jellyfin
+spec:
+  clusterIP: None
+  ports:
+    - name: http
+      port: 8096
+  selector:
+    garrison.io/service: app
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: sso@file
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: app
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: app
+  namespace: app-dev-jellyfin
+spec:
+  rules:
+    - host: dev-jellyfin.example.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: app
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: redis
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: redis
+  namespace: app-dev-jellyfin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      garrison.io/service: redis
+  template:
+    metadata:
+      labels:
+        garrison.app: jellyfin
+        garrison.environment: dev
+        garrison.io/service: redis
+        garrison.io/stack: dev-jellyfin
+        garrison.unit: media
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - image: redis:7
+          name: redis
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: registry-pull
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/service: redis
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: redis
+  namespace: app-dev-jellyfin
+spec:
+  clusterIP: None
+  selector:
+    garrison.io/service: redis

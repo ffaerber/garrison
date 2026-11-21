@@ -51,6 +51,22 @@ type object struct {
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
+		// Of an Ingress:
+		Rules []struct {
+			HTTP struct {
+				Paths []struct {
+					Backend struct {
+						Service struct {
+							Name string `json:"name"`
+							Port struct {
+								Name   string `json:"name"`
+								Number int    `json:"number"`
+							} `json:"port"`
+						} `json:"service"`
+					} `json:"backend"`
+				} `json:"paths"`
+			} `json:"http"`
+		} `json:"rules"`
 		Replicas *int `json:"replicas"`
 		Selector struct {
 			MatchLabels map[string]string `json:"matchLabels"`
@@ -98,10 +114,43 @@ type Sandbox struct {
 	Namespace, Pod, Unit, Agent, Person, Chat string
 }
 
+// Route is how Traefik names the service of an app's Ingress in its
+// metrics (<namespace>-<service>-<port>@kubernetes), and whose app it is.
+type Route struct {
+	Traefik, Unit, App, Environment, Stack string
+}
+
 // Services reads every workload's health.
 func (k *Kubernetes) Services(ctx context.Context) ([]Service, error) {
 	svcs, _, err := k.collect(ctx)
 	return svcs, err
+}
+
+// routes lists the apps' routes, from their Ingress objects.
+func (k *Kubernetes) routes(ctx context.Context) ([]Route, error) {
+	ingresses, err := k.list(ctx, "ingresses")
+	if err != nil {
+		return nil, err
+	}
+	var out []Route
+	for _, in := range ingresses {
+		l := in.Metadata.Labels
+		if l[render.LabelUnit] == "" {
+			continue // the platform's own
+		}
+		for _, r := range in.Spec.Rules {
+			for _, p := range r.HTTP.Paths {
+				b := p.Backend.Service
+				port := b.Port.Name
+				if port == "" {
+					port = fmt.Sprint(b.Port.Number)
+				}
+				out = append(out, Route{Traefik: in.Metadata.Namespace + "-" + b.Name + "-" + port + "@kubernetes",
+					Unit: l[render.LabelUnit], App: l[render.LabelApp], Environment: l[render.LabelEnvironment], Stack: l[system.StackLabel]})
+			}
+		}
+	}
+	return out, nil
 }
 
 // collect reads every workload's health, and the sandboxes.
@@ -191,6 +240,10 @@ func selects(selector, labels map[string]string) bool {
 func (k *Kubernetes) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		svcs, sandboxes, err := k.collect(r.Context())
+		var routes []Route
+		if err == nil {
+			routes, err = k.routes(r.Context())
+		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		var b strings.Builder
 		up := 1
@@ -223,6 +276,13 @@ func (k *Kubernetes) Handler() http.Handler {
 				fmt.Fprintf(&b, "garrison_pod_info{namespace=%q,pod=%q,unit=%q,app=%q,environment=%q,stack=%q,service=%q} 1\n",
 					s.Namespace, p, s.Unit, s.App, s.Environment, s.Stack, s.Service)
 			}
+		}
+		// Traefik's metrics name a route's service as Traefik does; joined
+		// with this (* on (service) group_left (stack, unit, app, environment)),
+		// they name its app. The alert HighErrorRate does so.
+		b.WriteString("# HELP garrison_route_info An app's route, as Traefik names its service; always 1.\n# TYPE garrison_route_info gauge\n")
+		for _, r := range routes {
+			fmt.Fprintf(&b, "garrison_route_info{service=%q,unit=%q,app=%q,environment=%q,stack=%q} 1\n", r.Traefik, r.Unit, r.App, r.Environment, r.Stack)
 		}
 		// Joined the same way, a sandbox's metrics name its agent and person.
 		b.WriteString("# HELP garrison_sandbox_info An agent's sandbox, by namespace and pod; always 1.\n# TYPE garrison_sandbox_info gauge\n")

@@ -8,9 +8,11 @@ tests:
         values: '0 1 3 4 4 4 4'
       - series: 'garrison_service_replicas_desired{unit="todo",app="todo",environment="main",stack="todo",service="todo_web"}'
         values: '1x20'
-      - series: 'traefik_service_requests_total{service="todo@swarm",code="500"}'
+      - series: 'garrison_route_info{service="app-todo-web-http@kubernetes",unit="todo",app="todo",environment="main",stack="todo"}'
+        values: '1x20'
+      - series: 'traefik_service_requests_total{service="app-todo-web-http@kubernetes",code="500"}'
         values: '0+10x20'
-      - series: 'traefik_service_requests_total{service="todo@swarm",code="200"}'
+      - series: 'traefik_service_requests_total{service="app-todo-web-http@kubernetes",code="200"}'
         values: '0+10x20'
     alert_rule_test:
       - eval_time: 3m
