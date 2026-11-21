@@ -133,7 +133,7 @@ YAML
 # The node keeps the name it was installed with, also when the machine's
 # hostname changes (a cloned test VM): a new name would be a new node, and
 # the pods would wait on the old one, unreachable, for minutes.
-node_name=$(sed -n 's/^node-name: //p' /etc/rancher/k3s/config.yaml 2>/dev/null)
+node_name=$(sed -n 's/^node-name: //p' /etc/rancher/k3s/config.yaml 2>/dev/null || true)
 [ -n "$node_name" ] || node_name=$(hostname -s)
 k3s_config=$(printf '# Written by the Garrison installer; changes are overwritten.\ndefault-runtime: crun\nnode-name: %s\n' "$node_name")
 if [ "$(cat /etc/rancher/k3s/config.yaml 2>/dev/null)" != "$k3s_config" ]; then
