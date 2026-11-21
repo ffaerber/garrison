@@ -1,0 +1,118 @@
+# Who may reach which pod of the platform, in the namespace garrison. These
+# NetworkPolicies take the place of Swarm's separate networks; k3s enforces
+# them (kube-router).
+#
+# Nothing reaches a pod here unless a policy below lets it. Two kinds of
+# traffic always do: from the machine itself, so Traefik (on the host's
+# network) reaches every routed service and the kubelet its probes; and
+# within a pod. Pods of other namespaces, the apps' later, reach nothing
+# here. Docker containers outside the cluster are known by their network's
+# range: the pipelines' jobs (garrison-builds, 10.200.0.0/24) and the
+# agents' sandboxes (garrison-sandboxes, 10.201.0.0/24), both made by install.sh.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-by-default
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# The system network: Postgres, Keycloak, Gitea, the control plane's
+# services, Grafana, Prometheus, Loki and Open WebUI reach each other.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: system
+spec:
+  podSelector: { matchLabels: { garrison.io/net: system } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { garrison.io/net: system } } }]
+---
+# Prometheus scrapes every pod's metrics port here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: from-prometheus
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: prometheus } } }]
+---
+# Gitea for the runners and their jobs: Git and the API on its port, and
+# nothing else of the platform.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gitea-for-builds
+spec:
+  podSelector: { matchLabels: { app: gitea } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: runner } }
+        - podSelector: { matchLabels: { app: user-runner } }
+        - ipBlock: { cidr: 10.200.0.0/24 }
+      ports: [{ port: 3000 }]
+---
+# The guarded Docker API of the user runner: only that runner.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: guard
+spec:
+  podSelector: { matchLabels: { app: guard } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: user-runner } } }]
+      ports: [{ port: 2375 }]
+---
+# The guarded Docker API for sandboxes: only the agent service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-guard
+spec:
+  podSelector: { matchLabels: { app: sandbox-guard } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: agents } } }]
+      ports: [{ port: 2375 }]
+---
+# The agents' browser, whose DevTools have no password: only the gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: browser
+spec:
+  podSelector: { matchLabels: { app: browser } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: gateway } } }]
+      ports: [{ port: 9222 }]
+---
+# Loki takes the logs Alloy ships.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: loki-from-alloy
+spec:
+  podSelector: { matchLabels: { app: loki } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: alloy } } }]
+      ports: [{ port: 3100 }]
+---
+# The sandboxes reach the agent service's LLM and tools (8071) and its
+# internet proxy (8072), not its API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agents-for-sandboxes
+spec:
+  podSelector: { matchLabels: { app: agents } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ ipBlock: { cidr: 10.201.0.0/24 } }]
+      ports: [{ port: 8071 }, { port: 8072 }]

@@ -2,6 +2,10 @@
 
 What is built, measured against `docs/spec.md`. Updated with each slice.
 
+## On the branch k3s: moving from Docker Swarm to Kubernetes
+
+The platform runs on k3s (v1.37.2, pods under crun): every system stack is a `kubernetes.yaml` that the deployer applies with `kubectl` in the namespace `garrison`; Traefik routes Ingress objects; Secrets, ConfigMaps from the stacks' files, ZFS datasets as hostPath volumes; NetworkPolicies take the place of Swarm's networks (`garrison/platform`); metrics come from the kubelet and the Kubernetes API, logs from Alloy reading pods. The VM steps base, install and login are green on it. The agents' sandboxes, the apps (render, snapshots, restores, previews, the gate) and more machines are still to move, so the rest of what follows describes main, on Swarm. How Garrison uses Kubernetes: [kubernetes.md](kubernetes.md).
+
 ## Works, tested end to end on a fresh Ubuntu 26.04 VM
 
 `test/vm/steps.sh` runs the end-to-end test as a tree on Multipass VMs: fixtures (base, install, login, agent, deploy, team), saved as snapshots, and scenarios, each in a throwaway clone of its fixture, up to four at once; see `test/README.md`.
