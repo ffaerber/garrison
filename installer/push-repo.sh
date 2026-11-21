@@ -43,7 +43,10 @@ fi
 
 # Remember tags this repo's build set, replace the contents, put the tags back.
 tag=
-[ -f "$work/repo/kubernetes.yaml" ] && tag=$(grep -oE "/$full:[A-Za-z0-9._-]+" "$work/repo/kubernetes.yaml" | head -n1 | sed 's/.*://')
+# Most repos have no image of their own: grep then finds nothing, which is no error.
+if [ -f "$work/repo/kubernetes.yaml" ]; then
+  tag=$(grep -oE "/$full:[A-Za-z0-9._-]+" "$work/repo/kubernetes.yaml" | head -n1 | sed 's/.*://' || true)
+fi
 find "$work/repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 cp -r "$src"/. "$work/repo/"
 if [ -n "$tag" ] && [ "$tag" != bootstrap ]; then
