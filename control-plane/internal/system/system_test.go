@@ -1,8 +1,10 @@
 package system
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -154,6 +156,53 @@ func TestWaitAndRemove(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// Every Deployment and StatefulSet of the platform's stacks runs on the main
+// machine, where their data, Docker and Traefik's address are; DaemonSets
+// run on every machine.
+func TestPlatformRunsOnTheMainMachine(t *testing.T) {
+	dirs, err := filepath.Glob("../../../garrison/*/" + Manifest)
+	if err != nil || len(dirs) < 10 {
+		t.Fatalf("stacks: %v %v", dirs, err)
+	}
+	for _, m := range dirs {
+		d := filepath.Dir(m)
+		out, err := Render(Stack{Name: filepath.Base(d), Dir: d}, []string{"DOMAIN=example.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dec := yaml.NewDecoder(bytes.NewReader(out))
+		for {
+			var obj struct {
+				Kind     string `yaml:"kind"`
+				Metadata struct {
+					Name string `yaml:"name"`
+				} `yaml:"metadata"`
+				Spec struct {
+					Template struct {
+						Spec struct {
+							NodeSelector map[string]string `yaml:"nodeSelector"`
+						} `yaml:"spec"`
+					} `yaml:"template"`
+				} `yaml:"spec"`
+			}
+			if dec.Decode(&obj) != nil {
+				break
+			}
+			pinned := obj.Spec.Template.Spec.NodeSelector[MainNodeLabel] == "true"
+			switch obj.Kind {
+			case "Deployment", "StatefulSet":
+				if !pinned {
+					t.Errorf("%s: %s %s does not run on the main machine", filepath.Base(d), obj.Kind, obj.Metadata.Name)
+				}
+			case "DaemonSet":
+				if pinned {
+					t.Errorf("%s: DaemonSet %s is kept to the main machine", filepath.Base(d), obj.Metadata.Name)
+				}
+			}
 		}
 	}
 }

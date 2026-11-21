@@ -234,8 +234,9 @@ wait_stack() {
 # the database, routing, login, Gitea and its Actions runner. Each is a repo of
 # the `garrison` organisation (see garrison/). Then the deployer takes over and
 # deploys every repo of that organisation, these included.
-# platform first: its NetworkPolicies say who reaches whom from the start.
-BOOTSTRAP="platform postgres traefik keycloak sso gitea runner"
+# platform first: its NetworkPolicies say who reaches whom from the start;
+# then openebs, which the apps' volumes need.
+BOOTSTRAP="platform openebs postgres traefik keycloak sso gitea runner"
 
 # The host has the CLI too: it applies these stacks as the deployer later
 # does, and stays for admins (garrison applied, apply, ...).

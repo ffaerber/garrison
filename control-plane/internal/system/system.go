@@ -178,9 +178,18 @@ func label(obj *yaml.Node, name string) error {
 	// its selector, which cannot change.
 	if tmpl := field(field(obj, "spec"), "template"); tmpl != nil && tmpl.Kind == yaml.MappingNode {
 		set(child(child(tmpl, "metadata", yaml.MappingNode), "labels", yaml.MappingNode), StackLabel, name)
+		// The platform's Deployments and StatefulSets run on the main
+		// machine, where its data (hostPath under /garrison/system), Docker
+		// and Traefik's address are. DaemonSets run on every machine.
+		if kind == "Deployment" || kind == "StatefulSet" {
+			set(child(child(tmpl, "spec", yaml.MappingNode), "nodeSelector", yaml.MappingNode), MainNodeLabel, "true")
+		}
 	}
 	return nil
 }
+
+// MainNodeLabel is the label k3s gives its server, the main machine.
+const MainNodeLabel = "node-role.kubernetes.io/control-plane"
 
 // takeFiles fills a ConfigMap's data with the files its annotation names.
 func takeFiles(obj *yaml.Node, dir string) error {

@@ -1,0 +1,561 @@
+# OpenEBS ZFS LocalPV: the apps' data on the ZFS pool of whichever machine
+# holds it (docs/kubernetes.md, "More machines"). The deployer writes each
+# volume itself (control-plane/internal/apply/volumes.go): a ZFSVolume that
+# names the dataset and its machine, whose OpenEBS agent creates it, and a
+# PersistentVolume that sends the pods there.
+#
+# First the StorageClass those volumes name, and the zfs DaemonSet through
+# which the deployer runs ZFS, rsync and mount on each machine; then, below
+# the line, OpenEBS's own objects, vendored from openebs/zfs-localpv v2.11.2,
+# deploy/zfs-operator.yaml, unchanged but for the image tag (the release's,
+# not the file's prerelease) and the namespace, garrison in place of
+# kube-system. Its CRDs are in crds.kubernetes.yaml.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: garrison-zfs
+provisioner: zfs.csi.openebs.io
+parameters: { fstype: zfs, poolname: garrison/ns }
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+# The deployer's hands on each machine: it runs `kubectl exec` here, and
+# nsenter into the host's namespaces, for zfs, rsync and mount on the
+# machine that holds an environment's data (apply.NodeExec). Nothing else
+# uses it; the deployer itself runs without privileges.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: zfs
+spec:
+  selector:
+    matchLabels: { app: zfs }
+  template:
+    metadata:
+      labels: { app: zfs }
+    spec:
+      automountServiceAccountToken: false
+      hostPID: true
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 1
+      tolerations: [{ operator: Exists }]
+      containers:
+        - name: zfs
+          image: busybox:1.37
+          command: [sleep, infinity]
+          securityContext: { privileged: true }
+          resources:
+            requests: { cpu: 1m, memory: 4Mi }
+            limits: { memory: 32Mi }
+# ---------- OpenEBS ZFS LocalPV v2.11.2 ----------
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: openebs-zfs-csi-controller-critical
+value: 900000000
+globalDefault: false
+description: "This priority class should be used for the CStor CSI driver controller deployment only."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: openebs-zfs-csi-node-critical
+value: 900001000
+globalDefault: false
+description: "This priority class should be used for the CStor CSI driver node deployment only."
+---
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: openebs-zfs-controller-sa
+  namespace: garrison
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    app: "openebs-zfs-controller"
+    component: "openebs-zfs-controller"
+    openebs.io/component-name: "openebs-zfs-controller"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openebs-zfs-node-sa
+  namespace: garrison
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    name: "openebs-zfs-node"
+    app: "openebs-zfs-node"
+    openebs.io/component-name: "openebs-zfs-node"
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: openebs-zfspv-bin
+  namespace: garrison
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    name: "openebs-zfs-node"
+    app: "openebs-zfs-node"
+    openebs.io/component-name: "openebs-zfs-node"
+data:
+  zfs: |
+    #!/bin/sh
+    if [ -x /host/sbin/zfs ]; then
+      chroot /host /sbin/zfs "$@"
+    elif [ -x /host/usr/sbin/zfs ]; then
+      chroot /host /usr/sbin/zfs "$@"
+    else
+      chroot /host "zfs" "$@"
+    fi
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openebs-zfs-provisioner-role
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    app: "openebs-zfs-controller"
+    component: "openebs-zfs-controller"
+    openebs.io/component-name: "openebs-zfs-controller"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "services"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csinodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [ "storage.k8s.io" ]
+    resources: [ "csistoragecapacities"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "watch", "list", "delete", "update", "create"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["*"]
+    resources: ["zfsvolumes", "zfssnapshots", "zfsbackups", "zfsrestores", "zfsnodes"]
+    verbs: ["*"]
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openebs-zfs-snapshotter-role
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    app: "openebs-zfs-controller"
+    component: "openebs-zfs-controller"
+    openebs.io/component-name: "openebs-zfs-controller"
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["create", "get", "list", "watch", "update", "delete", "patch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots/status"]
+    verbs: ["update"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create", "list", "watch", "delete"]
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openebs-zfs-driver-registrar-role
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    name: "openebs-zfs-node"
+    app: "openebs-zfs-node"
+    openebs.io/component-name: "openebs-zfs-node"
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "nodes", "services"]
+    verbs: ["get", "list"]
+  - apiGroups: ["*"]
+    resources: ["zfsvolumes", "zfssnapshots", "zfsbackups", "zfsrestores", "zfsnodes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openebs-zfs-provisioner-binding
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    app: "openebs-zfs-controller"
+    component: "openebs-zfs-controller"
+    openebs.io/component-name: "openebs-zfs-controller"
+subjects:
+  - kind: ServiceAccount
+    name: openebs-zfs-controller-sa
+    namespace: garrison
+roleRef:
+  kind: ClusterRole
+  name: openebs-zfs-provisioner-role
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openebs-zfs-snapshotter-binding
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    app: "openebs-zfs-controller"
+    component: "openebs-zfs-controller"
+    openebs.io/component-name: "openebs-zfs-controller"
+subjects:
+  - kind: ServiceAccount
+    name: openebs-zfs-controller-sa
+    namespace: garrison
+roleRef:
+  kind: ClusterRole
+  name: openebs-zfs-snapshotter-role
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: openebs-zfs-driver-registrar-binding
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    name: "openebs-zfs-node"
+    app: "openebs-zfs-node"
+    openebs.io/component-name: "openebs-zfs-node"
+subjects:
+  - kind: ServiceAccount
+    name: openebs-zfs-node-sa
+    namespace: garrison
+roleRef:
+  kind: ClusterRole
+  name: openebs-zfs-driver-registrar-role
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: openebs-zfs-localpv-node
+  namespace: garrison
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    name: "openebs-zfs-node"
+    app: "openebs-zfs-node"
+    openebs.io/component-name: "openebs-zfs-node"
+spec:
+  selector:
+    matchLabels:
+      name: "openebs-zfs-node"
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 100%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        openebs.io/version: "2.11.2"
+        role: "openebs-zfs"
+        name: "openebs-zfs-node"
+        app: "openebs-zfs-node"
+        openebs.io/component-name: "openebs-zfs-node"
+        
+        openebs.io/logging: "true"
+    spec:
+      priorityClassName: openebs-zfs-csi-node-critical
+      serviceAccountName: openebs-zfs-node-sa
+      hostNetwork: true
+      containers:
+        - name: csi-node-driver-registrar
+          image: "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.13.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--v=5"
+            - "--csi-address=$(ADDRESS)"
+            - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "rm -rf /registration/zfs-localpv /registration/zfs-localpv-reg.sock"]
+          env:
+            - name: ADDRESS
+              value: /plugin/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: "/var/lib/kubelet/plugins/zfs-localpv/csi.sock"
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NODE_DRIVER
+              value: openebs-zfs
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /plugin
+            - name: registration-dir
+              mountPath: /registration
+          resources:
+            {}
+        - name: openebs-zfs-plugin
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+          image: "docker.io/openebs/zfs-driver:2.11.2"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--nodename=$(OPENEBS_NODE_NAME)"
+            - "--endpoint=$(OPENEBS_CSI_ENDPOINT)"
+            - "--plugin=$(OPENEBS_NODE_DRIVER)"
+          env:
+            - name: OPENEBS_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: OPENEBS_CSI_ENDPOINT
+              value: unix:///plugin/csi.sock
+            - name: OPENEBS_NODE_DRIVER
+              value: agent
+            - name: OPENEBS_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ALLOWED_TOPOLOGIES
+              value: "All"
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /plugin
+            - name: device-dir
+              mountPath: /dev
+            - name: encr-keys
+              mountPath: /home/keys
+            - name: chroot-zfs
+              mountPath: /sbin/zfs
+              subPath: zfs
+            - name: host-root
+              mountPath: /host
+              mountPropagation: "HostToContainer"
+              readOnly: true
+            - name: pods-mount-dir
+              mountPath: "/var/lib/kubelet/"
+              # needed so that any mounts setup inside this container are
+              # propagated back to the host machine.
+              mountPropagation: "Bidirectional"
+          resources:
+            {}
+      volumes:
+        - name: device-dir
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: encr-keys
+          hostPath:
+            path: /home/keys
+            type: DirectoryOrCreate
+        - name: chroot-zfs
+          configMap:
+            defaultMode: 0555
+            name: openebs-zfspv-bin
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: "/var/lib/kubelet/plugins_registry/"
+            type: DirectoryOrCreate
+        - name: plugin-dir
+          hostPath:
+            path: "/var/lib/kubelet/plugins/zfs-localpv/"
+            type: DirectoryOrCreate
+        - name: pods-mount-dir
+          hostPath:
+            path: "/var/lib/kubelet/"
+            type: Directory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openebs-zfs-localpv-controller
+  namespace: garrison
+  labels:
+    openebs.io/version: "2.11.2"
+    role: "openebs-zfs"
+    app: "openebs-zfs-controller"
+    component: "openebs-zfs-controller"
+    openebs.io/component-name: "openebs-zfs-controller"
+spec:
+  selector:
+    matchLabels:
+      app: "openebs-zfs-controller"
+      component: "openebs-zfs-controller"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        openebs.io/version: "2.11.2"
+        role: "openebs-zfs"
+        app: "openebs-zfs-controller"
+        component: "openebs-zfs-controller"
+        openebs.io/component-name: "openebs-zfs-controller"
+        
+        name: openebs-zfs-controller
+        
+        openebs.io/logging: "true"
+    spec:
+      priorityClassName: openebs-zfs-csi-controller-critical
+      serviceAccountName: openebs-zfs-controller-sa
+      containers:
+        - name: csi-resizer
+          image: "registry.k8s.io/sig-storage/csi-resizer:v1.13.2"
+          args:
+            - "--v=5"
+            - "--csi-address=$(ADDRESS)"            
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          resources:
+            {}
+        - name: csi-snapshotter
+          image: "registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--csi-address=$(ADDRESS)"            
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          resources:
+            {}
+        - name: snapshot-controller
+          image: "registry.k8s.io/sig-storage/snapshot-controller:v8.2.0"
+          args:
+            - "--v=5"            
+          imagePullPolicy: IfNotPresent
+          resources:
+            {}
+        - name: csi-provisioner
+          image: "registry.k8s.io/sig-storage/csi-provisioner:v5.2.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--v=5"
+            - "--feature-gates=Topology=true"
+            - "--strict-topology"
+            - "--enable-capacity=true"
+            - "--extra-create-metadata=true"
+            - "--default-fstype=ext4"            
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          resources:
+            {}
+        - name: openebs-zfs-plugin
+          image: "docker.io/openebs/zfs-driver:2.11.2"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENEBS_CONTROLLER_DRIVER
+              value: controller
+            - name: OPENEBS_CSI_ENDPOINT
+              value: unix:///var/lib/csi/sockets/pluginproxy/csi.sock
+            - name: OPENEBS_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OPENEBS_IO_INSTALLER_TYPE
+              value: "zfs-operator"
+            - name: OPENEBS_IO_ENABLE_ANALYTICS
+              value: "true"
+            - name: OPENEBS_IO_ENABLE_BACKUP_GC
+              value: "false"
+          args :
+            - "--endpoint=$(OPENEBS_CSI_ENDPOINT)"
+            - "--plugin=$(OPENEBS_CONTROLLER_DRIVER)"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          resources:
+            {}
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+---
+# Create the CSI Driver object
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: zfs.csi.openebs.io
+spec:
+  # do not require volumeattachment
+  attachRequired: false
+  podInfoOnMount: false
+  storageCapacity: true
