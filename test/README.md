@@ -23,7 +23,7 @@ The agents run on Ollama on this computer by default (`qwen3.8-64k`), reached fr
 
 A **fixture** is a state scenarios start from; green, it is saved as a snapshot of its own VM. A **scenario** is a test: it runs in a fresh clone of its fixture's VM, which is deleted when it passes and kept, stopped, when it fails (`garrison-test-<scenario>`), so one failure stops nothing else. Up to `JOBS` VMs run at once (8 GB each).
 
-On the branch `k3s`, the platform, the sandboxes and the apps run on Kubernetes; every step is green (`docs/kubernetes.md`). `VM=garrison-k3s test/vm/steps.sh login` keeps those VMs apart from main's.
+The VMs run Garrison on Kubernetes (`docs/kubernetes.md`). `VM=garrison-k3s` names VMs apart from the default ones, as the move to k3s did.
 
 ```
 1 base [F] - 2 install [F] - 3 login [F] -+- 4.1 platform

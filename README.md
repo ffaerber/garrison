@@ -34,10 +34,10 @@ Then open `https://<domain>/` (the dashboard), `https://chat.<domain>` (the team
                                LLM provider          gateway ──acts as you──> Gitea: pull requests
                                                                                  │ you merge
                                                                                  v
-                              Docker Swarm <──deploys── deployer <──webhook── Gitea (main)
+                          Kubernetes (k3s) <──deploys── deployer <──webhook── Gitea (main)
 ```
 
-The control plane (Go, `control-plane/`) is one binary with several roles: the **deployer** applies Git to Docker Swarm, the **gateway** gives agents their tools and keeps units, members and chat in sync, the **agent service** runs each chat in its sandbox, and **home** serves the dashboard.
+The control plane (Go, `control-plane/`) is one binary with several roles: the **deployer** applies Git to Kubernetes (k3s), the **gateway** gives agents their tools and keeps units, members and chat in sync, the **agent service** runs each chat in its sandbox, and **home** serves the dashboard.
 
 ## Learn more
 

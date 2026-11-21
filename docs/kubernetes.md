@@ -2,7 +2,7 @@
 
 Garrison runs on k3s, a complete Kubernetes in one binary. This page explains how Garrison uses Kubernetes, and how what it did on Docker Swarm maps to Kubernetes. It is meant for learning: each section names the files to read.
 
-The move is in progress, on the branch `k3s`. The platform, the agents' sandboxes and the apps run on Kubernetes. More machines follow (see "Still to move").
+The platform, the agents' sandboxes and the apps run on Kubernetes; it used to be Docker Swarm. More machines follow (see "Still to move").
 
 ## The pieces
 
