@@ -311,7 +311,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(count by (name) (container_memory_working_set_bytes{container_label_com_docker_swarm_service_name!=\"\"}))",
+          "expr": "count(garrison_pod_info)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -537,7 +537,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sort_desc(sum by (container_label_com_docker_stack_namespace) (rate(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace!=\"\"}[5m])))",
+          "expr": "sort_desc(sum by (stack) (rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * on (namespace, pod) group_left (stack) garrison_pod_info))",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -582,7 +582,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sort_desc(sum by (container_label_com_docker_stack_namespace) (container_memory_working_set_bytes{container_label_com_docker_stack_namespace!=\"\"}))",
+          "expr": "sort_desc(sum by (stack) (container_memory_working_set_bytes{container!=\"\"} * on (namespace, pod) group_left (stack) garrison_pod_info))",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -626,12 +626,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_stack_namespace) (rate(container_network_receive_bytes_total{container_label_com_docker_stack_namespace!=\"\"}[5m]))",
+          "expr": "sum by (stack) (rate(container_network_receive_bytes_total{interface=\"eth0\"}[5m]) * on (namespace, pod) group_left (stack) garrison_pod_info)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_stack_namespace}}"
+          "legendFormat": "{{stack}}"
         }
       ],
       "fieldConfig": {
@@ -680,12 +680,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_swarm_service_name) (changes(container_start_time_seconds{container_label_com_docker_swarm_service_name!=\"\"}[1h])) > 0",
+          "expr": "sum by (service) (changes(container_start_time_seconds{container!=\"\"}[1h]) * on (namespace, pod) group_left (service) garrison_pod_info) > 0",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_swarm_service_name}}"
+          "legendFormat": "{{service}}"
         }
       ],
       "fieldConfig": {

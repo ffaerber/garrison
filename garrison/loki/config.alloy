@@ -1,40 +1,50 @@
-// Ships the logs of every container on this node to Loki, labelled with the
-// Swarm stack and service they belong to. Not those of agents' sandboxes:
-// their output is Pi's conversation, with whatever the agent read, private
-// repos included, and everyone signed in reads Loki. What agents do is in
-// the logs of the agent service and the gateway: who, which agent, which
-// tool, never what was said.
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
+// Ships the logs of every pod on this node to Loki, labelled with its
+// namespace, the stack it belongs to (garrison.io/stack) and its service
+// (its label app). Not those of agents' sandboxes (garrison.sandbox): their
+// output is Pi's conversation, with whatever the agent read, private repos
+// included, and everyone signed in reads Loki. What agents do is in the logs
+// of the agent service and the gateway: who, which agent, which tool, never
+// what was said.
+discovery.kubernetes "pods" {
+  role = "pod"
+  selectors {
+    role  = "pod"
+    field = "spec.nodeName=" + sys.env("NODE_NAME")
+  }
 }
 
-discovery.relabel "containers" {
-  targets = discovery.docker.containers.targets
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
 
   rule {
-    source_labels = ["__meta_docker_container_label_garrison_sandbox"]
+    source_labels = ["__meta_kubernetes_pod_label_garrison_sandbox"]
     regex         = "true"
     action        = "drop"
   }
-
   rule {
-    source_labels = ["__meta_docker_container_label_com_docker_stack_namespace"]
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_garrison_io_stack"]
     target_label  = "stack"
   }
   rule {
-    source_labels = ["__meta_docker_container_label_com_docker_swarm_service_name"]
+    source_labels = ["__meta_kubernetes_pod_label_app"]
     target_label  = "service"
   }
   rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/(.*)"
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
     target_label  = "container"
   }
 }
 
-loki.source.docker "containers" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.containers.output
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
   forward_to = [loki.write.default.receiver]
 }
 

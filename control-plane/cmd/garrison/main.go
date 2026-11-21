@@ -283,7 +283,6 @@ func deployCmd(args []string) error {
 	apps := fs.Bool("apps", true, "also deploy the apps of every other unit (repos with a stack.yaml)")
 	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
-	dockerSocket := fs.String("docker-socket", "/var/run/docker.sock", "Docker's API, for the services' metrics on -listen (/metrics)")
 	keysDir := fs.String("keys", "", "the units' age keys, which decrypt their stored secrets (e.g. "+etcDir+"/sops); empty: apps with stored secrets are left alone")
 	llmKeys := fs.String("llm-keys", "", "where to write the LLM providers' keys that garrison's config keeps, for the agent service (e.g. "+etcDir+"/llm-keys); empty: not written")
 	feed := eventsFlags(fs)
@@ -362,7 +361,7 @@ func deployCmd(args []string) error {
 		}
 		wake := &hooks.Wake{}
 		c.Wake = wake.Subscribe()
-		extra := map[string]http.Handler{"GET /metrics": (&health.Docker{Socket: *dockerSocket}).Handler()}
+		extra := map[string]http.Handler{"GET /metrics": (&health.Kubernetes{Run: apply.Exec}).Handler()}
 		if keys != nil {
 			// The dashboard asks for a unit's public keys here, to
 			// encrypt the secrets people set.

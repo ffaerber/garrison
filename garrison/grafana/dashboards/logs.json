@@ -110,10 +110,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(container_cpu_usage_seconds_total, container_label_com_docker_stack_namespace)",
+          "query": "label_values(garrison_pod_info, stack)",
           "refId": "v"
         },
-        "definition": "label_values(container_cpu_usage_seconds_total, container_label_com_docker_stack_namespace)",
+        "definition": "label_values(garrison_pod_info, stack)",
         "refresh": 2,
         "sort": 1,
         "multi": true,
@@ -138,10 +138,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace=~\"$stack\"}, container_label_com_docker_swarm_service_name)",
+          "query": "label_values(garrison_pod_info{stack=~\"$stack\"}, service)",
           "refId": "v"
         },
-        "definition": "label_values(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace=~\"$stack\"}, container_label_com_docker_swarm_service_name)",
+        "definition": "label_values(garrison_pod_info{stack=~\"$stack\"}, service)",
         "refresh": 2,
         "sort": 1,
         "multi": true,

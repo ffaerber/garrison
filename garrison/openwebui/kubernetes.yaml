@@ -1,0 +1,119 @@
+# Chat at https://chat.<domain>. People sign in through Keycloak; root admins
+# become Open WebUI admins, everyone else a user. Its one model connection is
+# the agent service (agents), whose models are the agents (folders under
+# agents/ in garrison/config); it runs them, with tools acting as the person
+# chatting: Open WebUI sends their Keycloak token. Open WebUI itself has no
+# LLM key and no tools.
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+spec:
+  selector: { app: openwebui }
+  ports: [{ name: http, port: 8080 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openwebui
+spec:
+  rules:
+    - host: chat.${DOMAIN}
+      http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: openwebui, port: { name: http } } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: openwebui } }
+  template:
+    metadata:
+      labels: { app: openwebui, garrison.io/net: system }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: openwebui
+          image: ghcr.io/open-webui/open-webui:v0.12.4
+          # Open WebUI reads secrets only from its environment, so a wrapper exports
+          # them. Python's HTTP clients bring their own CA bundles; the installation's
+          # certificate is added to each so Keycloak's URL is trusted.
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -e
+              export OAUTH_CLIENT_SECRET="$(</run/secrets/openwebui-oidc-secret)"
+              export WEBUI_SECRET_KEY="$(</run/secrets/openwebui-secret-key)"
+              export WEBUI_ADMIN_PASSWORD="$(</run/secrets/admin-password)"
+              cat /etc/ssl/certs/ca-certificates.crt /run/secrets/tls.crt > /tmp/ca.pem
+              certifi=$(python -c 'import certifi; print(certifi.where())')
+              grep -q 'garrison' "$certifi" || { echo '# garrison'; cat /run/secrets/tls.crt; } >> "$certifi"
+              export SSL_CERT_FILE=/tmp/ca.pem REQUESTS_CA_BUNDLE=/tmp/ca.pem
+              exec bash start.sh
+          env:
+            - { name: WEBUI_URL, value: "https://chat.${DOMAIN}" }
+            - { name: WEBUI_NAME, value: Garrison }
+            # Configuration comes from here, i.e. from Git, on every start.
+            - { name: ENABLE_PERSISTENT_CONFIG, value: "False" }
+            # Local admin for the gateway's sync. People never use it.
+            - { name: WEBUI_ADMIN_EMAIL, value: "installer@${DOMAIN}" }
+            - { name: WEBUI_ADMIN_NAME, value: "Gateway (not the agent)" }
+            - { name: ENABLE_LOGIN_FORM, value: "False" }
+            - { name: ENABLE_SIGNUP, value: "False" }
+            # Sign-in through Keycloak.
+            - { name: ENABLE_OAUTH_SIGNUP, value: "True" }
+            - { name: OAUTH_CLIENT_ID, value: openwebui }
+            - { name: OPENID_PROVIDER_URL, value: "https://keycloak.${DOMAIN}/realms/garrison/.well-known/openid-configuration" }
+            - { name: OPENID_REDIRECT_URI, value: "https://chat.${DOMAIN}/oauth/oidc/callback" }
+            - { name: OAUTH_PROVIDER_NAME, value: Keycloak }
+            - { name: OAUTH_SCOPES, value: openid email profile }
+            - { name: OAUTH_CODE_CHALLENGE_METHOD, value: S256 }
+            # Show people by their username, as Gitea and Grafana do; kept current at each sign-in.
+            - { name: OAUTH_USERNAME_CLAIM, value: preferred_username }
+            - { name: OAUTH_UPDATE_NAME_ON_LOGIN, value: "True" }
+            - { name: ENABLE_OAUTH_ROLE_MANAGEMENT, value: "True" }
+            - { name: OAUTH_ROLES_CLAIM, value: groups }
+            - { name: OAUTH_ALLOWED_ROLES, value: "*" }
+            - { name: OAUTH_ADMIN_ROLES, value: root-admins }
+            - { name: DEFAULT_USER_ROLE, value: user }
+            # The agent service, OpenAI-compatible, with each person's own Keycloak
+            # token. The headers name the chat, and Open WebUI's own tasks (titles,
+            # tags), which go straight to the LLM. Set here, not through the API:
+            # with persistent config off, settings made through the API are lost on
+            # restart.
+            - { name: ENABLE_OLLAMA_API, value: "False" }
+            - { name: ENABLE_OPENAI_API, value: "True" }
+            - { name: OPENAI_API_BASE_URL, value: "http://agents:8070/v1" }
+            - name: OPENAI_API_CONFIGS
+              value: '{"0": {"enable": true, "auth_type": "system_oauth", "headers": {"X-Garrison-Chat": "{{CHAT_ID}}", "X-Garrison-Task": "{{TASK}}"}}}'
+            # New chats start with the commander, which finds the agent for a task.
+            - { name: DEFAULT_MODELS, value: garrison/commander }
+            # One channel per unit, kept by the gateway: the team chat
+            # where people mention the agents.
+            - { name: ENABLE_CHANNELS, value: "True" }
+            - { name: ENABLE_DIRECT_CONNECTIONS, value: "False" }
+            - { name: ENABLE_COMMUNITY_SHARING, value: "False" }
+            - { name: ENABLE_VERSION_UPDATE_CHECK, value: "False" }
+            - { name: ANONYMIZED_TELEMETRY, value: "False" }
+            - { name: DO_NOT_TRACK, value: "True" }
+            - { name: SCARF_NO_ANALYTICS, value: "True" }
+          ports: [{ containerPort: 8080 }]
+          volumeMounts:
+            - { name: data, mountPath: /app/backend/data }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            periodSeconds: 10
+            failureThreshold: 60
+      volumes:
+        - { name: data, hostPath: { path: /garrison/system/openwebui, type: DirectoryOrCreate } }
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: openwebui-oidc-secret }
+              - secret: { name: openwebui-secret-key }
+              - secret: { name: admin-password }
+              - secret: { name: tls, items: [{ key: tls.crt, path: tls.crt }] }

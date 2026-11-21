@@ -1,0 +1,90 @@
+# Logs. Alloy, one per node, ships the logs of every pod on its node to
+# Loki, labelled with namespace, stack and service (config.alloy). Loki has
+# no login of its own, so it is not routed: Grafana reads it inside the cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-files
+  annotations:
+    garrison.io/files: config.alloy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+spec:
+  selector: { app: loki }
+  ports: [{ name: http, port: 3100 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: loki } }
+  template:
+    metadata:
+      labels: { app: loki, garrison.io/net: system }
+    spec:
+      automountServiceAccountToken: false
+      # The dataset is owned by root.
+      securityContext: { runAsUser: 0 }
+      containers:
+        - name: loki
+          image: grafana/loki:3.6.0
+          args: [-config.file=/etc/loki/local-config.yaml]
+          ports: [{ containerPort: 3100 }]
+          volumeMounts: [{ name: data, mountPath: /loki }]
+          readinessProbe:
+            httpGet: { path: /ready, port: 3100 }
+            periodSeconds: 10
+      volumes:
+        - { name: data, hostPath: { path: /garrison/system/loki, type: Directory } }
+---
+# Alloy reads pods and their logs through the API server.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: garrison-alloy
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garrison-alloy
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: garrison-alloy }
+subjects: [{ kind: ServiceAccount, name: alloy, namespace: garrison }]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+spec:
+  selector: { matchLabels: { app: alloy } }
+  template:
+    metadata:
+      labels: { app: alloy }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.12.0
+          args: [run, /etc/alloy/config.alloy, --storage.path=/var/lib/alloy/data]
+          env:
+            # Each Alloy ships only its own node's pods.
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          volumeMounts: [{ name: files, mountPath: /etc/alloy, readOnly: true }]
+      volumes:
+        - { name: files, configMap: { name: loki-files } }

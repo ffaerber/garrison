@@ -31,14 +31,14 @@ for dir in garrison/*/; do
   [ "$name" = control-plane ] && [ "${result%% *}" = updated ] && plane_commit=${result#updated }
 done
 
-# The deployer only follows Gitea while it runs in Swarm.
-docker service inspect deployer >/dev/null 2>&1 || exit 0
+# The deployer only follows Gitea while it runs in the cluster.
+kubectl --namespace garrison get deployment deployer >/dev/null 2>&1 || exit 0
 
 # A changed control plane is built first; the build sets the new tag.
 if [ -n "$plane_commit" ]; then
   echo "  waiting for the control plane build of $plane_commit"
   deadline=$((SECONDS + 1200))
-  until [ "$(gitea_api GET /repos/garrison/control-plane/raw/compose.yaml)" = 200 ] && grep -q "garrison/control-plane:$plane_commit" "$work/body"; do
+  until [ "$(gitea_api GET /repos/garrison/control-plane/raw/kubernetes.yaml)" = 200 ] && grep -q "garrison/control-plane:$plane_commit" "$work/body"; do
     [ $SECONDS -ge $deadline ] && { echo "the control plane was not built" >&2; exit 1; }
     sleep 10
   done
@@ -51,7 +51,7 @@ while :; do
   behind=
   for dir in garrison/*/; do
     name=$(basename "$dir")
-    [ -f "$dir/compose.yaml" ] || continue
+    [ -f "$dir/kubernetes.yaml" ] || continue
     [ "$(gitea_api GET "/repos/garrison/$name/branches/main")" = 200 ] || { behind+=" $name"; continue; }
     head=$(grep -o '"id":"[0-9a-f]*"' "$work/body" | head -n1 | cut -d'"' -f4)
     garrison applied 2>/dev/null | grep -qx "$name $head" || behind+=" $name"
@@ -59,7 +59,7 @@ while :; do
   [ -z "$behind" ] && break
   if [ $SECONDS -ge $deadline ]; then
     echo "the deployer has not deployed:$behind" >&2
-    docker service logs --tail 20 deployer >&2 || true
+    kubectl --namespace garrison logs --tail 20 deployment/deployer >&2 || true
     exit 1
   fi
   sleep 5

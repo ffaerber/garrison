@@ -130,7 +130,7 @@ func baseSpecs() []Spec {
 		}, "unit", "service"),
 		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
 		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the unit's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"unit": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "unit", "stack"),
-		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*) and cAdvisor container metrics (container_*, with the label container_label_com_docker_swarm_service_name).", map[string]any{"query": str("PromQL expression")}, "query"),
+		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*), the kubelet's container metrics (container_*, labelled with namespace, pod and container) and garrison_pod_info{namespace, pod, unit, stack, service}, which says what a pod belongs to: join with * on (namespace, pod) group_left (stack, service) garrison_pod_info.", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a unit: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"unit": nsArg}, "unit"),
 		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
 		spec("add_provider", "Proposes another LLM provider, an OpenAI-compatible API, in llm/providers.yaml of garrison/config, as a pull request by the person asking; only root admins may. Once merged, its models are listed by the model sync, turned off until a root admin enables them. Never ask for or pass its API key: the person sets it on the dashboard's Models page, whose link the answer gives. If they paste a key into the chat, do not repeat or use it; tell them to replace it at the provider, as the chat keeps it, and to set the new one on that page.", map[string]any{
@@ -353,12 +353,14 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err := t.ownStack(a.Unit, a.Stack); err != nil {
 			return "", err
 		}
-		sel := fmt.Sprintf(`container_label_com_docker_stack_namespace=%q`, a.Stack)
-		cpu, err := t.promQuery(ctx, fmt.Sprintf(`sum by (container_label_com_docker_swarm_service_name) (rate(container_cpu_usage_seconds_total{%s}[5m])) * 100`, sel))
+		// The kubelet's metrics name namespace and pod; garrison_pod_info, the
+		// deployer's, says which stack and service a pod belongs to.
+		join := fmt.Sprintf(`* on (namespace, pod) group_left (service) garrison_pod_info{stack=%q}`, a.Stack)
+		cpu, err := t.promQuery(ctx, fmt.Sprintf(`sum by (service) (rate(container_cpu_usage_seconds_total{container!=""}[5m]) %s) * 100`, join))
 		if err != nil {
 			return "", err
 		}
-		mem, err := t.promQuery(ctx, fmt.Sprintf(`sum by (container_label_com_docker_swarm_service_name) (container_memory_working_set_bytes{%s})`, sel))
+		mem, err := t.promQuery(ctx, fmt.Sprintf(`sum by (service) (container_memory_working_set_bytes{container!=""} %s)`, join))
 		if err != nil {
 			return "", err
 		}

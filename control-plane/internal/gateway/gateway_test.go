@@ -178,7 +178,7 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 			io.WriteString(w, `{"status":"error","error":"parse error"}`)
 			return
 		}
-		io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"container_label_com_docker_swarm_service_name":"grafana"},"value":[1,"12.5"]}]}}`)
+		io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service":"grafana"},"value":[1,"12.5"]}]}}`)
 	}))
 	t.Cleanup(prom.Close)
 	dir := t.TempDir()

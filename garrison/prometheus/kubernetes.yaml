@@ -1,0 +1,152 @@
+# Metrics and alerts. Prometheus scrapes every node (node-exporter), every
+# container (the kubelet's cAdvisor metrics, through the API server), Traefik
+# and the deployer's view of the workloads, and evaluates alerts.yml;
+# Alertmanager hands what fires to the agent service. Neither has a login of
+# its own, so neither is routed: Grafana reads Prometheus inside the cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-files
+  annotations:
+    garrison.io/files: prometheus.yml alerts.yml alertmanager.yml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+# The kubelets' metrics, read through the API server's node proxy.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: garrison-prometheus
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy, nodes/metrics]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garrison-prometheus
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: garrison-prometheus }
+subjects: [{ kind: ServiceAccount, name: prometheus, namespace: garrison }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  selector: { app: prometheus }
+  ports: [{ name: http, port: 9090 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata:
+      labels: { app: prometheus, garrison.io/net: system }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      serviceAccountName: prometheus
+      # The dataset is owned by root.
+      securityContext: { runAsUser: 0 }
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.7.3
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=30d
+          ports: [{ containerPort: 9090 }]
+          volumeMounts:
+            - { name: files, mountPath: /etc/prometheus, readOnly: true }
+            - { name: data, mountPath: /prometheus }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            periodSeconds: 5
+      volumes:
+        - name: files
+          configMap: { name: prometheus-files, items: [{ key: prometheus.yml, path: prometheus.yml }, { key: alerts.yml, path: alerts.yml }] }
+        - { name: data, hostPath: { path: /garrison/system/prometheus, type: Directory } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+spec:
+  selector: { app: alertmanager }
+  ports: [{ name: http, port: 9093 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: alertmanager } }
+  template:
+    metadata:
+      labels: { app: alertmanager, garrison.io/net: system }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.28.1
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=   # one Alertmanager: no peers to gossip with
+          ports: [{ containerPort: 9093 }]
+          volumeMounts:
+            - { name: files, mountPath: /etc/alertmanager, readOnly: true }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+            - { name: data, mountPath: /alertmanager }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9093 }
+            periodSeconds: 5
+      volumes:
+        - name: files
+          configMap: { name: prometheus-files, items: [{ key: alertmanager.yml, path: alertmanager.yml }] }
+        - name: secrets
+          projected:
+            sources: [{ secret: { name: alerts-token } }]
+        - { name: data, emptyDir: {} }
+---
+# One per node. Headless: its name resolves to every node's pod, which
+# Prometheus scrapes each.
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+spec:
+  clusterIP: None
+  selector: { app: node-exporter }
+  ports: [{ name: metrics, port: 9100 }]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+spec:
+  selector: { matchLabels: { app: node-exporter } }
+  template:
+    metadata:
+      labels: { app: node-exporter }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter:v1.10.2
+          args: [--path.rootfs=/host]
+          ports: [{ containerPort: 9100 }]
+          volumeMounts:
+            - { name: root, mountPath: /host, readOnly: true, mountPropagation: HostToContainer }
+      volumes:
+        - { name: root, hostPath: { path: / } }

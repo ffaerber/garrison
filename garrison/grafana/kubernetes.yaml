@@ -1,0 +1,94 @@
+# Dashboards at https://grafana.<domain>. People sign in through Keycloak:
+# everyone signed in can look, root admins can change. Reads metrics from the
+# prometheus stack and logs from the loki stack inside the cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-files
+  annotations:
+    garrison.io/files: datasources.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector: { app: grafana }
+  ports: [{ name: http, port: 3000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+spec:
+  rules:
+    - host: grafana.${DOMAIN}
+      http:
+        paths: [{ path: /, pathType: Prefix, backend: { service: { name: grafana, port: { name: http } } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: grafana } }
+  template:
+    metadata:
+      labels: { app: grafana, garrison.io/net: system }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.3.0
+          env:
+            - { name: GF_SERVER_ROOT_URL, value: "https://grafana.${DOMAIN}" }
+            - { name: GF_DATABASE_TYPE, value: postgres }
+            - { name: GF_DATABASE_HOST, value: "postgres:5432" }
+            - { name: GF_DATABASE_NAME, value: grafana }
+            - { name: GF_DATABASE_USER, value: grafana }
+            - { name: GF_DATABASE_PASSWORD__FILE, value: /run/secrets/grafana-db-password }
+            # Local account for the installer and tests. People never use it.
+            - { name: GF_SECURITY_ADMIN_USER, value: installer }
+            - { name: GF_SECURITY_ADMIN_EMAIL, value: installer@localhost }
+            - { name: GF_SECURITY_ADMIN_PASSWORD__FILE, value: /run/secrets/admin-password }
+            # Sign-in through Keycloak only.
+            - { name: GF_AUTH_DISABLE_LOGIN_FORM, value: "true" }
+            - { name: GF_AUTH_OAUTH_AUTO_LOGIN, value: "true" }
+            - { name: GF_AUTH_SIGNOUT_REDIRECT_URL, value: "https://keycloak.${DOMAIN}/realms/garrison/protocol/openid-connect/logout" }
+            - { name: GF_AUTH_GENERIC_OAUTH_ENABLED, value: "true" }
+            - { name: GF_AUTH_GENERIC_OAUTH_NAME, value: Keycloak }
+            - { name: GF_AUTH_GENERIC_OAUTH_CLIENT_ID, value: grafana }
+            - { name: GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET__FILE, value: /run/secrets/grafana-oidc-secret }
+            - { name: GF_AUTH_GENERIC_OAUTH_SCOPES, value: openid email profile }
+            - { name: GF_AUTH_GENERIC_OAUTH_USE_PKCE, value: "true" }
+            - { name: GF_AUTH_GENERIC_OAUTH_AUTH_URL, value: "https://keycloak.${DOMAIN}/realms/garrison/protocol/openid-connect/auth" }
+            - { name: GF_AUTH_GENERIC_OAUTH_TOKEN_URL, value: "https://keycloak.${DOMAIN}/realms/garrison/protocol/openid-connect/token" }
+            - { name: GF_AUTH_GENERIC_OAUTH_API_URL, value: "https://keycloak.${DOMAIN}/realms/garrison/protocol/openid-connect/userinfo" }
+            - { name: GF_AUTH_GENERIC_OAUTH_TLS_CLIENT_CA, value: /run/secrets/tls.crt }
+            - { name: GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH, value: preferred_username }
+            - { name: GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH, value: preferred_username }
+            # Re-read at every login, so leaving root-admins removes the right.
+            - { name: GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH, value: "contains(groups[*], 'root-admins') && 'GrafanaAdmin' || 'Viewer'" }
+            - { name: GF_AUTH_GENERIC_OAUTH_ALLOW_ASSIGN_GRAFANA_ADMIN, value: "true" }
+            - { name: GF_USERS_AUTO_ASSIGN_ORG_ROLE, value: Viewer }
+            - { name: GF_ANALYTICS_REPORTING_ENABLED, value: "false" }
+            - { name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false" }
+          ports: [{ containerPort: 3000 }]
+          volumeMounts:
+            - { name: datasources, mountPath: /etc/grafana/provisioning/datasources, readOnly: true }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 5
+      volumes:
+        - name: datasources
+          configMap: { name: grafana-files, items: [{ key: datasources.yaml, path: garrison.yaml }] }
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: grafana-db-password }
+              - secret: { name: grafana-oidc-secret }
+              - secret: { name: admin-password }
+              - secret: { name: tls, items: [{ key: tls.crt, path: tls.crt }] }

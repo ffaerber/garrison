@@ -46,7 +46,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}[5m]))",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -91,7 +91,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(container_memory_working_set_bytes{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"})",
+          "expr": "sum(container_memory_working_set_bytes{container!=\"\"} * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -135,7 +135,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(count by (name) (container_memory_working_set_bytes{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}))",
+          "expr": "count(garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -177,7 +177,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(changes(container_start_time_seconds{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}[1h]))",
+          "expr": "sum(changes(container_start_time_seconds{container!=\"\"}[1h]) * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -240,12 +240,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_swarm_service_name) (rate(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_swarm_service_name}}"
+          "legendFormat": "{{service}}"
         }
       ],
       "fieldConfig": {
@@ -294,12 +294,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_swarm_service_name) (container_memory_working_set_bytes{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"})",
+          "expr": "sum by (service) (container_memory_working_set_bytes{container!=\"\"} * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_swarm_service_name}}"
+          "legendFormat": "{{service}}"
         }
       ],
       "fieldConfig": {
@@ -348,12 +348,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_swarm_service_name) (rate(container_network_receive_bytes_total{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (service) (rate(container_network_receive_bytes_total{interface=\"eth0\"}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_swarm_service_name}}"
+          "legendFormat": "{{service}}"
         }
       ],
       "fieldConfig": {
@@ -402,12 +402,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_swarm_service_name) (rate(container_network_transmit_bytes_total{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (service) (rate(container_network_transmit_bytes_total{interface=\"eth0\"}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_swarm_service_name}}"
+          "legendFormat": "{{service}}"
         }
       ],
       "fieldConfig": {
@@ -456,12 +456,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (container_label_com_docker_swarm_service_name) (rate(container_fs_writes_bytes_total{container_label_com_docker_stack_namespace=\"$stack\", container_label_com_docker_swarm_service_name=~\"$service\"}[5m]))",
+          "expr": "sum by (service) (rate(container_fs_writes_bytes_total{container!=\"\"}[5m]) * on (namespace, pod) group_left (service) garrison_pod_info{stack=\"$stack\", service=~\"$service\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "legendFormat": "{{container_label_com_docker_swarm_service_name}}"
+          "legendFormat": "{{service}}"
         }
       ],
       "fieldConfig": {
@@ -510,7 +510,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (service) (rate(traefik_service_requests_total{service=~\"(.+-)?$stack(-.+)?@swarm\"}[5m]))",
+          "expr": "sum by (service) (rate(traefik_service_requests_total{service=~\"(.+-)?$stack(-.+)?@kubernetes\"}[5m]))",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -610,10 +610,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(container_cpu_usage_seconds_total, container_label_com_docker_stack_namespace)",
+          "query": "label_values(garrison_pod_info, stack)",
           "refId": "v"
         },
-        "definition": "label_values(container_cpu_usage_seconds_total, container_label_com_docker_stack_namespace)",
+        "definition": "label_values(garrison_pod_info, stack)",
         "refresh": 2,
         "sort": 1,
         "multi": false,
@@ -630,10 +630,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace=\"$stack\"}, container_label_com_docker_swarm_service_name)",
+          "query": "label_values(garrison_pod_info{stack=\"$stack\"}, service)",
           "refId": "v"
         },
-        "definition": "label_values(container_cpu_usage_seconds_total{container_label_com_docker_stack_namespace=\"$stack\"}, container_label_com_docker_swarm_service_name)",
+        "definition": "label_values(garrison_pod_info{stack=\"$stack\"}, service)",
         "refresh": 2,
         "sort": 1,
         "multi": true,
