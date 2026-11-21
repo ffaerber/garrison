@@ -22,6 +22,8 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+        - ipBlock:
+            cidr: 10.42.0.0/32
   podSelector: {}
   policyTypes:
     - Ingress
@@ -161,14 +163,12 @@ spec:
       imagePullSecrets:
         - name: registry-pull
       volumes:
-        - hostPath:
-            path: /tank/media/stacks/jellyfin/jellyfin-config
-            type: Directory
-          name: v-config
-        - hostPath:
-            path: /tank/media/shares/media-library
-            type: Directory
-          name: v-media
+        - name: v-config
+          persistentVolumeClaim:
+            claimName: data-jellyfin-config
+        - name: v-media
+          persistentVolumeClaim:
+            claimName: share-media-library
         - name: secrets
           projected:
             sources:
@@ -268,3 +268,41 @@ spec:
   clusterIP: None
   selector:
     garrison.io/service: redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: main
+    garrison.io/stack: jellyfin
+    garrison.unit: media
+  name: data-jellyfin-config
+  namespace: app-jellyfin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: garrison-zfs
+  volumeName: jellyfin.jellyfin-config
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: main
+    garrison.io/stack: jellyfin
+    garrison.unit: media
+  name: share-media-library
+  namespace: app-jellyfin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: garrison-zfs
+  volumeName: media.shares.media-library.app-jellyfin

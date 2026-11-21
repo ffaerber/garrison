@@ -52,17 +52,13 @@ func Stack(ctx context.Context, run Runner, s *stack.Stack, o render.Options) er
 	}
 	ns := render.Namespace(s, o.Environment)
 
-	for _, name := range s.ServiceNames() {
-		for _, v := range s.Services[name].Volumes {
-			if v.Share != "" {
-				err = EnsureDataset(ctx, run, render.SharePath(o.DataRoot, s.Unit, v.Share), "")
-			} else {
-				err = EnsureDataset(ctx, run, render.DatasetPath(o.DataRoot, s, o.Environment, v.Dataset), v.Size)
-			}
-			if err != nil {
-				return err
-			}
-		}
+	// Its data: on the machine that has it, or the one chosen for it.
+	node, err := PlaceEnv(ctx, run, s, o.Environment)
+	if err != nil {
+		return err
+	}
+	if err := ensureVolumes(ctx, run, s, o, node); err != nil {
+		return err
 	}
 	// The namespace first, then what its pods need before they start: the
 	// pull secret and the secrets; then the rest.

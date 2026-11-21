@@ -66,6 +66,11 @@ type Options struct {
 	// Members are the unit's people, its admins and members, for
 	// {{members}} in a service's env: their names, comma-separated.
 	Members []string
+	// MainAddress is the main machine's own address on the pod network, as
+	// a CIDR of one address (10.42.0.0/32): Traefik's, on the host's
+	// network there, as pods on other machines see it. Empty on one machine
+	// alone, where the host's traffic to its pods always passes.
+	MainAddress string
 }
 
 // Stored is the value of a stored secret, and its version, which pods carry
@@ -116,10 +121,60 @@ func DatasetPath(root string, s *stack.Stack, env, dataset string) string {
 	return path.Join(root, s.Unit, "stacks", s.Hostname(env), dataset)
 }
 
-// SharePath is where a unit's shared library is mounted on the host.
+// SharePath is where a unit's shared library was mounted on the host,
+// before shares became volumes of OpenEBS; ShareDataset is the dataset now.
 func SharePath(root, unit, share string) string {
 	return path.Join(root, unit, "shares", share)
 }
+
+// An environment's volume and a unit's share each are a ZFSVolume of OpenEBS
+// ZFS LocalPV, whose dataset is <its parent>/<its name>, and whose name is
+// unique among them: an environment's <stack>.<dataset>, a share's
+// <unit>.shares.<share>. Units, stacks and datasets are named without dots.
+// A PersistentVolume of each, in each namespace that mounts it, binds the
+// claim there; the deployer writes both (apply/volumes.go).
+
+// StorageClass is the StorageClass of the volumes (garrison/openebs).
+const StorageClass = "garrison-zfs"
+
+// VolumeName is the ZFSVolume, and the PersistentVolume, of an environment's dataset.
+func VolumeName(s *stack.Stack, env, dataset string) string { return StackName(s, env) + "." + dataset }
+
+// ShareVolume is the ZFSVolume of a unit's share.
+func ShareVolume(unit, share string) string { return unit + ".shares." + share }
+
+// SharePV is the PersistentVolume of a unit's share in the namespace ns.
+func SharePV(unit, share, ns string) string { return ShareVolume(unit, share) + "." + ns }
+
+// EnvParent is the dataset that holds an environment's datasets.
+func EnvParent(root string, s *stack.Stack, env string) string {
+	return strings.TrimPrefix(path.Join(root, s.Unit, "stacks", s.Hostname(env)), "/")
+}
+
+// ShareParent is the dataset that holds a unit's shares.
+func ShareParent(root, unit string) string {
+	return strings.TrimPrefix(path.Join(root, unit, "shares"), "/")
+}
+
+// VolumeDataset is the dataset of an environment's volume.
+func VolumeDataset(root string, s *stack.Stack, env, dataset string) string {
+	return EnvParent(root, s, env) + "/" + VolumeName(s, env, dataset)
+}
+
+// ShareDataset is the dataset of a unit's share.
+func ShareDataset(root, unit, share string) string {
+	return ShareParent(root, unit) + "/" + ShareVolume(unit, share)
+}
+
+// DataClaim and ShareClaim are the PersistentVolumeClaims of an
+// environment's dataset and of a share, in the environment's namespace.
+func DataClaim(dataset string) string { return "data-" + dataset }
+func ShareClaim(share string) string  { return "share-" + share }
+
+// ShareSize is the size of a share's volume, which sets no limit of its
+// own: a share has no size in the stack file; its pool's free space is what
+// it has.
+const ShareSize = "1Ti"
 
 type object = map[string]any
 
@@ -158,13 +213,18 @@ func Kubernetes(s *stack.Stack, o Options) ([]byte, error) {
 		}
 		return l
 	}
+	from := []object{{"podSelector": object{}}}
+	if o.MainAddress != "" {
+		// Traefik, from the main machine, to pods on the others.
+		from = append(from, object{"ipBlock": object{"cidr": o.MainAddress}})
+	}
 	objs := []object{NamespaceObject(s, o.Environment),
 		// The environment's pods reach each other, as on a network of their
 		// own; nothing else reaches them but Traefik, on the machine.
 		{"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
 			"metadata": meta("stack", ns, labels(), nil),
 			"spec": object{"podSelector": object{}, "policyTypes": []string{"Ingress"},
-				"ingress": []object{{"from": []object{{"podSelector": object{}}}}}}},
+				"ingress": []object{{"from": from}}}},
 	}
 	for _, name := range s.ServiceNames() {
 		svc := s.Services[name]
@@ -197,16 +257,16 @@ func Kubernetes(s *stack.Stack, o Options) ([]byte, error) {
 		var mounts, volumes []object
 		for _, vol := range sortedKeys(svc.Volumes) {
 			v := svc.Volumes[vol]
-			src := DatasetPath(o.DataRoot, s, o.Environment, v.Dataset)
+			claim := DataClaim(v.Dataset)
 			if v.Share != "" {
-				src = SharePath(o.DataRoot, s.Unit, v.Share)
+				claim = ShareClaim(v.Share)
 			}
 			m := object{"name": "v-" + vol, "mountPath": v.MountPath(vol)}
 			if v.Readonly {
 				m["readOnly"] = true
 			}
 			mounts = append(mounts, m)
-			volumes = append(volumes, object{"name": "v-" + vol, "hostPath": object{"path": src, "type": "Directory"}})
+			volumes = append(volumes, object{"name": "v-" + vol, "persistentVolumeClaim": object{"claimName": claim}})
 		}
 		annotations := map[string]string{}
 		if len(svc.Secrets) > 0 {
@@ -291,6 +351,21 @@ func Kubernetes(s *stack.Stack, o Options) ([]byte, error) {
 				"path": "/", "pathType": "Prefix",
 				"backend": object{"service": object{"name": name, "port": object{"name": "http"}}}}}}}}}})
 	}
+	// The claims of the environment's datasets and shares, each bound to its
+	// PersistentVolume by name.
+	claims := map[string]object{}
+	for _, name := range s.ServiceNames() {
+		for _, v := range s.Services[name].Volumes {
+			if v.Share != "" {
+				claims[ShareClaim(v.Share)] = claimObject(ShareClaim(v.Share), ns, SharePV(s.Unit, v.Share, ns), ShareSize, labels())
+			} else {
+				claims[DataClaim(v.Dataset)] = claimObject(DataClaim(v.Dataset), ns, VolumeName(s, o.Environment, v.Dataset), v.Size, labels())
+			}
+		}
+	}
+	for _, c := range sortedKeys(claims) {
+		objs = append(objs, claims[c])
+	}
 	var b strings.Builder
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
@@ -303,6 +378,13 @@ func Kubernetes(s *stack.Stack, o Options) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(b.String()), nil
+}
+
+// claimObject is a PersistentVolumeClaim bound to the PersistentVolume pv.
+func claimObject(name, ns, pv, size string, labels map[string]string) object {
+	return object{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": meta(name, ns, labels, nil),
+		"spec": object{"accessModes": []string{"ReadWriteOnce"}, "storageClassName": StorageClass, "volumeName": pv,
+			"resources": object{"requests": object{"storage": size}}}}
 }
 
 // NamespaceObject is the environment's namespace, labelled with its unit,

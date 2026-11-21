@@ -19,6 +19,7 @@ type fake struct {
 	calls   []string
 	stdin   map[string]string // the last stdin of each command
 	stdins  []string          // every command's stdin, in order
+	volumes string            // the ZFSVolumes there are, as JSON objects
 }
 
 func (f *fake) run(_ context.Context, _ []string, stdin []byte, name string, args ...string) ([]byte, error) {
@@ -37,6 +38,17 @@ func (f *fake) run(_ context.Context, _ []string, stdin []byte, name string, arg
 		return []byte(`{"apiVersion":"v1","kind":"Secret","type":"kubernetes.io/dockerconfigjson","metadata":{"name":"registry-pull","namespace":"garrison","uid":"x"},"data":{".dockerconfigjson":"e30="}}`), nil
 	case strings.HasPrefix(call, "kubectl get secret "):
 		return []byte(f.secrets[args[2]]), nil
+	case strings.HasPrefix(call, "kubectl get zfsvolumes.zfs.openebs.io --namespace"):
+		return []byte(`{"items":[` + f.volumes + `]}`), nil
+	case strings.HasPrefix(call, "kubectl get zfsvolumes.zfs.openebs.io "):
+		if !strings.Contains(f.volumes, `"name":"`+args[2]+`"`) {
+			return nil, errors.New("NotFound")
+		}
+	case strings.HasPrefix(call, "kubectl get zfsnodes"):
+		return []byte(`{"items":[{"metadata":{"name":"main"},"pools":[{"name":"garrison","free":"9Gi"}]},
+ {"metadata":{"name":"node-2"},"pools":[{"name":"garrison","free":"31457280Ki"}]}]}`), nil
+	case strings.HasPrefix(call, "kubectl get persistentvolume "):
+		return []byte("Bound"), nil
 	}
 	return nil, nil
 }
@@ -52,6 +64,24 @@ func jellyfin(t *testing.T) *stack.Stack {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// ofKind is the stdin of the first call that gave kubectl an object of kind.
+func (f *fake) ofKind(kind string) string {
+	if i := f.index(kind); i >= 0 {
+		return f.stdins[i]
+	}
+	return ""
+}
+
+// index is the first call that gave kubectl an object of kind, or -1.
+func (f *fake) index(kind string) int {
+	for i := range f.calls {
+		if strings.Contains(f.stdins[i], `{"apiVersion":"v1","kind":"`+kind+`"`) {
+			return i
+		}
+	}
+	return -1
 }
 
 // called is the stdin of the first call that begins with prefix.
@@ -73,8 +103,11 @@ func TestStack(t *testing.T) {
 
 	got := strings.Join(f.calls, "\n")
 	for _, want := range []string{
-		"zfs create -p garrison/ns/media/stacks/dev-jellyfin/jellyfin-config",
-		"zfs set quota=5G garrison/ns/media/stacks/dev-jellyfin/jellyfin-config",
+		// The environment's dataset, under which OpenEBS makes its volumes.
+		"zfs create -p garrison/ns/media/stacks/dev-jellyfin",
+		// The share from before OpenEBS is adopted: renamed and made legacy.
+		"zfs rename garrison/ns/media/shares/media-library garrison/ns/media/shares/media.shares.media-library",
+		"zfs set mountpoint=legacy garrison/ns/media/shares/media.shares.media-library",
 		"kubectl create --filename -",
 		"kubectl apply --namespace app-dev-jellyfin --filename - --prune --selector garrison.io/stack=dev-jellyfin",
 	} {
@@ -82,21 +115,47 @@ func TestStack(t *testing.T) {
 			t.Errorf("missing command %q in:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "zfs create -p garrison/ns/media/shares/media-library") {
-		t.Error("existing share was created again")
+	if strings.Contains(got, "zfs create -p garrison/ns/media/stacks/dev-jellyfin/") {
+		t.Error("the deployer created a volume's dataset; OpenEBS does")
+	}
+	// Each volume a ZFSVolume on the machine with the most free space, and a
+	// PersistentVolume there bound to its claim.
+	var zv, pv []string
+	for i, c := range f.calls {
+		if strings.Contains(f.stdins[i], `"kind":"ZFSVolume"`) && c == "kubectl create --filename -" {
+			zv = append(zv, f.stdins[i])
+		}
+		if strings.Contains(f.stdins[i], `"kind":"PersistentVolume"`) {
+			pv = append(pv, f.stdins[i])
+		}
+	}
+	if len(zv) != 2 || !strings.Contains(zv[0], `"name":"dev-jellyfin.jellyfin-config"`) || !strings.Contains(zv[0], `"ownerNodeID":"node-2"`) ||
+		!strings.Contains(zv[0], `"poolName":"garrison/ns/media/stacks/dev-jellyfin"`) || !strings.Contains(zv[0], `"capacity":"5368709120"`) {
+		t.Errorf("ZFSVolumes: %v", zv)
+	}
+	if !strings.Contains(zv[1], `"name":"media.shares.media-library"`) || !strings.Contains(zv[1], `"shared":"yes"`) {
+		t.Errorf("the share's ZFSVolume: %s", zv[1])
+	}
+	if len(pv) != 2 || !strings.Contains(pv[0], `"claimRef":{"name":"data-jellyfin-config","namespace":"app-dev-jellyfin"}`) ||
+		!strings.Contains(pv[0], `"values":["node-2"]`) || !strings.Contains(pv[1], `"name":"media.shares.media-library.app-dev-jellyfin"`) {
+		t.Errorf("PersistentVolumes: %v", pv)
 	}
 	deploy := strings.Index(got, "kubectl apply --namespace app-dev-jellyfin")
 	if deploy < strings.LastIndex(got, "zfs ") || deploy < strings.LastIndex(got, "kubectl create") {
-		t.Errorf("the stack must be applied after the datasets and secrets:\n%s", got)
+		t.Errorf("the stack must be applied after the volumes and secrets:\n%s", got)
 	}
-	ns, _ := f.called("kubectl apply --filename -")
-	if !strings.Contains(ns, `"kind":"Namespace"`) || !strings.Contains(ns, `"name":"app-dev-jellyfin"`) {
-		t.Errorf("the namespace is not made first: %s", ns)
+	if ns := f.ofKind("Namespace"); !strings.Contains(ns, `"name":"app-dev-jellyfin"`) || f.index("Namespace") > f.index("Secret") {
+		t.Errorf("the namespace is not made before the secrets: %s", ns)
 	}
 	if pull, _ := f.stdin["kubectl apply --filename -"]; !strings.Contains(got, "kubectl get secret registry-pull --namespace garrison") || pull == "" {
 		t.Errorf("the pull secret is not copied:\n%s", got)
 	}
-	created, _ := f.called("kubectl create --filename -")
+	created := ""
+	for i, c := range f.calls {
+		if c == "kubectl create --filename -" && strings.Contains(f.stdins[i], `"kind":"Secret"`) {
+			created = f.stdins[i]
+		}
+	}
 	if !strings.Contains(created, `"name":"jellyfin-api-key","namespace":"app-dev-jellyfin"`) {
 		t.Errorf("generated secret: %s", created)
 	}
@@ -128,7 +187,7 @@ func TestStackWithAStoredSecret(t *testing.T) {
 	if !strings.Contains(stored, `"garrison.io/version":"v2"`) || !strings.Contains(stored, `"garrison.stored":"true"`) {
 		t.Errorf("stored value not put into its Secret with its version: %q", stored)
 	}
-	if _, made := f.called("kubectl create --filename -"); made {
+	if f.ofKind("Secret") != "" && !strings.Contains(f.ofKind("Secret"), "the real key") {
 		t.Error("a generated value was made too")
 	}
 	manifests, err := render.Kubernetes(s, o)

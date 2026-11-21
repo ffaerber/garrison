@@ -24,7 +24,11 @@ func TestGolden(t *testing.T) {
 	}
 	for _, env := range []string{"main", "dev"} {
 		t.Run(env, func(t *testing.T) {
-			got, err := Kubernetes(s, Options{Environment: env, Domain: "example.com", DataRoot: "/tank"})
+			o := Options{Environment: env, Domain: "example.com", DataRoot: "/tank"}
+			if env == "main" {
+				o.MainAddress = "10.42.0.0/32" // with other machines
+			}
+			got, err := Kubernetes(s, o)
 			if err != nil {
 				t.Fatal(err)
 			}

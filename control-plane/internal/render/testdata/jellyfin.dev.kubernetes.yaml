@@ -162,14 +162,12 @@ spec:
       imagePullSecrets:
         - name: registry-pull
       volumes:
-        - hostPath:
-            path: /tank/media/stacks/dev-jellyfin/jellyfin-config
-            type: Directory
-          name: v-config
-        - hostPath:
-            path: /tank/media/shares/media-library
-            type: Directory
-          name: v-media
+        - name: v-config
+          persistentVolumeClaim:
+            claimName: data-jellyfin-config
+        - name: v-media
+          persistentVolumeClaim:
+            claimName: share-media-library
         - name: secrets
           projected:
             sources:
@@ -270,3 +268,41 @@ spec:
   clusterIP: None
   selector:
     garrison.io/service: redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: data-jellyfin-config
+  namespace: app-dev-jellyfin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: garrison-zfs
+  volumeName: dev-jellyfin.jellyfin-config
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    garrison.app: jellyfin
+    garrison.environment: dev
+    garrison.io/stack: dev-jellyfin
+    garrison.unit: media
+  name: share-media-library
+  namespace: app-dev-jellyfin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: garrison-zfs
+  volumeName: media.shares.media-library.app-dev-jellyfin
