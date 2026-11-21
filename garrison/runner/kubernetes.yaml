@@ -24,6 +24,13 @@ spec:
       annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
     spec:
       automountServiceAccountToken: false
+      # It exits when Gitea does not answer, and Kubernetes then waits ever
+      # longer before starting it again (up to 5 minutes): so it starts only
+      # once Gitea answers, e.g. after a reboot.
+      initContainers:
+        - name: wait-for-gitea
+          image: busybox:1.37
+          command: [sh, -c, "until wget -q -O /dev/null http://gitea.garrison.svc.cluster.local:3000/api/healthz; do sleep 2; done"]
       containers:
         - name: runner
           image: gitea/act_runner:0.2.13

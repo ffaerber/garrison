@@ -32,6 +32,13 @@ spec:
       labels: { app: sso }
     spec:
       automountServiceAccountToken: false
+      # It exits when Keycloak's realm does not answer, and Kubernetes then
+      # waits ever longer before starting it again: so it starts only once
+      # the realm answers, e.g. after a reboot.
+      initContainers:
+        - name: wait-for-keycloak
+          image: busybox:1.37
+          command: [sh, -c, "until wget -q -O /dev/null http://keycloak.garrison.svc.cluster.local:8080/realms/garrison/.well-known/openid-configuration; do sleep 2; done"]
       containers:
         - name: oauth2-proxy
           image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0

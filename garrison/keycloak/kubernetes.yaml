@@ -51,14 +51,18 @@ spec:
           ports: [{ containerPort: 8080 }]
           volumeMounts: [{ name: secrets, mountPath: /run/secrets, readOnly: true }]
           # Keycloak answers its health checks on the management port.
+          # Up to 10 minutes to start before the liveness probe counts.
+          startupProbe:
+            httpGet: { path: /health/started, port: 9000 }
+            periodSeconds: 5
+            failureThreshold: 120
           readinessProbe:
             httpGet: { path: /health/ready, port: 9000 }
             periodSeconds: 5
-            failureThreshold: 60
           livenessProbe:
             httpGet: { path: /health/live, port: 9000 }
-            initialDelaySeconds: 120
             periodSeconds: 10
+            failureThreshold: 6
       volumes:
         - name: secrets
           projected:

@@ -60,10 +60,15 @@ spec:
             # Over TCP: during first-run initialisation Postgres listens on the socket only.
             exec: { command: [pg_isready, -h, 127.0.0.1, -U, postgres] }
             periodSeconds: 5
+          # Recovery after an unclean stop can take a while.
+          startupProbe:
+            exec: { command: [pg_isready, -h, 127.0.0.1, -U, postgres] }
+            periodSeconds: 5
+            failureThreshold: 120
           livenessProbe:
             exec: { command: [pg_isready, -h, 127.0.0.1, -U, postgres] }
-            initialDelaySeconds: 60
             periodSeconds: 10
+            failureThreshold: 6
       volumes:
         - { name: data, hostPath: { path: /garrison/system/postgres, type: Directory } }
         - name: secrets
