@@ -194,7 +194,7 @@ func TestTheMediaLibraryIsBound(t *testing.T) {
 		if c.Labels[sandbox.UnitLabel] != "media" {
 			t.Errorf("labels %v", c.Labels)
 		}
-		if len(c.Mounts) != 2 || c.Mounts[1] != (sandboxtest.Mount{Type: "bind", Source: w.Media, Target: sandbox.MediaTarget}) {
+		if len(c.Mounts) != 2 || c.Mounts[1] != (sandboxtest.Mount{Type: "bind", Source: "/garrison/ns/media/shares/media", Target: sandbox.MediaTarget}) {
 			t.Errorf("mounts %v", c.Mounts)
 		}
 	}
