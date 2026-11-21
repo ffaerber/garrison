@@ -107,6 +107,18 @@ Docker stays on the machine for what has no Kubernetes way yet:
 - **Deleting a namespace deletes its Secrets.** See Apps above.
 - **`kubectl run -i` loses the output of a short command**, which may end before kubectl attaches. The tests read a finished pod's log instead (`image_pod` in `test/e2e/lib.sh`).
 
+## More machines (in progress, branch `nodes`)
+
+Other machines join as k3s agents with a ZFS pool of their own (`install.sh --join`, `installer/join.sh`; what every machine needs is `installer/node.sh`). App data moves to **OpenEBS ZFS LocalPV** (`zfs.csi.openebs.io`): a `ZFSVolume` object names a dataset and its machine, the agent of OpenEBS on that machine creates the dataset, and the PersistentVolume's node affinity sends the pods there.
+
+What a spike on two VMs found (OpenEBS ZFS LocalPV 2.11.2):
+- **Static volumes keep Garrison's layout.** A ZFSVolume's dataset is `<poolName>/<its name>`, and `poolName` may be a dataset deep in the pool, such as `garrison/ns/<unit>/stacks/<stack>`. OpenEBS does not create that parent: whoever writes the ZFSVolume creates it first. Names are unique among ZFSVolumes, so a volume is named `<stack>.<volume>`.
+- **Its size is a quota:** `capacity` becomes the dataset's `quota`. Its `mountpoint` is `legacy`: the dataset is mounted only where a pod uses it.
+- **A share is one ZFSVolume with `shared: "yes"`**, and a PersistentVolume of its own (the same `volumeHandle`) in each namespace that mounts it. Without `shared`, the second mount fails with "device already mounted".
+- **Snapshots are read on the host.** Inside a pod, `.zfs/snapshot/<name>` stays empty: ZFS mounts a snapshot on demand, which does not happen in a container's mount namespace. On the machine, a brief `mount -t zfs` of the dataset shows them, also while a pod has it mounted.
+- **Traefik and NetworkPolicies across machines.** On one machine the host's traffic to its pods always passes. To a pod on another machine it arrives from the main machine's flannel address, the first address of its pod range (`10.42.0.0` for `10.42.0.0/24`), which a policy must admit as an `ipBlock`.
+- **Images:** the joined machine pulls the installation's images from the main machine's registry, with `git.<domain>` pointing there in `/etc/hosts` (`host/hosts.sh`) and the CA in `registries.yaml`.
+
 ## Still to move
 
-- **More machines**: `k3s agent` joins; app data moves to OpenEBS ZFS LocalPV volumes, or Longhorn where copies are wanted.
+- **More machines**: see above; on the branch `nodes`.
