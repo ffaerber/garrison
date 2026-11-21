@@ -135,14 +135,14 @@ check "alice merges it"                    test "$(merge config alice "$spr")" =
 check "the marketing agent gets an account in Gitea" until_true 120 has_account agent-todo-marketing
 # kc_user NAME: whether the Keycloak account NAME is enabled (true, false, or nothing).
 kc_user() {
-  docker exec "$(docker ps -q -f name=keycloak | head -n1)" bash -c '
+  kubectl --namespace garrison exec -i deployment/keycloak -- bash -c '
     KC_CLI_PASSWORD=$(</run/secrets/admin-password) /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/smoke.config \
       --server http://localhost:8080 --realm master --user "$0" >/dev/null 2>&1 &&
     /opt/keycloak/bin/kcadm.sh get users --config /tmp/smoke.config -r garrison -q "username=$1" -q exact=true --fields enabled --format csv --noquotes' "$ADMIN_USER" "$1"
 }
 kc_enabled() { [ "$(kc_user "$1")" = true ]; }
 check "and the same account in Keycloak"   until_true 120 kc_enabled agent-todo-marketing
-shots_seen() { docker exec "$(docker ps -q -f name=postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/marketing/shots'" | grep -q .; }
+shots_seen() { kubectl --namespace garrison exec -i deployment/postgres -- psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/marketing/shots'" | grep -q .; }
 check "the routine sees shots"             until_true 180 shots_seen
 since=$(last_pr app)
 shot_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -155,7 +155,7 @@ check "a PNG"                              test "$(png_size app docs/screenshots
 body=$(gitea_api "" "$hp/app/pulls/${rspr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])')
 check "of the todo app behind the sign-in, as the agent, for bob" \
   bash -c 'grep -q "Screenshot of https://todo.$1/ as the agent todo/marketing" <<<"$0" && grep -q "page title \"Todo\"" <<<"$0" && grep -q "Asked by bob through todo/marketing, routine todo/marketing/shots, with nobody watching" <<<"$0"' "$body" "$DOMAIN"
-check "the gateway shot it as the agent"   bash -c 'docker service logs --since "$0" gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-marketing): todo/marketing: screenshot \[routine todo/marketing/shots\]"' "$shot_at"
+check "the gateway shot it as the agent"   bash -c 'kubectl --namespace garrison logs deployment/gateway --since-time="$0" 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-marketing): todo/marketing: screenshot \[routine todo/marketing/shots\]"' "$shot_at"
 gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/${rspr:-0}"
 
 }

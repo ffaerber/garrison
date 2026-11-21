@@ -50,16 +50,19 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 PASSWORD=$(cat $ETC/admin-password)
 
-# After a reboot, give every service time to come back before checking.
+# After a reboot, give every workload of the platform time to come back before checking.
 if [ -n "${WAIT_READY:-}" ]; then
-  deadline=$((SECONDS + WAIT_READY))
-  while :; do
-    pending=$(docker service ls --format '{{.Name}} {{.Replicas}}' | awk '{ split($2, r, "/"); if (r[1] != r[2]) print $1 }')
-    [ -z "$pending" ] && break
-    [ $SECONDS -ge $deadline ] && { echo "services not ready after reboot: $pending"; break; }
-    sleep 5
-  done
+  kubectl --namespace garrison wait --for=condition=Available deployment --all --timeout="${WAIT_READY}s" >/dev/null ||
+    echo "workloads not ready after reboot: $(kubectl --namespace garrison get deployments --no-headers | awk '{ split($2, r, "/"); if (r[1] != r[2]) print $1 }' | tr '\n' ' ')"
 fi
+
+# logs_since SINCE NAME: the logs of the platform's Deployment NAME since
+# SINCE, a duration (15m) or a time (2026-11-21T10:00:00Z).
+logs_since() {
+  local flag=--since
+  case $1 in *T*) flag=--since-time ;; esac
+  kubectl --namespace garrison logs "deployment/$2" --all-containers "$flag=$1" 2>&1
+}
 
 
 # ---------- shared helpers ----------
@@ -160,9 +163,11 @@ for s in json.load(sys.stdin).get("statuses") or []:
 }
 # set_stack NS NAME FILE|- [APPROVER]: set_config for config/stacks/NAME.yaml.
 set_stack() { set_config "$1" "stacks/$2.yaml" "$3" "${4:-}"; }
-smoke_running() { docker service ls --filter name=smoke_web --format '{{.Replicas}}' | grep -qx 1/1; }
-smoke_gone()    { ! docker stack ls --format '{{.Name}}' | grep -qx smoke; }
-deployer_image() { docker service inspect deployer --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'; }
+# stack_objects NAME: what the platform's stack NAME has in the cluster.
+stack_objects() { kubectl --namespace garrison get all --selector "garrison.io/stack=$1" --output name 2>/dev/null; }
+smoke_running() { [ "$(kubectl --namespace garrison get deployment smoke -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" = 1 ]; }
+smoke_gone()    { [ -z "$(stack_objects smoke)" ]; }
+deployer_image() { kubectl --namespace garrison get deployment deployer -o jsonpath='{.spec.template.spec.containers[0].image}'; }
 json() { curl -sS --max-time 20 --cacert "$ETC/tls.crt" --resolve "git.$DOMAIN:443:127.0.0.1" -u "$ADMIN_USER:$PASSWORD" "$@"; }
 # grafana_api USER ARGS...: call Grafana with a signed-in person's session, or,
 # with "", as the local installer account.
@@ -205,17 +210,17 @@ chat_login() {
 # system_channel [PERSON]: the id of the channel of the unit garrison.
 system_channel() { chat_api "${1:-bob}" "$chat/api/v1/channels/" | python3 -c 'import json,sys; print(next(c["id"] for c in json.load(sys.stdin) if c["name"] == "garrison"))' 2>/dev/null; }
 # mcp_calls SINCE PERSON: the tools the gateway ran for PERSON, as "mcp: PERSON: TOOL".
-mcp_calls() { docker service logs --since "$1" gateway 2>&1 | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
+mcp_calls() { logs_since "$1" gateway | grep -oE "mcp: $2: [a-z0-9._-]+/[a-z0-9-]+: [a-z_]+" | sed -E 's#: [^ ]+/[^ ]+: #: #' | sort -u; }
 # mcp ARGS...: the gateway's MCP endpoint, which only Open WebUI reaches.
 mcp() {
-  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui | head -n1)" \
+  kubectl --namespace garrison exec -i deployment/openwebui -- \
     curl -sS --max-time 20 "$@" http://gateway:8080/mcp
 }
 
 # agents_api ARGS... PATH: the agent service, which only the system network reaches.
 agents_api() {
   local path=${!#}
-  docker exec "$(docker ps -q --filter label=com.docker.swarm.service.name=openwebui | head -n1)" \
+  kubectl --namespace garrison exec -i deployment/openwebui -- \
     curl -sS --max-time 20 "${@:1:$#-1}" "http://agents:8070$path"
 }
 
@@ -415,7 +420,7 @@ import json,sys
 # refused_only SINCE PERSON TOOL WHY: every call of TOOL by PERSON since SINCE
 # was refused with WHY (also true if the agent did not try at all).
 refused_only() {
-  docker service logs --since "$1" gateway 2>&1 | grep "mcp: $2: [^ ]*: $3" | grep -v "$4" | grep -q . && return 1
+  logs_since "$1" gateway | grep "mcp: $2: [^ ]*: $3" | grep -v "$4" | grep -q . && return 1
   return 0
 }
 # has_model ID [PERSON]: Open WebUI offers the agent to PERSON (bob). Not the

@@ -366,51 +366,31 @@ save() {
 }
 
 
-# readdress: a clone has a new IP address; the swarm is formed again on it,
-# keeping its services, secrets and configs, and repaired like after a boot.
+# readdress: a clone has a new IP address (and hostname). k3s takes the new
+# address when it starts, keeping its node name (install.sh); this waits
+# until the API answers and the node is Ready again.
 readdress() {
   in_vm sudo bash -c '
-    ip=$(ip -4 route get 1.1.1.1 | sed -n "s/.* src \([0-9.]*\).*/\1/p")
-    docker swarm init --force-new-cluster --advertise-addr "$ip" >/dev/null
-    /usr/local/lib/garrison/repair-services.sh >/dev/null'
+    for i in $(seq 90); do
+      kubectl get --raw /readyz >/dev/null 2>&1 && kubectl wait --for=condition=Ready node --all --timeout=5s >/dev/null 2>&1 && exit 0
+      sleep 2
+    done
+    echo "k3s is not ready on the clone" >&2; kubectl get nodes >&2; exit 1'
 }
 
-# settle: on a clone's first boot, some tasks start before the re-formed swarm
-# has their names, and stay unreachable by name on internal networks (the user
-# runner could not find the guard). Every service gets new tasks, once; then
-# this waits until all run again.
+# settle: after the clone boots, every workload of the platform rolls out
+# again; this waits until each is available.
 settle() {
   in_vm sudo bash -c '
-    for s in $(docker service ls -q); do docker service update --quiet --detach --force "$s" >/dev/null; done
-    # The old tasks still count as running for a moment.
-    sleep 15
-    # A task can count as running while its container lost its network
-    # endpoint (the old task'"'"'s cleanup raced the new one), so its name does
-    # not resolve; those services are restarted again.
-    detached() {
-      for c in $(docker ps -q -f label=com.docker.swarm.service.name); do
-        n=$(docker inspect "$c" --format "{{.Name}} {{range .NetworkSettings.Networks}}{{if not .EndpointID}}lost{{end}}{{end}}")
-        # Named /SERVICE.SLOT.TASK
-        case $n in *lost) n=${n#/}; echo "${n%%.*}" ;; esac
-      done | sort -u
-    }
-    up=0
-    for i in $(seq 1 60); do
-      if docker service ls --format "{{.Replicas}}" | awk -F"[/ ]" "\$1 != \$2 { bad = 1 } END { exit bad }"; then
-        lost=$(detached)
-        [ -z "$lost" ] && { up=1; break; }
-        echo "restarting services without a network endpoint: $lost" >&2
-        for s in $lost; do docker service update --quiet --detach --force "$s" >/dev/null; done
-        sleep 15
-      fi
-      sleep 5
-    done
-    [ "$up" = 1 ] || { echo "services still starting after 5 minutes:" >&2
-                         docker service ls --format "{{.Name}} {{.Replicas}}" >&2; exit 1; }
-    # BuildKit runs outside Swarm, on the builds network; after the swarm is
-    # re-formed its name can be gone from that network, and pipelines fail
-    # with "lookup garrison-buildkit ... server misbehaving". It is restarted
-    # until a client on the builds network reaches it by name.
+    if ! kubectl --namespace garrison wait --for=condition=Available deployment --all --timeout=300s >/dev/null; then
+      echo "workloads still starting after 5 minutes:" >&2
+      kubectl --namespace garrison get pods >&2
+      exit 1
+    fi
+    # BuildKit runs outside the cluster, in Docker, on the builds network;
+    # after a clone boots its name can be gone from that network, and
+    # pipelines fail with "lookup garrison-buildkit ... server misbehaving".
+    # It is restarted until a client on the builds network reaches it by name.
     systemctl is-enabled --quiet garrison-buildkit.service 2>/dev/null || exit 0
     for i in $(seq 1 6); do
       systemctl restart garrison-buildkit.service
@@ -632,15 +612,14 @@ scenario_job() {
   status "$s" "green, $(minutes "$(cat "$ROOT/bin/times/$s")")"
 }
 
-# service_logs STEP: the logs of every service in the job's VM, to
-# bin/logs/STEP/<service>.log, kept from before the VM stops: a container
+# service_logs STEP: the logs of every workload of the platform in the job's
+# VM, to bin/logs/STEP/<workload>.log, kept from before the VM stops: a pod
 # starts afresh when the VM boots again, without its old logs.
 service_logs() {
-  local dir=$ROOT/bin/logs/$1 svc
+  local dir=$ROOT/bin/logs/$1 w
   rm -rf "$dir" && mkdir -p "$dir"
-  for svc in $(in_vm sudo docker service ls --format '{{.Name}}' 2>/dev/null); do
-    # docker service logs can hang on a task whose node is gone, so each has a minute.
-    in_vm sudo timeout 60 docker service logs --timestamps --no-trunc --tail 5000 "$svc" > "$dir/$svc.log" 2>&1
+  for w in $(in_vm sudo kubectl --namespace garrison get deployments,daemonsets --output name 2>/dev/null); do
+    in_vm sudo timeout 60 kubectl --namespace garrison logs "$w" --all-containers --timestamps --tail 5000 > "$dir/${w#*/}.log" 2>&1
   done
   echo "==> the services' logs are in ${dir#"$ROOT/"}/"
 }

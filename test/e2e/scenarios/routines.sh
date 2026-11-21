@@ -33,9 +33,9 @@ sys.exit(1)'
 }
 check "its answer is posted in the channel" until_true 600 routine_post
 routine_post >/dev/null ||
-  for s in agents gateway; do docker service logs --since 15m "$s" 2>&1 | grep -E 'main-moved|post: ' | tail -8 | sed 's/^/      /'; done
-check "it read as its own account, for bob" bash -c 'docker service logs --since "$0" gateway 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-developer): todo/developer: [a-z_]* \[routine todo/developer/main-moved\]"' "$mainmoved"
-head_kept() { [ "$(docker exec "$(docker ps -q -f name=postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/developer/main-moved'")" = "$(gitea_api "" "$hp/app/branches/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])')" ]; }
+  for s in agents gateway; do kubectl --namespace garrison logs "deployment/$s" --since=15m 2>&1 | grep -E 'main-moved|post: ' | tail -8 | sed 's/^/      /'; done
+check "it read as its own account, for bob" bash -c 'kubectl --namespace garrison logs deployment/gateway --since-time="$0" 2>&1 | grep -q "mcp: bob (nobody watching, as agent-todo-developer): todo/developer: [a-z_]* \[routine todo/developer/main-moved\]"' "$mainmoved"
+head_kept() { [ "$(kubectl --namespace garrison exec -i deployment/postgres -- psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/developer/main-moved'")" = "$(gitea_api "" "$hp/app/branches/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["id"])')" ]; }
 check "the commit it saw is kept, for after a restart" head_kept
 check "the feed has the run, for todo's people" in_feed carol ns=todo "e['kind'] == 'routine' and e['agent'] == 'todo/developer' and e['actor'] == 'bob' and e['status'] == 'ok' and e['detail'] != ''"
 if id=$(routine_post); then web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$hcid/messages/$id/delete"; fi
@@ -57,7 +57,7 @@ check "carol approves its routine in todo" test "$(review config carol "$rpr")" 
 check "the approval check passes"          until_true 90 approval_is "$rpr" success
 check "alice merges it"                    test "$(merge config alice "$rpr")" = 200
 # Its routine must see main before the push, so the push is news to it.
-asker_seen() { docker exec "$(docker ps -q -f name=postgres | head -n1)" psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/asker/colour'" | grep -q .; }
+asker_seen() { kubectl --namespace garrison exec -i deployment/postgres -- psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'todo/asker/colour'" | grep -q .; }
 check "the routine sees main"              until_true 180 asker_seen
 printf 'More notes.\n' > "$tmp/notes2.md"
 check "another change lands on app's main" to_main app NOTES2.md "$tmp/notes2.md" "More notes"

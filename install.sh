@@ -130,7 +130,12 @@ YAML
 # 26.04, which the profile does not let signal its own processes, so
 # Postgres could not stop its helpers and never started. crun, like
 # Ubuntu's runc, applies the profile as it is. k3s finds crun on the host.
-k3s_config=$(printf '# Written by the Garrison installer; changes are overwritten.\ndefault-runtime: crun\n')
+# The node keeps the name it was installed with, also when the machine's
+# hostname changes (a cloned test VM): a new name would be a new node, and
+# the pods would wait on the old one, unreachable, for minutes.
+node_name=$(sed -n 's/^node-name: //p' /etc/rancher/k3s/config.yaml 2>/dev/null)
+[ -n "$node_name" ] || node_name=$(hostname -s)
+k3s_config=$(printf '# Written by the Garrison installer; changes are overwritten.\ndefault-runtime: crun\nnode-name: %s\n' "$node_name")
 if [ "$(cat /etc/rancher/k3s/config.yaml 2>/dev/null)" != "$k3s_config" ]; then
   printf '%s\n' "$k3s_config" > /etc/rancher/k3s/config.yaml
   # An installed k3s reads it when it starts again.
