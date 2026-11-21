@@ -116,3 +116,16 @@ spec:
   ingress:
     - from: [{ ipBlock: { cidr: 10.201.0.0/24 } }]
       ports: [{ port: 8071 }, { port: 8072 }]
+---
+# The login proxy waits for Keycloak's realm before it starts (its init
+# container asks Keycloak directly); it signs people in through Traefik.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-for-sso
+spec:
+  podSelector: { matchLabels: { app: keycloak } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: sso } } }]
+      ports: [{ port: 8080 }]
