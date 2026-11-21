@@ -1,6 +1,6 @@
 // Package gitops keeps the cluster in line with a unit in Gitea. A
 // unit is a Gitea organisation; every repo in it that holds a
-// compose.yaml on its default branch is one stack, named after the repo.
+// kubernetes.yaml on its default branch is one stack, named after the repo.
 package gitops
 
 import (
@@ -325,7 +325,7 @@ func (c *Config) fetch(ctx context.Context, r repo) (string, error) {
 
 // Sync deploys every stack whose repo moved since it was last applied, or
 // every stack if force is set, and takes down stacks whose repo is gone or no
-// longer holds a compose.yaml. What succeeded is recorded; what failed is
+// longer holds a kubernetes.yaml. What succeeded is recorded; what failed is
 // retried on the next sync.
 func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	unlock, err := c.lock()
@@ -361,7 +361,7 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 			continue
 		}
 		dir := filepath.Join(c.WorkDir, "repos", r.Name)
-		if _, err := os.Stat(filepath.Join(dir, "compose.yaml")); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, system.Manifest)); err != nil {
 			continue // not a stack
 		}
 		present[r.Name] = true
@@ -418,9 +418,9 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 			next.Stacks[name] = prev.Stacks[name]
 			continue
 		}
-		log.Printf("removed %s: its repo is gone or holds no compose.yaml", name)
+		log.Printf("removed %s: its repo is gone or holds no kubernetes.yaml", name)
 		c.record(ctx, events.Event{Kind: events.KindUndeploy, Status: events.StatusOK,
-			Title: fmt.Sprintf("removed the system stack %s: its repo is gone or holds no compose.yaml", name)})
+			Title: fmt.Sprintf("removed the system stack %s: its repo is gone or holds no kubernetes.yaml", name)})
 	}
 	if c.Apps && !appsDone {
 		apps, appErrs := c.syncApps(ctx, force, prev.Apps)

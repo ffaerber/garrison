@@ -1,0 +1,33 @@
+# A database with two datasets, a config file and a secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-files
+  annotations:
+    garrison.io/files: init.sql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+spec:
+  serviceName: db
+  selector: { matchLabels: { app: db } }
+  template:
+    metadata:
+      labels: { app: db }
+      annotations: { garrison.io/config-hash: "${CONFIG_HASH}" }
+    spec:
+      containers:
+        - name: db
+          image: postgres:17-alpine
+          env: [{ name: DOMAIN, value: "db.${DOMAIN}" }, { name: KEEP, value: "${NOT_SET}" }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: backup, mountPath: /backup, readOnly: true }
+            - { name: files, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - { name: data, hostPath: { path: /garrison/system/db, type: Directory } }
+        - { name: backup, hostPath: { path: /garrison/system/db-backup/ } }
+        - { name: sock, hostPath: { path: /var/run/docker.sock } }
+        - { name: files, configMap: { name: db-files } }

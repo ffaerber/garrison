@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// fakeGitea serves the organisation's repo list and plays git and docker.
+// fakeGitea serves the organisation's repo list and plays git and kubectl.
 type fakeGitea struct {
 	t      *testing.T
 	repos  map[string]map[string]string // repo -> file -> content
@@ -25,10 +25,10 @@ type fakeGitea struct {
 func newFake(t *testing.T) *fakeGitea {
 	return &fakeGitea{t: t,
 		repos: map[string]map[string]string{
-			"traefik":       {"compose.yaml": "services: {t: {image: a}}\n"},
-			"control-plane": {"compose.yaml": "services: {c: {image: b}}\n", "go.mod": "module x\n"},
-			"grafana":       {"compose.yaml": "services: {g: {image: c}}\n"},
-			"platform":      {"README.md": "contracts\n"}, // no compose.yaml: not a stack
+			"traefik":       {"kubernetes.yaml": "kind: Deployment\nmetadata: {name: t}\n"},
+			"control-plane": {"kubernetes.yaml": "kind: Deployment\nmetadata: {name: c}\n", "go.mod": "module x\n"},
+			"grafana":       {"kubernetes.yaml": "kind: Deployment\nmetadata: {name: g}\n"},
+			"platform":      {"README.md": "contracts\n"}, // no kubernetes.yaml: not a stack
 		},
 		commit: map[string]string{"traefik": "t1", "control-plane": "c1", "grafana": "g1", "platform": "p1"},
 	}
@@ -65,8 +65,8 @@ func (f *fakeGitea) run(_ context.Context, _ []string, _ []byte, name string, ar
 		f.write(args[slices.Index(args, "-C")+1])
 	case name == "git" && slices.Contains(args, "rev-parse"):
 		return []byte(f.commit[filepath.Base(args[slices.Index(args, "-C")+1])] + "\n"), nil
-	case name == "docker" && slices.Contains(args, "deploy"):
-		if args[len(args)-1] == f.failOn {
+	case name == "kubectl" && args[0] == "apply":
+		if stackOf(args) == f.failOn {
 			return nil, errors.New("deploy failed")
 		}
 	}
@@ -83,18 +83,33 @@ func (f *fakeGitea) write(dir string) {
 	}
 }
 
+// stackOf is the stack a kubectl command selects.
+func stackOf(args []string) string {
+	for i, a := range args {
+		if a == "--selector" && i+1 < len(args) {
+			return strings.TrimPrefix(args[i+1], "garrison.io/stack=")
+		}
+	}
+	return ""
+}
+
 func (f *fakeGitea) deploys() []string {
 	var out []string
 	for _, c := range f.calls {
-		if strings.HasPrefix(c, "docker stack deploy") {
-			out = append(out, c[strings.LastIndex(c, " ")+1:])
+		if strings.HasPrefix(c, "kubectl apply") {
+			out = append(out, stackOf(strings.Fields(c)))
 		}
 	}
 	return out
 }
 
 func (f *fakeGitea) removed(name string) bool {
-	return slices.Contains(f.calls, "docker stack rm "+name)
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "kubectl delete") && stackOf(strings.Fields(c)) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func setup(t *testing.T) (*Config, *fakeGitea) {
@@ -163,12 +178,12 @@ func TestStackIsRemovedWithItsRepo(t *testing.T) {
 	if _, ok := s.Stacks["grafana"]; ok {
 		t.Error("grafana still recorded")
 	}
-	// A repo that drops its compose.yaml stops being a stack too.
-	delete(f.repos["traefik"], "compose.yaml")
+	// A repo that drops its kubernetes.yaml stops being a stack too.
+	delete(f.repos["traefik"], "kubernetes.yaml")
 	f.commit["traefik"] = "t2"
 	c.Sync(ctx, false)
 	if !f.removed("traefik") {
-		t.Error("traefik was not taken down after losing compose.yaml")
+		t.Error("traefik was not taken down after losing kubernetes.yaml")
 	}
 	if f.removed("platform") {
 		t.Error("a repo that never was a stack was removed")

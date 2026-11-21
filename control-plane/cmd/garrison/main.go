@@ -48,6 +48,7 @@ import (
 	"garrison/control-plane/internal/sandbox"
 	"garrison/control-plane/internal/secrets"
 	"garrison/control-plane/internal/stack"
+	"garrison/control-plane/internal/system"
 )
 
 const usage = `usage:
@@ -59,6 +60,7 @@ const usage = `usage:
   garrison deploy [-once] [-interval DURATION] [-config FILE] [-work DIR]
                    [-gitea URL] [-password-file FILE] [-host-exec IMAGE]
   garrison applied [-work DIR]
+  garrison system [-render] [-wait DURATION] DIR...   (a system stack, kubernetes.yaml; ${VAR} from the environment)
   garrison gateway [-listen ADDR] [-gitea URL] [-openwebui URL] [-prometheus URL] ...
   garrison agents [-listen ADDR] [-gitea URL] [-gateway URL] ...
   garrison home [-listen ADDR] [-gitea URL] [-events-db URL] ...
@@ -86,6 +88,8 @@ func main() {
 		err = deployCmd(args)
 	case "applied":
 		err = appliedCmd(args)
+	case "system":
+		err = systemCmd(args)
 	case "gateway":
 		err = gatewayCmd(args)
 	case "agents":
@@ -373,6 +377,40 @@ func deployCmd(args []string) error {
 }
 
 // appliedCmd prints each applied stack and the commit of its repo.
+// systemCmd applies system stacks, each a directory with kubernetes.yaml
+// named like its repo, as the deployer does, and waits for their rollout.
+// The installer uses it for the stacks it deploys before the deployer runs.
+func systemCmd(args []string) error {
+	fs := flag.NewFlagSet("system", flag.ExitOnError)
+	only := fs.Bool("render", false, "print the stacks as they would be applied, and apply nothing")
+	wait := fs.Duration("wait", 10*time.Minute, "how long to wait for each stack's rollout; 0: not at all")
+	fs.Parse(args)
+	if fs.NArg() == 0 {
+		return fmt.Errorf("system: name at least one stack directory")
+	}
+	ctx := context.Background()
+	for _, dir := range fs.Args() {
+		s := system.Stack{Name: filepath.Base(filepath.Clean(dir)), Dir: dir}
+		if *only {
+			out, err := system.Render(s, os.Environ())
+			if err != nil {
+				return err
+			}
+			os.Stdout.Write(out)
+			continue
+		}
+		if err := system.Deploy(ctx, apply.Exec, s, os.Environ()); err != nil {
+			return fmt.Errorf("%s: %w", s.Name, err)
+		}
+		if *wait > 0 {
+			if err := system.Wait(ctx, apply.Exec, s.Name, wait.String()); err != nil {
+				return fmt.Errorf("%s: %w", s.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 func appliedCmd(args []string) error {
 	fs := flag.NewFlagSet("applied", flag.ExitOnError)
 	work := fs.String("work", workDir, "the deployer's checkouts and state")
