@@ -17,12 +17,12 @@ check "alice is a Gitea admin"             grep -q '"is_admin":true'  <<<"$(gite
 check "bob is not a Gitea admin"           grep -q '"is_admin":false' <<<"$(gitea_api "" "https://git.$DOMAIN/api/v1/users/bob")"
 check "every system stack is a repo of the garrison organisation" \
   bash -c 'for n in postgres traefik keycloak sso gitea runner control-plane grafana prometheus loki; do grep -q "\"full_name\":\"garrison/$n\"" <<<"$0" || { echo "missing garrison/$n"; exit 1; }; done' "$(gitea_api "" "$api/orgs/garrison/repos?limit=50")"
-check "the traefik repo holds its stack"   test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
+check "the traefik repo holds its stack"   test "$(gitea_api "" -o /dev/null -w '%{http_code}' $repo/contents/kubernetes.yaml)" = 200
 check "alice can administer the garrison repos"    grep -q '"permissions":{"admin":true' <<<"$(gitea_api alice $repo)"
 check "alice can change a garrison repo" \
   test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"YWxpY2UK","message":"smoke test","new_branch":"smoke-'$RANDOM$RANDOM'"}' $repo/contents/smoke-test.txt)" = 201
 check "bob can see the garrison repos, read-only"  grep -q '"permissions":{"admin":false,"push":false,"pull":true}' <<<"$(gitea_api bob $repo)"
-check "bob can read the system stack"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' $repo/contents/compose.yaml)" = 200
+check "bob can read the system stack"      test "$(gitea_api bob -o /dev/null -w '%{http_code}' $repo/contents/kubernetes.yaml)" = 200
 check "bob can see it in the browser too"  test "$(web -b "$tmp/bob.jar" -o /dev/null -w '%{http_code}' "https://git.$DOMAIN/garrison/traefik")" = 200
 check "bob cannot change a garrison repo" \
   test "$(gitea_api bob -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Ym9iCg==","message":"smoke test"}' $repo/contents/bob-was-here.txt)" = 403
