@@ -14,12 +14,13 @@ import (
 // fake records commands and pretends datasets in `have` exist; secrets
 // answers `kubectl get secret NAME` with what kubectl prints for it.
 type fake struct {
-	have    map[string]bool
-	secrets map[string]string
-	calls   []string
-	stdin   map[string]string // the last stdin of each command
-	stdins  []string          // every command's stdin, in order
-	volumes string            // the ZFSVolumes there are, as JSON objects
+	have     map[string]bool
+	secrets  map[string]string
+	calls    []string
+	stdin    map[string]string // the last stdin of each command
+	stdins   []string          // every command's stdin, in order
+	volumes  string            // the ZFSVolumes there are, as JSON objects
+	capacity map[string]string // the capacity of each ZFSVolume there is
 }
 
 func (f *fake) run(_ context.Context, _ []string, stdin []byte, name string, args ...string) ([]byte, error) {
@@ -44,6 +45,7 @@ func (f *fake) run(_ context.Context, _ []string, stdin []byte, name string, arg
 		if !strings.Contains(f.volumes, `"name":"`+args[2]+`"`) {
 			return nil, errors.New("NotFound")
 		}
+		return []byte(f.capacity[args[2]]), nil
 	case strings.HasPrefix(call, "kubectl get zfsnodes"):
 		return []byte(`{"items":[{"metadata":{"name":"main"},"pools":[{"name":"garrison","free":"9Gi"}]},
  {"metadata":{"name":"node-2"},"pools":[{"name":"garrison","free":"31457280Ki"}]}]}`), nil
@@ -165,6 +167,34 @@ func TestStack(t *testing.T) {
 				t.Errorf("generated secret has no 64-character value: %s", f.stdin[c])
 			}
 		}
+	}
+}
+
+// A volume whose size changed keeps its machine and gets the new size as its
+// ZFSVolume's capacity and its dataset's quota, smaller too; one of the same
+// size is left alone.
+func TestAVolumeChangesItsSize(t *testing.T) {
+	s := jellyfin(t)
+	f := &fake{have: map[string]bool{}, secrets: map[string]string{}, stdin: map[string]string{},
+		volumes:  `{"metadata":{"name":"dev-jellyfin.jellyfin-config"},"spec":{"ownerNodeID":"main"}},{"metadata":{"name":"media.shares.media-library"},"spec":{"ownerNodeID":"main"}}`,
+		capacity: map[string]string{"dev-jellyfin.jellyfin-config": "1073741824", "media.shares.media-library": "1099511627776"}}
+	if err := Stack(context.Background(), f.run, s, render.Options{Environment: "dev", Domain: "example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(f.calls, "\n")
+	for _, want := range []string{
+		"zfs set quota=5G garrison/ns/media/stacks/dev-jellyfin/dev-jellyfin.jellyfin-config",
+		`kubectl patch zfsvolumes.zfs.openebs.io dev-jellyfin.jellyfin-config --namespace garrison --type merge --patch {"spec":{"capacity":"5368709120"}}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "media.shares.media-library --namespace garrison --type merge") {
+		t.Error("the share, of the same size, was changed")
+	}
+	if pv := f.ofKind("PersistentVolume"); !strings.Contains(pv, `"capacity":{"storage":"5Gi"}`) || !strings.Contains(pv, `"values":["main"]`) {
+		t.Errorf("the PersistentVolume: %s", pv)
 	}
 }
 

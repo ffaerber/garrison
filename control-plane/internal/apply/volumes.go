@@ -243,7 +243,7 @@ func EnsureShare(ctx context.Context, run Runner, root, unit, share, node string
 	claim, err := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "PersistentVolumeClaim",
 		"metadata": map[string]any{"name": MediaClaim(unit), "namespace": SandboxNamespace, "labels": labels},
 		"spec": map[string]any{"accessModes": []string{"ReadWriteOnce"}, "storageClassName": render.StorageClass, "volumeName": pv,
-			"resources": map[string]any{"requests": map[string]string{"storage": render.ShareSize}}}})
+			"resources": map[string]any{"requests": map[string]string{"storage": render.ClaimRequest}}}})
 	if err != nil {
 		return err
 	}
@@ -271,14 +271,26 @@ func adopt(ctx context.Context, run Runner, old, ds, size string) error {
 
 // ensureZFSVolume creates the ZFSVolume name, of a dataset under parent on
 // node, unless it exists: OpenEBS's agent there creates the dataset, with
-// size as its quota, or takes the one that is there. An existing one is
-// left as it is: its machine does not change.
+// size as its quota, or takes the one that is there. An existing one keeps
+// its machine; if its size changed, the deployer sets the new one as its
+// capacity and its dataset's quota, larger or smaller. (A claim cannot
+// shrink, and OpenEBS grows a dataset only through its claim, so claims
+// request render.ClaimRequest and the size lives here and in the PV.)
 func ensureZFSVolume(ctx context.Context, run Runner, name, parent, node, size string, shared bool, labels map[string]string) error {
-	if _, err := run(ctx, nil, nil, "kubectl", "get", "zfsvolumes.zfs.openebs.io", name, "--namespace", ZFSVolumes, "--output", "name"); err == nil {
-		return nil
-	}
 	n, err := sizeBytes(size)
 	if err != nil {
+		return err
+	}
+	if out, err := run(ctx, nil, nil, "kubectl", "get", "zfsvolumes.zfs.openebs.io", name, "--namespace", ZFSVolumes, "--output", "jsonpath={.spec.capacity}"); err == nil {
+		capacity := strconv.FormatInt(n, 10)
+		if strings.TrimSpace(string(out)) == capacity {
+			return nil
+		}
+		if _, err := run(ctx, nil, nil, "zfs", "set", "quota="+strings.TrimSuffix(size, "i"), parent+"/"+name); err != nil {
+			return err
+		}
+		_, err = run(ctx, nil, nil, "kubectl", "patch", "zfsvolumes.zfs.openebs.io", name, "--namespace", ZFSVolumes,
+			"--type", "merge", "--patch", `{"spec":{"capacity":"`+capacity+`"}}`)
 		return err
 	}
 	spec := map[string]any{"capacity": strconv.FormatInt(n, 10), "fsType": "zfs", "ownerNodeID": node, "poolName": parent, "volumeType": "DATASET"}
@@ -337,4 +349,6 @@ func sizeBytes(q string) (int64, error) {
 }
 
 // volumeMount is where restores mount a dataset on its machine.
-func volumeMount(ds string) string { return path.Join("/run/garrison/restore", strings.ReplaceAll(ds, "/", "_")) }
+func volumeMount(ds string) string {
+	return path.Join("/run/garrison/restore", strings.ReplaceAll(ds, "/", "_"))
+}

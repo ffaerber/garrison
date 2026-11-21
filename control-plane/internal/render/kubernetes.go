@@ -357,9 +357,9 @@ func Kubernetes(s *stack.Stack, o Options) ([]byte, error) {
 	for _, name := range s.ServiceNames() {
 		for _, v := range s.Services[name].Volumes {
 			if v.Share != "" {
-				claims[ShareClaim(v.Share)] = claimObject(ShareClaim(v.Share), ns, SharePV(s.Unit, v.Share, ns), ShareSize, labels())
+				claims[ShareClaim(v.Share)] = claimObject(ShareClaim(v.Share), ns, SharePV(s.Unit, v.Share, ns), labels())
 			} else {
-				claims[DataClaim(v.Dataset)] = claimObject(DataClaim(v.Dataset), ns, VolumeName(s, o.Environment, v.Dataset), v.Size, labels())
+				claims[DataClaim(v.Dataset)] = claimObject(DataClaim(v.Dataset), ns, VolumeName(s, o.Environment, v.Dataset), labels())
 			}
 		}
 	}
@@ -381,11 +381,17 @@ func Kubernetes(s *stack.Stack, o Options) ([]byte, error) {
 }
 
 // claimObject is a PersistentVolumeClaim bound to the PersistentVolume pv.
-func claimObject(name, ns, pv, size string, labels map[string]string) object {
+func claimObject(name, ns, pv string, labels map[string]string) object {
 	return object{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": meta(name, ns, labels, nil),
 		"spec": object{"accessModes": []string{"ReadWriteOnce"}, "storageClassName": StorageClass, "volumeName": pv,
-			"resources": object{"requests": object{"storage": size}}}}
+			"resources": object{"requests": object{"storage": ClaimRequest}}}}
 }
+
+// ClaimRequest is what every claim of a volume asks for: the least, so it
+// binds its PersistentVolume of any size. A volume's size is its PV's
+// capacity and its ZFSVolume's, which the deployer changes (apply); a claim
+// could only grow.
+const ClaimRequest = "1Mi"
 
 // NamespaceObject is the environment's namespace, labelled with its unit,
 // app, environment and stack.

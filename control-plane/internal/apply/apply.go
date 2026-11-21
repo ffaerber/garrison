@@ -211,5 +211,3 @@ func EnsureDataset(ctx context.Context, run Runner, path, size string) error {
 	_, err := run(ctx, nil, nil, "zfs", "set", "quota="+strings.TrimSuffix(size, "i"), dataset)
 	return err
 }
-
-
