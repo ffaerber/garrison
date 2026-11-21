@@ -2,7 +2,7 @@
 
 Garrison runs on k3s, a complete Kubernetes in one binary. This page explains how Garrison uses Kubernetes, and how what it did on Docker Swarm maps to Kubernetes. It is meant for learning: each section names the files to read.
 
-The move is in progress, on the branch `k3s`. The platform and the agents' sandboxes run on Kubernetes. The apps and more machines follow (see "Still to move").
+The move is in progress, on the branch `k3s`. The platform, the agents' sandboxes and the apps run on Kubernetes. More machines follow (see "Still to move").
 
 ## The pieces
 
@@ -78,6 +78,17 @@ Who may do what (`garrison/platform/kubernetes.yaml`):
 
 The image is large (Chromium, ffmpeg, Node). The DaemonSet `sandbox-image` keeps it on every machine, so a chat's first message does not wait minutes for a pull. The deployer exports `garrison_sandbox_info{pod, agent, person, chat}`, which the Agents dashboard joins with the kubelet's metrics.
 
+## Apps
+
+A unit's stack file (`<unit>/config/stacks/<name>.yaml`) stays as it was. The deployer renders it for Kubernetes (`control-plane/internal/render/kubernetes.go`; whole examples in `render/testdata/*.kubernetes.yaml`):
+- **A namespace per environment:** `app-todo`, `app-dev-todo`, `app-pr-7-todo`. Its services reach each other by their own names, as on a network of their own. The NetworkPolicy `stack` admits only the namespace's own pods; Traefik, on the host's network, always passes.
+- **Per service:** a Deployment, a headless Service of the same name, and for a routed service an Ingress for its hostname. A service with volumes is `strategy: Recreate`, so two pods never share its data.
+- **Data:** ZFS datasets under `/garrison/ns/<unit>/stacks/<stack>/`, mounted as hostPath volumes, as the system stacks' are. Before a redeploy, the deployer scales the environment to nothing, snapshots its datasets, and applies (`apply/snapshots.go`).
+- **Secrets:** a Secret per secret in the namespace, generated once, or the stored value for `main` with its version on the pods, so a new version restarts them. When an app is removed, the deployer deletes what it applied and keeps the namespace with its Secrets: the kept data still needs its password when the app comes back.
+- **Private environments:** the Ingress names the login check and a Middleware of its own, which adds the environment's ingress key (`garrison/platform/contracts/README.md`).
+- **Images** come from Gitea's registry with a copy of `registry-pull` in each namespace.
+- **Names:** the alerts, the feed and the gateway's tools call an app's service `<stack>_<service>`, as on Swarm: `todo_web` is the Deployment `web` in `app-todo`.
+
 ## What still uses Docker
 
 Docker stays on the machine for what has no Kubernetes way yet:
@@ -91,12 +102,11 @@ Docker stays on the machine for what has no Kubernetes way yet:
 - **A new hostname is a new node.** k3s names its node after the hostname; a clone with a new hostname would register a second node, with every pod stuck on the old one. The installer pins `node-name`.
 - **The service-account token and `/run/secrets`:** see Secrets above.
 - **A pull secret works only in its own namespace.** The sandboxes' namespace needs its own copy of `registry-pull` (`garrison/gitea/configure.sh`).
+- **The registry's `/etc/hosts` entry is lost at boot**: cloud-init writes the file again. `garrison-hosts.service` (`host/hosts.sh`) puts it back before k3s and Docker start; without it no app image could be pulled after a reboot.
+- **On the host's network, every port is on the machine's address.** Traefik's metrics port 8082 was open to the world. Its router `metrics` (`garrison/traefik/dynamic.yaml`) answers only the pod network, 10.42.0.0/16.
+- **Deleting a namespace deletes its Secrets.** See Apps above.
 - **`kubectl run -i` loses the output of a short command**, which may end before kubectl attaches. The tests read a finished pod's log instead (`image_pod` in `test/e2e/lib.sh`).
 
 ## Still to move
 
-1. **Apps**:
-   - `internal/render` writes Deployments, Services and Ingresses instead of a Compose file;
-   - one namespace per unit;
-   - snapshots, restores, previews, secrets and the gate move with it.
-2. **More machines**: `k3s agent` joins; app data moves to OpenEBS ZFS LocalPV volumes, or Longhorn where copies are wanted.
+- **More machines**: `k3s agent` joins; app data moves to OpenEBS ZFS LocalPV volumes, or Longhorn where copies are wanted.

@@ -6,7 +6,7 @@ A guide for people and coding agents changing this repository: how the system fi
 
 Garrison runs on one Ubuntu machine with Kubernetes (k3s) and ZFS. **Gitea is the source of truth**: everything that runs is described in a repo, and the control plane makes the machine match `main`. How it uses Kubernetes, for learning: [docs/kubernetes.md](docs/kubernetes.md).
 
-**Moving from Docker Swarm to k3s**, on the branch `k3s`: the platform and the agents' sandboxes (pods under gVisor) run on k3s; the apps still use Swarm code and move next (docs/kubernetes.md, "Still to move"). Until then base, install, login and agent are green on this branch.
+**Moving from Docker Swarm to k3s**, on the branch `k3s`: the platform, the agents' sandboxes (pods under gVisor) and the apps (a namespace per environment) run on k3s; more machines come next (docs/kubernetes.md, "Still to move").
 
 - **Units** are Gitea organisations. `garrison` is the platform's own: one repo per system stack (`garrison/<stack>` in this repo, with a `kubernetes.yaml` each: Kubernetes manifests, applied in the namespace `garrison`), plus `garrison/config`, which holds **the agents** (`agents/<name>/agent.yaml`, `prompt.md`, skills), the chains of command (`chains/`) and the LLM providers and models (`llm/`). Every other unit has a `config` repo (`members.yaml`, `stacks/<name>.yaml`, `grants.yaml`, `routines.yaml`, `secrets/`, `restores/`) and app repos holding only code.
 - **The control plane** (`control-plane/`) is one Go binary, `garrison`, with one role per subcommand (`control-plane/cmd/garrison/main.go`):
@@ -28,7 +28,7 @@ How a change travels: chat → agent (sandbox) → gateway tool, as the person �
 | --- | --- | --- |
 | An agent's prompt, tools, skills | `templates/garrison-config/agents/<name>/` | Compiled into the control plane (`templates/templates.go`). The agent list is tested in `control-plane/internal/agents/agents_test.go` |
 | A tool agents can call | `control-plane/internal/gateway/tools.go` plus its handler | Also list it in the agent's `agent.yaml` `tools:` |
-| How a stack file becomes Swarm | `control-plane/internal/render`, `schemas/stack.schema.json` | Golden files: `make golden` |
+| How a stack file becomes Kubernetes objects | `control-plane/internal/render/kubernetes.go`, `schemas/stack.schema.json` | Golden files: `make golden` |
 | Members, teams, branch protection | `control-plane/internal/gateway/members.go` | |
 | What Open WebUI shows | `control-plane/internal/gateway/openwebui.go` | Groups, channels, the pinned how-to, models |
 | Routines, `ask_agent`, sandboxes | `control-plane/internal/agentapi`, `internal/sandbox`, `sandbox/` | |
