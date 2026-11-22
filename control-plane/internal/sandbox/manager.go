@@ -120,6 +120,11 @@ type Run struct {
 	Unattended bool     // nobody is watching: a routine
 	Owner      string   // then: the routine's owner
 	Admin      bool     // the person is a root admin
+	// Merge is the merge mode of the chain a routine runs (agents.Merge*),
+	// which the gateway holds the run to; "" for other runs. Answered: the
+	// run went on after its owner answered a question (ask_person).
+	Merge    string
+	Answered bool
 	// Show, if set, shows progress to whoever waits for the run, e.g. the
 	// person whose agent asked this one.
 	Show func(string) `json:"-"`

@@ -301,6 +301,16 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 	text += "\n\nTask: " + strings.TrimSpace(rt.Task)
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }
 	run := sandbox.Run{StartedBy: "routine " + key, Chain: []string{a.ID()}, Unattended: true, Owner: rt.Owner, Asked: &atomic.Bool{}}
+	if rt.Chain != "" {
+		// The chain says what happens to its pull requests; the gateway
+		// holds the run to it.
+		run.Merge = agents.MergeReview
+		for _, c := range a.Chains {
+			if c.Name == rt.Chain {
+				run.Merge = c.MergeMode()
+			}
+		}
+	}
 	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout())
 	defer cancel()
 	out := &collect{}

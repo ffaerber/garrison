@@ -98,6 +98,10 @@ const (
 	ServiceHeader   = "X-Garrison-Service"
 	StartedByHeader = "X-Garrison-Started-By"
 	OwnerHeader     = "X-Garrison-Owner" // a run without a person: the routine's owner
+	// MergeHeader is the merge mode of the chain a routine runs, with
+	// MergeAnswered after it once the owner has answered its question.
+	MergeHeader   = "X-Garrison-Merge"
+	MergeAnswered = "answered"
 )
 
 // AgentHeader names the agent a request is for.
@@ -187,7 +191,9 @@ func (m *MCP) person(w http.ResponseWriter, r *http.Request, agent *agents.Agent
 			http.Error(w, "a run without a person needs an agent and its owner", http.StatusBadRequest)
 			return Person{}, false
 		}
-		return Person{Name: AgentAccount(agent), Unattended: true, Owner: owner, StartedBy: startedBy(r)}, true
+		p := Person{Name: AgentAccount(agent), Unattended: true, Owner: owner, StartedBy: startedBy(r)}
+		p.Merge, p.Answered = mergeOf(r)
+		return p, true
 	}
 	if !hasToken || raw == "" {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="garrison"`)
@@ -205,11 +211,26 @@ func (m *MCP) person(w http.ResponseWriter, r *http.Request, agent *agents.Agent
 	p.StartedBy = "person"
 	if service {
 		p.StartedBy = startedBy(r)
+		p.Merge, p.Answered = mergeOf(r)
 	}
 	return p, true
 }
 
 var startedByValue = regexp.MustCompile(`^(person|agent [A-Za-z0-9._/-]{1,200}|routine [A-Za-z0-9._/-]{1,200})$`)
+
+// mergeOf is the merge mode the agent service names, and whether the
+// owner answered. An unknown mode counts as review: the strictest.
+func mergeOf(r *http.Request) (string, bool) {
+	v := r.Header.Get(MergeHeader)
+	if v == "" {
+		return "", false
+	}
+	mode, rest, _ := strings.Cut(v, " ")
+	if !slices.Contains(agents.MergeModes, mode) {
+		mode = agents.MergeReview
+	}
+	return mode, rest == MergeAnswered
+}
 
 func startedBy(r *http.Request) string {
 	if v := r.Header.Get(StartedByHeader); startedByValue.MatchString(v) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -68,9 +69,16 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // fakeMCP is the gateway: it records who called which tool for which agent.
 type fakeMCP struct {
-	mu    sync.Mutex
-	calls []string // "token agent tool"
-	seen  []string // "owner|started by" of each request
+	mu     sync.Mutex
+	calls  []string // "token agent tool"
+	seen   []string // "owner|started by" of each request
+	merges []string // the merge mode a request named, if it named one
+}
+
+func (f *fakeMCP) mergeModes() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.merges)
 }
 
 func (f *fakeMCP) headers() []string {
@@ -94,6 +102,9 @@ func (f *fakeMCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seen = append(f.seen, r.Header.Get("Authorization")+"|"+r.Header.Get(gateway.OwnerHeader)+"|"+r.Header.Get(gateway.StartedByHeader)+"|"+r.Header.Get(gateway.ServiceHeader))
+	if v := r.Header.Get(gateway.MergeHeader); v != "" {
+		f.merges = append(f.merges, v)
+	}
 	var req struct {
 		Method string `json:"method"`
 		Params struct {

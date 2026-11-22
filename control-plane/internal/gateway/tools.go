@@ -37,6 +37,11 @@ type Person struct {
 	StartedBy  string `json:"-"` // what started the run: person, agent <id>, routine <agent>/<name>
 	Unattended bool   `json:"-"` // a run without a person: Name is the agent's account
 	Owner      string `json:"-"` // in such a run, the routine's owner, for whom grants are checked
+	// Merge is the merge mode of the chain a routine runs (agents.Merge*),
+	// which merge_change holds the run to; "" for other runs. Answered:
+	// the run went on after the owner answered its question.
+	Merge    string `json:"-"`
+	Answered bool   `json:"-"`
 }
 
 // PlatformUnit is the unit the deployer deploys.
@@ -160,13 +165,16 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "unit", "repo", "patch", "title"),
-		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the unit's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes repos (a screenshot or a patch proposed into them), give repos: the agent then also gets the grant to propose there that a run with nobody watching needs. For a chain of command (find_agents shows which agent leads one), give chain instead of agent: its lead runs it, and every agent of the chain that proposes gets the grants on repos. In garrison, only root admins add routines. What each run finds is posted in the unit's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
-			"unit":        nsArg,
-			"agent":       str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots; leave it out with chain"),
-			"chain":       str("a chain of command the routine runs, e.g. software-updates; its lead runs it"),
-			"name":        str("the routine's name: lowercase letters, digits and dashes, unique in the unit, e.g. morning-check"),
-			"schedule":    str("when, as cron in Garrison's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
-			"every":       str("how often instead of schedule, 10m to 168h, e.g. 6h"),
+		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the unit's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes repos (a screenshot or a patch proposed into them), give repos: the agent then also gets the grant to propose there that a run with nobody watching needs. For a chain of command (find_agents shows which agent leads one), give chain instead of agent: its lead runs it, and every agent of the chain that proposes gets the grants on repos; if the chain merges by itself (merge: auto or ask in its file), those that merge get the grant to merge into main of repos too. In garrison, only root admins add routines. What each run finds is posted in the unit's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
+			"unit":     nsArg,
+			"agent":    str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots; leave it out with chain"),
+			"chain":    str("a chain of command the routine runs, e.g. software-updates; its lead runs it"),
+			"name":     str("the routine's name: lowercase letters, digits and dashes, unique in the unit, e.g. morning-check"),
+			"schedule": str("when, as cron in Garrison's time zone: minute hour day-of-month month day-of-week, e.g. \"0 9 * * *\" every day at 9, \"0 8 * * 1\" Mondays at 8; or @daily, @hourly. Give this or every"),
+			"every":    str("how often instead of schedule, 10m to 168h, e.g. 6h"),
+			"on_push": map[string]any{"type": "object", "description": "instead of schedule or every: when a branch of the unit's repo moves; with paths, only when one of those files (or a folder ending in /) changed, e.g. {repo: news, branch: main, paths: [topics.md]}",
+				"properties": map[string]any{"repo": str("the unit's repo"), "branch": str("its branch, e.g. main"), "paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "files that start it, e.g. topics.md; empty for every change"}},
+				"required":   []string{"repo", "branch"}},
 			"task":        str("what the agent does each time, as you would ask it: what to look at, what to do, what to say"),
 			"repos":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the unit's repos the task changes (proposes a screenshot or a patch into), if any"},
 			"title":       str("short title of the change; default names the routine"),
@@ -230,6 +238,7 @@ type args struct {
 	FullPage                                                                          bool   `json:"full_page"`
 	Agent, Schedule, Every, Task, Chain                                               string
 	Include, Repos                                                                    []string
+	OnPush                                                                            *agents.Push `json:"on_push"`
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp

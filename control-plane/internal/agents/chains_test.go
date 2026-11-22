@@ -105,6 +105,7 @@ func TestAWrongChainIsLeftOut(t *testing.T) {
 		"nodoes.yaml":   strings.Replace(updates, "does: Sort them.", "does: \"\"", 1),
 		"nowhen.yaml":   strings.Replace(updates, "when: someone asks about software updates\n", "", 1),
 		"extra.yaml":    updates + "owner: alice\n",
+		"merge.yaml":    strings.Replace(updates, "lead: sentry\n", "lead: sentry\nmerge: always\n", 1),
 		"short.yaml":    "description: x\nwhen: x\nlead: sentry\nsteps:\n  - {agent: sentry, does: All.}\n",
 		"long.yaml":     updates + strings.Repeat("  - {agent: scout, does: More.}\n", MaxSteps),
 	} {
@@ -117,6 +118,33 @@ func TestAWrongChainIsLeftOut(t *testing.T) {
 		}
 		if s := agentNamed(t, defs, "sentry"); len(s.Chains) != 0 || s.MayAsk("coder") {
 			t.Errorf("%s: bound anyway: %+v", name, s)
+		}
+	}
+}
+
+// A chain says what happens to its pull requests; its lead hears it, and
+// a chain that says nothing is reviewed by people.
+func TestAChainSaysHowItsWorkIsMerged(t *testing.T) {
+	for mode, want := range map[string]string{
+		"":       "never merge them yourself",
+		"review": "never merge them yourself",
+		"ask":    "ask them with ask_person",
+		"auto":   "merge each one with merge_change as soon as it is proposed",
+	} {
+		c := updates
+		if mode != "" {
+			c = strings.Replace(updates, "lead: sentry\n", "lead: sentry\nmerge: "+mode+"\n", 1)
+		}
+		defs, problems, err := Definitions(context.Background(), chainFiles(map[string]string{"updates.yaml": c}), []string{"read_file", "propose_patch"})
+		if err != nil || len(problems) > 0 {
+			t.Fatal(err, problems)
+		}
+		sentry := agentNamed(t, defs, "sentry")
+		if got := sentry.Chains[0].MergeMode(); (mode == "" && got != MergeReview) || (mode != "" && got != mode) {
+			t.Errorf("%q: mode %q", mode, got)
+		}
+		if s := System(sentry, "example.com"); !strings.Contains(s, want) {
+			t.Errorf("%q: the lead's prompt lacks %q:\n%s", mode, want, s)
 		}
 	}
 }

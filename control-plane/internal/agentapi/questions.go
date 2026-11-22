@@ -74,6 +74,7 @@ type runRecord struct {
 	Chain      []string `json:"chain"`
 	Unattended bool     `json:"unattended"`
 	Owner      string   `json:"owner"`
+	Merge      string   `json:"merge,omitempty"`
 }
 
 // mayAskPerson tells whether the run may ask its person: a routine's own
@@ -122,7 +123,7 @@ func (s *Server) askPerson(ctx context.Context, c sandbox.Caller, raw json.RawMe
 	if root == "" {
 		root = posted.ID
 	}
-	run, _ := json.Marshal(runRecord{StartedBy: c.Run.StartedBy, Chain: c.Run.Chain, Unattended: c.Run.Unattended, Owner: c.Run.Owner})
+	run, _ := json.Marshal(runRecord{StartedBy: c.Run.StartedBy, Chain: c.Run.Chain, Unattended: c.Run.Unattended, Owner: c.Run.Owner, Merge: c.Run.Merge})
 	q := &events.Question{
 		At: s.Questions.now(), Unit: ns, Agent: c.Agent, Person: person, Text: question,
 		Channel: posted.Channel, Message: posted.ID, Root: root, User: posted.User,
@@ -330,7 +331,7 @@ func (q *Questions) resume(ctx context.Context, x events.Question) {
 		return
 	}
 	record(events.StatusRunning, "")
-	run := sandbox.Run{StartedBy: rec.StartedBy, Chain: rec.Chain, Unattended: rec.Unattended, Owner: rec.Owner,
+	run := sandbox.Run{StartedBy: rec.StartedBy, Chain: rec.Chain, Unattended: rec.Unattended, Owner: rec.Owner, Merge: rec.Merge, Answered: true,
 		Asked: &atomic.Bool{}, Thread: x.Channel + "/" + x.Root}
 	text := fmt.Sprintf(`%s answered your question.
 

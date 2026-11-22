@@ -298,6 +298,40 @@ func TestRoutines(t *testing.T) {
 	}
 }
 
+// A routine running a chain tells the gateway the chain's merge mode, so
+// merge_change holds the run to it; a plain routine names none.
+func TestARoutineOfAChainNamesItsMergeMode(t *testing.T) {
+	s, _, mcp := setup(t)
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/homepage/config/raw/members.yaml" {
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer gitea.Close()
+	g := &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Tools: []string{"list_repos"},
+		Chains:   []agents.Chain{{Name: "pages", Lead: "dev", Merge: agents.MergeAuto}},
+		Routines: []agents.Routine{{Name: "pages", Chain: "pages", Every: time.Hour, Raw: "1h", Owner: "bob", Task: "call list_repos {}"}}}}
+	withSandboxes(t, s)
+	s.Gateway.ServiceKey = "k"
+	poster := &fakePoster{}
+	s.Poster = poster
+	now := time.Date(2026, 11, 13, 8, 0, 0, 0, time.UTC)
+	r := &Routines{Server: s, Gitea: g, Now: func() time.Time { return now }}
+	r.Check(context.Background()) // first seen
+	now = now.Add(61 * time.Minute)
+	r.Check(context.Background())
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := mcp.mergeModes(); len(got) == 0 || got[0] != agents.MergeAuto {
+		t.Errorf("merge modes the gateway heard: %v (posts %+v)", got, poster.all())
+	}
+}
+
 // An on_push with paths starts only when one of them changed: a merge of
 // news.yaml, the routine's own work, starts nothing; a change of topics.md
 // does.

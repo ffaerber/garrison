@@ -32,11 +32,13 @@ type As struct {
 	Token     string
 	StartedBy string // person, agent <id>, routine <id>/<name>
 	Owner     string // a run without a person: the routine's owner
+	Merge     string // the merge mode of the chain a routine runs, if any
+	Answered  bool   // the run went on after its owner's answer
 }
 
 // AsOf is whom a sandbox's calls act for.
 func AsOf(c sandbox.Caller) As {
-	return As{Token: c.Token, StartedBy: c.Run.StartedBy, Owner: c.Run.Owner}
+	return As{Token: c.Token, StartedBy: c.Run.StartedBy, Owner: c.Run.Owner, Merge: c.Run.Merge, Answered: c.Run.Answered}
 }
 
 func (g *Gateway) rpc(ctx context.Context, as As, agent, method string, params, out any) error {
@@ -56,6 +58,13 @@ func (g *Gateway) rpc(ctx context.Context, as As, agent, method string, params, 
 		req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
 		if as.StartedBy != "" {
 			req.Header.Set(gateway.StartedByHeader, as.StartedBy)
+		}
+		if as.Merge != "" {
+			v := as.Merge
+			if as.Answered {
+				v += " " + gateway.MergeAnswered
+			}
+			req.Header.Set(gateway.MergeHeader, v)
 		}
 	}
 	req.Header.Set(AgentHeader, agent)

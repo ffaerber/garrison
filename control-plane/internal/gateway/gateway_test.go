@@ -139,9 +139,12 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "x\n")
 	// A chain of command: marketing leads, the operator proposes.
 	case p == "/repos/garrison/config/contents/chains":
-		io.WriteString(w, `[{"name":"shots.yaml","type":"file"},{"name":"README.md","type":"file"}]`)
+		io.WriteString(w, `[{"name":"shots.yaml","type":"file"},{"name":"pages.yaml","type":"file"},{"name":"README.md","type":"file"}]`)
 	case p == "/repos/garrison/config/raw/chains/shots.yaml":
 		io.WriteString(w, "description: Shots of the site\nwhen: someone asks for shots\nlead: marketing\nsteps:\n  - {agent: marketing, does: Look at the site.}\n  - {agent: operator, does: Propose the shots.}\n")
+	// One that merges by itself: the operator merges.
+	case p == "/repos/garrison/config/raw/chains/pages.yaml":
+		io.WriteString(w, "description: Keeps a page current\nwhen: someone asks to keep a page current\nlead: marketing\nmerge: auto\nsteps:\n  - {agent: marketing, does: Look.}\n  - {agent: operator, does: Propose and merge.}\n")
 	case p == "/repos/homepage/config/raw/grants.yaml":
 		io.WriteString(w, "- {agent: marketing, repo: site, level: propose}\n")
 	case p == "/repos/garrison/config/contents/agents/marketing/skills/thumbnail":
@@ -1008,7 +1011,7 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 		"task": "Take a screenshot of https://site.example.com/: then propose it.", "repo": "site"}
 	text, isErr := callText(t, m, "tok-alice", "add_routine", args)
 	if isErr || fg.prs != 1 || len(fg.commits) != 1 || !strings.Contains(text, "the routine morning-shot of marketing, on the schedule 0 9 * * *, for alice") ||
-		!strings.Contains(text, "grants to propose that its runs may use with nobody watching (grants.yaml): marketing in homepage/site.") {
+		!strings.Contains(text, "grants that its runs may use with nobody watching (grants.yaml): marketing in homepage/site.") {
 		t.Fatalf("%q, prs %d", text, fg.prs)
 	}
 	files := map[string]string{}
@@ -1074,6 +1077,31 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(files["grants.yaml"]), &grants); err != nil || len(grants) != 3 || grants[1].Agent != "operator" || grants[2].Repo != "docs" || !grants[2].Unattended {
 		t.Errorf("grants.yaml with a chain: %v\n%s", err, files["grants.yaml"])
 	}
+	// A chain that merges by itself (merge: auto): who merges also gets
+	// the grant to merge into main; a routine on a push, only of topics.md.
+	fg.commits = nil
+	text, isErr = callText(t, m, "tok-alice", "add_routine", map[string]any{"unit": "homepage", "chain": "pages", "name": "on-topics",
+		"on_push": map[string]any{"repo": "site", "branch": "main", "paths": []string{"topics.md"}}, "repos": []string{"site"}})
+	if isErr || len(fg.commits) != 1 || !strings.Contains(text, "when main of site moves, changing topics.md") ||
+		!strings.Contains(text, "operator merging into main of homepage/site (merge: auto in its chain)") {
+		t.Fatalf("a chain that merges: %q", text)
+	}
+	files = map[string]string{}
+	for _, f := range fg.commits[0]["files"].([]any) {
+		op := f.(map[string]any)
+		raw, _ := base64.StdEncoding.DecodeString(op["content"].(string))
+		files[op["path"].(string)] = string(raw)
+	}
+	routines = nil
+	if err := yaml.Unmarshal([]byte(files["routines.yaml"]), &routines); err != nil || routines[len(routines)-1].OnPush == nil || routines[len(routines)-1].OnPush.Paths[0] != "topics.md" {
+		t.Errorf("routines.yaml on a push: %v\n%s", err, files["routines.yaml"])
+	}
+	grants = nil
+	if err := yaml.Unmarshal([]byte(files["grants.yaml"]), &grants); err != nil || !slices.ContainsFunc(grants, func(g agents.Grant) bool {
+		return g.Agent == "operator" && g.Repo == "site" && g.Branch == "main" && g.Level == agents.LevelAutonomous && g.Unattended
+	}) {
+		t.Errorf("grants.yaml of a chain that merges: %v\n%s", err, files["grants.yaml"])
+	}
 	for _, bad := range []map[string]any{
 		{"chain": "nope"},
 		{"chain": "shots", "agent": "operator"},
@@ -1082,7 +1110,7 @@ func TestARoutineIsAddedAsItWillBeChecked(t *testing.T) {
 		for k, v := range bad {
 			a[k] = v
 		}
-		if text, isErr := callText(t, m, "tok-alice", "add_routine", a); !isErr || fg.prs != 2 {
+		if text, isErr := callText(t, m, "tok-alice", "add_routine", a); !isErr || fg.prs != 3 {
 			t.Errorf("%v: %q", bad, text)
 		}
 	}

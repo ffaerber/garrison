@@ -222,6 +222,14 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	if number <= 0 {
 		return "", fmt.Errorf("%w: the pull request's number is missing", ErrInvalid)
 	}
+	// A routine running a chain of command: the chain says the most it may
+	// do with its pull requests.
+	switch {
+	case p.Merge == agents.MergeReview:
+		return "", refused{"this chain's pull requests are for people to review (merge: review in its chain): leave it open and give its link"}
+	case p.Merge == agents.MergeAsk && !p.Answered:
+		return "", refused{fmt.Sprintf("this chain merges only after its owner agrees (merge: ask in its chain): ask %s with ask_person first, giving the link, and merge once they say yes", p.Owner)}
+	}
 	if err := t.mayRead(ctx, p, org, repo); err != nil {
 		return "", err
 	}
