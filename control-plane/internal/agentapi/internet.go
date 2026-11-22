@@ -156,6 +156,31 @@ var reserved = []netip.Prefix{
 
 var errNotPublic = errors.New("not a public address")
 
+// PublicOr allows the public addresses and those of the ranges given in
+// also, a list of CIDRs separated by commas or spaces, e.g. a test's fake
+// web site in the cluster (INTERNET_ALLOW in install.env). Never set on a
+// real installation: it opens those addresses to every agent that reaches
+// the whole internet.
+func PublicOr(also string) (func(netip.Addr) bool, []netip.Prefix, error) {
+	var ranges []netip.Prefix
+	for _, f := range strings.FieldsFunc(also, func(r rune) bool { return r == ',' || r == ' ' }) {
+		p, err := netip.ParsePrefix(f)
+		if err != nil {
+			return nil, nil, fmt.Errorf("INTERNET_ALLOW: %q is not a CIDR like 10.43.0.0/16", f)
+		}
+		ranges = append(ranges, p.Masked())
+	}
+	return func(a netip.Addr) bool {
+		a = a.Unmap()
+		for _, p := range ranges {
+			if p.Contains(a) {
+				return true
+			}
+		}
+		return Public(a)
+	}, ranges, nil
+}
+
 // dial connects to target, checking the address it actually connects to,
 // so a name that resolves to the home network is refused too.
 func (p *InternetProxy) dial(ctx context.Context, network, target string) (net.Conn, error) {

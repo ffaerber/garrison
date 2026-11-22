@@ -187,3 +187,27 @@ func TestAWideAgentClonesOnlyPublicRepos(t *testing.T) {
 		}
 	}
 }
+
+// INTERNET_ALLOW, for tests: the ranges given are let through as if they
+// were public; everything else private stays refused.
+func TestPublicOr(t *testing.T) {
+	allowed, ranges, err := PublicOr("10.43.0.0/16, 192.168.5.7/32")
+	if err != nil || len(ranges) != 2 {
+		t.Fatal(err, ranges)
+	}
+	for addr, want := range map[string]bool{
+		"10.43.12.1":    true,
+		"192.168.5.7":   true,
+		"192.168.5.8":   false,
+		"10.42.0.5":     false,
+		"127.0.0.1":     false,
+		"93.184.216.34": true,
+	} {
+		if got := allowed(netip.MustParseAddr(addr)); got != want {
+			t.Errorf("%s: %v, want %v", addr, got, want)
+		}
+	}
+	if _, _, err := PublicOr("everything"); err == nil {
+		t.Error("a word was taken for a range")
+	}
+}
