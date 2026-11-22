@@ -130,3 +130,78 @@ func (n *News) Topics(now time.Time) []Topic {
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out
 }
+
+// maxPerTopic is the most items one topic may hold.
+const maxPerTopic = 100
+
+// Wanted is topics.md: its topics by their "## " headings, each with the
+// sites its items must come from if it names them, in a line
+// "Only from: example.com, jobs.example.org" (subdomains included).
+type Wanted map[string][]string
+
+// ParseTopics reads topics.md. Headings are compared without case.
+func ParseTopics(md string) Wanted {
+	w := Wanted{}
+	topic := ""
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "## "):
+			topic = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "## ")))
+			w[topic] = nil
+		case topic != "" && strings.HasPrefix(strings.ToLower(line), "only from:"):
+			for _, s := range strings.Split(line[len("only from:"):], ",") {
+				s = strings.TrimSpace(s)
+				if u, err := url.Parse(s); err == nil && u.Host != "" {
+					s = u.Host
+				}
+				if s = strings.ToLower(strings.Trim(s, "/ ")); s != "" {
+					w[topic] = append(w[topic], s)
+				}
+			}
+		}
+	}
+	return w
+}
+
+// Check holds news.yaml to topics.md: each item's topic is one of its
+// headings, its link is on the topic's sites if it names them, and no topic
+// holds more than maxPerTopic items. A page may ask an agent to add a link;
+// this keeps such a link off a topic that names its sites.
+func (n *News) Check(w Wanted) error {
+	var problems []string
+	count := map[string]int{}
+	for i, it := range n.Items {
+		topic := strings.ToLower(strings.TrimSpace(it.Topic))
+		sites, ok := w[topic]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("item %d: the topic %q is not a heading of topics.md", i+1, it.Topic))
+			continue
+		}
+		if count[topic]++; count[topic] == maxPerTopic+1 {
+			problems = append(problems, fmt.Sprintf("the topic %q holds more than %d items", it.Topic, maxPerTopic))
+		}
+		if len(sites) > 0 && !onSites(it.Link, sites) {
+			problems = append(problems, fmt.Sprintf("item %d: %s is not on the sites of %q (%s)", i+1, it.Link, it.Topic, strings.Join(sites, ", ")))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("news.yaml and topics.md: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// onSites: link's host is one of sites or below one.
+func onSites(link string, sites []string) bool {
+	u, err := url.Parse(link)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, s := range sites {
+		if host == s || strings.HasSuffix(host, "."+s) {
+			return true
+		}
+	}
+	return false
+}
