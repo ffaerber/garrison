@@ -115,10 +115,14 @@ multipass() {
     case $1 in
       launch|start|stop|restart|snapshot|restore|clone|delete|purge)
         ( flock 8; command multipass "$@" ) 8>"$ROOT/bin/multipass.lock" ;;
+      exec) watched "$@" ;;
       *) command multipass "$@" ;;
     esac
     rc=$?
     [ $rc = 0 ] && return 0
+    # A command cut off by the daemon's crash is not run again: it may have
+    # changed the VM halfway. Its step fails, and its VM is kept.
+    [ $rc = 125 ] && return $rc
     command multipass version 2>/dev/null | grep -q '^multipassd' && return $rc
     echo "==> Multipass's daemon is not answering; waiting for it (see AGENTS.md, Multipass)" >&2
     local i
@@ -132,6 +136,28 @@ multipass() {
     done
   done
   return $rc
+}
+# watched exec VM -- COMMAND...: multipass exec, given up when Multipass's
+# daemon restarts meanwhile. The session of a crashed daemon never ends (a
+# step hung for six hours): it is killed, and watched returns 125.
+watched() {
+  local daemon pid now
+  daemon=$(pidof multipassd || true)
+  command multipass "$@" <&0 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 15 &
+    wait $! 2>/dev/null
+    now=$(pidof multipassd || true)
+    if [ -n "$daemon" ] && [ "$now" != "$daemon" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "==> Multipass's daemon restarted during: multipass $*; giving it up (see AGENTS.md, Multipass)" >&2
+      pkill -P "$pid" 2>/dev/null
+      kill "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 125
+    fi
+  done
+  wait "$pid"
 }
 # By name in the list: info fails for a VM that is running but unreachable.
 exists() { multipass list --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$VM"; }
