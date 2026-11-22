@@ -71,6 +71,19 @@ A fixture's snapshot, or a scenario's green mark (`bin/green/<step>`), stays val
 
 A full run takes about 45 minutes; one scenario, about 2 minutes to clone its fixture plus its own time. Each step copies this checkout into its VM first: tracked and new files, never ignored ones such as `.env`.
 
+## A news page on the real web
+
+`test/e2e/scenarios/newsdemo.sh` is not in the tree: it sets up the news page of `newsroom` with topics of your own, and the agents look on the real web, so what it finds depends on the day. Run it in a clone of the fixture `deploy`, with your `topics.md` copied into the VM:
+
+```
+multipass clone garrison-k3s-deploy --name garrison-k3s-newsdemo   # once garrison-k3s-deploy is stopped
+multipass start garrison-k3s-newsdemo
+multipass transfer bin/news-topics.md garrison-k3s-newsdemo:topics.md
+multipass exec garrison-k3s-newsdemo -- sudo bash -c 'cd garrison && NEWS_TOPICS=/home/ubuntu/topics.md WAIT_READY=600 test/e2e/smoke.sh newsdemo'
+```
+
+It prints `news.yaml` and leaves the page running at `https://news.<domain>/` (see below for opening it).
+
 ## The test people
 
 `test/e2e/add-test-users.sh` creates three people with the password `12345678`: `alice`, a root admin, and `bob` and `carol`, regular users.
