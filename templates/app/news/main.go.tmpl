@@ -1,0 +1,83 @@
+// News is a page of what is new on its topics: news, job offers, releases.
+// Agents keep it current (the chain news-page in garrison's config): they
+// read topics.md, look on the web, and rewrite news.yaml; each merge builds
+// and deploys the page again. Both files are built in, so the page is
+// exactly what the repo's main holds. It runs behind the installation's
+// sign-in, and has no JavaScript: everything it shows is escaped text.
+package main
+
+import (
+	"crypto/subtle"
+	"embed"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+//go:embed page.html news.yaml topics.md
+var files embed.FS
+
+var page = template.Must(template.ParseFS(files, "page.html"))
+
+// App serves the page.
+type App struct {
+	News   *News
+	Topics string // topics.md, shown as it is
+	// IngressKey, if set, must come with every request but /healthz: see
+	// ingressHeader.
+	IngressKey string
+	Now        func() time.Time
+}
+
+// The environment's ingress key, which Traefik adds to every request it
+// passes on after the sign-in. Other apps could call this one directly,
+// past the sign-in; they do not know the key, which the platform gives this
+// app as GARRISON_INGRESS_KEY.
+const ingressHeader = "X-Garrison-Ingress"
+
+func (a *App) Routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", a.index)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
+	return mux
+}
+
+func (a *App) index(w http.ResponseWriter, r *http.Request) {
+	if a.IngressKey != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get(ingressHeader)), []byte(a.IngressKey)) != 1 {
+		http.Error(w, "only through the installation's sign-in", http.StatusForbidden)
+		return
+	}
+	now := a.Now()
+	topics := a.News.Topics(now)
+	count := 0
+	for _, t := range topics {
+		count += len(t.Items)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// No scripts, no frames, nothing from elsewhere but the links.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if err := page.Execute(w, map[string]any{
+		"Topics": topics, "Count": count, "Updated": a.News.Updated, "Keep": a.News.Keep, "Wanted": a.Topics,
+	}); err != nil {
+		log.Printf("page: %v", err)
+	}
+}
+
+func main() {
+	data, err := files.ReadFile("news.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+	news, err := Parse(data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	topics, _ := files.ReadFile("topics.md")
+	app := &App{News: news, Topics: string(topics), IngressKey: os.Getenv("GARRISON_INGRESS_KEY"), Now: time.Now}
+	log.Printf("news: %d items, on :8080", len(news.Items))
+	srv := &http.Server{Addr: ":8080", Handler: app.Routes(), ReadHeaderTimeout: 10 * time.Second}
+	log.Fatal(srv.ListenAndServe())
+}

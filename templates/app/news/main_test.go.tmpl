@@ -1,0 +1,113 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+// The repo's own news.yaml, the one the image is built with, is valid: a
+// mistake in it fails this test, so no image is built and the page keeps
+// its last good version.
+func TestTheRepoNewsIsValid(t *testing.T) {
+	data, err := files.ReadFile("news.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(data); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const good = `keep: 30
+updated: "2026-11-22T06:00:00Z"
+items:
+  - title: k3s v1.37.2 is out
+    link: https://github.com/k3s-io/k3s/releases/tag/v1.37.2
+    source: github.com
+    date: "2026-11-20"
+    topic: Kubernetes releases
+    summary: A patch release.
+  - title: Older news
+    link: https://example.com/old
+    source: example.com
+    date: "2026-01-01"
+    topic: Kubernetes releases
+`
+
+func TestParse(t *testing.T) {
+	n, err := Parse([]byte(good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Items) != 2 || n.Keep != 30 {
+		t.Fatalf("parsed %+v", n)
+	}
+	if n, err := Parse(nil); err != nil || len(n.Items) != 0 {
+		t.Errorf("an empty file: %v", err)
+	}
+	for name, bad := range map[string]string{
+		"an unknown field": "items:\n  - {title: a, link: https://a.example/, source: a, date: \"2026-11-20\", topic: t, script: x}\n",
+		"a link not https": "items:\n  - {title: a, link: \"javascript:alert(1)\", source: a, date: \"2026-11-20\", topic: t}\n",
+		"an http link":     "items:\n  - {title: a, link: \"http://a.example/\", source: a, date: \"2026-11-20\", topic: t}\n",
+		"no title":         "items:\n  - {link: https://a.example/, source: a, date: \"2026-11-20\", topic: t}\n",
+		"a bad date":       "items:\n  - {title: a, link: https://a.example/, source: a, date: yesterday, topic: t}\n",
+		"the same link":    "items:\n  - {title: a, link: https://a.example/, source: a, date: \"2026-11-20\", topic: t}\n  - {title: b, link: https://a.example/, source: a, date: \"2026-11-20\", topic: t}\n",
+		"a long title":     "items:\n  - {title: " + strings.Repeat("a", maxTitle+1) + ", link: https://a.example/, source: a, date: \"2026-11-20\", topic: t}\n",
+		"keep too long":    "keep: 1000\n",
+		"not YAML":         "items: [\n",
+	} {
+		if _, err := Parse([]byte(bad)); err == nil {
+			t.Errorf("%s was taken", name)
+		}
+	}
+}
+
+func TestPage(t *testing.T) {
+	n, err := Parse([]byte(good + `  - title: "<script>alert(1)</script>"
+    link: https://example.com/x?a=1&b=<2>
+    source: example.com
+    date: "2026-11-21"
+    topic: Jobs
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{News: n, Topics: "## Kubernetes releases", IngressKey: "key",
+		Now: func() time.Time { return time.Date(2026, 11, 22, 8, 0, 0, 0, time.UTC) }}
+	h := app.Routes()
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != http.StatusForbidden {
+		t.Errorf("without the ingress key: %d", w.Code)
+	}
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set(ingressHeader, "key")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	for _, want := range []string{"k3s v1.37.2 is out", `href="https://github.com/k3s-io/k3s/releases/tag/v1.37.2"`, "<h2>Jobs</h2>", "2 items", "## Kubernetes releases"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<script>") || strings.Contains(body, "Older news") {
+		t.Errorf("an unescaped title, or an item older than keep, in:\n%s", body)
+	}
+	if strings.Index(body, "<h2>Jobs</h2>") > strings.Index(body, "<h2>Kubernetes releases</h2>") {
+		t.Error("topics are not in the order of their names")
+	}
+	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Error("the page allows scripts")
+	}
+
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/healthz", nil))
+	if w.Code != http.StatusOK {
+		t.Errorf("healthz: %d", w.Code)
+	}
+}
