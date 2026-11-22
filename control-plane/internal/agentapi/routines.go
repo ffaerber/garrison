@@ -221,8 +221,23 @@ func (r *Routines) Check(ctx context.Context) {
 					// was, so this push starts the routine once it is done.
 					continue
 				}
+				if len(rt.OnPush.Paths) > 0 {
+					// Only a change to its paths starts it. If Gitea cannot
+					// say what changed, it runs: better once too often.
+					files, err := r.Gitea.ChangedFiles(ctx, a.Unit, rt.OnPush.Repo, prev, head)
+					if err != nil {
+						log.Printf("routines: %s: what changed from %.12s to %.12s: %v; running it", key, prev, head, err)
+					} else if !rt.OnPush.Touches(files) {
+						r.heads[key] = head
+						r.save(ctx, key)
+						continue
+					}
+				}
 				r.heads[key] = head
 				why = fmt.Sprintf("%s of %s/%s moved to %.12s", rt.OnPush.Branch, a.Unit, rt.OnPush.Repo, head)
+				if len(rt.OnPush.Paths) > 0 {
+					why += ", changing " + strings.Join(rt.OnPush.Paths, " or ")
+				}
 			} else {
 				continue // on_alert: started by alerts, not by the clock
 			}

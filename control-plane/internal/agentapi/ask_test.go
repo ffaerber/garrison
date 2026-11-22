@@ -298,6 +298,59 @@ func TestRoutines(t *testing.T) {
 	}
 }
 
+// An on_push with paths starts only when one of them changed: a merge of
+// news.yaml, the routine's own work, starts nothing; a change of topics.md
+// does.
+func TestOnPushWithPaths(t *testing.T) {
+	s, _, _ := setup(t)
+	head := "c1"
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+		case "/api/v1/repos/homepage/site/branches/main":
+			io.WriteString(w, `{"commit":{"id":"`+head+`"}}`)
+		case "/api/v1/repos/homepage/site/compare/c1...c2":
+			io.WriteString(w, `{"commits":[{"files":[{"filename":"news.yaml"}]}]}`)
+		case "/api/v1/repos/homepage/site/compare/c2...c3":
+			io.WriteString(w, `{"commits":[{"files":[{"filename":"README.md"}]},{"files":[{"filename":"topics.md"}]}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	g := &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Tools: []string{"list_repos"}, Routines: []agents.Routine{
+		{Name: "topics", OnPush: &agents.Push{Repo: "site", Branch: "main", Paths: []string{"topics.md"}}, Owner: "bob", Task: "Look at the topics."},
+	}}}
+	withSandboxes(t, s)
+	s.Gateway.ServiceKey = "k"
+	poster := &fakePoster{}
+	s.Poster = poster
+	now := time.Date(2026, 11, 13, 8, 0, 0, 0, time.UTC)
+	r := &Routines{Server: s, Gitea: g, Now: func() time.Time { return now }}
+	settle := func() []gateway.Post {
+		time.Sleep(300 * time.Millisecond)
+		return poster.all()
+	}
+	r.Check(context.Background()) // first seen
+	head = "c2"
+	r.Check(context.Background()) // only news.yaml changed
+	if got := settle(); len(got) != 0 {
+		t.Fatalf("a change of news.yaml started it: %+v", got)
+	}
+	head = "c3"
+	r.Check(context.Background()) // topics.md changed
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	posts := poster.all()
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "main of homepage/site moved to c3, changing topics.md") {
+		t.Fatalf("a change of topics.md: %+v", posts)
+	}
+}
+
 func TestPrivateAgentsAnswerOnlyAmongTheirPeople(t *testing.T) {
 	s, _, _ := setup(t)
 	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

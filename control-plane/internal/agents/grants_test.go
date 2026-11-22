@@ -149,10 +149,40 @@ func TestRoutines(t *testing.T) {
 		`- {agent: dev, name: x, schedule: "0 0 30 2 *", owner: a, task: t}`:                                         "never comes",
 		`- {agent: dev, name: x, schedule: "at six", owner: a, task: t}`:                                             "want five fields",
 		`- {name: x, every: 1h, owner: a, task: t}`:                                                                  "agent is missing",
+		`- {agent: dev, name: x, on_push: {repo: todo, branch: main, paths: [../x]}, owner: a, task: t}`:             "not a path in the repo",
+		`- {agent: dev, name: x, on_push: {repo: todo, branch: main, paths: [/etc]}, owner: a, task: t}`:             "not a path in the repo",
 	} {
 		if _, p := load1(t, "homepage", "", routines(yaml)); !strings.Contains(strings.Join(p, "\n"), want) {
 			t.Errorf("%s: %v", yaml, p)
 		}
+	}
+}
+
+// on_push paths: a routine starts only for a change to one of them, or below
+// one ending in /.
+func TestOnPushPaths(t *testing.T) {
+	a, p := load1(t, "homepage", "", routines(`
+- {agent: dev, name: topics, on_push: {repo: site, branch: main, paths: [topics.md, sources/]}, owner: bob, task: Update.}
+`))
+	if len(p) > 0 || len(a.Routines) != 1 {
+		t.Fatalf("%v %+v", p, a.Routines)
+	}
+	push := a.Routines[0].OnPush
+	for files, want := range map[string]bool{
+		"topics.md":           true,
+		"news.yaml":           false,
+		"news.yaml,topics.md": true,
+		"sources/feeds.txt":   true,
+		"sources":             false,
+		"docs/topics.md":      false,
+		"":                    false,
+	} {
+		if got := push.Touches(strings.Split(files, ",")); got != want {
+			t.Errorf("%q: %v, want %v", files, got, want)
+		}
+	}
+	if !(&Push{Repo: "site", Branch: "main"}).Touches([]string{"anything"}) {
+		t.Error("without paths, every change counts")
 	}
 }
 

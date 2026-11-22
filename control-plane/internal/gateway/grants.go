@@ -467,6 +467,34 @@ func (g *Gitea) BranchHead(ctx context.Context, org, repo, branch string) (strin
 	return b.Commit.ID, err
 }
 
+// ChangedFiles are the files the commits from base to head changed, as
+// the admin, by Gitea's compare.
+func (g *Gitea) ChangedFiles(ctx context.Context, org, repo, base, head string) ([]string, error) {
+	if err := validOrg(org); err != nil {
+		return nil, err
+	}
+	if err := validRepo(repo); err != nil {
+		return nil, err
+	}
+	var c struct {
+		Commits []struct {
+			Files []struct {
+				Filename string `json:"filename"`
+			} `json:"files"`
+		} `json:"commits"`
+	}
+	if _, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/compare/%s...%s?files=true&verification=false", org, repo, escapePath(base), escapePath(head)), nil, &c); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, cm := range c.Commits {
+		for _, f := range cm.Files {
+			out = append(out, f.Filename)
+		}
+	}
+	return out, nil
+}
+
 var patchedFile = regexp.MustCompile(`(?m)^diff --git a/(\S+) b/(\S+)$`)
 
 // checkPatched checks grants.yaml and routines.yaml of a unit's config
