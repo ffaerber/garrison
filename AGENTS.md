@@ -26,6 +26,8 @@ How a change travels: chat → agent (sandbox) → gateway tool, as the person �
 
 | To change | Edit | Notes |
 | --- | --- | --- |
+| A chain of command, and whether its work is merged by itself | `templates/garrison-config/chains/<name>.yaml` (`merge: review`, `ask` or `auto`) | Parsed in `control-plane/internal/agents/chains.go`; a routine's run is held to `merge` in `gateway/grants.go` (`mergeChange`) |
+| An app template | `templates/app/<name>/` | Offered by `create_repo`; Go files and go.mod as `.tmpl`. `todo`, and `news` for the chain `news-page` |
 | An agent's prompt, tools, skills | `templates/garrison-config/agents/<name>/` | Compiled into the control plane (`templates/templates.go`). The agent list is tested in `control-plane/internal/agents/agents_test.go` |
 | A tool agents can call | `control-plane/internal/gateway/tools.go` plus its handler | Also list it in the agent's `agent.yaml` `tools:` |
 | How a stack file becomes Kubernetes objects | `control-plane/internal/render/kubernetes.go`, `schemas/stack.schema.json` | Golden files: `make golden` |
