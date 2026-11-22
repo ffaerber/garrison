@@ -19,7 +19,7 @@
 #                                  reached at the VM's gateway, port 8188,
 #                                  instead of the fake one: it really draws
 #
-# The scenarios that talk to a real LLM (agent, media, journey, ui, and team
+# The scenarios that talk to a real LLM (agent, media, journey, newsroom, ui, and team
 # and what grows from it) use by
 # default Ollama on this computer, which the VM reaches through its gateway
 # (LOCAL_MODEL, default qwen3.8-64k); with LLM=cloud, Ollama's cloud with
@@ -50,6 +50,7 @@ cd "$ROOT"
 #                                             +- 4.5 deploy [F] -+- 5.2 journey
 #                                                                +- 5.3 people
 #                                                                +- 5.5 nodes
+#                                                                +- 5.6 newsroom
 #                                                                +- 5.4 team [F] -+- 6.1 roles
 #                                                                                 +- 6.2 change
 #                                                                                 +- 6.3 marketing
@@ -64,12 +65,12 @@ cd "$ROOT"
 # Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
 # scenario in a VM of its own, $VM-<step>, cloned from its parent's.
-STEPS=(base install login platform crud ui agent media deploy journey people nodes team roles change marketing routines commander operator leaving guided)
+STEPS=(base install login platform crud ui agent media deploy journey people nodes newsroom team roles change marketing routines commander operator leaving guided)
 declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
-  [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [nodes]=deploy [team]=deploy
+  [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [nodes]=deploy [newsroom]=deploy [team]=deploy
   [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
-  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [nodes]=5.5 [team]=5.4
+  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [nodes]=5.5 [newsroom]=5.6 [team]=5.4
   [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8)
 FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
@@ -94,6 +95,7 @@ inputs() {
               echo "$shared" test/ui/Dockerfile test/ui/run.sh test/ui/lib.py "test/ui/$1.py" ;;
     media)    echo "$shared" test/e2e/media templates/unit-config/README.md ;;
     nodes)    echo "$shared" installer/join.sh installer/node.sh host/hosts.sh ;;
+    newsroom) echo "$shared" templates/app/news ;;
     team|roles|change|marketing|routines|commander|operator|leaving)
               echo "$shared" test/e2e/apps ;;
     *)        echo "$shared" ;;
@@ -241,6 +243,12 @@ step_journey() {
   sync_repo
   put_llm_key
   smoke journey
+}
+
+step_newsroom() {
+  sync_repo
+  put_llm_key
+  smoke newsroom
 }
 
 # The browser scenarios (test/ui/NAME.py): people click and type in Gitea,
