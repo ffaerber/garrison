@@ -53,7 +53,7 @@ The end-to-end tests run on throwaway Multipass VMs; see [test/README.md](test/R
 - `test/vm/steps.sh --list` shows what is green or stale, and `test/vm/steps.sh <scenario>` reruns one.
 - Each step is `test/e2e/scenarios/<step>.sh` on `test/e2e/lib.sh`. The browser scenarios are `test/ui/<step>.py` (Playwright) on `test/ui/lib.py`, which holds every selector of Gitea's and Open WebUI's pages.
 - The agents use a real LLM: local Ollama by default, `LLM=cloud` for Ollama's cloud. So agent checks look at what happened (pull requests, authors, approvals, deploys), not at wording, and retry once with a plainer request.
-- Logs: `bin/steps-<step>.log`. A failed scenario's VM is kept as `garrison-test-<step>`: `multipass exec garrison-test-<step> -- sudo ...` to look around.
+- Logs: `bin/steps-<step>.log`. A failed scenario's VM is kept as `garrison-k3s-<step>`: `multipass exec garrison-k3s-<step> -- sudo ...` to look around.
 
 What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.sh` everything from login; anything the installer uses (`control-plane/`, `templates/`, `garrison/`, `sandbox/`, `files/`, `installer/`) everything from install, about 45 minutes in all.
 

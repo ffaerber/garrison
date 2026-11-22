@@ -34,7 +34,7 @@
 # (test/vm/dns.sh) and Keycloak opens in the browser. OPEN=0 skips that.
 set -euo pipefail
 
-VM=${VM:-garrison-test}
+VM=${VM:-garrison-k3s}
 BASE_VM=$VM   # VM changes to the VM of each job; names come from this
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}

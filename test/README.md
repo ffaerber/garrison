@@ -21,9 +21,9 @@ The agents run on Ollama on this computer by default (`qwen3.8-64k`), reached fr
 
 ## The tree
 
-A **fixture** is a state scenarios start from; green, it is saved as a snapshot of its own VM. A **scenario** is a test: it runs in a fresh clone of its fixture's VM, which is deleted when it passes and kept, stopped, when it fails (`garrison-test-<scenario>`), so one failure stops nothing else. Up to `JOBS` VMs run at once (8 GB each).
+A **fixture** is a state scenarios start from; green, it is saved as a snapshot of its own VM. A **scenario** is a test: it runs in a fresh clone of its fixture's VM, which is deleted when it passes and kept, stopped, when it fails (`garrison-k3s-<scenario>`), so one failure stops nothing else. Up to `JOBS` VMs run at once (8 GB each).
 
-The VMs run Garrison on Kubernetes (`docs/kubernetes.md`). `VM=garrison-k3s` names VMs apart from the default ones, as the move to k3s did.
+The VMs run Garrison on Kubernetes (`docs/kubernetes.md`).
 
 ```
 1 base [F] - 2 install [F] - 3 login [F] -+- 4.1 platform
@@ -82,7 +82,7 @@ A green run points this computer's DNS at the VM and opens Keycloak (`OPEN=0` sk
 ```
 test/vm/dns.sh          # *.garrison.test resolves to the VM from this computer
 test/vm/dns.sh --off    # undo
-multipass exec garrison-test -- sudo cat /etc/garrison/admin-password
+multipass exec garrison-k3s -- sudo cat /etc/garrison/admin-password
 ```
 
 Then open `https://chat.garrison.test`, `https://git.garrison.test`, `https://grafana.garrison.test`, `https://keycloak.garrison.test` or any deployed stack. The certificate is self-signed, so the browser asks once per hostname. The DNS setting lasts until a reboot or until the VM is recreated. It needs systemd-resolved on this computer.

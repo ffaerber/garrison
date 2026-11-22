@@ -10,7 +10,7 @@
 # the next reboot or until the VM is recreated; run the script again then.
 set -euo pipefail
 
-VM=${VM:-garrison-test}
+VM=${VM:-garrison-k3s}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck disable=SC1090
 DOMAIN=$(. "$ROOT/${ANSWERS:-test/answers/selfsigned.env}" && echo "$DOMAIN")
