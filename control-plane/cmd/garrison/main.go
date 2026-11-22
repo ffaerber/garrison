@@ -804,7 +804,18 @@ func agentsCmd(args []string) error {
 			sb.Close()
 		}()
 		if *internetProxy != "" {
-			proxy := &http.Server{Addr: *internetListen, Handler: &agentapi.InternetProxy{Server: srv}, ReadHeaderTimeout: 10 * time.Second}
+			ip := &agentapi.InternetProxy{Server: srv}
+			// Tests only: addresses that are not public, e.g. a fake web
+			// site in the cluster, which the agents may reach as if it were.
+			if also := vars["INTERNET_ALLOW"]; also != "" {
+				allowed, ranges, err := agentapi.PublicOr(also)
+				if err != nil {
+					return err
+				}
+				ip.Allowed = allowed
+				log.Printf("agents: the proxy also lets through %v (INTERNET_ALLOW, for tests)", ranges)
+			}
+			proxy := &http.Server{Addr: *internetListen, Handler: ip, ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				<-ctx.Done()
 				proxy.Close()

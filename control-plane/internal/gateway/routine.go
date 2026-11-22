@@ -19,19 +19,21 @@ import (
 
 // routineEntry is one routine as add_routine writes it into routines.yaml.
 type routineEntry struct {
-	Agent    string `yaml:"agent,omitempty"`
-	Chain    string `yaml:"chain,omitempty"`
-	Name     string `yaml:"name"`
-	Schedule string `yaml:"schedule,omitempty"`
-	Every    string `yaml:"every,omitempty"`
-	Owner    string `yaml:"owner"`
-	Task     string `yaml:"task,omitempty"`
+	Agent    string       `yaml:"agent,omitempty"`
+	Chain    string       `yaml:"chain,omitempty"`
+	Name     string       `yaml:"name"`
+	Schedule string       `yaml:"schedule,omitempty"`
+	Every    string       `yaml:"every,omitempty"`
+	OnPush   *agents.Push `yaml:"on_push,omitempty"`
+	Owner    string       `yaml:"owner"`
+	Task     string       `yaml:"task,omitempty"`
 }
 
 // grantEntry is the grant add_routine adds when the routine changes a repo.
 type grantEntry struct {
 	Agent      string `yaml:"agent"`
 	Repo       string `yaml:"repo"`
+	Branch     string `yaml:"branch,omitempty"`
 	Level      string `yaml:"level"`
 	For        string `yaml:"for"`
 	Unattended bool   `yaml:"unattended"`
@@ -59,8 +61,11 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 	name, which := strings.TrimSpace(a.Name), agents.NameOf(strings.TrimSpace(a.Agent))
 	task, chainName := strings.TrimSpace(a.Task), strings.TrimSpace(a.Chain)
 	// Who proposes into repos with nobody watching: the agent, or every
-	// agent of the chain that proposes.
+	// agent of the chain that proposes; and, for a chain that merges by
+	// itself (merge: auto or ask), who merges into main.
 	proposers := []string{which}
+	var mergers []string
+	mode := ""
 	if chainName != "" {
 		defs, err := t.Gitea.Definitions(ctx)
 		if err != nil {
@@ -73,21 +78,33 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		if which != "" && which != c.Lead {
 			return "", fmt.Errorf("%w: the chain %s is run by its lead, %s; leave agent out", ErrInvalid, c.Name, c.Lead)
 		}
-		which, proposers = c.Lead, nil
+		which, proposers, mode = c.Lead, nil, c.MergeMode()
 		for _, n := range c.Agents() {
-			if i := slices.IndexFunc(defs, func(d agents.Agent) bool { return d.Name == n }); i >= 0 &&
-				slices.ContainsFunc(defs[i].Tools, func(t string) bool { return t == "propose_patch" || t == "screenshot" }) {
+			i := slices.IndexFunc(defs, func(d agents.Agent) bool { return d.Name == n })
+			if i < 0 {
+				continue
+			}
+			if slices.ContainsFunc(defs[i].Tools, func(t string) bool { return t == "propose_patch" || t == "screenshot" }) {
 				proposers = append(proposers, n)
+			}
+			if mode != agents.MergeReview && slices.Contains(defs[i].Tools, "merge_change") {
+				mergers = append(mergers, n)
 			}
 		}
 	}
 	if name == "" || which == "" || (task == "" && chainName == "") {
 		return "", fmt.Errorf("%w: a routine needs a name, and agent and task, or chain", ErrInvalid)
 	}
-	if (a.Schedule == "") == (a.Every == "") {
-		return "", fmt.Errorf("%w: give either schedule (cron, e.g. \"0 9 * * *\" for every day at 9) or every (e.g. 6h), not both", ErrInvalid)
+	whens := 0
+	for _, set := range []bool{a.Schedule != "", a.Every != "", a.OnPush != nil} {
+		if set {
+			whens++
+		}
 	}
-	entry := routineEntry{Agent: which, Name: name, Schedule: strings.TrimSpace(a.Schedule), Every: strings.TrimSpace(a.Every), Owner: p.Name, Task: task}
+	if whens != 1 {
+		return "", fmt.Errorf("%w: give one of schedule (cron, e.g. \"0 9 * * *\" for every day at 9), every (e.g. 6h) or on_push (a repo and branch, and the paths that start it)", ErrInvalid)
+	}
+	entry := routineEntry{Agent: which, Name: name, Schedule: strings.TrimSpace(a.Schedule), Every: strings.TrimSpace(a.Every), OnPush: a.OnPush, Owner: p.Name, Task: task}
 	if chainName != "" {
 		entry.Agent, entry.Chain = "", chainName
 	}
@@ -129,6 +146,20 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 				have = append(have, agents.Grant{Agent: who, Repo: repo, Unattended: true})
 				gave = append(gave, who+" in "+a.Unit+"/"+repo)
 			}
+			// Merging into main deploys: autonomous, for the routine's
+			// unattended runs. The chain's mode still holds them back.
+			for _, who := range mergers {
+				if slices.ContainsFunc(have, func(g agents.Grant) bool {
+					return agents.NameOf(g.Agent) == who && g.Repo == repo && g.Unattended && g.Branch == "main" && agents.Rank(g.Level) >= agents.Rank(agents.LevelAutonomous)
+				}) {
+					continue
+				}
+				if grants, err = appendEntry(grants, grantEntry{Agent: who, Repo: repo, Branch: "main", Level: agents.LevelAutonomous, For: agents.ForMembers, Unattended: true}); err != nil {
+					return "", err
+				}
+				have = append(have, agents.Grant{Agent: who, Repo: repo, Branch: "main", Level: agents.LevelAutonomous, Unattended: true})
+				gave = append(gave, who+" merging into main of "+a.Unit+"/"+repo+" (merge: "+mode+" in its chain)")
+			}
 		}
 		if len(gave) > 0 {
 			files[agents.GrantsFile] = grants
@@ -136,7 +167,7 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 	}
 	granted := ""
 	if len(gave) > 0 {
-		granted = fmt.Sprintf(" It also gives grants to propose that its runs may use with nobody watching (grants.yaml): %s.", strings.Join(gave, ", "))
+		granted = fmt.Sprintf(" It also gives grants that its runs may use with nobody watching (grants.yaml): %s.", strings.Join(gave, ", "))
 	}
 	if err := t.checkFiles(ctx, a.Unit, files); err != nil {
 		return "", err
@@ -157,8 +188,14 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		note = askedBy(p, agent, role)
 	}
 	when := "on the schedule " + entry.Schedule
-	if entry.Every != "" {
+	switch {
+	case entry.Every != "":
 		when = "every " + entry.Every
+	case entry.OnPush != nil:
+		when = fmt.Sprintf("when %s of %s moves", entry.OnPush.Branch, entry.OnPush.Repo)
+		if len(entry.OnPush.Paths) > 0 {
+			when += ", changing " + strings.Join(entry.OnPush.Paths, " or ")
+		}
 	}
 	title := a.Title
 	if strings.TrimSpace(title) == "" {

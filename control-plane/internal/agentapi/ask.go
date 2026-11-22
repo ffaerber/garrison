@@ -243,7 +243,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }
 	run := sandbox.Run{
 		Token: c.Token, StartedBy: "agent " + c.Agent, Chain: append(slices.Clone(c.Run.Chain), target.ID()),
-		Unattended: c.Run.Unattended, Owner: c.Run.Owner, Admin: c.Run.Admin,
+		Unattended: c.Run.Unattended, Owner: c.Run.Owner, Admin: c.Run.Admin, Merge: c.Run.Merge, Answered: c.Run.Answered,
 	}
 	key := c.Chat + "\x00" + target.ID()
 	log.Printf("agents: %s: %s asks %s (%s)", who, c.Agent, target.ID(), strings.Join(run.Chain, " → "))

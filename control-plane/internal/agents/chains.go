@@ -23,7 +23,29 @@ type Chain struct {
 	Description string `yaml:"description"`
 	When        string `yaml:"when"` // which requests it is for, in words
 	Lead        string `yaml:"lead"`
-	Steps       []Step `yaml:"steps"`
+	// Merge says what happens to the pull requests a run of the chain
+	// opens: MergeReview, MergeAsk or MergeAuto (MergeModes). It is the most
+	// a run may do: merging also needs the unit's grant.
+	Merge string `yaml:"merge"`
+	Steps []Step `yaml:"steps"`
+}
+
+// A chain's merge modes.
+const (
+	MergeReview = "review" // a person reviews and merges, in Gitea; the default
+	MergeAsk    = "ask"    // the lead asks the routine's owner, and merges after the reply
+	MergeAuto   = "auto"   // the lead merges once the grant's checks pass
+)
+
+// MergeModes are the values of a chain's merge.
+var MergeModes = []string{MergeReview, MergeAsk, MergeAuto}
+
+// MergeMode is c's merge, MergeReview if it names none.
+func (c Chain) MergeMode() string {
+	if c.Merge == "" {
+		return MergeReview
+	}
+	return c.Merge
 }
 
 // Step is one step of a chain: an agent and what it does there.
@@ -97,6 +119,9 @@ func parseChain(name, raw string, defs []Agent) (Chain, []string) {
 	case strings.TrimSpace(c.Description) == "" || len(c.Description) > 300:
 		why = append(why, "description is needed, at most 300 characters")
 	}
+	if c.Merge != "" && !slices.Contains(MergeModes, c.Merge) {
+		why = append(why, fmt.Sprintf("merge must be %s: whether a person reviews its pull requests in Gitea (review, the default), the lead asks the routine's owner first (ask), or it merges by itself (auto)", strings.Join(MergeModes, ", ")))
+	}
 	if strings.TrimSpace(c.When) == "" || len(c.When) > 300 {
 		why = append(why, "when is needed: which requests the chain is for, at most 300 characters")
 	}
@@ -165,6 +190,14 @@ func ChainNamed(defs []Agent, name string) (Chain, bool) {
 	return Chain{}, false
 }
 
+// mergePrompt tells a chain's lead what to do with the pull requests its
+// run opens; the gateway holds a routine's run to it (merge_change).
+var mergePrompt = map[string]string{
+	MergeReview: "Its pull requests are for people to review: never merge them yourself; give their links, and a person merges in Gitea.\n",
+	MergeAsk:    "Its pull requests are merged after the routine's owner says so: in a routine, ask them with ask_person, giving the pull request's link and what it changes, and merge it with merge_change only once they agree; in a chat, ask the person. If they say no, leave it open and say so.\n",
+	MergeAuto:   "Its pull requests are merged without a review: merge each one with merge_change as soon as it is proposed, if your grants allow it; if merge_change refuses, say why and leave it for a person.\n",
+}
+
 // chainsPrompt is the part of an agent's system prompt about the chains it
 // knows: the whole order for the lead, its place and who comes next for an
 // agent in one, and every chain in short for the commander.
@@ -185,6 +218,7 @@ func chainsPrompt(a Agent) string {
 				}
 				fmt.Fprintf(&b, "%d. %s: %s\n", i+1, who, s.Does)
 			}
+			b.WriteString(mergePrompt[c.MergeMode()])
 			b.WriteString("When a request is for this chain, run it: do your steps yourself; for each step of another agent, call ask_agent with that agent, the step as task, and what it needs from the steps before (only that: never secrets, tokens or private data to an agent that reaches the internet). Wait for its answer before the next step. If a step fails, stop there and report what was done and what failed. End with the report the last step asks for, with every link the others gave.\n")
 		case c.Has(a.Name):
 			fmt.Fprintf(&b, "\nChain %s, led by %s: %s.\n", c.Name, c.Lead, c.Description)

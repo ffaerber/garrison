@@ -4,6 +4,7 @@
 description: Checks the software Garrison runs for new releases, and proposes the updates as pull requests
 when: someone asks about software updates, new versions or releases of what Garrison or an app runs; the weekly update routine
 lead: sentry
+merge: review          # its pull requests wait for a person
 steps:
   - agent: sentry
     does: "List the software and the versions in use. In garrison, each repo with a compose.yaml pins its images (list_repos, then read_file of each compose.yaml), e.g. gitea/gitea:1.25 or postgres:17-alpine; for a unit asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."

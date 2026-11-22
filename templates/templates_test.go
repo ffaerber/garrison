@@ -25,6 +25,22 @@ func TestAppFilesTodo(t *testing.T) {
 	}
 }
 
+func TestAppFilesNews(t *testing.T) {
+	files := AppFiles("news", "me", "headlines")
+	for _, p := range []string{"go.mod", "go.sum", "main.go", "news.go", "main_test.go", "page.html", "news.yaml", "topics.md", "Dockerfile", ".gitea/workflows/pipeline.yaml", "README.md"} {
+		if _, ok := files[p]; !ok {
+			t.Errorf("no %s in %v", p, keys(files))
+		}
+	}
+	if !strings.Contains(files["README.md"], "source: headlines") || !strings.Contains(files["README.md"], "main: { private: true }") {
+		t.Errorf("README.md: %s", files["README.md"])
+	}
+	// The pipeline is todo's: one way to build an app.
+	if files[".gitea/workflows/pipeline.yaml"] != AppFiles("todo", "me", "headlines")[".gitea/workflows/pipeline.yaml"] {
+		t.Error("news's pipeline differs from todo's")
+	}
+}
+
 func TestAppFilesUnknown(t *testing.T) {
 	for _, name := range []string{"", "static-web", "../unit-config", "todo/.."} {
 		if AppFiles(name, "lab", "example") != nil {

@@ -116,6 +116,18 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	if s := agentNamed(t, got, "sentry"); len(s.Chains) != 1 || s.Chains[0].Name != "software-updates" || s.Chains[0].Lead != "sentry" || !s.MayAsk("scout") || !s.MayAsk("coder") {
 		t.Errorf("sentry: chains %+v, asks %v", s.Chains, s.Asks)
 	}
+	if s := agentNamed(t, got, "sentry"); s.Chains[0].MergeMode() != MergeReview {
+		t.Errorf("software-updates merges by itself: %q", s.Chains[0].Merge)
+	}
+	// The chain news-page: the coder leads it and merges by itself; the
+	// scout, which reads the web, writes nothing, and the coder, which
+	// writes, reaches only the package registries.
+	coder := agentNamed(t, got, "coder")
+	news := slices.IndexFunc(coder.Chains, func(c Chain) bool { return c.Name == "news-page" })
+	if news < 0 || coder.Chains[news].Lead != "coder" || coder.Chains[news].MergeMode() != MergeAuto || !coder.MayAsk("scout") ||
+		!slices.Contains(coder.Tools, "merge_change") || coder.Internet.All {
+		t.Errorf("coder: chains %+v, asks %v, internet %s", coder.Chains, coder.Asks, coder.Internet)
+	}
 	i := slices.IndexFunc(got, func(a Agent) bool { return a.Name == OperatorName })
 	if want := Operator(PlatformUnit, all); i < 0 || got[i].Prompt != want.Prompt || !slices.Equal(got[i].Tools, want.Tools) {
 		t.Errorf("written operator differs from the built-in one: %+v", got)

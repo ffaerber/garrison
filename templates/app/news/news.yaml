@@ -1,0 +1,12 @@
+# What the page lists. The agents rewrite it after looking for the topics
+# in topics.md (the chain news-page); the tests check it, so a file with a
+# mistake is never built. Each item:
+#   title:   the headline, as the source gives it
+#   link:    https:// address of the item itself
+#   source:  the site, e.g. github.com
+#   date:    when it was published, YYYY-MM-DD
+#   topic:   one of the topics of topics.md, by its heading
+#   summary: one sentence, optional
+keep: 30        # days an item stays on the page
+updated: ""
+items: []

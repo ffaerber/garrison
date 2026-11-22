@@ -25,12 +25,14 @@ check "an alert fires: it keeps failing"   until_true 400 quotes_alert
 check "todo's people see it in the feed"   until_true 120 in_feed carol ns=todo "e['kind'] == 'alert' and e['status'] == 'failed' and 'quotes_web' in e['title']"
 # Who outside todo sees it is home's TestEachSeesWhatTheyMayRead: here bob
 # and carol are both todo's (the fixture team).
+# alert_post: the operator's post of the run: its report, or a question to
+# alice (ask_person), which it may ask first, e.g. whether to propose the fix.
 alert_post() {
   chat_api alice "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
 import json,sys
 for m in json.load(sys.stdin):
     c = m.get("content") or ""
-    if c.startswith("**operator**") and "Routine on-failure, for alice (the alert ServiceFailing fired" in c:
+    if c.startswith("**operator**") and ("Routine on-failure, for alice (the alert ServiceFailing fired" in c or "todo/operator goes on with your answer" in c):
         print(c); sys.exit(0)
 sys.exit(1)'
 }

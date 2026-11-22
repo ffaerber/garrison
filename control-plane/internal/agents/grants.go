@@ -75,6 +75,29 @@ type Routine struct {
 type Push struct {
 	Repo   string `yaml:"repo"`
 	Branch string `yaml:"branch"`
+	// Paths, if given, start it only when one of these files, or a file
+	// below one ending in /, changed: e.g. [topics.md], so that the
+	// routine's own merges of other files start nothing.
+	Paths []string `yaml:"paths"`
+}
+
+// MaxPaths is how many paths an on_push may name.
+const MaxPaths = 20
+
+// Touches is whether one of files is one of p's paths, or below one ending
+// in /. Without paths, every change counts.
+func (p *Push) Touches(files []string) bool {
+	if len(p.Paths) == 0 {
+		return true
+	}
+	for _, f := range files {
+		for _, want := range p.Paths {
+			if f == want || (strings.HasSuffix(want, "/") && strings.HasPrefix(f, want)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`)
@@ -201,6 +224,14 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 		case r.OnPush != nil:
 			if !repoName.MatchString(r.OnPush.Repo) || !branchRe.MatchString(r.OnPush.Branch) || strings.Contains(r.OnPush.Branch, "..") {
 				why = append(why, at+": on_push needs a repo of this unit and a branch")
+			}
+			if len(r.OnPush.Paths) > MaxPaths {
+				why = append(why, fmt.Sprintf("%s: on_push names at most %d paths", at, MaxPaths))
+			}
+			for _, p := range r.OnPush.Paths {
+				if p == "" || p == "/" || strings.HasPrefix(p, "/") || slices.Contains(strings.Split(strings.TrimSuffix(p, "/"), "/"), "..") || len(p) > 300 {
+					why = append(why, fmt.Sprintf("%s: on_push paths: %q is not a path in the repo, like topics.md or docs/", at, p))
+				}
 			}
 		default:
 			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h), on_push (repo and branch) or on_alert (label values, e.g. {alertname: ServiceDown})")

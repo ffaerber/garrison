@@ -31,7 +31,7 @@ status_is() {
 # curl with every hostname of the installation pointed at this machine.
 web() {
   local args=() h
-  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo example dev-example files; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
+  for h in keycloak sso git grafana prometheus loki chat gateway agents hello dev-hello todo dev-todo example dev-example files news; do args+=(--resolve "$h.$DOMAIN:443:127.0.0.1"); done
   args+=(--resolve "$DOMAIN:443:127.0.0.1") # the dashboard
   curl -sS --max-time 20 --cacert "$ETC/tls.crt" "${args[@]}" "$@"
 }
@@ -302,8 +302,12 @@ sys.exit(1)' "$id" && return 0
 # render_todo NS REPO DIR: the template todo as create_repo writes it into
 # NS/REPO, in DIR (NAME.tmpl as NAME, the placeholders filled in), and the
 # stack its README says to propose, in DIR.stack.yaml.
-render_todo() {
-  rm -rf "$3" && cp -r templates/app/todo "$3" || return 1
+render_todo() { render_app todo "$@"; }
+# render_app TEMPLATE UNIT REPO DIR: the app template as create_repo writes it
+# for UNIT/REPO, into DIR, and the stack its README shows into DIR.stack.yaml.
+render_app() {
+  local template=$1; shift
+  rm -rf "$3" && cp -r "templates/app/$template" "$3" || return 1
   find "$3" -name '*.tmpl' -exec sh -c 'mv "$1" "${1%.tmpl}"' _ {} \;
   find "$3" -type f -exec sed -i "s/{{unit}}/$1/g; s/{{repo}}/$2/g" {} +
   python3 -c '

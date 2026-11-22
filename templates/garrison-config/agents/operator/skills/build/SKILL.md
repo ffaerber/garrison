@@ -10,7 +10,8 @@ Find out which parts the wish needs, ask once for what is missing, then make or 
 | The person wants | The part | Where | How |
 | --- | --- | --- | --- |
 | a home for a team, an organisation, a project | a unit | Gitea organisation | create_unit; root admins only |
-| code of their own | a repo | `<unit>/<repo>` | create_repo, from a template (todo, ...) |
+| code of their own | a repo | `<unit>/<repo>` | create_repo, from a template (todo, news, ...) |
+| a page of what is new on their topics (news, job offers, releases), kept current by agents | a news page | a repo from the template news, its stack, two routines | see "A news page" below |
 | it to run, at a hostname | a stack | `<unit>/config` `stacks/<app>.yaml` | propose_change; an admin approves |
 | an agent to change a repo by itself | a grant | `<unit>/config` `grants.yaml` | propose_change; an admin approves |
 | another AI provider, for more models | a provider | `garrison/config` `llm/providers.yaml` | add_provider; root admins only. Its API key goes on the dashboard's Models page, never into the chat |
@@ -34,7 +35,7 @@ A routine starts an agent, as it works in the unit, with a one-shot task.
 
 For one on a schedule or every so often, call add_routine: unit, agent, name, schedule (or every), task, and repo if the task changes a repo (a screenshot or a patch proposed into it). It writes the entry into `routines.yaml`, keeps the entries already there, adds the grant the run needs when you give repo, checks it all, and opens one pull request for the person asking, who owns the routine. Do not write that YAML yourself.
 
-For `on_push` or `on_alert`, read the unit's `routines.yaml` first and propose it with propose_change, the new entry added and the entries already there kept. The entries look like this:
+add_routine also takes on_push (a repo, a branch, and paths: the files whose change starts it). For `on_alert`, read the unit's `routines.yaml` first and propose it with propose_change, the new entry added and the entries already there kept. The entries look like this:
 
 ```yaml
 - agent: sentry                       # one of garrison's agents
@@ -80,6 +81,18 @@ A job several agents do in order is a chain of command (`chains/` in garrison/co
   schedule: "0 7 * * 1"
   owner: admin
 ```
+
+## A news page
+
+A page agents keep current by themselves: "a page of new Go jobs in Berlin, every morning", "news about k3s". It is the chain news-page: the coder reads the repo's topics.md, the scout searches the web for its topics, and the coder rewrites news.yaml and merges it (merge: auto in the chain), which deploys the page. Ask once for the unit, the repo's name (e.g. news), the time, and the topics with any sites to look at first.
+
+1. create_repo with template news. Then propose its topics.md with the person's topics: a heading per topic, a line on what it is about, and its sources as https:// links, as the template's topics.md shows.
+2. Propose the stack `stacks/<repo>.yaml` its README shows, with `main: { private: true }`: the page is behind the sign-in.
+3. add_routine twice, both with chain news-page and repos [<repo>]:
+   - the daily one, with schedule, e.g. "0 7 * * *";
+   - one on a change of topics.md: on_push {repo: <repo>, branch: main, paths: [topics.md]}, so editing the topics updates the page at once, and the coder's own merges of news.yaml start nothing.
+
+   The first gives the coder the grant to merge into main of the repo with nobody watching; say so plainly: an admin of the unit approves it once, and after that nobody reviews the updates. A bad one is undone by reverting its merge.
 
 ## After proposing
 

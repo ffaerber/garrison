@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -325,6 +326,45 @@ func TestServiceKeyRuns(t *testing.T) {
 	m.ServiceKey = ""
 	if c := call(map[string]string{ServiceHeader: "", OwnerHeader: "bob"}); c != http.StatusUnauthorized {
 		t.Errorf("with no key configured: %d", c)
+	}
+}
+
+// A routine running a chain of command merges only as far as the chain's
+// merge says: never under review, under ask only after its owner answered.
+// The agent service names the mode; nobody else can.
+func TestAChainsMergeModeHoldsItsRoutines(t *testing.T) {
+	tools := &Tools{}
+	dev := &agents.Agent{Unit: "homepage", Name: "dev"}
+	for _, c := range []struct {
+		p    Person
+		want string
+	}{
+		{Person{Unattended: true, Owner: "bob", Merge: agents.MergeReview}, "for people to review"},
+		{Person{Unattended: true, Owner: "bob", Merge: agents.MergeAsk}, "ask bob with ask_person first"},
+	} {
+		_, err := tools.mergeChange(context.Background(), c.p, dev, "homepage", "site", 3)
+		var r refused
+		if !errors.As(err, &r) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.p.Merge, err)
+		}
+	}
+	for header, want := range map[string]struct {
+		mode     string
+		answered bool
+	}{
+		"":             {"", false},
+		"auto":         {agents.MergeAuto, false},
+		"ask":          {agents.MergeAsk, false},
+		"ask answered": {agents.MergeAsk, true},
+		"whatever":     {agents.MergeReview, false}, // unknown: the strictest
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		if header != "" {
+			r.Header.Set(MergeHeader, header)
+		}
+		if mode, answered := mergeOf(r); mode != want.mode || answered != want.answered {
+			t.Errorf("%q: %q %v", header, mode, answered)
+		}
 	}
 }
 

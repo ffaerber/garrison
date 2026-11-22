@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>News</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --bg: #fbfbfd; --link: #0b57d0; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; --bg: #161617; --link: #8ab4f8; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
+  .meta, .when, .src { color: var(--muted); font-size: .875rem; }
+  ol { list-style: none; padding: 0; margin: 0; }
+  li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
+  li a { color: var(--link); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+  li a:hover { text-decoration: underline; }
+  li p { margin: .2rem 0 0; }
+  details { margin-top: 2.5rem; }
+  pre { white-space: pre-wrap; background: color-mix(in srgb, var(--line) 30%, transparent); padding: .75rem; border-radius: .5rem; font-size: .875rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>News</h1>
+  <p class="meta">{{.Count}} item{{if ne .Count 1}}s{{end}} from the last {{.Keep}} days{{if .Updated}} · updated {{.Updated}}{{end}}</p>
+  {{range .Topics}}
+  <section>
+    <h2>{{.Name}}</h2>
+    <ol>
+      {{range .Items}}<li>
+        <a href="{{.Link}}" rel="noopener noreferrer nofollow">{{.Title}}</a>
+        <div><span class="src">{{.Source}}</span> · <time class="when" datetime="{{.Date}}">{{.Date}}</time></div>
+        {{if .Summary}}<p>{{.Summary}}</p>{{end}}
+      </li>{{end}}
+    </ol>
+  </section>
+  {{else}}
+  <p>Nothing yet. The agents add what they find on the topics below.</p>
+  {{end}}
+  <details>
+    <summary>What this page looks for (topics.md)</summary>
+    <pre>{{.Wanted}}</pre>
+  </details>
+</main>
+</body>
+</html>

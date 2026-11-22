@@ -33,6 +33,7 @@ The VMs run Garrison on Kubernetes (`docs/kubernetes.md`). `VM=garrison-k3s` nam
                                           +- 4.5 deploy [F] -+- 5.2 journey
                                                              +- 5.3 people
                                                              +- 5.5 nodes
+                                                             +- 5.6 newsroom
                                                              +- 5.4 team [F] -+- 6.1 roles      6.5 commander
                                                                               +- 6.2 change     6.6 operator
                                                                               +- 6.3 marketing  6.7 leaving
@@ -55,6 +56,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
 | `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
 | `nodes` | scenario | A second VM, a clone of `base`, joins with `install.sh --join` and a larger pool; an app with data runs there, with its snapshots, a restore and a reboot (`docs/nodes.md`) |
+| `newsroom` | scenario | A news page the chain `news-page` keeps current: a fake news site, the coder and the scout, an update merged with nobody watching, and the next day's news (`docs/scenarios.md`) |
 | `team` | fixture | Carol an admin and bob a member, by a config pull request; the developer, tester and desk in `garrison/config`, with their grants in todo. No LLM |
 | `roles` | scenario | Bob cannot raise his own rights; nobody's approval of their own role change counts; no agent may have a grant on config |
 | `change` | scenario | Bob changes the app through an agent and carol merges; the developer with Git, on dev, with previews the tester tries; an agent installs packages |

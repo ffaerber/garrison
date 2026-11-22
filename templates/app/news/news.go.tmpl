@@ -1,0 +1,132 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"net/url"
+	"sort"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
+)
+
+// News is news.yaml: what the page lists. Agents rewrite it (the chain
+// news-page), people may too; Parse refuses anything else, so a bad file
+// fails the tests and is never built.
+type News struct {
+	Keep    int    `yaml:"keep"`    // days an item stays on the page
+	Updated string `yaml:"updated"` // when it was last rewritten, RFC 3339; may be empty
+	Items   []Item `yaml:"items"`
+}
+
+// Item is one story, job offer or release, with where it came from.
+type Item struct {
+	Title   string `yaml:"title"`
+	Link    string `yaml:"link"`
+	Source  string `yaml:"source"`
+	Date    string `yaml:"date"` // YYYY-MM-DD
+	Topic   string `yaml:"topic"`
+	Summary string `yaml:"summary"`
+}
+
+// Limits of news.yaml.
+const (
+	maxItems   = 500
+	maxTitle   = 200
+	maxSummary = 400
+	maxTopic   = 80
+	maxSource  = 100
+	maxLink    = 2000
+)
+
+// Parse reads news.yaml and checks every item: the known fields only, an
+// https link, a date, and lengths within the limits. Each problem is named,
+// with the item's number. An empty file lists nothing yet.
+func Parse(data []byte) (*News, error) {
+	var n News
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&n); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("news.yaml: %w", err)
+	}
+	var problems []string
+	if n.Keep == 0 {
+		n.Keep = 30
+	}
+	if n.Keep < 1 || n.Keep > 365 {
+		problems = append(problems, "keep must be 1 to 365 days")
+	}
+	if n.Updated != "" {
+		if _, err := time.Parse(time.RFC3339, n.Updated); err != nil {
+			problems = append(problems, "updated must be a time like 2026-11-22T06:00:00Z")
+		}
+	}
+	if len(n.Items) > maxItems {
+		problems = append(problems, fmt.Sprintf("at most %d items", maxItems))
+	}
+	seen := map[string]int{}
+	for i, it := range n.Items {
+		bad := func(format string, a ...any) {
+			problems = append(problems, fmt.Sprintf("item %d: ", i+1)+fmt.Sprintf(format, a...))
+		}
+		text := func(name, v string, max int) {
+			switch {
+			case strings.TrimSpace(v) == "":
+				bad("%s is empty", name)
+			case utf8.RuneCountInString(v) > max:
+				bad("%s is longer than %d characters", name, max)
+			case strings.ContainsAny(v, "\x00\r"):
+				bad("%s holds control characters", name)
+			}
+		}
+		text("title", it.Title, maxTitle)
+		text("topic", it.Topic, maxTopic)
+		text("source", it.Source, maxSource)
+		if it.Summary != "" {
+			text("summary", it.Summary, maxSummary)
+		}
+		if u, err := url.Parse(it.Link); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || len(it.Link) > maxLink {
+			bad("link must be an https:// address")
+		} else if j, ok := seen[it.Link]; ok {
+			bad("the same link as item %d", j)
+		} else {
+			seen[it.Link] = i + 1
+		}
+		if _, err := time.Parse(time.DateOnly, it.Date); err != nil {
+			bad("date must be YYYY-MM-DD")
+		}
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("news.yaml: %s", strings.Join(problems, "; "))
+	}
+	return &n, nil
+}
+
+// Topic is one topic's items, newest first.
+type Topic struct {
+	Name  string
+	Items []Item
+}
+
+// Topics are the items still within keep days of now, grouped by topic in
+// the order of their names, each topic's items newest first.
+func (n *News) Topics(now time.Time) []Topic {
+	cutoff := now.AddDate(0, 0, -n.Keep).Format(time.DateOnly)
+	by := map[string][]Item{}
+	for _, it := range n.Items {
+		if it.Date >= cutoff {
+			by[it.Topic] = append(by[it.Topic], it)
+		}
+	}
+	out := make([]Topic, 0, len(by))
+	for name, items := range by {
+		sort.SliceStable(items, func(i, j int) bool { return items[i].Date > items[j].Date })
+		out = append(out, Topic{Name: name, Items: items})
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out
+}

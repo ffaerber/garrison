@@ -222,6 +222,14 @@ func (t *Tools) mergeChange(ctx context.Context, p Person, agent *agents.Agent, 
 	if number <= 0 {
 		return "", fmt.Errorf("%w: the pull request's number is missing", ErrInvalid)
 	}
+	// A routine running a chain of command: the chain says the most it may
+	// do with its pull requests.
+	switch {
+	case p.Merge == agents.MergeReview:
+		return "", refused{"this chain's pull requests are for people to review (merge: review in its chain): leave it open and give its link"}
+	case p.Merge == agents.MergeAsk && !p.Answered:
+		return "", refused{fmt.Sprintf("this chain merges only after its owner agrees (merge: ask in its chain): ask %s with ask_person first, giving the link, and merge once they say yes", p.Owner)}
+	}
 	if err := t.mayRead(ctx, p, org, repo); err != nil {
 		return "", err
 	}
@@ -465,6 +473,34 @@ func (g *Gitea) BranchHead(ctx context.Context, org, repo, branch string) (strin
 		return "", nil
 	}
 	return b.Commit.ID, err
+}
+
+// ChangedFiles are the files the commits from base to head changed, as
+// the admin, by Gitea's compare.
+func (g *Gitea) ChangedFiles(ctx context.Context, org, repo, base, head string) ([]string, error) {
+	if err := validOrg(org); err != nil {
+		return nil, err
+	}
+	if err := validRepo(repo); err != nil {
+		return nil, err
+	}
+	var c struct {
+		Commits []struct {
+			Files []struct {
+				Filename string `json:"filename"`
+			} `json:"files"`
+		} `json:"commits"`
+	}
+	if _, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/compare/%s...%s?files=true&verification=false", org, repo, escapePath(base), escapePath(head)), nil, &c); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, cm := range c.Commits {
+		for _, f := range cm.Files {
+			out = append(out, f.Filename)
+		}
+	}
+	return out, nil
 }
 
 var patchedFile = regexp.MustCompile(`(?m)^diff --git a/(\S+) b/(\S+)$`)
