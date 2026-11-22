@@ -120,10 +120,13 @@ news_yaml() { gitea_api "" -f "$hp/news/raw/news.yaml?ref=main"; }
 # listed SLUG: news.yaml lists the story's link, once.
 listed() { [ "$(news_yaml | grep -c "https://zorblat.example/news/$1")" = 1 ]; }
 # merged_by_coder: the newest pull request of todo/news is the coder's, merged by its account.
+# Gitea's list of pull requests leaves merged_by out: each is read on its own.
 merged_by_coder() {
-  gitea_api "" "$hp/news/pulls?state=closed&sort=recentupdate&limit=1" | python3 -c '
+  local n
+  n=$(gitea_api "" "$hp/news/pulls?state=closed&sort=recentupdate&limit=1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["number"])') || return 1
+  gitea_api "" "$hp/news/pulls/$n" | python3 -c '
 import json,sys
-p=json.load(sys.stdin)[0]
+p=json.load(sys.stdin)
 ok=p["user"]["login"]=="agent-todo-coder" and p.get("merged") and (p.get("merged_by") or {}).get("login")=="agent-todo-coder" and "nobody watching" in (p.get("body") or "")
 sys.exit(0 if ok else 1)'
 }
