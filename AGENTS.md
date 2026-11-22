@@ -4,9 +4,9 @@ A guide for people and coding agents changing this repository: how the system fi
 
 ## The system in one page
 
-Garrison runs on one Ubuntu machine with Kubernetes (k3s) and ZFS. **Gitea is the source of truth**: everything that runs is described in a repo, and the control plane makes the machine match `main`. How it uses Kubernetes, for learning: [docs/kubernetes.md](docs/kubernetes.md).
+Garrison runs on Ubuntu machines with Kubernetes (k3s) and ZFS: the main one holds the platform, others join for apps and sandboxes (docs/nodes.md). **Gitea is the source of truth**: everything that runs is described in a repo, and the control plane makes the machine match `main`. How it uses Kubernetes, for learning: [docs/kubernetes.md](docs/kubernetes.md).
 
-Garrison moved from Docker Swarm to k3s: the platform, the agents' sandboxes (pods under gVisor) and the apps (a namespace per environment) run on it; more machines come next (docs/kubernetes.md, "Still to move").
+Garrison moved from Docker Swarm to k3s: the platform, the agents' sandboxes (pods under gVisor) and the apps (a namespace per environment) run on it. Apps' data are OpenEBS ZFS LocalPV volumes on the machine that runs them (docs/kubernetes.md, "More machines").
 
 - **Units** are Gitea organisations. `garrison` is the platform's own: one repo per system stack (`garrison/<stack>` in this repo, with a `kubernetes.yaml` each: Kubernetes manifests, applied in the namespace `garrison`), plus `garrison/config`, which holds **the agents** (`agents/<name>/agent.yaml`, `prompt.md`, skills), the chains of command (`chains/`) and the LLM providers and models (`llm/`). Every other unit has a `config` repo (`members.yaml`, `stacks/<name>.yaml`, `grants.yaml`, `routines.yaml`, `secrets/`, `restores/`) and app repos holding only code.
 - **The control plane** (`control-plane/`) is one Go binary, `garrison`, with one role per subcommand (`control-plane/cmd/garrison/main.go`):
@@ -35,7 +35,8 @@ How a change travels: chat → agent (sandbox) → gateway tool, as the person �
 | A system stack | `garrison/<stack>/kubernetes.yaml` | Pushed at install; on a running machine, `test/vm/push-repos.sh`. `garrison system -render DIR` shows what is applied |
 | Who may reach which pod | `garrison/platform/kubernetes.yaml` | NetworkPolicies, deny by default; checked by the scenario `system` |
 | New repos' starting contents | `templates/` | `unit-config`, `garrison-config`, `app/todo` |
-| The installer | `install.sh`, `installer/` | Safe to run again: every step checks what exists |
+| The installer | `install.sh`, `installer/` | Safe to run again: every step checks what exists. `installer/node.sh` is what every machine needs; `installer/join.sh` joins another |
+| Where an app's data goes, its volumes | `control-plane/internal/apply/volumes.go`, `nodes.go` | ZFSVolumes, PVs, the choice of machine; commands on data run there through the `zfs` DaemonSet |
 
 ## Build and test
 
@@ -86,6 +87,8 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
   - A StatefulSet does not replace a pod that never became ready; one pod on a host directory is a Deployment with `strategy: Recreate`.
   - Liveness probes kill slow starters after a reboot: Gitea, Keycloak and Postgres have startup probes. Containers that exit while what they need is away fall into a growing crash-loop backoff: they wait for it in an init container.
   - Kubernetes's container metrics name only namespace, pod and container: join with `garrison_pod_info` (the deployer's) for stack and service.
+  - `garrison system` re-encodes manifests as YAML 1.2, where `yes` and `no` are strings; kubectl reads YAML 1.1, where they are booleans. Such strings stay quoted (`system.plain`); OpenEBS's CRDs need it.
+  - A claim can never shrink: app claims request 1Mi, and a volume's size lives on its ZFSVolume and PV (docs/kubernetes.md, "More machines").
 - **Bash:** `set -e` is ignored inside anything run after `&&`, `||` or in an `if`, subshells included. `steps.sh` runs steps as plain statements and checks `$?` after.
 - **Open WebUI:**
   - It limits sign-ins, so the gateway keeps its token.

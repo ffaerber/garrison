@@ -32,6 +32,7 @@ The VMs run Garrison on Kubernetes (`docs/kubernetes.md`). `VM=garrison-k3s` nam
                                           +- 4.4 agent [F] --- 5.1 media
                                           +- 4.5 deploy [F] -+- 5.2 journey
                                                              +- 5.3 people
+                                                             +- 5.5 nodes
                                                              +- 5.4 team [F] -+- 6.1 roles      6.5 commander
                                                                               +- 6.2 change     6.6 operator
                                                                               +- 6.3 marketing  6.7 leaving
@@ -53,6 +54,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `deploy` | fixture | The unit `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
 | `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
 | `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
+| `nodes` | scenario | A second VM, a clone of `base`, joins with `install.sh --join` and a larger pool; an app with data runs there, with its snapshots, a restore and a reboot (`docs/nodes.md`) |
 | `team` | fixture | Carol an admin and bob a member, by a config pull request; the developer, tester and desk in `garrison/config`, with their grants in todo. No LLM |
 | `roles` | scenario | Bob cannot raise his own rights; nobody's approval of their own role change counts; no agent may have a grant on config |
 | `change` | scenario | Bob changes the app through an agent and carol merges; the developer with Git, on dev, with previews the tester tries; an agent installs packages |

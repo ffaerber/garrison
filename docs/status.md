@@ -4,7 +4,7 @@ What is built, measured against `docs/spec.md`. Updated with each slice.
 
 ## On Kubernetes
 
-Garrison moved from Docker Swarm to k3s. The platform runs on k3s (v1.37.2, pods under crun): every system stack is a `kubernetes.yaml` that the deployer applies with `kubectl` in the namespace `garrison`; Traefik routes Ingress objects; Secrets, ConfigMaps from the stacks' files, ZFS datasets as hostPath volumes; NetworkPolicies take the place of Swarm's networks (`garrison/platform`); metrics come from the kubelet and the Kubernetes API, logs from Alloy reading pods. The agents' sandboxes are pods under gVisor in `garrison-sandboxes`, held to an admission policy. The apps run on it too, each environment in a namespace of its own (`app-<stack>`), with their datasets as hostPath volumes, snapshots before redeploys, and Secrets kept when an app is removed. Every VM step is green on it. More machines are still to come. How Garrison uses Kubernetes: [kubernetes.md](kubernetes.md).
+Garrison moved from Docker Swarm to k3s. The platform runs on k3s (v1.37.2, pods under crun): every system stack is a `kubernetes.yaml` that the deployer applies with `kubectl` in the namespace `garrison`; Traefik routes Ingress objects; Secrets, ConfigMaps from the stacks' files, ZFS datasets as hostPath volumes; NetworkPolicies take the place of Swarm's networks (`garrison/platform`); metrics come from the kubelet and the Kubernetes API, logs from Alloy reading pods. The agents' sandboxes are pods under gVisor in `garrison-sandboxes`, held to an admission policy. The apps run on it too, each environment in a namespace of its own (`app-<stack>`), with their datasets as OpenEBS ZFS LocalPV volumes, snapshots before redeploys, and Secrets kept when an app is removed. Other machines join with `install.sh --join` and run apps and sandboxes, each app's data in the pool of the machine that runs it; the platform stays on the main machine ([nodes.md](nodes.md)). Every VM step is green on it, `nodes` with two machines. How Garrison uses Kubernetes: [kubernetes.md](kubernetes.md).
 
 ## Works, tested end to end on a fresh Ubuntu 26.04 VM
 
@@ -37,7 +37,7 @@ Garrison moved from Docker Swarm to k3s. The platform runs on k3s (v1.37.2, pods
 | Hostname claims come from Git | Kept in `/var/lib/garrison/claims.json` |
 | Restore from the History tab, code and data together, with a change record | A restore request, `restores/<name>.yaml` in the unit's config, brings back an environment's data only |
 | Tests with and without a second virtual disk | One disk; Multipass cannot attach a second |
-| Single node, Docker Swarm, in the MVP | Single node, Kubernetes (k3s), already; more machines next ([kubernetes.md](kubernetes.md)) |
+| Single node, Docker Swarm, in the MVP | Kubernetes (k3s), with more machines already ([nodes.md](nodes.md)); an app's data does not move between them by itself |
 | — | Test installs pull Docker Hub images through `mirror.gcr.io` (`REGISTRY_MIRROR`) |
 
 ## Not started

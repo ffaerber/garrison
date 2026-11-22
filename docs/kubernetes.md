@@ -2,7 +2,7 @@
 
 Garrison runs on k3s, a complete Kubernetes in one binary. This page explains how Garrison uses Kubernetes, and how what it did on Docker Swarm maps to Kubernetes. It is meant for learning: each section names the files to read.
 
-The platform, the agents' sandboxes and the apps run on Kubernetes; it used to be Docker Swarm. More machines follow (see "Still to move").
+The platform, the agents' sandboxes and the apps run on Kubernetes; it used to be Docker Swarm. Other machines can join it, for apps and sandboxes (see "More machines"; how to join one: [nodes.md](nodes.md)).
 
 ## The pieces
 
@@ -81,9 +81,9 @@ The image is large (Chromium, ffmpeg, Node). The DaemonSet `sandbox-image` keeps
 ## Apps
 
 A unit's stack file (`<unit>/config/stacks/<name>.yaml`) stays as it was. The deployer renders it for Kubernetes (`control-plane/internal/render/kubernetes.go`; whole examples in `render/testdata/*.kubernetes.yaml`):
-- **A namespace per environment:** `app-todo`, `app-dev-todo`, `app-pr-7-todo`. Its services reach each other by their own names, as on a network of their own. The NetworkPolicy `stack` admits only the namespace's own pods; Traefik, on the host's network, always passes.
+- **A namespace per environment:** `app-todo`, `app-dev-todo`, `app-pr-7-todo`. Its services reach each other by their own names, as on a network of their own. The NetworkPolicy `stack` admits only the namespace's own pods, and the main machine's address on the pod network, from which Traefik, on that machine's host network, reaches pods on other machines.
 - **Per service:** a Deployment, a headless Service of the same name, and for a routed service an Ingress for its hostname. A service with volumes is `strategy: Recreate`, so two pods never share its data.
-- **Data:** ZFS datasets under `/garrison/ns/<unit>/stacks/<stack>/`, mounted as hostPath volumes, as the system stacks' are. Before a redeploy, the deployer scales the environment to nothing, snapshots its datasets, and applies (`apply/snapshots.go`).
+- **Data:** a volume is a ZFS dataset `garrison/ns/<unit>/stacks/<stack>/<stack>.<dataset>`, through OpenEBS ZFS LocalPV on the machine that holds the environment (see "More machines"); the pod mounts the claim `data-<dataset>`. Before a redeploy, the deployer scales the environment to nothing, snapshots its datasets on their machine, and applies (`apply/snapshots.go`).
 - **Secrets:** a Secret per secret in the namespace, generated once, or the stored value for `main` with its version on the pods, so a new version restarts them. When an app is removed, the deployer deletes what it applied and keeps the namespace with its Secrets: the kept data still needs its password when the app comes back.
 - **Private environments:** the Ingress names the login check and a Middleware of its own, which adds the environment's ingress key (`garrison/platform/contracts/README.md`).
 - **Images** come from Gitea's registry with a copy of `registry-pull` in each namespace.
@@ -107,7 +107,7 @@ Docker stays on the machine for what has no Kubernetes way yet:
 - **Deleting a namespace deletes its Secrets.** See Apps above.
 - **`kubectl run -i` loses the output of a short command**, which may end before kubectl attaches. The tests read a finished pod's log instead (`image_pod` in `test/e2e/lib.sh`).
 
-## More machines (in progress, branch `nodes`)
+## More machines
 
 Other machines join as k3s agents with a ZFS pool of their own (`install.sh --join`, `installer/join.sh`; what every machine needs is `installer/node.sh`). App data moves to **OpenEBS ZFS LocalPV** (`zfs.csi.openebs.io`): a `ZFSVolume` object names a dataset and its machine, the agent of OpenEBS on that machine creates the dataset, and the PersistentVolume's node affinity sends the pods there.
 
@@ -119,6 +119,19 @@ What a spike on two VMs found (OpenEBS ZFS LocalPV 2.11.2):
 - **Traefik and NetworkPolicies across machines.** On one machine the host's traffic to its pods always passes. To a pod on another machine it arrives from the main machine's flannel address, the first address of its pod range (`10.42.0.0` for `10.42.0.0/24`), which a policy must admit as an `ipBlock`.
 - **Images:** the joined machine pulls the installation's images from the main machine's registry, with `git.<domain>` pointing there in `/etc/hosts` (`host/hosts.sh`) and the CA in `registries.yaml`.
 
+How the deployer uses it (`control-plane/internal/apply/volumes.go`, `nodes.go`):
+- **Volumes are static.** For each of an environment's volumes the deployer creates its parent dataset, a `ZFSVolume` (`<stack>.<dataset>`, in the namespace `garrison`), and a PersistentVolume bound to the claim `data-<dataset>` that the rendered stack holds. A share is one shared ZFSVolume `<unit>.shares.<share>` with a PV per namespace that mounts it; the media share's claim in `garrison-sandboxes` is `media-<unit>`.
+- **Which machine:** the machine of the environment's existing volumes; otherwise that of a share it mounts; otherwise the one whose pool has the most free space (OpenEBS's `ZFSNode`s). Its volumes then stay there.
+- **Sizes** live on the ZFSVolume and the PV. A changed size is set there and as the dataset's quota, larger or smaller; claims ask for 1Mi, since Kubernetes never lets a claim shrink.
+- **Commands on data** (`zfs`, `rsync`, `mount`) run on the data's machine, through the privileged DaemonSet `zfs` there: `kubectl exec` and `nsenter` into the host (`apply.NodeExec`). The deployer itself has no privileges.
+- **The platform stays on the main machine:** `garrison system` gives every Deployment and StatefulSet of `garrison/*` the node selector `node-role.kubernetes.io/control-plane`. DaemonSets run everywhere.
+- **A dataset from before OpenEBS** is adopted at the next deploy: renamed to its volume's name, its mountpoint made legacy, its size set as quota.
+
+Traps found:
+- **`"yes"` loses its quotes.** `garrison system` re-encodes manifests with yaml.v3 (YAML 1.2), which writes `yes` and `no` bare; kubectl reads YAML 1.1, where they are booleans, so OpenEBS's CRDs allowed `true`/`false` and refused a shared volume. Such strings stay quoted (`system.plain`).
+- **A claim cannot shrink**, and OpenEBS changes a dataset's size only through its claim: see Sizes above.
+- **A fresh machine's apt is busy.** cloud-init holds the package lists' lock for minutes; the join waits for cloud-init and retries `apt-get update` (`installer/node.sh`).
+
 ## Still to move
 
-- **More machines**: see above; on the branch `nodes`.
+- **Moving an app's data to another machine** is by hand for now (`zfs send | zfs recv`, [nodes.md](nodes.md), Limits).
