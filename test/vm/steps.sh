@@ -421,14 +421,39 @@ save() {
   # happens, with many containers) is forced off once its disks are synced:
   # without a stop there is no snapshot, and later steps have nothing to
   # start from.
-  in_vm sudo sync || true
-  if ! multipass stop "$VM"; then
-    say "The VM did not stop; forcing it off"
-    multipass stop --force "$VM"
-  fi
-  [ -n "$(snapshot_of "$step")" ] && multipass delete --purge "$VM.$step"
-  multipass snapshot "$VM" --name "$step" --comment "$fp" >/dev/null
+  # Multipass's daemon has crashed while stopping the VM (1.17, see AGENTS.md).
+  # Restarted, it boots the VM again and leaves it "starting", half off, and
+  # refuses to stop or snapshot it. So a failed try boots the VM fully, and
+  # the next stops it again; without a snapshot after three, the fixture is
+  # not green and the step fails.
+  local try i done=
+  for try in 1 2 3; do
+    if [ "$try" -gt 1 ]; then
+      say "No snapshot yet; booting $VM to stop it again (try $try of 3)"
+      multipass start "$VM" || true   # the wrapper above waits for the daemon
+    fi
+    in_vm sudo sync || true
+    if ! multipass stop "$VM"; then
+      say "The VM did not stop; forcing it off"
+      multipass stop --force "$VM"
+    fi
+    for i in $(seq 12); do
+      stopped "$VM" && break
+      sleep 5
+      multipass stop --force "$VM" >/dev/null 2>&1
+    done
+    stopped "$VM" || continue
+    [ -n "$(snapshot_of "$step")" ] && multipass delete --purge "$VM.$step"
+    if multipass snapshot "$VM" --name "$step" --comment "$fp" >/dev/null; then
+      done=1
+      break
+    fi
+  done
   multipass start "$VM"
+  if [ -z "$done" ]; then
+    say "Multipass took no snapshot ${NUMBER[$step]} $step"
+    return 1
+  fi
   say "Snapshot ${NUMBER[$step]} $step took $((SECONDS - t0))s (stop, snapshot, boot)"
 }
 
@@ -643,6 +668,11 @@ trunk() {
       return $rc
     fi
     save "$s"
+    rc=$?
+    if [ $rc != 0 ]; then
+      status "$s" failed
+      return $rc
+    fi
     status "$s" green
   done
 }
