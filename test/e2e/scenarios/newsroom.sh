@@ -4,8 +4,9 @@
 # reads a fake news site (a pod here, let through by INTERNET_ALLOW) for
 # those topics, and the coder rewrites news.yaml and merges it (merge: auto),
 # which deploys the page. Its topic is a product that does not exist,
-# Zorblat, so only the fake site has news of it. From the fixture deploy:
-# alice is todo's only person.
+# Zorblat, so only the fake site has news of it. Last, the chain is changed
+# to merge: ask, and the coder merges only after alice says yes. From the
+# fixture deploy: alice is todo's only person.
 section_newsroom() {
 talk_setup || return 0
 local ns=newsroom-web today
@@ -177,4 +178,45 @@ check "the new one is added, the others kept, each once" second
 no_agent_config() { ! gitea_api "" "$hp/config/pulls?state=closed&limit=50" | grep -q '"login":"agent-todo-'; }
 check "nothing of todo's config was merged by an agent" no_agent_config
 check "the page shows it"                  until_true 900 page_has "Zorblat 2.2 speeds up plugins"
+
+echo "# the chain asks first (merge: ask): the coder merges once alice says yes"
+gitea_api "" -f "$gc/raw/chains/news-page.yaml" > "$tmp/news-page.yaml"
+sed -i 's/^merge: auto$/merge: ask/' "$tmp/news-page.yaml"
+check "the chain says merge: ask"          grep -qx "merge: ask" "$tmp/news-page.yaml"
+cpr=$(REPO=$gc propose_config news-page-ask "news-page asks before it merges" "chains/news-page.yaml=$tmp/news-page.yaml")
+check "a root admin approves it, alice merges it" lands "$cpr"
+front <<<"$(story zorblat-2-2 "Zorblat 2.2 speeds up plugins" "Zorblat 2.2 loads plugins twice as fast.")
+$(story zorblat-2-3 "Zorblat 2.3 adds plugin signing" "Zorblat 2.3 checks the signature of every plugin it loads.")"
+put_site "$tmp/site.html"
+fresher() { kubectl --namespace garrison exec -i deployment/agents -- wget -qO- "http://$site_ip/" | grep -q "Zorblat 2.3"; }
+check "the site has another story"         until_true 120 fresher
+hcid=$(channel_of todo alice)
+# question_post: the coder's question to alice in todo's channel; prints its id.
+question_post() {
+  chat_api alice "$chat/api/v1/channels/$hcid/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+for m in json.load(sys.stdin):
+    c = m.get("content") or ""
+    if c.startswith("**coder**") and "|alice>" in c and "Reply in this thread" in c:
+        print(m["id"]); sys.exit(0)
+sys.exit(1)'
+}
+check "alice adds another line to the topics" update "And plugin signing"
+if ! until_true 1200 question_post; then
+  echo "retry the coder asked nothing; once more"
+  update "Look at The Daily Byte again: there is a new Zorblat release" && until_true 1200 question_post
+fi
+check "the coder asks alice in the channel" question_post
+qid=$(question_post)
+# open_pr: todo/news has an open pull request of the coder's.
+open_pr() { gitea_api "" "$hp/news/pulls?state=open&limit=10" | python3 -c 'import json,sys; sys.exit(0 if any(p["user"]["login"] == "agent-todo-coder" for p in json.load(sys.stdin)) else 1)'; }
+check "its pull request waits, open"       open_pr
+not_yet() { ! listed zorblat-2-3; }
+check "and main does not have it yet"      not_yet
+check "alice answers yes in its thread" \
+  test "$(chat_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"content":"Yes, merge it.","parent_id":"'"$qid"'"}' "$chat/api/v1/channels/$hcid/messages/post")" = 200
+third() { listed zorblat-2-3 && listed zorblat-2-0; }
+check "then the coder merges it"           until_true 900 third
+check "its own account merged it"          merged_by_coder
+check "the question is answered in the feed" in_feed alice ns=todo "e['kind'] == 'question' and e['agent'] == 'todo/coder' and e['status'] == 'ok'"
 }

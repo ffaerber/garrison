@@ -7,10 +7,10 @@ A page of what is new on your topics, of the unit {{unit}}: news, job offers, re
 
 Each merge builds the page again and deploys it. The scout reads the web but cannot change any repo; the coder changes this repo but never opens a web page.
 
-- `topics.md`: what the page looks for, in plain words, with the sites to look at first. Edit it whenever you like; a change starts an update at once.
+- `topics.md`: what the page looks for, in plain words, with the sites to look at first. Each topic is a `## ` heading. A line `Only from: example.com, jobs.example.org` under one limits its items to those sites. Edit it whenever you like; a change starts an update at once.
 - `news.yaml`: what the page lists, one item per story with its title, link, source, date, topic and a one-line summary. `keep` is how many days an item stays.
 - `main.go`, `news.go`, `page.html`: the page. It has no JavaScript, escapes everything it shows, and links only to the items' own `https://` addresses.
-- `main_test.go`: its tests. They check `news.yaml`: a file with a mistake (an unknown field, a link that is not `https://`, the same link twice, a missing date) fails the pipeline, so no image is built and the page keeps its last good version.
+- `main_test.go`: its tests. They check `news.yaml`: a file with a mistake (an unknown field, a link that is not `https://`, the same link twice, a missing date, a topic that is not a heading of `topics.md`, a link off its topic's `Only from` sites, more than 100 items in one topic) fails the pipeline, so no image is built and the page keeps its last good version.
 - `Dockerfile`, `.gitea/workflows/pipeline.yaml`: on every push, one BuildKit build that tests, builds and pushes `{{registry}}/{{unit}}/{{repo}}:<commit>`.
 
 ## Running it

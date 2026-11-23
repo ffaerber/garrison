@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,8 +17,47 @@ func TestTheRepoNewsIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Parse(data); err != nil {
+	n, err := Parse(data)
+	if err != nil {
 		t.Fatal(err)
+	}
+	topics, err := files.ReadFile("topics.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Check(ParseTopics(string(topics))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheck(t *testing.T) {
+	w := ParseTopics("# Page\n\n## Kubernetes releases\n\nSources:\n- https://github.com/k3s-io/k3s/releases\n\n## Jobs\n\nOnly from: https://jobs.example.org/, example.com\n")
+	item := func(topic, link string) Item {
+		return Item{Title: "a", Link: link, Source: "a", Date: "2026-11-20", Topic: topic}
+	}
+	good := &News{Items: []Item{
+		item("Kubernetes releases", "https://anywhere.example/x"),
+		item("jobs", "https://jobs.example.org/1"),
+		item("Jobs", "https://www.example.com/2"),
+	}}
+	if err := good.Check(w); err != nil {
+		t.Error(err)
+	}
+	for name, n := range map[string]*News{
+		"a topic not in topics.md": {Items: []Item{item("Cooking", "https://a.example/")}},
+		"a link off its sites":     {Items: []Item{item("Jobs", "https://evil.example/win")}},
+		"a look-alike site":        {Items: []Item{item("Jobs", "https://notexample.com/")}},
+	} {
+		if err := n.Check(w); err == nil {
+			t.Errorf("%s was taken", name)
+		}
+	}
+	many := &News{}
+	for i := 0; i <= maxPerTopic; i++ {
+		many.Items = append(many.Items, item("Jobs", fmt.Sprintf("https://example.com/%d", i)))
+	}
+	if err := many.Check(w); err == nil {
+		t.Error("a topic with too many items was taken")
 	}
 }
 

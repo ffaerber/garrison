@@ -53,7 +53,7 @@ The end-to-end tests run on throwaway Multipass VMs; see [test/README.md](test/R
 - `test/vm/steps.sh --list` shows what is green or stale, and `test/vm/steps.sh <scenario>` reruns one.
 - Each step is `test/e2e/scenarios/<step>.sh` on `test/e2e/lib.sh`. The browser scenarios are `test/ui/<step>.py` (Playwright) on `test/ui/lib.py`, which holds every selector of Gitea's and Open WebUI's pages.
 - The agents use a real LLM: local Ollama by default, `LLM=cloud` for Ollama's cloud. So agent checks look at what happened (pull requests, authors, approvals, deploys), not at wording, and retry once with a plainer request.
-- Logs: `bin/steps-<step>.log`. A failed scenario's VM is kept as `garrison-k3s-<step>`: `multipass exec garrison-k3s-<step> -- sudo ...` to look around.
+- Logs: `bin/steps-<step>.log`, the run's own output `bin/steps.out`; `test/vm/watch.py` shows them live in the browser. A failed scenario's VM is kept as `garrison-k3s-<step>`: `multipass exec garrison-k3s-<step> -- sudo ...` to look around.
 
 What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.sh` everything from login; anything the installer uses (`control-plane/`, `templates/`, `garrison/`, `sandbox/`, `files/`, `installer/`) everything from install, about 45 minutes in all.
 
@@ -82,6 +82,7 @@ What reruns: a scenario's own file reruns only it; `test/e2e/lib.sh` or `smoke.s
 - **Multipass:**
   - It is a snap and cannot read files under `/tmp`. Put anything it transfers under the repo (`bin/` is ignored).
   - Its daemon (1.17) has crashed when several VMs were changed at once, and also stopping one VM with nothing else running, so `steps.sh` runs commands that change a VM one at a time. After a crash it does not come back by itself (its old dnsmasq holds the address): `steps.sh` runs `test/vm/revive-multipass.sh` after half a minute when sudo needs no password; otherwise run it by hand. A `multipass exec` running when the daemon crashes never returns: `steps.sh` kills it when the daemon's process changes, and fails that step instead of waiting forever. `JOBS=1` runs one VM at a time.
+  - Each VM takes 8 GB. Too many at once (a killed run's VMs left running next to a new run's) ran the host out of memory and crashed it. `steps.sh` now runs one at a time, stops leftover VMs first, lowers `JOBS` to what the free memory holds and boots a VM only while `FREE_GB` is free.
 - **A cloned VM** gets a new address and hostname. k3s keeps its node name (`node-name` in `/etc/rancher/k3s/config.yaml`, set by the installer); `settle` in `steps.sh` waits for the rollouts and restarts BuildKit, which runs in Docker, until it is reachable by name again.
 - **k3s:**
   - Its own runc puts containers under a stacked AppArmor label on Ubuntu 26.04 that cannot signal its own processes (Postgres never started). Pods run with crun (`default-runtime: crun`).
