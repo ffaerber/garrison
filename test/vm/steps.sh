@@ -12,7 +12,10 @@
 #   test/vm/steps.sh --from login  rerun from `login`: it and all that grows from it
 #   test/vm/steps.sh --list        the tree, and what is green, valid or stale
 #   test/vm/steps.sh --clean       delete the VMs, their snapshots and the green marks
-#   JOBS=2 test/vm/steps.sh        at most 2 VMs at once (default 4)
+#   JOBS=2 test/vm/steps.sh        at most 2 VMs at once (default 4, fewer
+#                                  when memory is short, see FREE_GB)
+#   FREE_GB=12 test/vm/steps.sh    a VM boots only while the host has this
+#                                  much memory available (default 10)
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
 #   COMFYUI=host test/vm/steps.sh media
 #                                  media with a real ComfyUI on this computer,
@@ -39,6 +42,7 @@ BASE_VM=$VM   # VM changes to the VM of each job; names come from this
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
 JOBS=${JOBS:-4}
+FREE_GB=${FREE_GB:-10}   # memory a VM waits for before it boots: its 8G and a margin
 cd "$ROOT"
 
 # The tree. Fixtures [F] are saved as snapshots; the others are scenarios.
@@ -537,13 +541,56 @@ clone_from() {
   ) 9>"$ROOT/bin/lock-$src"
 }
 
+# free_gb: the memory the host has available, in whole GB.
+free_gb() { awk '/^MemAvailable:/ { print int($2 / 1048576) }' /proc/meminfo; }
+
+# start_vm NAME: boots the VM once the host has FREE_GB available, one boot
+# at a time, so jobs starting together do not all count the same free memory.
+start_vm() {
+  (
+    flock 9
+    local said=
+    while [ "$(free_gb)" -lt "$FREE_GB" ]; do
+      [ -n "$said" ] || { say "Waiting for ${FREE_GB}G of free memory to boot $1 (now $(free_gb)G)"; said=1; }
+      sleep 10
+    done
+    multipass start "$1" >/dev/null
+  ) 9>"$ROOT/bin/lock-memory"
+}
+
+# stop_leftovers: a run that ended without cleaning up (the computer
+# crashed, or the run was killed) leaves its VMs running and holding memory.
+# No run drives them now (the lock in main), so each is stopped: a fixture's
+# is restored from its snapshot before it is used, a scenario's replaced
+# when it runs again, and a failed one stays to look at. One at a time, as
+# Multipass's daemon has crashed when several changed at once.
+stop_leftovers() {
+  local v
+  for v in $(multipass list --format csv 2>/dev/null | awk -F, -v p="$BASE_VM" \
+      'NR > 1 && ($1 == p || index($1, p "-") == 1) && $2 !~ /^(Stopped|Deleted|Suspended)$/ { print $1 }'); do
+    say "Stopping $v, left running by an earlier run"
+    multipass stop "$v" >/dev/null 2>&1 || multipass stop --force "$v" >/dev/null 2>&1 || true
+  done
+}
+
+# fit_jobs: at most as many jobs as the available memory holds VMs of 8G
+# (FREE_GB each, the first one's margin kept for the host).
+fit_jobs() {
+  local fit=$(( $(free_gb) / FREE_GB ))
+  [ "$fit" -ge 1 ] || fit=1
+  if [ "$fit" -lt "$JOBS" ]; then
+    say "$(free_gb)G of memory available: $fit VM(s) at once instead of $JOBS"
+    JOBS=$fit
+  fi
+}
+
 # fresh STEP: $VM becomes a new clone of STEP's parent, booted, with its
 # swarm formed on the clone's address and every service running again.
 fresh() {
   exists && multipass delete --purge "$VM"
   say "Cloning ${NUMBER[${PARENT[$1]}]} ${PARENT[$1]} into $VM"
   clone_from "${PARENT[$1]}" "$VM" || return 1
-  multipass start "$VM" >/dev/null || return 1
+  start_vm "$VM" || return 1
   readdress || return 1
   local t0=$SECONDS
   settle || return 1
@@ -581,7 +628,7 @@ trunk() {
     say "Restoring snapshot ${NUMBER[$resume]} $resume"
     multipass stop "$VM" 2>/dev/null || true
     multipass restore --destructive "$VM.$resume" >/dev/null
-    multipass start "$VM"
+    start_vm "$VM"
   fi
   local go=${resume:+no}
   for s in "${steps[@]}"; do
@@ -748,6 +795,15 @@ NEEDED=" "
 for t in "${targets[@]}"; do
   for s in $(path "$t"); do needed "$s" || NEEDED+="$s "; done
 done
+# One run at a time: it may then stop whatever VM of ours is still running.
+# Opened without emptying it: a run refused here keeps the running one's ID.
+exec 8>>"$ROOT/bin/lock-run"
+flock -n 8 || { echo "another test/vm/steps.sh is running (bin/lock-run)" >&2; exit 1; }
+echo $$ > "$ROOT/bin/lock-run"   # its process ID, for test/vm/watch.py
+# The run's output also goes to bin/steps.out, for test/vm/watch.py.
+exec > >(tee "$ROOT/bin/steps.out" 8>&-) 2>&1
+stop_leftovers
+fit_jobs
 [ -z "$from" ] || forget "$from"
 rm -rf "$ROOT/bin/slots" && mkdir -p "$ROOT/bin/slots"
 rm -f "$ROOT/bin/state/"*
@@ -787,7 +843,7 @@ if [ "${OPEN:-1}" != 0 ] && needed deploy && VM=$(vm_of deploy) exists; then
   # shellcheck disable=SC1090
   url=https://keycloak.$(. "$ANSWERS" && echo "$DOMAIN")
   if command -v xdg-open >/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-    xdg-open "$url" >/dev/null 2>&1 &
+    xdg-open "$url" >/dev/null 2>&1 8>&- &   # without the run lock
     echo "Opened $url"
   else
     echo "Open $url"
