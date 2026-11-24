@@ -201,9 +201,12 @@ if [ "$TLS_MODE" = selfsigned ] && ! cmp -s "$ETC/tls.crt" /usr/local/share/ca-c
 fi
 # Inside the cluster, every name of the installation is Traefik's Service,
 # as outside it is this machine: one URL for Keycloak, Gitea and the apps
-# everywhere. k3s's CoreDNS reads *.override files of this ConfigMap.
+# everywhere. k3s's CoreDNS reads *.override files of this ConfigMap, but
+# only when it starts: its reload watches the Corefile alone, and a pod that
+# started before the file reached it never rewrites. So a changed ConfigMap
+# restarts it.
 domain_re=$(printf '%s' "$DOMAIN" | sed 's/\./\\./g')
-kubectl apply -f - >/dev/null <<YAML
+coredns=$(kubectl apply -f - <<YAML
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -216,6 +219,16 @@ data:
       answer auto
     }
 YAML
+)
+if ! grep -q unchanged <<<"$coredns"; then
+  # k3s deploys CoreDNS on its own, a moment after its API answers.
+  for _ in $(seq 120); do
+    kubectl --namespace kube-system get deployment coredns >/dev/null 2>&1 && break
+    sleep 1
+  done
+  kubectl --namespace kube-system rollout restart deployment coredns >/dev/null
+  kubectl --namespace kube-system rollout status deployment coredns --timeout 300s >/dev/null
+fi
 
 # ---------- system stack ----------
 # wait_stack NAME: waits until every Deployment, StatefulSet and DaemonSet
