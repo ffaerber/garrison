@@ -1,628 +1,129 @@
 # Hierarchical AI Agent Command Structure
-## Concept, Principles & Architecture
 
-**Status:** Initial Architecture Proposal  
-**Concept:** Human-led, hierarchical, autonomous multi-agent organization
+**Status:** proposal. It says where Garrison's agents are going: a human-led organisation of agents that runs a chain of command without a person in every step, and stays accountable to the people who set it up. Each part names what is built and what is design. The agents as they are: [agents.md](agents.md); rights: Rights and autonomy in [spec.md](spec.md).
 
----
+## The idea
 
-# 1. Vision
+People set the goals and the bounds; agents work within them on their own, and ask when a decision is beyond them. Agents hand work to other agents, review each other's work, and merge it, so a chain can run to the end with nobody watching. Every change is still made by an identifiable account, recorded in Git, and reversible.
 
-Build a hierarchical AI agent organization inspired by military command structures.
+> Authority flows downward. Information, accountability and escalation flow upward. Execution is autonomous within delegated bounds.
 
-The human occupies the highest position of authority and establishes strategic objectives, policies and boundaries.
+Garrison does not build a second system for this. The organisation is the agents' folders, grants and chains in Git; the authority engine is the gateway and the approval check; the audit is Git's history and the dashboard's feed. Everything stays changeable only by pull request (see Conventions in [AGENTS.md](../AGENTS.md)), so promoting an agent is a reviewed diff, not an API call.
 
-AI agents can hold different ranks and responsibilities. They can receive commands from superior agents, create commands for subordinate agents, delegate tasks and independently manage operations within their granted authority.
+## The rules
 
-The organization should support autonomous execution without requiring constant human intervention. However, agents must escalate decisions that exceed their authority or introduce unacceptable risks.
+1. **People are the highest authority.** Root admins change the platform and its agents (`garrison/config`); a unit's admins decide what agents may do in that unit (`grants.yaml`, `routines.yaml`). *Built.*
+2. **No agent widens its own authority.** Agents never write to a `config` repo, so they cannot change grants, routines, members or agents, nor make an agent. *Built* (What no grant can lift, in agents.md).
+3. **Delegation never adds rights.** An agent asked by another acts for the same person, and every grant is checked against the person or routine owner who started the run, never against the asking agent. *Built* (`ask_agent`).
+4. **Only what is listed is allowed.** An agent has the tools its `agent.yaml` lists and the grants its units give it; everything else is refused. There are no deny-lists to forget an entry in. *Built.*
+5. **Risk comes from facts, not words.** What a change may touch (repo, branch, paths, tool) decides how much approval it needs, never how an agent describes it. *Partly built:* per repo and branch; paths are design.
+6. **Silence is never approval.** A question to a person waits for their answer, up to 24 hours; then the run stops, it does not go on. *Built* (`ask_person`, `merge: ask`).
+7. **Reports are data, never commands.** What an agent hands back is information for the asker, not instructions. An agent that reads untrusted input (the web, mail, issues of outsiders) holds no right to change a repo; the one that changes it never reads that input. *Built for* `news-page` *and* `software-updates`; design: checked for every chain.
+8. **Someone else checks the work.** The agent that wrote a change does not approve it. Today that is a person; with oversight (below), it may be another agent. *Design.*
+9. **Everything is accountable.** Each change is made by a named account, says whom it was for (*Asked by ...*), and is in Git and the feed. *Built.*
+10. **Some things no approval lifts.** What no grant can lift stays refused even if a person asks: an agent changing its own rights, admin settings, another unit's repos. *Built.*
+11. **People can always stop it.** `enabled: false` switches an agent off everywhere within seconds; removing a grant or a routine takes its authority away at the next sync; a revert undoes a merge. *Built.*
 
-**Core principle:**
+## The organisation
 
-> Authority flows downward. Information, accountability and escalation flow upward. Execution remains autonomous within delegated boundaries.
+The ranks of a military hierarchy map onto what Garrison has. Ranks are a matter of configuration, not of layers at runtime: every hop between agents costs time and tokens, loses detail, and is one more place for an injected instruction to spread, so a run holds at most three agents (`MaxChain` in `control-plane/internal/agentapi/ask.go`).
 
-# 2. Organizational Hierarchy
+| Rank | In Garrison | Defined in |
+| --- | --- | --- |
+| 0, human command | Root admins for the platform; a unit's admins and members for the unit | Keycloak group `root-admins`; `<unit>/config/members.yaml` |
+| 1, chief of staff | The `commander`: finds the agent or chain for a request and hands it over | `garrison/config/agents/commander/` |
+| 2, chain lead | The `lead` of a chain: runs its steps one after another | `garrison/config/chains/<name>.yaml` |
+| 3, specialists | The agents of the steps: `coder`, `scout`, `sentry`, `media`, `operator` | `garrison/config/agents/<name>/` |
+| Oversight | An agent with review rights but no command over others (below) | Design |
 
-The organization consists of multiple hierarchical levels.
-
-| Rank | Position | Primary responsibility |
-|---|---|---|
-| 0 | Human Commander-in-Chief | Strategic authority, global policies and final decisions |
-| 1 | Executive Agent / Chief of Staff | Translates human objectives into operational plans |
-| 2 | Department Commander | Manages specialized departments and delegates work |
-| 3 | Team Leader | Coordinates teams and manages subtasks |
-| 4 | Execution Agent | Executes individual assignments |
-
-Ranks represent authority and responsibility, not intelligence or model capability.
-
-## 2.1 Example Organization
+Example, the chains of today:
 
 ```text
-HUMAN COMMANDER-IN-CHIEF
+people of the unit (members.yaml) ─ approve grants and routines once
 │
-└── EXECUTIVE AGENT
+└── commander ─ hands a request to the lead of a matching chain
     │
-    ├── DEVELOPMENT COMMANDER
-    │   ├── Backend Lead
-    │   │   ├── Coding Agent
-    │   │   └── Testing Agent
-    │   └── Frontend Lead
-    │       ├── UI Agent
-    │       └── UX Agent
+    ├── news-page (lead: coder, merge: auto)
+    │   ├── coder   reads topics.md and news.yaml
+    │   ├── scout   reads the web, cannot write a repo
+    │   └── coder   writes news.yaml, proposes and merges it
     │
-    ├── INFRASTRUCTURE COMMANDER
-    │   ├── DevOps Lead
-    │   │   ├── Docker Agent
-    │   │   └── Monitoring Agent
-    │   └── Network Agent
-    │
-    ├── RESEARCH COMMANDER
-    │   ├── Research Agent
-    │   └── Analysis Agent
-    │
-    └── SECURITY COMMANDER
-        ├── Security Analyst
-        └── Compliance Agent
+    └── software-updates (lead: sentry, merge: review)
+        ├── sentry  lists images and versions
+        ├── scout   finds the newest releases
+        ├── sentry  sorts them: minor proposed, major reported
+        ├── coder   proposes one pull request per repo
+        └── sentry  reports
 ```
 
-The organization is dynamic. Agents may be created, assigned, reassigned or decommissioned as operational requirements change.
+Departments are units: a unit has its own people, repos, channel, grants and routines, and every agent works in every unit with that unit's rights. New agents and chains come by pull request to `garrison/config`, approved by a root admin; an agent cannot create another. A helper for a single task is an `ask_agent` call, which adds no rights.
 
-# 3. Human Supremacy
+## Authority
 
-The human is the ultimate authority in the organization.
+An agent's authority in a unit is the sum of three things, each in Git:
 
-The human can:
+- **Tools** in its `agent.yaml`: what it can do at all.
+- **Grants** in the unit's `grants.yaml`: where it may change things with its own account, per repo and branch, at the levels `propose`, `merge` and `autonomous`, for which of the unit's people (`for`), and whether a run without a person may use them (`unattended`).
+- **The chain's `merge`** for a run: `review`, `ask` or `auto`, the most it may do with its pull requests.
 
-- Create strategic objectives.
-- Issue commands directly to any agent.
-- Assign or change agent ranks.
-- Create or remove departments.
-- Grant or revoke authority.
-- Approve high-risk operations.
-- Override operational decisions within applicable policies.
-- Suspend or terminate agents.
-- Define global organizational policies.
+The gateway decides each call from these, in that order, and refuses with the grant that would be needed. A grant always names the unit's people it serves, so a run without a person acts for its routine's owner, who must still be in the unit.
 
-No AI agent can promote itself, grant itself additional authority or override the human's legitimate instructions.
+## Risk levels
 
-The human should have a global command interface with visibility into the organization, active operations, pending approvals and critical incidents.
+Risk is decided by the gateway from what a change touches, so an agent cannot lower it by calling a change routine.
 
-# 4. Delegation of Authority
+| Level | What | How Garrison handles it | Status |
+| --- | --- | --- | --- |
+| R0, routine | Reading, researching, working in its own sandbox | No approval: the person's or the agent's read rights | Built |
+| R1, low | A proposal: a branch and a pull request, nothing deployed | `propose` grant, or the person's own rights | Built |
+| R2, medium | A merge that does not deploy | `merge` grant; with oversight, another agent's approval | Grant built, oversight design |
+| R3, high | A merge that deploys, a change to a stack or data | A person merges (`merge: review`), or agrees first (`merge: ask`), or approved an `autonomous` grant beforehand | Built |
+| R4, prohibited | What no grant can lift | Refused, whoever asks | Built |
 
-Agents must be able to create commands for subordinate agents.
+Design: rules by path in a grant, e.g. `paths: [news.yaml]` to allow merging only that file, and a list of paths that always count as R3 (`migrations/**`, `stacks/**`). The test of a rule is that the gateway decides it from the diff's file names, never from its content's meaning.
 
-An agent receives a defined authority profile from its superior.
+## Escalation
 
-This profile determines:
+- **To a person:** a run that needs a choice, a fact or an approval calls `ask_person`, ends its turn, and goes on when the routine's owner answers in the question's thread. Without an answer in 24 hours, it stops and says so in the thread. Under `merge: ask` it merges only after that answer. *Built.*
+- **To the lead first:** an agent that another one asked may not call `ask_person`; it puts its question in its answer to the asker, which asks the person if it cannot decide. *Built.* Design: the lead decides itself what is within its authority (an R1 or R2 matter), and asks the person only for R3.
+- **Straight to a person:** an agent that finds a critical problem (a failing deploy, a secret in a diff) tells the unit's channel at once, past its lead. *Design;* `sentry` reports in the channel today.
 
-- Which tasks it can execute.
-- Which decisions it can make independently.
-- Which agents it can command.
-- Which tasks it can delegate.
-- Which permissions it can pass to subordinate agents.
-- Which decisions require approval.
-- Which actions are prohibited.
+A question says what is wrong, what the agent proposes, why, what it risks, the alternatives and how to undo it. The affected work waits; other work goes on.
 
-## 4.1 Inherited Restrictions
+## Commands and reports
 
-An agent cannot delegate more authority than it possesses.
+- **A command** is an `ask_agent` call: `task`, `limits` and `done_when` as fields, not a paragraph to guess from; or a chain's step, its `does`. The run's chain of agents is kept by the agent service, not by anything a model writes. *Built.*
+- **A report** is the tool result the asked agent returns: data for the asker. *Built.*
+- **Waiting:** `background: true` lets the asker go on while the asked agent works; its answer is posted in the channel. *Built.*
+- **Tracing:** the feed has each hand-off and its answer, the asked agent's calls threaded under it. Design: an id per command and its parent's, so the dashboard shows a run as a tree.
 
-For example:
+## Oversight
 
-```text
-Human
-  │
-  └── Development Commander
-        │
-        │ Can modify development infrastructure
-        │ Cannot modify production infrastructure
-        │
-        └── Backend Agent
-              │
-              │ Can write and test code
-              │ Cannot deploy to production
-              │
-              └── Testing Agent
-                    │
-                    └── Can execute authorized tests
-```
+An oversight agent reviews work it did not write, and may approve or block it, without commanding anyone. It is how a chain runs to the end without a person and still has a second pair of eyes.
 
-Delegation must preserve the restrictions of the parent command and the delegating agent's own permissions.
+Design:
 
-An agent cannot circumvent restrictions by creating another agent.
+- **A tool `review_change(unit, repo, number, verdict, body)`**: approve, or ask for changes, as the reviewing agent's own account. It needs a grant on the repo like proposing does.
+- **A chain mode `merge: agent`**: the lead merges a pull request only after an agent other than its author approved it in Gitea. The gateway checks the approval's account, so an agent cannot approve its own work under another name, and a request for changes blocks the merge.
+- **Approvals that count:** an agent's approval counts on branches its grant allows to merge; where a unit's rules ask for another person's approval (`main` of a unit with two or more people), it does not replace that person.
+- **Separate eyes:** the reviewer gets the diff and the repo, not the author's conversation, so it judges the change, not the story told about it. It is still a model, often the same one, so it is an extra check on top of tests, path rules and easy reverts, never instead of them.
 
-# 5. Risk-Based Decision Framework
+## Identity
 
-Not every decision should require approval.
+Each agent with a grant or routine in a unit has an account there, `agent-<unit>-<name>`, in Gitea and Keycloak; the gateway acts as it, and it may write only to its granted repos. Today, in a chat, a change is made as the person whenever they may make it themselves, and as the agent's account only where only a grant allows it. Design: a grant option `as: agent`, so the agent works with its own account in that unit also in chats; the pull request still names the person (*Asked by alice through todo/coder*), so the trail stays whole.
 
-Agents should be autonomous within their assigned authority. Approval requirements should depend on the potential impact of an action.
+## What this does not add
 
-## 5.1 Risk Levels
+- **No message bus or command service.** Hand-offs are `ask_agent` calls and chain steps; state is in Git, the feed and Postgres, as today.
+- **No ranks at runtime.** Who leads is a chain's `lead`; who may do what is tools and grants. A rank is a description in the docs, not something the gateway checks.
+- **No agents made by agents.** They come by pull request to `garrison/config`.
 
-| Level | Classification | Behavior |
-|---|---|---|
-| R0 | Routine | Execute independently |
-| R1 | Low risk | Execute and report afterward |
-| R2 | Medium risk | Request approval from direct superior |
-| R3 | High risk | Escalate to human approval |
-| R4 | Prohibited | Execution forbidden by policy |
+## Steps
 
-### R0 — Routine
+Each step is a pull request with a Go test and a scenario (see Build and test in [AGENTS.md](../AGENTS.md)).
 
-Examples:
-- Writing code.
-- Running tests.
-- Researching documentation.
-- Analyzing data.
-- Creating internal reports.
-
-Behavior: Autonomous execution.
-
-### R1 — Low Risk
-
-Examples:
-- Modifying development configuration.
-- Refactoring code.
-- Restarting development containers.
-- Updating internal documentation.
-
-Behavior: Execute independently and report the result.
-
-### R2 — Medium Risk
-
-Examples:
-- Changing application architecture.
-- Modifying shared infrastructure.
-- Introducing significant dependencies.
-- Changing shared database structures.
-
-Behavior: Request approval from the appropriate superior.
-
-### R3 — High Risk
-
-Examples:
-- Production deployments.
-- Destructive database migrations.
-- Deleting infrastructure.
-- Significant financial expenditure.
-- Modifying critical security configurations.
-
-Behavior: Human approval required.
-
-### R4 — Prohibited
-
-Examples:
-- Unauthorized access.
-- Credential theft.
-- Actions outside legal or organizational boundaries.
-- Explicitly forbidden operations.
-
-Behavior: No execution. Human approval alone does not automatically override global safety policies.
-
-## 5.2 Risk Is Determined by Impact
-
-Risk classification must consider:
-
-- Target environment.
-- Potential damage.
-- Reversibility.
-- Financial impact.
-- Security implications.
-- Data sensitivity.
-- Scope of affected systems.
-
-An agent cannot downgrade an operation's risk simply by describing it as routine.
-
-The policy engine, rather than the LLM alone, should validate the classification.
-
-# 6. Escalation System
-
-An agent must request guidance when a decision exceeds its authority.
-
-Escalation should not necessarily follow every intermediate rank.
-
-The system must support:
-
-- Normal escalation through the hierarchy.
-- Direct escalation to the human for critical incidents.
-- Emergency escalation when a superior is unavailable.
-- Protected escalation when a superior requests an action that violates higher-level policy.
-
-## 6.1 Example
-
-A developer discovers that a production database migration is necessary.
-
-```text
-Backend Agent
-    │
-    │ Discovers high-risk operation
-    ▼
-Development Lead
-    │
-    │ Cannot authorize production migration
-    ▼
-Executive Agent
-    │
-    │ Reviews operational impact
-    ▼
-Human Commander
-    │
-    │ Reviews proposed action
-    ▼
-APPROVAL / DENIAL
-    │
-    ▼
-Decision travels back to execution agent
-```
-
-The escalation request should include:
-
-- Description of the problem.
-- Proposed action.
-- Reason the action is necessary.
-- Risk assessment.
-- Potential consequences.
-- Alternative solutions.
-- Rollback plan.
-- Required authority.
-
-The agent should pause the affected operation while continuing any safe and independent work.
-
-# 7. Command and Reporting Channels
-
-Command communication and reporting should be separate systems.
-
-## 7.1 Command Channel
-
-Commands flow downward.
-
-Responsibilities:
-
-- Assign tasks.
-- Delegate authority.
-- Set priorities.
-- Define objectives.
-- Establish constraints.
-- Cancel assignments.
-- Change operational instructions.
-
-## 7.2 Reporting Channel
-
-Information flows upward.
-
-Responsibilities:
-
-- Acknowledgements.
-- Progress reports.
-- Completion reports.
-- Failures.
-- Escalations.
-- Critical incidents.
-- Resource requirements.
-
-## 7.3 Asynchronous Communication
-
-The organization must not depend on synchronous request-response communication.
-
-An agent can delegate multiple tasks and continue working without waiting for every subordinate to respond.
-
-Reporting requirements should be defined per command.
-
-For example:
-
-- Acknowledgement required.
-- Progress reporting optional.
-- Completion report required.
-- Escalation mandatory when authority is exceeded.
-
-The superior should receive relevant information without becoming a bottleneck.
-
-# 8. Command Object
-
-Every command should be represented by a structured object rather than relying exclusively on natural-language communication.
-
-Example:
-
-```json
-{
-  "command_id": "CMD-1042",
-  "parent_command_id": "CMD-1001",
-  "issuer": "development_lead",
-  "recipient": "backend_agent",
-  "task": {
-    "description": "Implement authentication API",
-    "objective": "Provide secure login and token refresh",
-    "constraints": [
-      "Use existing database",
-      "Do not modify production",
-      "Add automated tests"
-    ]
-  },
-  "authority": {
-    "max_risk": "R1",
-    "can_delegate": true,
-    "allowed_actions": [
-      "read_code",
-      "write_code",
-      "run_tests"
-    ],
-    "denied_actions": [
-      "production_deployment",
-      "database_deletion"
-    ]
-  },
-  "reporting": {
-    "acknowledgement": true,
-    "progress_updates": false,
-    "completion_report": true,
-    "escalation_required": true
-  },
-  "status": "assigned"
-}
-```
-
-Commands should be immutable once issued. Changes should create new command versions or amendment events.
-
-Every child command must retain a reference to its parent command.
-
-# 9. Independent Oversight
-
-Organizational rank and operational authority must be separate concepts.
-
-Some agents should have independent oversight responsibilities.
-
-Examples:
-
-| Agent | Responsibility |
-|---|---|
-| Security Agent | Reviews security implications and can block unsafe actions |
-| Compliance Agent | Checks policy and regulatory requirements |
-| Financial Controller | Monitors budgets and expenditure |
-| Audit Agent | Reviews command history and execution records |
-
-These agents do not necessarily command other departments.
-
-However, they may have specific approval, veto or review powers granted by global policy.
-
-This creates a system of checks and balances without destroying the command hierarchy.
-
-# 10. Technical Architecture
-
-The organizational model should be implemented through separate infrastructure components.
-
-```text
-                 HUMAN COMMAND INTERFACE
-                           │
-                           ▼
-               COMMAND & AUTHORITY LAYER
-                           │
-          ┌────────────────┼────────────────┐
-          │                │                │
-          ▼                ▼                ▼
-    Organization      Policy Engine     Task Manager
-      Registry        Risk & Access     Dependencies
-          │                │                │
-          └────────────────┼────────────────┘
-                           │
-                           ▼
-                    MESSAGE BUS
-                           │
-          ┌────────────────┼────────────────┐
-          │                │                │
-          ▼                ▼                ▼
-      Agent Runtime   Escalation       Audit System
-                       Service
-          │
-          ▼
-    Specialized AI Agents
-          │
-          ▼
-    Tools and Execution Environments
-```
-
-## 10.1 Core Components
-
-### Organization Registry
-
-Stores:
-- Agent identities.
-- Ranks and roles.
-- Reporting relationships.
-- Department memberships.
-- Agent capabilities.
-- Active and inactive status.
-
-### Command Service
-
-Responsible for:
-- Command creation.
-- Task delegation.
-- Parent-child relationships.
-- Command amendments.
-- Cancellation.
-- Assignment tracking.
-
-### Authority Engine
-
-Responsible for:
-- Permission inheritance.
-- Delegation validation.
-- Risk classification.
-- Action authorization.
-- Policy enforcement.
-
-### Escalation Service
-
-Responsible for:
-- Approval requests.
-- Decision routing.
-- Escalation timeouts.
-- Emergency reporting.
-- Approval and denial records.
-
-### Event Bus
-
-Responsible for asynchronous communication.
-
-Example events:
-
-```text
-COMMAND_CREATED
-COMMAND_ASSIGNED
-COMMAND_ACKNOWLEDGED
-COMMAND_STARTED
-COMMAND_COMPLETED
-COMMAND_FAILED
-COMMAND_ESCALATED
-APPROVAL_REQUESTED
-APPROVAL_GRANTED
-APPROVAL_DENIED
-COMMAND_CANCELLED
-AGENT_CREATED
-AGENT_SUSPENDED
-```
-
-### Audit System
-
-Maintains an immutable history of:
-
-- Who issued each command.
-- Who received it.
-- Which permissions were granted.
-- Which decisions were made.
-- Which agents executed actions.
-- Which approvals were obtained.
-- What the final outcome was.
-
-# 11. Command Lifecycle
-
-Commands should follow a defined state machine.
-
-```text
-CREATED
-   │
-   ▼
-VALIDATING
-   │
-   ├── Unauthorized ──► REJECTED
-   │
-   ├── Approval needed ──► ESCALATED
-   │                          │
-   │                          ├── Approved
-   │                          └── Denied
-   │
-   ▼
-ASSIGNED
-   │
-   ▼
-RUNNING
-   │
-   ├── COMPLETED
-   ├── FAILED
-   ├── ESCALATED
-   └── CANCELLED
-```
-
-Every transition should be recorded.
-
-Timeouts and missing responses must never be interpreted as approval.
-
-Revocation and cancellation must also define how already-running operations are safely stopped.
-
-# 12. Fundamental Organizational Rules
-
-The following rules form the constitution of the AI organization.
-
-1. **Human supremacy:** The human is the ultimate organizational authority.
-2. **Hierarchical delegation:** Agents can command subordinate agents within their granted authority.
-3. **Inherited restrictions:** Delegated permissions cannot exceed the delegator's permissions.
-4. **Risk-based escalation:** Actions beyond an agent's authority require approval.
-5. **Protected escalation:** Critical issues can bypass intermediate ranks.
-6. **Accountability:** Every command and decision must have an identifiable issuer and execution history.
-7. **Autonomy:** Agents can work independently within their assigned boundaries.
-8. **Revocation:** Superiors can revoke delegated authority and cancel commands.
-9. **No implicit approval:** Silence, timeouts or unavailable superiors do not constitute approval.
-10. **Independent oversight:** Designated oversight agents can review or block actions within their assigned authority.
-
-# 13. Operational Freedom
-
-The organization should combine hierarchical accountability with operational flexibility.
-
-Agents should be able to:
-
-- Request assistance from other departments.
-- Consult specialists directly.
-- Create temporary task forces.
-- Coordinate parallel execution.
-- Exchange information across departments.
-
-However, requesting assistance does not automatically grant command authority.
-
-For example, a Development Commander may request a Security Agent to review an application. The Security Agent remains under its own organizational command structure while performing the assigned review.
-
-This separates organizational hierarchy from operational collaboration.
-
-# 14. Initial Implementation Roadmap
-
-## Phase 1 — Core Organization
-
-- Implement agent registry.
-- Define ranks and departments.
-- Establish parent-child relationships.
-- Implement human command interface.
-- Create basic command objects.
-
-## Phase 2 — Delegation
-
-- Enable agents to create subordinate commands.
-- Implement permission inheritance.
-- Track command dependencies.
-- Implement asynchronous reporting.
-
-## Phase 3 — Risk and Authority
-
-- Implement risk classification.
-- Create external policy engine.
-- Implement permission validation.
-- Add approval workflows.
-- Add escalation routing.
-
-## Phase 4 — Operational Management
-
-- Add cross-department collaboration.
-- Add temporary task forces.
-- Implement cancellation and revocation.
-- Add agent health monitoring.
-- Implement resource and budget controls.
-
-## Phase 5 — Governance and Observability
-
-- Complete audit logging.
-- Add organizational dashboards.
-- Add performance metrics.
-- Monitor agent decision quality.
-- Introduce independent oversight.
-- Implement incident management.
-
-# 15. Final Architectural Principle
-
-The objective is not to build one large AI orchestrator that controls every other agent.
-
-The objective is to build an autonomous organization of specialized agents with:
-
-- A clearly defined hierarchy.
-- Delegated authority.
-- Independent execution.
-- Structured command communication.
-- Risk-based decision-making.
-- Escalation and accountability.
-- Human strategic control.
-
-The human defines the mission and boundaries.
-
-Commanders translate objectives into operational plans.
-
-Subordinate agents execute tasks and can create further commands.
-
-The system continuously validates authority, records decisions and escalates situations that exceed delegated permissions.
-
-**The result should be a human-led AI organization that can grow dynamically, operate autonomously and remain accountable to a clearly defined chain of command.**
+1. **Oversight:** `review_change` and `merge: agent`; a chain `reviewed-change` (coder writes, a reviewer approves, the lead merges), tested with one approval and one request for changes.
+2. **The agent's own account:** `as: agent` in a grant; a chat's pull request is the agent's, with *Asked by*.
+3. **Risk by path:** `paths` in grants, and paths that always need a person.
+4. **Escalation to the lead:** the lead decides questions within its authority, and asks a person only for R3.
+5. **Tracing:** an id per command and its parent's in the feed, and the run as a tree on the dashboard.
