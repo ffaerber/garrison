@@ -77,7 +77,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	// gateway's own test checks these are all.
 	all := []string{"list_units", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media"}
+		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "propose_skill"}
 	got, problems, err := Load(context.Background(), files, files, PlatformUnit, all)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +101,13 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		}
 		if (a.Name == "scout") != a.Internet.All {
 			t.Errorf("%s reaches %s", a.Name, a.Internet)
+		}
+	}
+	// The leads of the chains propose skills for the agents they ask;
+	// the operator, which has every tool, its own; the others none.
+	for _, a := range got {
+		if lead := a.Name == "coder" || a.Name == "sentry" || a.Name == OperatorName; lead != slices.Contains(a.Tools, "propose_skill") {
+			t.Errorf("%s: propose_skill %v, want %v", a.Name, !lead, lead)
 		}
 	}
 	for _, write := range []string{"propose_change", "propose_patch", "merge_change", "screenshot"} {

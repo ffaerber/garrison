@@ -2,6 +2,6 @@
 # pull requests.
 description: Changes the code of the apps (features, fixes, dependencies) as pull requests, and reviews pull requests (bugs, risks, missing tests)
 model: ""
-tools: [list_units, list_repos, list_files, read_file, list_changes, list_stacks, propose_patch, merge_change, create_branch]
+tools: [list_units, list_repos, list_files, read_file, list_changes, list_stacks, propose_patch, merge_change, create_branch, propose_skill]
 agents: [sentry]
 internet: [packages]

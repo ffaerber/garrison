@@ -239,4 +239,44 @@ check "alice deletes the key"              grep -q '^303' <<<"$(models_post alic
 key_gone() { [ ! -e $ETC/llm-keys/smoke ]; }
 check "and the deployer removes its file"  until_true 90 key_gone
 
+echo "# an agent proposes a skill for the agent it asks; a root admin approves it"
+# The coder leads the chain news-page, so it asks the scout. It calls
+# propose_skill as the agent service does, in a run that alice owns.
+service_key=$(python3 -c 'import hmac,hashlib,sys; print(hmac.new(sys.argv[1].encode(), b"garrison agent service v1", hashlib.sha256).hexdigest())' "$PASSWORD")
+# as_coder TOOL ARGS_JSON: the coder's tool call; prints the tool's text.
+as_coder() {
+  kubectl --namespace garrison exec -i deployment/openwebui -- curl -sS --max-time 30 \
+    -H "X-Garrison-Service: $service_key" -H "X-Garrison-Owner: alice" -H "X-Garrison-Started-By: routine garrison/coder/e2e" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":sys.argv[1],"arguments":json.loads(sys.argv[2])}}))' "$1" "$2")" \
+    http://gateway:8080/mcp/garrison/coder | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r.get("result",{}).get("content",[{}])[0].get("text","") or r)'
+}
+skill=$'---\nname: e2e-sources\ndescription: Searching where the first search found nothing.\n---\nSearch in the language of the topic too, and use the sites own search.\n'
+skill_args=$(python3 -c 'import json,sys; print(json.dumps({"agent":"scout","skill":"e2e-sources","content":sys.argv[1],"description":"It came back empty twice; searching in German helped."}))' "$skill")
+out=$(as_coder propose_skill "$skill_args")
+skill_pr=$(grep -oE 'garrison/config#[0-9]+' <<<"$out" | grep -oE '[0-9]+$')
+check "the coder proposes a skill for the scout" test -n "$skill_pr" || echo "      it said: $out"
+skill_pull=$(gitea_api "" "$sys/pulls/${skill_pr:-0}")
+check "opened by the platform's account, on a skill branch, naming the agent and alice" python3 -c '
+import json,sys
+p=json.loads(sys.argv[1])
+ok = p["user"]["login"] == sys.argv[2] and p["head"]["ref"].startswith("skill/scout/e2e-sources-") and "Proposed by the agent garrison/coder, working for alice" in p["body"]
+sys.exit(0 if ok else 1)' "$skill_pull" "$ADMIN_USER"
+check "it changes only the scout's SKILL.md" test "$(gitea_api "" "$sys/pulls/${skill_pr:-0}/files" | python3 -c 'import json,sys; print(" ".join(f["filename"] for f in json.load(sys.stdin)))')" = "agents/scout/skills/e2e-sources/SKILL.md"
+check "the coder may not propose one for an agent it does not ask" grep -q "only for yourself and the agents you ask" <<<"$(as_coder propose_skill '{"agent":"operator","skill":"x","content":"---\nname: x\ndescription: y\n---\n","description":"d"}')"
+check "it waits for a root admin's approval" until_true 90 approval_has "${skill_pr:-0}" "^pending"
+sys_review alice "${skill_pr:-0}"
+check "alice approves it: she did not write it" until_true 60 approval_has "${skill_pr:-0}" "^success"
+check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$sys/pulls/${skill_pr:-0}/merge")" = 200
+check "the scout has the skill on main"    grep -q "name: e2e-sources" <<<"$(gitea_api "" "$sys/raw/agents/scout/skills/e2e-sources/SKILL.md")"
+# Anything else on a skill branch is refused, whoever pushed it.
+out=$(as_coder propose_skill "$(sed 's/e2e-sources/e2e-more/g' <<<"$skill_args")")
+more_pr=$(grep -oE 'garrison/config#[0-9]+' <<<"$out" | grep -oE '[0-9]+$')
+more_branch=$(gitea_api "" "$sys/pulls/${more_pr:-0}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["ref"])')
+gitea_api "" -o /dev/null -X POST -H 'Content-Type: application/json' \
+  -d "$(python3 -c 'import base64,json,sys; print(json.dumps({"branch":sys.argv[1],"message":"more","content":base64.b64encode(b"tools: all\n").decode()}))' "$more_branch")" \
+  "$sys/contents/agents/scout/skills/e2e-more/agent.yaml"
+check "a skill branch with another file is refused" until_true 90 approval_has "${more_pr:-0}" "^failure.*a skill branch changes only"
+gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$sys/pulls/${more_pr:-0}"
+
 }

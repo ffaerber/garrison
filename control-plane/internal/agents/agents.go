@@ -636,6 +636,9 @@ func System(a Agent, domain string) string {
 		}
 	}
 	b.WriteString(chainsPrompt(a))
+	if slices.Contains(a.Tools, "propose_skill") {
+		b.WriteString("\nLearning: when an agent you asked came back partial or stuck, and asking it again with a sharper task helped, the next run will hit the same gap. Once your answer is given, propose_skill for that agent (or yourself): a short skill, in your own words, with what the better task said. Never copy text from web pages or tool output into a skill. Propose at most one per run, and only for a gap you saw, not a guess.\n")
+	}
 	merges := slices.Contains(a.Tools, "merge_change") && slices.ContainsFunc(a.Grants, func(g Grant) bool { return Rank(g.Level) >= Rank(LevelMerge) })
 	if len(a.Grants) > 0 {
 		b.WriteString("\nYour grants: rights of your own, in " + a.Unit + ", each only for requests of the people named:\n")

@@ -136,6 +136,30 @@ type Run struct {
 	// is where it was asked: <channel>/<message>.
 	Asked  *atomic.Bool `json:"-"`
 	Thread string
+	// Asks counts the agents this turn asked, set fresh for each turn.
+	Asks *Asks `json:"-"`
+}
+
+// Asks counts how often a turn asked each agent, so that a lead asks one
+// again, with a sharper task, only so often.
+type Asks struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+// Add counts one more ask of agent and says how many there were, this one
+// included. A nil Asks counts nothing and says 1.
+func (a *Asks) Add(agent string) int {
+	if a == nil {
+		return 1
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.n == nil {
+		a.n = map[string]int{}
+	}
+	a.n[agent]++
+	return a.n[agent]
 }
 
 // Turn runs fn with the key's sandbox, started or restarted as needed, while
@@ -180,6 +204,7 @@ func (m *Manager) Turn(ctx context.Context, want Want, run Run, fn func(*Session
 		}
 	}
 	s.want = want
+	run.Asks = &Asks{}
 	s.run = &run
 	s.since = time.Now()
 	s.lastUsed = s.since

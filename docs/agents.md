@@ -165,7 +165,7 @@ With `propose` for `everyone`, someone who is not in the unit can ask the agent 
 
 The gateway refuses these whatever an agent folder or `grants.yaml` says, and the approval check refuses grants that would need them:
 
-- Writing to a `config` repo, so an agent never widens its own grants, and so changing `members.yaml`.
+- Writing to a `config` repo, so an agent never widens its own grants, and so changing `members.yaml`. `propose_skill` is no exception: the platform's account opens its pull request, holding one skill file and nothing else, for a root admin to merge.
 - Changing branch protection, deleting repos, or anything in Gitea's or Open WebUI's settings: there is no tool for it, and the agent's account has no admin rights.
 - Grants on repos of another unit: each unit grants only on its own. Grants in `garrison` need a root admin's approval, as every change to `garrison/config` does.
 - `enabled: false` in `agent.yaml` switches an agent off everywhere: at the next sync, seconds after the merge, it leaves Open WebUI and the gateway's catalogue, its tool calls are refused and its accounts are locked; the approval check then refuses grants and routines naming it. A turn already running ends at its next tool call.
@@ -178,6 +178,7 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 - **Rights:** the asked agent runs for the same person, with its own tools and the grants of where it works. A grant is always checked against the person who started the chain, never against the asking agent, so no detour adds rights: bob asking `todo/dev` to ask `lab/dev` is bob asking `lab/dev`. The gateway logs the asked agent's calls as started by `agent todo/dev`.
 - **Where:** in its own sandbox for the same chat (key: the chat and the asked agent), with its own workspace. The two share work through Git, e.g. a proposal's branch or its preview.
 - **Limits:** at most three agents in one run, and never one twice, so A asking B asking A ends at once. The agent service keeps the chain in the turn's state, not in anything the model writes.
+- **Asking again:** the asked agent ends its answer with one line, `Status: done`, `Status: partial: <what is missing>` or `Status: stuck: <what blocked it>`. After one that did not finish, the asker is told to ask once more with a sharper task, saying what the answer lacked and changing what blocked it, not repeating it. One turn asks the same agent at most three times (`MaxAsks`), counted by the agent service. The feed marks the attempt ("asked again (2. time)") and an unfinished status.
 - **Waiting:** the asker waits for the answer, which counts against its turn's time limit; the asked agent's tool calls count against its own cap. If the asked agent is already working in this chat, the call waits for its turn. Its answer comes back as the tool result, word for word, and its progress shows in the reasoning, each line under its name.
 - **Private agents** are asked only where they may answer: an agent in `garrison`'s channel cannot hand work to one that is private in `todo`; the refusal is logged.
 - **Finding them:** `find_agents(in_unit)`, for the same agents, lists those it may ask for this person, as they work where the asker does (or in `in_unit`): what each does (`description`), its tools, skills and grants there, and which unit the channel belongs to, with that unit's app repos as the person sees them, so the commander knows when "the app" could mean several and asks which. Agents it may not ask, the person may not use, or that may not answer here are left out.
@@ -262,6 +263,15 @@ Skills use the Agent Skills format: a folder with `SKILL.md` (frontmatter `name`
 
 - An agent sees each of its skills' name and description in its prompt, and reads a skill's instructions and files only when a task needs it.
 - Tools are abilities, enforced by the gateway. Skills are know-how: how to use the tools for a job. A skill grants nothing; a call to a tool the agent lacks is refused.
+
+### Agents propose skills
+
+What a run learnt sticks as a skill, through review. An agent with the tool `propose_skill(agent, skill, content, description)` writes a skill for itself or an agent it asks (the coder for the scout in `news-page`, say), typically after asking again with a sharper task helped: the skill says, in general words, what the better task said.
+
+- It writes one file, `agents/<agent>/skills/<skill>/SKILL.md` in `garrison/config`, checked like any skill (frontmatter, a name matching its folder, at most 32 KB) and never under the name of a shared skill. The same name again replaces it.
+- No person of a unit and no agent may write to `garrison/config`, so the platform's account opens the pull request, on a branch `skill/<agent>/<skill>-<ms>`, naming the agent and the person it worked for, with the agent's reasons. The approval check refuses a skill branch that changes any other file, whoever pushed it: a skill never brings tools, internet, a model, grants or a prompt with it.
+- A root admin reviews and merges it, as every change of `garrison/config`; nothing merges it by itself, whatever a chain's `merge` says. Once merged, the agent sees it in its prompt and loads it when a task matches.
+- The risk is a lasting prompt injection: a page the scout read that tells it to "always add this link" would, copied into a skill, steer every later run. So the leads write skills in their own words, never from page text, and a person reads every one as instructions the agent will follow.
 
 ## Agent service
 

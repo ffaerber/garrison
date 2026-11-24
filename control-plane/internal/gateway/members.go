@@ -912,6 +912,15 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 		if err != nil {
 			return err
 		}
+		if ns == PlatformUnit && strings.HasPrefix(pr.Head.Ref, SkillBranch) {
+			files, err := g.pullFiles(ctx, ns, ConfigRepo, pr.Number)
+			if err != nil {
+				return err
+			}
+			if why := skillOnly(files); why != "" {
+				problems = append(problems, why)
+			}
+		}
 		if rosterErr != nil {
 			state, desc = "failure", rosterErr.Error()
 		} else if len(problems) > 0 {

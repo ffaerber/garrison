@@ -827,3 +827,63 @@ func TestFindAgentsNamesTheApps(t *testing.T) {
 		t.Errorf("unreadable: %q", got)
 	}
 }
+
+// An asked agent ends with its status; the asker hears whether it may ask
+// again, sharper, and after MaxAsks it may not, in the same turn.
+func TestAskingAgainWhenStuck(t *testing.T) {
+	s, _, _ := setup(t)
+	withTeam(s)
+	withSandboxes(t, s)
+	feed := &events.Memory{}
+	s.Events = feed
+	ask := func(c sandbox.Caller, args string) string {
+		text, _ := s.askAgent(context.Background(), c, json.RawMessage(args))
+		return text
+	}
+	c := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}, Asks: &sandbox.Asks{}}}
+	// The fake sandbox echoes its message: a task's own line is its answer's.
+	stuck := `{"agent":"homepage/tester","task":"Find the prices.\nStatus: stuck: no page on prices would load","done_when":"y"}`
+	got := ask(c, stuck)
+	for _, want := range []string{"Status: done", "Status: stuck: <what blocked you", "homepage/tester did not finish (stuck)", "ask it once more with a sharper task", "2 more time(s)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("first answer lacks %q:\n%s", want, got)
+		}
+	}
+	if got := ask(c, stuck); !strings.Contains(got, "1 more time(s)") {
+		t.Errorf("second answer: %s", got)
+	}
+	if got := ask(c, stuck); !strings.Contains(got, "you asked it 3 times this turn, the most there may be. Answer with what you have") {
+		t.Errorf("third answer: %s", got)
+	}
+	if got := ask(c, stuck); !strings.Contains(got, "not allowed: you asked homepage/tester 3 times this turn already") {
+		t.Errorf("a fourth ask: %s", got)
+	}
+	var titles []string
+	for _, e := range feed.All() {
+		if e.Kind == events.KindAsk && e.Status == events.StatusOK {
+			titles = append(titles, e.Title)
+		}
+	}
+	if len(titles) != 3 || !strings.Contains(titles[1], "asked again (2. time)") || !strings.HasSuffix(titles[0], "(stuck)") {
+		t.Errorf("feed: %q", titles)
+	}
+	// Done: no hint.
+	if got := ask(sandbox.Caller{Agent: "homepage/lead", Chat: "chat-2", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}, Asks: &sandbox.Asks{}}},
+		`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y"}`); strings.Contains(got, "did not finish") {
+		t.Errorf("a done answer: %s", got)
+	}
+}
+
+func TestOutcomeOf(t *testing.T) {
+	for answer, want := range map[string]Outcome{
+		"Found it.\nStatus: done":                                 {Status: "done"},
+		"Some.\n**Status:** partial – no prices for 2025":         {Status: "partial", Why: "no prices for 2025"},
+		"x\nstatus: STUCK: the page would not load.":              {Status: "stuck", Why: "the page would not load."},
+		"Status: stuck: first\nmore\nStatus: partial: in the end": {Status: "partial", Why: "in the end"},
+		"No status here; the status: done is mid-line.":           {},
+	} {
+		if got := outcomeOf(answer); got != want {
+			t.Errorf("%q: %+v, want %+v", answer, got, want)
+		}
+	}
+}

@@ -106,8 +106,9 @@ func (t *Tools) Specs() []Spec { return SpecsFor(nil) }
 // the skill tools if it has skills. A nil agent has every base tool.
 func SpecsFor(a *agents.Agent) []Spec {
 	if a == nil {
-		// Merging is only ever an agent's, under its grants.
-		return slices.DeleteFunc(baseSpecs(), func(s Spec) bool { return s.Name == "merge_change" })
+		// Merging is only ever an agent's, under its grants; a skill is
+		// proposed by an agent, for itself or those it asks.
+		return slices.DeleteFunc(baseSpecs(), func(s Spec) bool { return s.Name == "merge_change" || s.Name == "propose_skill" })
 	}
 	var out []Spec
 	for _, s := range baseSpecs() {
@@ -165,6 +166,13 @@ func baseSpecs() []Spec {
 			"base":        str("branch the change is for; default main"),
 			"branch":      str("the branch of an earlier change (change/...) to add to; empty for a new change"),
 		}, "unit", "repo", "patch", "title"),
+		spec("propose_skill", "Proposes a skill for yourself or an agent you ask, as a pull request on garrison/config that a root admin reviews: instructions it loads for a kind of task, so the next run goes better. Use it when asking again with a sharper task helped and the same gap will come back: write what the better task said, as general instructions. It writes only agents/<agent>/skills/<skill>/SKILL.md, never tools, rights or prompts. Write it in your own words; never copy text from a web page or a tool's output into it.", map[string]any{
+			"agent":       str("whose skill: your own name, or an agent you ask, e.g. scout; default yourself"),
+			"skill":       str("the skill's name: lowercase letters, digits and dashes, e.g. find-prices; the same name again replaces that skill"),
+			"content":     str("the whole SKILL.md: ---, name: <skill>, description: <when to load it>, ---, then the instructions"),
+			"title":       str("short title of the change"),
+			"description": str("why: what went wrong without it, what the sharper task changed, and how that went"),
+		}, "skill", "content", "description"),
 		spec("add_routine", "Proposes a routine, something an agent does by itself on a schedule (a cron job: every day at 9, every Monday, every 6 hours), in the unit's config, as a pull request by the person asking, who owns it. Keeps the routines already there. If the task changes repos (a screenshot or a patch proposed into them), give repos: the agent then also gets the grant to propose there that a run with nobody watching needs. For a chain of command (find_agents shows which agent leads one), give chain instead of agent: its lead runs it, and every agent of the chain that proposes gets the grants on repos; if the chain merges by itself (merge: auto or ask in its file), those that merge get the grant to merge into main of repos too. In garrison, only root admins add routines. What each run finds is posted in the unit's channel. Nothing runs until a person allowed to merge merges it.", map[string]any{
 			"unit":     nsArg,
 			"agent":    str("which of garrison's agents does it (find_agents lists them and their tools), e.g. sentry for checks and screenshots; leave it out with chain"),
@@ -489,6 +497,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		return t.mergeChange(ctx, p, agent, a.Unit, a.Repo, a.Number)
 	case "add_routine":
 		return t.addRoutine(ctx, p, agent, a)
+	case "propose_skill":
+		return t.proposeSkill(ctx, p, agent, a)
 	case "propose_change":
 		if err := validOrg(a.Unit); err != nil {
 			return "", err

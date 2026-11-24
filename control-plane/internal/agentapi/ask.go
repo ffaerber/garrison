@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,53 @@ import (
 // MaxChain is how many agents one run may hold: the one a person asked,
 // and those it asks in turn.
 const MaxChain = 3
+
+// MaxAsks is how often one turn may ask the same agent: once, and twice
+// again with a sharper task when its answer was not enough.
+const MaxAsks = 3
+
+// Statuses an asked agent ends its answer with.
+const (
+	StatusDone    = "done"
+	StatusPartial = "partial"
+	StatusStuck   = "stuck"
+)
+
+// statusLine is the asked agent's last line on how far it got, e.g.
+// "Status: stuck: no page on the topic would load".
+var statusLine = regexp.MustCompile(`(?im)^[\s*_>-]*status[*_]*\s*:[*_\s]*(done|partial|stuck)\b[*_]*\s*[:,.\x{2013}\x{2014}-]?\s*(.*)$`)
+
+// Outcome is how far an asked agent got, by its own last status line: done,
+// partial or stuck, and why. Status is "" when it gave none.
+type Outcome struct {
+	Status, Why string
+}
+
+// outcomeOf reads the last status line of an answer.
+func outcomeOf(answer string) Outcome {
+	all := statusLine.FindAllStringSubmatch(answer, -1)
+	if len(all) == 0 {
+		return Outcome{}
+	}
+	m := all[len(all)-1]
+	return Outcome{Status: strings.ToLower(m[1]), Why: strings.TrimSpace(strings.Trim(m[2], "*_ "))}
+}
+
+// statusAsk is what the asked agent is told about its last line.
+const statusAsk = "End your answer with one line on how far you got: \"Status: done\", \"Status: partial: <what is missing>\" or \"Status: stuck: <what blocked you, e.g. no results, a page that would not load, an unclear task, a tool or right you lack>\". Be honest: whoever asked you decides by it whether to ask again."
+
+// retryHint is said to the asker after an answer that is not done: ask once
+// more, sharper, while it may; else answer with what it has.
+func retryHint(target string, o Outcome, n int) string {
+	if o.Status == "" || o.Status == StatusDone {
+		return ""
+	}
+	if n >= MaxAsks {
+		return fmt.Sprintf("\n\n%s did not finish (%s), and you asked it %d times this turn, the most there may be. Answer with what you have and say plainly what is missing.", target, o.Status, n)
+	}
+	left := MaxAsks - n
+	return fmt.Sprintf("\n\n%s did not finish (%s). If its answer is not enough, ask it once more with a sharper task: say what this answer lacked, and change what blocked it (other sources or ways, a narrower scope, a clearer format in done_when). Do not repeat the same task. You may ask it %d more time(s) this turn; otherwise answer with what you have and say what is missing.", target, o.Status, left)
+}
 
 // Poster posts an answer no message waits for into a channel, and tells
 // what a channel is.
@@ -167,7 +215,7 @@ func askSpec(a agents.Agent) toolSpec {
 	}
 	return toolSpec{
 		Name:        "ask_agent",
-		Description: "Hands work to another agent and returns its answer. It works for the same person, with its own tools and rights, in a workspace of its own. With background, it works on after this turn and posts its answer in this channel instead (only in a channel).",
+		Description: fmt.Sprintf("Hands work to another agent and returns its answer, which ends with its status: done, partial or stuck, and why. It works for the same person, with its own tools and rights, in a workspace of its own. If it is partial or stuck, you may ask it again with a sharper task, up to %d times in all per turn. With background, it works on after this turn and posts its answer in this channel instead (only in a channel).", MaxAsks),
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -226,6 +274,10 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		log.Printf("agents: %s: %s may not ask %s: %s", who, c.Agent, target.ID(), why)
 		return "not allowed: " + why, true
 	}
+	n := c.Run.Asks.Add(target.ID())
+	if n > MaxAsks {
+		return fmt.Sprintf("not allowed: you asked %s %d times this turn already, the most there may be. Answer with what you have and say plainly what is missing.", target.ID(), MaxAsks), true
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s asks you, working for %s", c.Agent, who)
 	if c.Run.Unattended {
@@ -238,7 +290,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	if strings.TrimSpace(in.DoneWhen) != "" {
 		fmt.Fprintf(&b, "A good answer: %s\n", strings.TrimSpace(in.DoneWhen))
 	}
-	fmt.Fprintf(&b, "\nYour last message is your answer; %s gets it word for word.", c.Agent)
+	fmt.Fprintf(&b, "\nYour last message is your answer; %s gets it word for word. %s", c.Agent, statusAsk)
 	text := b.String()
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }
 	run := sandbox.Run{
@@ -249,15 +301,24 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	log.Printf("agents: %s: %s asks %s (%s)", who, c.Agent, target.ID(), strings.Join(run.Chain, " → "))
 	// The feed shows the hand-off to the asked agent's unit and to the
 	// person, and how it ended.
+	asked := "asked"
+	if n > 1 {
+		asked = fmt.Sprintf("asked again (%d. time)", n)
+	}
 	ev := events.Event{Source: events.SourceAgents, Kind: events.KindAsk, Status: events.StatusRunning,
 		Unit: target.Unit, Audience: events.AudienceMembers, Actor: who, Agent: target.ID(), StartedBy: "agent " + c.Agent,
-		Title: fmt.Sprintf("%s asked %s, for %s: %s", c.Agent, target.ID(), who, strings.TrimSpace(in.Task)),
+		Title: fmt.Sprintf("%s %s %s, for %s: %s", c.Agent, asked, target.ID(), who, strings.TrimSpace(in.Task)),
 		Key:   fmt.Sprintf("ask:%s:%s:%d", c.Agent, target.ID(), time.Now().UnixNano())}
 	record := func(ctx context.Context, answer string, err error) {
 		if s.Events == nil {
 			return
 		}
 		ev.Status, ev.Detail = events.StatusOK, answer
+		// The feed says when it did not finish, so the lead's next ask,
+		// and a person reading, see why.
+		if o := outcomeOf(answer); o.Status == StatusPartial || o.Status == StatusStuck {
+			ev.Title = strings.TrimSuffix(ev.Title, ".") + " (" + o.Status + ")"
+		}
 		if err != nil {
 			ev.Status, ev.Detail = events.StatusFailed, strings.TrimSpace(err.Error()+"\n\n"+answer)
 		}
@@ -311,7 +372,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	if answer == "" {
 		answer = "(no answer)"
 	}
-	return target.ID() + " answers:\n" + answer, false
+	return target.ID() + " answers:\n" + answer + retryHint(target.ID(), outcomeOf(answer), n), false
 }
 
 // instance is the agent asked for as it works: in the unit named, as
