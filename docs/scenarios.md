@@ -136,6 +136,14 @@ Alice adds the builder to `garrison/config` with `internet: packages`; a root ad
 
 (The crud test checks the other side: an agent on a private repo may reach the registries, and the approval check refuses `internet: all` for it.)
 
+## 4l. The commander finds the agent, and hands work over
+
+Played by `commander`. Bob asks the commander in todo's channel which agent makes screenshots; it names one, and a Reply to its answer, without a mention, gets another. Bob: *Hand this to the agent that knows the stacks: which stacks does the unit todo have?*
+
+- While it works, bob's dashboard lists the commander at work in todo for him (`/api/running`), and its header counts the agents working.
+- It hands the task to an agent as it works in todo, as the feed shows, and that agent finishes it.
+- Once it has answered, the dashboard no longer lists it.
+
 ## 5. Alice removes bob
 
 Alice: *@operator Remove bob from the unit todo.*
@@ -206,10 +214,11 @@ A daily screenshot is a routine too, with a grant for an agent with `screenshot`
 Played by the `journey` step (`test/e2e/scenarios/journey.sh`), after deploy, in a unit of its own, with the same todo app under another name. Alice is its only person, so she pushes and merges in its repos freely.
 
 1. Alice: *@operator Make a unit lab, and in it the repo example from the template todo.* The unit and the repo appear, written as alice; lab gets its channel, where the agents work in lab, and there the operator welcomes alice, with things to ask for and her dashboard's address; the pipeline builds main's image.
-2. Alice: *@operator Deploy the app example: propose stacks/example.yaml as its README says, with main and dev.* A pull request on `lab/config` that the deployer takes; the operator's answer links its card on the dashboard. A root admin approves it (as lab's only person, alice would not need that); alice's dashboard lists it under Waiting for you, and its card says in plain words that it changes how the app example is deployed and that merging deploys it. A post from another site is refused; alice merges it with the card's button. The operator says in lab's channel, mentioning her, that it is merged and that it will say when it is deployed; `https://example.<domain>`, behind the sign-in, shows alice her todo list on light grey, and the operator posts that it is live, with its address.
+2. Alice: *@operator Deploy the app example: propose stacks/example.yaml as its README says, with main and dev.* A pull request on `lab/config` that the deployer takes; the operator's answer links its card on the dashboard. A root admin approves it (as lab's only person, alice would not need that); alice's dashboard lists it under Waiting for you, with a Merge button right there, and its card says in plain words that it changes how the app example is deployed and that merging deploys it. A post from another site is refused; alice merges it with the card's button and lands back on her dashboard, which says she merged it. The operator says in lab's channel, mentioning her, that it is merged and that it will say when it is deployed; `https://example.<domain>`, behind the sign-in, shows alice her todo list on light grey, and the operator posts that it is live, with its address.
 3. Alice makes the branch `dev` in Gitea. Nobody merges anything: the stack names `dev`, so the deployer deploys it at `https://dev-example.<domain>`, from the image main's build made of the same commit.
 4. Alice: *@operator Change the background of the todo list to #2e7d32 on dev.* A pull request into `dev` that changes `page.html` alone; alice merges it, its pipeline tests and builds it, dev-example turns green, and example on main stays grey.
 5. Alice opens a pull request from `dev` to `main` in Gitea and merges it: example turns green, and her dashboard's feed shows lab's deploys.
+6. Nobody adds lab anywhere: the dashboard's Apps page and `/api/apps` list `example` on main (up) and on dev, with their addresses, next to Garrison's own pages such as Grafana.
 
 ## Joining and leaving
 

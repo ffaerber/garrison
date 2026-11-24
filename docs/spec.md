@@ -236,7 +236,7 @@ secrets:
 
 ## Dashboard
 
-Served at the installation's domain, behind the sign-in. Built so far: the **feed**, Home's first page, one timeline of everything that happens and how it was handled: pushes, reviews and merges, pipeline runs, deploys and restores, what agents change for whom, routines' runs, and every refusal and failure, each person seeing what they may read; an entry opens its thread (its pull request, commits and runs). See [status.md](status.md).
+Served at the installation's domain, behind the sign-in. Built so far: the **Apps** page and `/api/apps`, every address of Garrison and its units' apps, as each person may see them; the agents **at work now**, counted in every page's header and listed on the feed (see [status.md](status.md)); and the **feed**, Home's first page, one timeline of everything that happens and how it was handled: pushes, reviews and merges, pipeline runs, deploys and restores, what agents change for whom, routines' runs, and every refusal and failure, each person seeing what they may read; an entry opens its thread (its pull request, commits and runs). See [status.md](status.md).
 
 Pages follow the levels: Home (cluster), Unit, Stack, Service. Every page has the same tabs:
 

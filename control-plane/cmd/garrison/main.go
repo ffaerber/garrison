@@ -358,7 +358,12 @@ func deployCmd(args []string) error {
 		}
 		wake := &hooks.Wake{}
 		c.Wake = wake.Subscribe()
-		extra := map[string]http.Handler{"GET /metrics": (&health.Kubernetes{Run: apply.Exec}).Handler()}
+		cluster := &health.Kubernetes{Run: apply.Exec}
+		extra := map[string]http.Handler{
+			"GET /metrics": cluster.Handler(),
+			// The dashboard's Apps page: every address and what runs behind it.
+			"GET /apps": cluster.AppsHandler(),
+		}
 		if keys != nil {
 			// The dashboard asks for a unit's public keys here, to
 			// encrypt the secrets people set.
@@ -929,7 +934,8 @@ func homeCmd(args []string) error {
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	gitea := fs.String("gitea", "http://gitea:3000", "Gitea's URL, to ask what each person may read")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
-	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys, for the secrets page (e.g. http://deployer:8090); empty: no secrets page")
+	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys for the secrets page and the apps for the Apps page (e.g. http://deployer:8090); empty: neither page")
+	agentsURL := fs.String("agents", "", "the agent service's URL, which says which agents work now (e.g. http://agents:8070); empty: the dashboard does not show it")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 
@@ -959,6 +965,10 @@ func homeCmd(args []string) error {
 	if *deployer != "" {
 		s.Secrets = &secrets.Store{Gitea: g, Recipients: secrets.Remote(*deployer), Run: secrets.Runner(apply.Exec), Domain: vars["DOMAIN"]}
 		s.Providers = homeProviders{g}
+		s.Apps = home.RemoteApps(*deployer)
+	}
+	if *agentsURL != "" {
+		s.Running = home.RemoteRunning(*agentsURL, gateway.ServiceKey(g.Password))
 	}
 	server := &http.Server{Addr: *listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

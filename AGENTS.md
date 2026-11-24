@@ -49,7 +49,7 @@ make golden   # regenerate render's golden files
 ```
 
 The end-to-end tests run on throwaway Multipass VMs; see [test/README.md](test/README.md).
-- `test/vm/steps.sh` runs a tree: **fixtures** (base, install, login, agent, deploy, team), saved as VM snapshots, and **scenarios**, each in a fresh clone of its fixture, up to `JOBS` (4) at once.
+- `test/vm/steps.sh` runs a tree: **fixtures** (base, install, login, agent, deploy, team), saved as VM snapshots, and **scenarios**, each in a fresh clone of its fixture, up to `JOBS` (2) at once.
 - `test/vm/steps.sh --list` shows what is green or stale, and `test/vm/steps.sh <scenario>` reruns one.
 - Each step is `test/e2e/scenarios/<step>.sh` on `test/e2e/lib.sh`. The browser scenarios are `test/ui/<step>.py` (Playwright) on `test/ui/lib.py`, which holds every selector of Gitea's and Open WebUI's pages.
 - The agents use a real LLM: local Ollama by default, `LLM=cloud` for Ollama's cloud. So agent checks look at what happened (pull requests, authors, approvals, deploys), not at wording, and retry once with a plainer request.

@@ -343,6 +343,8 @@ spec:
             # The secrets page encrypts with the units' public keys, which the
             # deployer gives; it never reads a value back.
             - -deployer=http://deployer:8090
+            # Which agents work now, for the header and the feed.
+            - -agents=http://agents:8070
           ports: [{ containerPort: 8060 }]
           volumeMounts:
             - { name: secrets, mountPath: /run/secrets, readOnly: true }

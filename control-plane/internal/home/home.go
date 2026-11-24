@@ -42,6 +42,12 @@ type Server struct {
 	Providers Providers
 	// Changes, if set, backs the cards of pull requests.
 	Changes Changes
+	// Apps, if set, backs the Apps page and /api/apps: every address of
+	// Garrison and its units' apps, as each person may see them.
+	Apps Apps
+	// Running, if set, says which agents work now: a count in every page's
+	// header, who and what on the feed, and /api/running.
+	Running Running
 	// MergeWait is how long Approve and merge waits for the checks the
 	// approval starts (garrison/approval); 0: 40 seconds.
 	MergeWait time.Duration
@@ -70,6 +76,7 @@ var page = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"entry":  func(e events.Event, now time.Time, this bool) entry { return entry{E: e, Now: now, This: this} },
 	"card":   func(c changes.Card) string { return changes.Path(c.Unit, c.Repo, c.Number) },
 	"join":   func(s []string) string { return strings.Join(s, ", ") },
+	"chain":  func(s []string) string { return strings.Join(s, " → ") },
 	"state": func(s string) string {
 		if s == "" {
 			return "pending"
@@ -102,6 +109,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /e/{id}", s.signedIn(s.event))
 	mux.Handle("GET /api/events", s.signedIn(s.apiList))
 	mux.Handle("GET /api/events/{id}", s.signedIn(s.apiEvent))
+	if s.Running != nil {
+		mux.Handle("GET /running", s.signedIn(s.runningBox))
+		mux.Handle("GET /api/running", s.signedIn(s.apiRunning))
+	}
+	if s.Apps != nil {
+		mux.Handle("GET /apps", s.signedIn(s.appsPage))
+		mux.Handle("GET /api/apps", s.signedIn(s.apiApps))
+	}
 	mux.Handle("GET /secrets", s.signedIn(s.secretsPage))
 	mux.Handle("POST /secrets/{ns}", s.signedIn(s.secretsPost))
 	mux.Handle("GET /models", s.signedIn(s.modelsPage))
@@ -219,15 +234,31 @@ type feedPage struct {
 	Event      *events.Event
 	Thread     []events.Event
 	Error      string
+	Notice     string       // what the person just did, e.g. a merge
 	Secrets    *secretsView // the secrets page
 	HasSecrets bool         // the dashboard has a secrets page
 	Models     *modelsView  // the Models page
 	HasModels  bool         // the dashboard has a Models page, and this is a root admin
+	AppsPage   *appsView    // the Apps page
+	HasApps    bool         // the dashboard has an Apps page
+	Running    *runningView // the agents at work, on the feed
+	Working    int          // how many agents work now, in every unit, for the header; -1: unknown
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, p feedPage) {
 	p.HasSecrets = s.Secrets != nil
 	p.HasModels = s.Secrets != nil && s.Providers != nil && p.All
+	p.HasApps = s.Apps != nil
+	p.Working = -1
+	if s.Running != nil && !p.Fragment {
+		// The count in the header is everyone's: which units and agents
+		// stays with the feed, as each person may see them.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if list, err := s.Running.Running(ctx); err == nil {
+			p.Working = len(list)
+		}
+		cancel()
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := page.ExecuteTemplate(w, name, p); err != nil {
 		log.Printf("home: render %s: %v", name, err)
@@ -236,7 +267,7 @@ func (s *Server) render(w http.ResponseWriter, name string, p feedPage) {
 
 func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibility) {
 	q, f := query(r, v)
-	p := feedPage{Who: v.Person, Domain: s.Domain, All: v.All, Views: views, Filter: f, Query: f.Encode(), Now: s.now()}
+	p := feedPage{Who: v.Person, Domain: s.Domain, All: v.All, Views: views, Filter: f, Query: f.Encode(), Now: s.now(), Notice: mergedNotice(r)}
 	es, err := s.Events.List(r.Context(), q)
 	if err != nil {
 		log.Printf("home: feed: %v", err)
@@ -248,6 +279,7 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request, v events.Visibilit
 	}
 	p.Units, _ = s.Events.Units(r.Context(), v)
 	s.waitingFor(r.Context(), v, &p)
+	p.Running = s.runningFor(r.Context(), v)
 	s.render(w, "page", p)
 }
 

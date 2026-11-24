@@ -92,6 +92,34 @@ func TestAChangeWaitsOnTheDashboard(t *testing.T) {
 	}
 }
 
+// The list of what waits has the buttons too, so several changes are merged
+// from one page: Approve and merge for someone else's, Merge once it is
+// ready, nothing for one whose checks failed.
+func TestMergeFromTheList(t *testing.T) {
+	s, _ := server()
+	f := newFakeChanges()
+	s.Changes = f
+	body := get(s, "bob", "/").Body.String()
+	if !strings.Contains(body, `action="/c/todo/config/4"`) || !strings.Contains(body, `value="approve_merge"`) {
+		t.Error("bob's list offers no Approve and merge")
+	}
+	if body := get(s, "alice", "/").Body.String(); strings.Contains(body, `value="approve_merge"`) || strings.Contains(body, `value="merge"`) {
+		t.Error("alice's own change, not approved, offers a button")
+	}
+	f.approved = []string{"bob"}
+	if body := get(s, "alice", "/").Body.String(); !strings.Contains(body, `value="merge"`) {
+		t.Error("alice's approved change offers no Merge")
+	}
+	f.approved, f.card.Checks = nil, []changes.Check{{Name: "ci", State: "failure"}}
+	if body := get(s, "bob", "/").Body.String(); strings.Contains(body, `value="approve_merge"`) {
+		t.Error("a change whose check failed offers Approve and merge")
+	}
+	// Only a merge's own words come back on the dashboard.
+	if body := get(s, "bob", "/?merged=<b>x</b>").Body.String(); strings.Contains(body, "You merged") {
+		t.Error("the dashboard repeats what it was given")
+	}
+}
+
 func TestWaitingRefreshesOnItsOwn(t *testing.T) {
 	s, _ := server()
 	s.Changes = newFakeChanges()
@@ -168,11 +196,15 @@ func TestApproveAndMergeOnTheCard(t *testing.T) {
 		t.Error("after approving, the card does not say so, or still offers it")
 	}
 	w = post(s, "alice", "https://home.test", "/c/todo/config/4", merge)
-	if w.Code != http.StatusSeeOther || !f.merged {
-		t.Fatalf("alice merging: %d", w.Code)
+	// A merge goes back to the dashboard, which says so.
+	if w.Code != http.StatusSeeOther || !f.merged || w.Header().Get("Location") != "/?merged=todo%2Fconfig%234" {
+		t.Fatalf("alice merging: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	if body := get(s, "alice", w.Header().Get("Location")).Body.String(); !strings.Contains(body, "You merged todo/config#4.") {
+		t.Error("after merging, the dashboard does not say so")
 	}
 	if body := get(s, "alice", "/c/todo/config/4?done=merge").Body.String(); !strings.Contains(body, "You merged it.") || strings.Contains(body, `value="merge"`) {
-		t.Error("after merging, the card does not say so, or still offers it")
+		t.Error("the merged card does not say so, or still offers it")
 	}
 	es, _ := m.List(context.Background(), events.Query{Visibility: events.Visibility{All: true}, Limit: 50})
 	var said []string
@@ -193,11 +225,8 @@ func TestApproveAndMergeInOneClick(t *testing.T) {
 	f.checking = 2 // the approval check takes a moment
 	s.Changes = f
 	w := post(s, "bob", "https://home.test", "/c/todo/config/4", url.Values{"action": {"approve_merge"}})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/c/todo/config/4?done=approve_merge" || !f.merged || len(f.approved) != 1 {
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/?merged=todo%2Fconfig%234" || !f.merged || len(f.approved) != 1 {
 		t.Fatalf("approve and merge: %d %q merged=%v approved=%v", w.Code, w.Header().Get("Location"), f.merged, f.approved)
-	}
-	if body := get(s, "bob", "/c/todo/config/4?done=approve_merge").Body.String(); !strings.Contains(body, "You merged it.") {
-		t.Error("the card does not say it is merged")
 	}
 
 	// Checks that never pass: it is approved, and says what still waits.

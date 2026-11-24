@@ -23,7 +23,23 @@ two() { [ "$(answers)" -ge 2 ]; }
 check "a Reply to its answer, without @, gets another" until_true 300 two
 # There it works in todo: it hands work to the agents as they work in todo.
 handed() { in_feed bob ns=todo "e['kind'] == 'ask' and e['started_by'] == 'agent todo/commander' and e['actor'] == 'bob' and e['agent'].startswith('todo/')" >/dev/null; }
-answer=$(ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the unit todo have? Have it answer here." commander)
+# While it works, the dashboard lists it: bob's, as it works for him.
+# working WHO AGENT: the dashboard's /api/running, as WHO, lists AGENT at
+# work in todo for WHO.
+working() {
+  feed "$1" /api/running | python3 -c '
+import json,sys
+v = json.load(sys.stdin)
+sys.exit(0 if any(a["unit"] == "todo" and a["agent"] == sys.argv[1] and a["for"] == sys.argv[2] for a in v["agents"]) else 1)' "$2" "$1"
+}
+idle() { ! working bob commander; }
+ask_agent todo bob "Hand this to the agent that knows the stacks: which stacks does the unit todo have? Have it answer here." commander >"$tmp/handoff" &
+asking=$!
+check "while it works, bob's dashboard lists it" until_true 120 working bob commander
+check "and its header counts it"           bash -c 'grep -qE "[1-9][0-9]* agents? working" <<<"$0"' "$(feed bob /)"
+wait "$asking"
+answer=$(cat "$tmp/handoff")
+check "once it has answered, it is gone"   until_true 60 idle
 if ! handed; then
   printf 'retry it handed nothing over; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
   answer=$(ask_agent todo bob "Please use ask_agent now: ask the operator which stacks the unit todo has." commander)

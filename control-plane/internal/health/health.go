@@ -65,6 +65,7 @@ type object struct {
 	Spec struct {
 		// Of an Ingress:
 		Rules []struct {
+			Host string `json:"host"`
 			HTTP struct {
 				Paths []struct {
 					Backend struct {

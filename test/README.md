@@ -4,13 +4,13 @@ End-to-end tests on a throwaway Multipass VM. The MVP acceptance list in `docs/s
 
 ```
 make test                        # unit tests, in a container
-test/vm/steps.sh                 # every scenario that is not green yet, up to JOBS (4) VMs at once
+test/vm/steps.sh                 # every scenario that is not green yet, up to JOBS (2) VMs at once
 test/vm/steps.sh routines people # only these, and the fixtures they start from
 test/vm/steps.sh --from install  # rerun from `install`: it and all that grows from it
 test/vm/steps.sh --list          # the tree: each step's kind, state and minutes
 test/vm/steps.sh --clean         # delete the VMs, their snapshots and the green marks
 KEEP=1 test/vm/steps.sh guided   # keep a passing scenario's VM, to look around in it
-JOBS=2 test/vm/steps.sh          # at most 2 VMs at once
+JOBS=4 test/vm/steps.sh          # at most 4 VMs at once
 FREE_GB=12 test/vm/steps.sh      # a VM boots only while this much memory is free (default 10)
 test/vm/watch.py                 # the run, live, in the browser: http://localhost:8099
 LLM=cloud test/vm/steps.sh       # the agents on Ollama's cloud instead of the local Ollama
@@ -23,7 +23,7 @@ The agents run on Ollama on this computer by default (`qwen3.8-64k`), reached fr
 
 ## The tree
 
-A **fixture** is a state scenarios start from; green, it is saved as a snapshot of its own VM. A **scenario** is a test: it runs in a fresh clone of its fixture's VM, which is deleted when it passes and kept, stopped, when it fails (`garrison-k3s-<scenario>`), so one failure stops nothing else. Up to `JOBS` VMs run at once (8 GB each), fewer when the memory available at the start holds fewer, and each boots only while `FREE_GB` is free. One run at a time (`bin/lock-run`): a run first stops any VM of ours still running, left by a run that was killed or a computer that crashed. Its output also goes to `bin/steps.out`.
+A **fixture** is a state scenarios start from; green, it is saved as a snapshot of its own VM. A **scenario** is a test: it runs in a fresh clone of its fixture's VM, which is deleted when it passes and kept, stopped, when it fails (`garrison-k3s-<scenario>`), so one failure stops nothing else. A step that Multipass's daemon crashed under (its process changed, and the log shows a command cut off) runs once more. Up to `JOBS` VMs run at once (8 GB each; 2 by default, as more at once crashed Multipass's daemon more often), fewer when the memory available at the start holds fewer, and each boots only while `FREE_GB` is free. One run at a time (`bin/lock-run`): a run first stops any VM of ours still running, left by a run that was killed or a computer that crashed. Its output also goes to `bin/steps.out`.
 
 `test/vm/watch.py` serves a page that follows a run as it goes: the tree with each step's state and time, the memory and the running VMs, and the log of the step you pick, growing as it is written. It only reads `bin/`, so it can start before, during or after a run.
 

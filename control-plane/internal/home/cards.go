@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -120,8 +122,27 @@ func (s *Server) cardPost(w http.ResponseWriter, r *http.Request, v events.Visib
 		return
 	}
 	s.record(r, ns, repo, n, v.Person, title)
-	http.Redirect(w, r, changes.Path(ns, repo, n)+"?done="+action, http.StatusSeeOther)
+	if action == "approve" {
+		// Approving alone keeps the change open: its page shows what comes next.
+		http.Redirect(w, r, changes.Path(ns, repo, n)+"?done="+action, http.StatusSeeOther)
+		return
+	}
+	// A merge is done with: back to the dashboard, saying so, whether it was
+	// clicked there or on the change's page.
+	http.Redirect(w, r, "/?merged="+url.QueryEscape(fmt.Sprintf("%s/%s#%d", ns, repo, n)), http.StatusSeeOther)
 }
+
+// mergedNotice is the line the dashboard shows after a merge, from its
+// ?merged=UNIT/REPO#N; nothing for anything else.
+func mergedNotice(r *http.Request) string {
+	m := r.URL.Query().Get("merged")
+	if !mergedRe.MatchString(m) {
+		return ""
+	}
+	return "You merged " + m + "."
+}
+
+var mergedRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$`)
 
 // record says in the feed that it was done here; Gitea's own webhook
 // records the review and the merge themselves.

@@ -81,7 +81,8 @@ type Session struct {
 	token     string
 	container string
 	pi        *Pi
-	run       *Run // whom the running turn is for; nil between turns
+	run       *Run      // whom the running turn is for; nil between turns
+	since     time.Time // when the running turn started
 	lastUsed  time.Time
 	stderr    *tail
 }
@@ -180,7 +181,8 @@ func (m *Manager) Turn(ctx context.Context, want Want, run Run, fn func(*Session
 	}
 	s.want = want
 	s.run = &run
-	s.lastUsed = time.Now()
+	s.since = time.Now()
+	s.lastUsed = s.since
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -456,6 +458,44 @@ func (m *Manager) Caller(token string) (Caller, bool) {
 		return Caller{}, false
 	}
 	return Caller{Agent: s.want.Agent, Model: s.want.Model, Chat: s.want.Chat, Person: s.want.Person, Token: s.run.Token, Run: *s.run}, true
+}
+
+// Running is a turn an agent is working on now, in its sandbox.
+type Running struct {
+	Unit      string    `json:"unit"`
+	Agent     string    `json:"agent"`      // its name, as it works in Unit
+	For       string    `json:"for"`        // the person it works for: whose message started it, or a routine's owner
+	StartedBy string    `json:"started_by"` // person, agent <unit>/<agent>, routine <unit>/<agent>/<name>
+	Chain     []string  `json:"chain"`      // the agents of the run, the first one first, this one last
+	Since     time.Time `json:"since"`
+}
+
+// Turns lists the turns running now, the oldest first: the agents at work.
+// A run that asked a person and waits for the answer has ended its turn, so
+// it is not here; nor is a sandbox between turns (Running has those).
+func (m *Manager) Turns() []Running {
+	m.mu.Lock()
+	all := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		all = append(all, s)
+	}
+	m.mu.Unlock()
+	out := []Running{}
+	for _, s := range all {
+		s.mu.Lock()
+		if s.run != nil {
+			unit, agent, _ := strings.Cut(s.want.Agent, "/")
+			who := s.want.Person
+			if s.run.Unattended {
+				who = s.run.Owner
+			}
+			out = append(out, Running{Unit: unit, Agent: agent, For: who, StartedBy: s.run.StartedBy,
+				Chain: append([]string(nil), s.run.Chain...), Since: s.since})
+		}
+		s.mu.Unlock()
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
+	return out
 }
 
 // Clean removes the sandbox containers left from before this service

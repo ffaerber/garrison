@@ -12,6 +12,7 @@ package agentapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,8 +87,27 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("POST /v1/chat/completions", s.chat)
+	mux.HandleFunc("GET /internal/running", s.running)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	return mux
+}
+
+// running lists the agents working now (sandbox.Manager.Turns), for the
+// dashboard, which shows each person what they may see. Only with the
+// service key, which the dashboard derives as the gateway does: who works
+// for whom is not for everyone who reaches this port.
+func (s *Server) running(w http.ResponseWriter, r *http.Request) {
+	if s.Gateway == nil || s.Gateway.ServiceKey == "" ||
+		!hmac.Equal([]byte(r.Header.Get(gateway.ServiceHeader)), []byte(s.Gateway.ServiceKey)) {
+		http.Error(w, "only for Garrison's own services", http.StatusForbidden)
+		return
+	}
+	list := []sandbox.Running{}
+	if s.Sandboxes != nil {
+		list = s.Sandboxes.Turns()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
 }
 
 // models lists every agent: garrison's, which work in every unit.

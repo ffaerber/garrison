@@ -343,3 +343,26 @@ func TestAChatRunsTheAgentWhereItsChannelIs(t *testing.T) {
 		}
 	}
 }
+
+// The dashboard asks which agents work now, with the service key; nobody
+// else learns who works for whom.
+func TestRunningNeedsTheServiceKey(t *testing.T) {
+	s, _, _ := setup(t)
+	s.Gateway = &Gateway{ServiceKey: "k"}
+	for _, key := range []string{"", "wrong"} {
+		r := httptest.NewRequest(http.MethodGet, "/internal/running", nil)
+		r.Header.Set(gateway.ServiceHeader, key)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("key %q: %d", key, w.Code)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/internal/running", nil)
+	r.Header.Set(gateway.ServiceHeader, "k")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Errorf("without sandboxes: %d %s", w.Code, w.Body)
+	}
+}

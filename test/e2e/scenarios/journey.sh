@@ -88,9 +88,13 @@ card() { web -b "$tmp/home-alice.jar" "https://$DOMAIN/c/lab/config/${spr:-0}"; 
 check "alice signs in to her dashboard"    until_true 60 home_login alice
 waits_for_alice() { local page; page=$(web -b "$tmp/home-alice.jar" "https://$DOMAIN/") && grep -q "href=\"/c/lab/config/${spr:-0}\"" <<<"$page"; }
 check "it waits for her there"             waits_for_alice
+# The list offers the merge itself: alice's own, needing no other approval.
+check "with a Merge button in the list"    bash -c 'grep -q "<form class=\"quick\" method=\"post\" action=\"/c/lab/config/$1\"><button name=\"action\" value=\"merge\"" <<<"$0"' "$(web -b "$tmp/home-alice.jar" "https://$DOMAIN/")" "${spr:-0}"
 check "its card says what it changes, in plain words" bash -c 'grep -q "how the app example is deployed" <<<"$0" && grep -q "Merging it deploys it" <<<"$0" && grep -q "value=\"merge\"" <<<"$0"' "$(card)"
 check "a post from another site is refused" test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://example.$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 403
-check "alice merges it on its card"        test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = 303
+# A merge takes her back to the dashboard, which says so.
+check "alice merges it on its card, and lands on her dashboard" test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code} %{redirect_url}' -H "Origin: https://$DOMAIN" -X POST -d action=merge "https://$DOMAIN/c/lab/config/${spr:-0}")" = "303 https://$DOMAIN/?merged=lab%2Fconfig%23${spr:-0}"
+check "which says she merged it"           bash -c 'grep -q "You merged lab/config#$1." <<<"$0"' "$(web -b "$tmp/home-alice.jar" "https://$DOMAIN/?merged=lab%2Fconfig%23${spr:-0}")" "${spr:-0}"
 check "the card says it is merged"         bash -c 'grep -q "It is merged." <<<"$0"' "$(card)"
 check "the operator says in lab's channel that it is merged" until_true 120 lab_said "lab/config#${spr:-0}" "is merged, by alice" "I will say here when it is deployed"
 deployed() { garrison applied | grep -q "^app lab/example@$1 $2 "; }
@@ -131,4 +135,17 @@ check "alice merges it"                    test "$(lab_merge example "${mpr:-0}"
 check "example, on main, turns green"      until_true 900 shows example "#2e7d32"
 check "alice opens her dashboard"          until_true 60 home_login alice
 check "its feed shows lab's deploys"       in_feed alice ns=lab "e['kind'] == 'deploy' and e['status'] == 'ok'"
+
+echo "# 6. the dashboard's Apps list has the new unit's app, by itself"
+# in_apps WHO CONDITION: the dashboard's /api/apps, as WHO, holds an app for
+# which the Python CONDITION on a holds.
+in_apps() {
+  feed "$1" /api/apps | python3 -c '
+import json,sys
+sys.exit(0 if any(eval(sys.argv[1]) for a in json.load(sys.stdin)) else 1)' "$2"
+}
+check "it lists lab's example on main, up"  until_true 60 in_apps alice "a['unit'] == 'lab' and a['app'] == 'example' and a['environment'] == 'main' and a['state'] == 'up' and a['urls'] == ['https://example.$DOMAIN/']"
+check "and its dev environment"             in_apps alice "a['unit'] == 'lab' and a['app'] == 'example' and a['environment'] == 'dev' and a['urls'] == ['https://dev-example.$DOMAIN/']"
+check "and Garrison's own, such as Grafana" in_apps alice "a['unit'] == 'garrison' and 'https://grafana.$DOMAIN/' in a['urls']"
+check "the Apps page links example"         grep -q "href=\"https://example.$DOMAIN/\"" <(feed alice /apps)
 }

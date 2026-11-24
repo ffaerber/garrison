@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{else if .Models}}Models · {{end}}Garrison</title>
+<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{else if .Models}}Models · {{else if .AppsPage}}Apps · {{end}}Garrison</title>
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #e3e6ea; --hover: #f0f2f5;
@@ -26,6 +26,14 @@ header { background: var(--panel); border-bottom: 1px solid var(--line); }
 .bar { max-width: 980px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 12px; align-items: center; }
 .brand { font-weight: 650; text-decoration: none; }
 .who { margin-left: auto; color: var(--muted); font-size: 14px; }
+.working + .who { margin-left: 12px; }
+.working { margin-left: auto; color: var(--muted); font-size: 13px; text-decoration: none; display: flex; align-items: center; gap: 6px; }
+.working.busy { color: var(--agent); }
+.working i { width: 8px; height: 8px; border-radius: 50%; background: var(--agent); animation: pulse 1.2s infinite alternate; }
+@keyframes pulse { to { opacity: .3; } }
+.running h2 { font-size: 15px; margin: 0 0 8px; color: var(--agent); }
+.running .panel { border-color: var(--agent); margin-bottom: 16px; }
+.running .chain { color: var(--muted); }
 main { max-width: 980px; margin: 0 auto; padding: 16px; }
 h1 { font-size: 20px; margin: 4px 0 12px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
@@ -82,12 +90,17 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .waiting h2 { font-size: 15px; margin: 0 0 8px; color: var(--waiting); }
 .waiting .panel { border-color: var(--waiting); }
 .waiting .answer { font-weight: 600; color: var(--accent); }
+.waiting form.quick { margin-top: 6px; }
+.waiting form.quick button { font-size: 13px; padding: 4px 10px; }
 .notice { border-left: 3px solid var(--ok); padding: 8px 12px; margin-bottom: 12px; background: var(--panel); }
 ul.names { list-style: none; margin: 0; padding: 0; }
 .names li { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); }
 .names li:first-child { border-top: 0; }
 .names .hidden { color: var(--muted); letter-spacing: .12em; }
 .names form { margin-left: auto; }
+.apps .urls { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 14px; overflow-wrap: anywhere; }
+.apps .state { margin-left: auto; }
+.apps .mark { margin: 0; flex: none; }
 button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
 button:hover { background: var(--hover); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -113,9 +126,9 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 </style>
 </head>
 <body>
-<header><div class="bar"><a class="brand" href="/">Garrison</a>{{if .HasSecrets}}<nav class="nav"><a href="/"{{if not (or .Secrets .Models)}} class="on"{{end}}>Feed</a><a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a>{{if .HasModels}}<a href="/models"{{if .Models}} class="on"{{end}}>Models</a>{{end}}</nav>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
+<header><div class="bar"><a class="brand" href="/">Garrison</a>{{if or .HasSecrets .HasApps}}<nav class="nav"><a href="/"{{if not (or .Secrets .Models .AppsPage)}} class="on"{{end}}>Feed</a>{{if .HasApps}}<a href="/apps"{{if .AppsPage}} class="on"{{end}}>Apps</a>{{end}}{{if .HasSecrets}}<a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a>{{end}}{{if .HasModels}}<a href="/models"{{if .Models}} class="on"{{end}}>Models</a>{{end}}</nav>{{end}}{{if ge .Working 0}}<a class="working{{if .Working}} busy{{end}}" href="/#running" title="Agents working now, in every unit">{{if .Working}}<i></i>{{.Working}} agent{{if ne .Working 1}}s{{end}} working{{else}}no agent working{{end}}</a>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
 <main>
-{{if .Event}}{{template "event" .}}{{else if .Card}}{{template "card" .Card}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else if .Models}}{{template "models" .Models}}{{else}}{{template "feed" .}}{{end}}
+{{if .Event}}{{template "event" .}}{{else if .Card}}{{template "card" .Card}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else if .Models}}{{template "models" .Models}}{{else if .AppsPage}}{{template "apps" .AppsPage}}{{else}}{{template "feed" .}}{{end}}
 </main>
 </body>
 </html>{{end}}
@@ -133,6 +146,8 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   <span class="live" id="live" title="New entries appear on their own"><i></i><span>live</span></span>
 </form>
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{if .Notice}}<div class="notice">{{.Notice}} The feed shows what follows, such as its deploy.</div>{{end}}
+<div id="running-box">{{template "running" .}}</div>
 <div id="waiting-box">{{template "waiting" .}}</div>
 <div class="panel">
   <ol class="feed" id="feed" data-query="{{.Query}}">{{template "entries" .}}</ol>
@@ -198,6 +213,20 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   }
   count();
   setInterval(waiting, 20000);
+  // Who works now changes by the second: every 5 seconds, while the page is seen.
+  var runningBox = document.getElementById('running-box'), working = document.querySelector('.working');
+  if (working) setInterval(function () {
+    if (document.hidden) return;
+    fetch('/running', {credentials: 'same-origin', cache: 'no-store'}).then(function (r) {
+      if (!r.ok) throw r.status;
+      return r.text();
+    }).then(function (html) {
+      runningBox.innerHTML = html;
+      var h = runningBox.querySelector('h2'), n = h ? parseInt(h.textContent.replace(/\D+/, ''), 10) : 0;
+      working.classList.toggle('busy', n > 0);
+      working.innerHTML = n ? '<i></i>' + n + ' agent' + (n === 1 ? '' : 's') + ' working' : 'no agent working';
+    }).catch(function () {});
+  }, 5000);
   new MutationObserver(function () { waiting(); }).observe(feed, {childList: true});
   var more = document.getElementById('more');
   if (more) more.addEventListener('click', function () {
@@ -227,10 +256,24 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
     <div>
       <a class="title" href="{{card .}}">{{.Title}}</a>
       <div class="meta"><span class="chip">{{.Unit}}/{{.Repo}}</span><span>{{if .Mine}}yours{{else}}by {{.Author}}{{end}}</span><span>· {{.Waits}}</span></div>
+      {{if .Open}}{{if and (not .Mine) (not .Approved) (ne .CheckState "failed")}}<form class="quick" method="post" action="{{card .}}"><button name="action" value="approve_merge" class="primary" title="Approve it and merge it as soon as its checks pass">Approve and merge</button></form>
+      {{else if .Ready}}<form class="quick" method="post" action="{{card .}}"><button name="action" value="merge" class="primary">Merge</button></form>{{end}}{{end}}
     </div>
     <time class="when" datetime="{{iso .Created}}" title="{{stamp .Created}}">{{ago $now .Created}}</time>
   </li>{{end}}</ol></div>
 </section>{{end}}{{end}}
+
+{{define "running"}}{{with .Running}}{{if or .Shown .Hidden .Error}}{{$now := .Now}}<section class="running" id="running" aria-labelledby="running-h">
+  <h2 id="running-h">Working now: {{.Total}} agent{{if ne .Total 1}}s{{end}}{{if gt .Units 1}} in {{.Units}} units{{end}}</h2>
+  {{if .Error}}<div class="error">{{.Error}}</div>{{else}}<div class="panel"><ol class="feed">{{range .Shown}}<li data-run="{{.Unit}}/{{.Agent}}">
+    <span class="mark g-agent s-running running" title="working"></span>
+    <div>
+      <strong>{{.Agent}}</strong> <span class="chip">{{.Unit}}</span>
+      <div class="meta"><span>for {{.For}}</span><span>· {{.How}}</span>{{if gt (len .Chain) 1}}<span class="chain">· {{chain .Chain}}</span>{{end}}</div>
+    </div>
+    <time class="when" datetime="{{iso .Since}}" title="started {{stamp .Since}}">started {{ago $now .Since}}</time>
+  </li>{{end}}{{if .Hidden}}<li><span></span><div class="hint">{{if .Shown}}and {{.Hidden}} more{{else}}{{.Hidden}}{{end}} in units you are not in</div><span></span></li>{{end}}</ol></div>{{end}}
+</section>{{end}}{{end}}{{end}}
 
 {{define "entries"}}{{$now := .Now}}{{range .Events}}{{template "entry" (entry . $now false)}}{{end}}{{end}}
 
@@ -293,6 +336,20 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
     <a class="gitea" href="{{$c.URL}}">See it in Gitea</a>
   </form>{{else}}<p><a class="gitea" href="{{$c.URL}}">See it in Gitea</a></p>{{end}}
 </div>
+{{end}}
+
+{{define "apps"}}
+<h1>Apps</h1>
+<p class="note">Everything with an address in Garrison: its own pages, and every environment of the units' apps, as the deployer runs them now. A new unit's app appears here once it is deployed. The same list, as JSON, is at <code>/api/apps</code>.</p>
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{range .Units}}<h2>{{.Name}}</h2>
+<div class="panel"><ul class="names apps">{{range .Apps}}<li data-app="{{.Unit}}/{{.App}}/{{.Environment}}">
+  <span class="mark {{if eq .State "up"}}ok g-deploy{{else if eq .State "starting"}}g-deploy s-running running{{else}}g-deploy s-failed failed{{end}}" title="{{.State}}: {{.Running}} of {{.Desired}} running"></span>
+  <span><strong>{{.App}}</strong>{{if ne .Environment "main"}} <span class="chip">{{.Environment}}</span>{{end}}</span>
+  <span class="urls">{{range .URLs}}<a href="{{.}}">{{.}}</a> {{end}}</span>
+  <span class="hint state">{{.State}}</span>
+</li>{{end}}</ul></div>
+{{else}}{{if not .Error}}<div class="panel empty">Nothing with an address runs yet that you may see.</div>{{end}}{{end}}
 {{end}}
 
 {{define "models"}}

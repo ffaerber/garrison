@@ -14,6 +14,8 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: sso
+  annotations:
+    garrison.io/unlisted: "true"   # the sign-in's own address: not on the dashboard's Apps page
 spec:
   rules:
     - host: sso.${DOMAIN}

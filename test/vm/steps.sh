@@ -12,7 +12,7 @@
 #   test/vm/steps.sh --from login  rerun from `login`: it and all that grows from it
 #   test/vm/steps.sh --list        the tree, and what is green, valid or stale
 #   test/vm/steps.sh --clean       delete the VMs, their snapshots and the green marks
-#   JOBS=2 test/vm/steps.sh        at most 2 VMs at once (default 4, fewer
+#   JOBS=4 test/vm/steps.sh        at most 4 VMs at once (default 2, fewer
 #                                  when memory is short, see FREE_GB)
 #   FREE_GB=12 test/vm/steps.sh    a VM boots only while the host has this
 #                                  much memory available (default 10)
@@ -41,7 +41,7 @@ VM=${VM:-garrison-k3s}
 BASE_VM=$VM   # VM changes to the VM of each job; names come from this
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ANSWERS=${ANSWERS:-test/answers/selfsigned.env}
-JOBS=${JOBS:-4}
+JOBS=${JOBS:-2}   # more at once has crashed Multipass's daemon more often
 FREE_GB=${FREE_GB:-10}   # memory a VM waits for before it boots: its 8G and a margin
 cd "$ROOT"
 
@@ -149,7 +149,9 @@ multipass() {
 watched() {
   local daemon pid now
   daemon=$(pidof multipassd || true)
-  command multipass "$@" <&0 &
+  # Without the run's lock (fd 8): an exec that outlives the run would
+  # hold it, and every later run would find the run still going.
+  command multipass "$@" <&0 8>&- &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     sleep 15 &
@@ -159,6 +161,8 @@ watched() {
       echo "==> Multipass's daemon restarted during: multipass $*; giving it up (see AGENTS.md, Multipass)" >&2
       pkill -P "$pid" 2>/dev/null
       kill "$pid" 2>/dev/null
+      sleep 5
+      kill -9 "$pid" 2>/dev/null   # a client of the crashed daemon may not end otherwise
       wait "$pid" 2>/dev/null
       return 125
     fi
@@ -690,24 +694,41 @@ grow() {
   return $rc
 }
 
+# lost_to_multipass LOG DAEMON: whether a job failed because Multipass's
+# daemon crashed under it (1.17, see AGENTS.md): its process is no longer
+# DAEMON, and the log shows a command it cut off or refused. Such a job runs
+# once more; a test that failed by itself, with no such line, does not.
+lost_to_multipass() {
+  [ "$(pidof multipassd || true)" != "$2" ] &&
+    grep -qE "Multipass's daemon restarted during|cannot connect to the multipass socket" "$1"
+}
+
 # fixture_job STEP: a fixture below the trunk, kept from its snapshot when
 # valid, else made in a new clone of its parent and saved; then what grows
 # from it. Logs to bin/steps-STEP.log.
 fixture_job() {
   set +e
-  local s=$1 log=$ROOT/bin/steps-$1.log rc=0
+  local s=$1 log=$ROOT/bin/steps-$1.log rc=0 try daemon
   VM=$(vm_of "$s")
   if exists && valid "$s"; then
     status "$s" "green already"
   else
     acquire fixture
     status "$s" "running (log: ${log#"$ROOT/"})"
-    {
-      fresh "$s"; rc=$?
-      if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
-      if [ $rc = 0 ]; then save "$s"; rc=$?; fi
-      multipass stop "$VM" >/dev/null 2>&1
-    } > "$log" 2>&1
+    : > "$log"
+    for try in 1 2; do
+      daemon=$(pidof multipassd || true)
+      {
+        fresh "$s"; rc=$?
+        if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
+        if [ $rc = 0 ]; then save "$s"; rc=$?; fi
+        multipass stop "$VM" >/dev/null 2>&1
+      } >> "$log" 2>&1
+      [ $rc = 0 ] && break
+      [ $try = 1 ] && lost_to_multipass "$log" "$daemon" || break
+      status "$s" "running again: Multipass's daemon crashed under it (log: ${log#"$ROOT/"})"
+      echo $'\n==> Running it again: Multipass\'s daemon crashed under it\n' >> "$log"
+    done
     release
     if [ $rc != 0 ]; then
       status "$s" failed
@@ -725,7 +746,7 @@ fixture_job() {
 # and kept, stopped, when it fails. Logs to bin/steps-STEP.log.
 scenario_job() {
   set +e
-  local s=$1 log=$ROOT/bin/steps-$1.log fp rc=0
+  local s=$1 log=$ROOT/bin/steps-$1.log fp rc=0 try daemon
   VM=$(vm_of "$s")
   fp=$(fingerprint "$s")
   if [ "$(green_of "$s")" = "$fp" ]; then
@@ -735,12 +756,20 @@ scenario_job() {
   rm -f "$ROOT/bin/green/$s"
   acquire
   status "$s" "running (log: ${log#"$ROOT/"})"
-  {
-    fresh "$s"; rc=$?
-    if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
-    [ $rc = 0 ] || service_logs "$s"
-    multipass stop "$VM" >/dev/null 2>&1
-  } > "$log" 2>&1
+  : > "$log"
+  for try in 1 2; do
+    daemon=$(pidof multipassd || true)
+    {
+      fresh "$s"; rc=$?
+      if [ $rc = 0 ]; then run_step "$s"; rc=$?; fi
+      [ $rc = 0 ] || service_logs "$s"
+      multipass stop "$VM" >/dev/null 2>&1
+    } >> "$log" 2>&1
+    [ $rc = 0 ] && break
+    [ $try = 1 ] && lost_to_multipass "$log" "$daemon" || break
+    status "$s" "running again: Multipass's daemon crashed under it (log: ${log#"$ROOT/"})"
+    echo $'\n==> Running it again: Multipass\'s daemon crashed under it\n' >> "$log"
+  done
   release
   if [ $rc != 0 ]; then
     status "$s" "failed (its VM $VM is kept)"
