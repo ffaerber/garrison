@@ -40,7 +40,11 @@ spec:
       initContainers:
         - name: wait-for-keycloak
           image: busybox:1.37
-          command: [sh, -c, "until wget -q -O /dev/null http://keycloak.garrison.svc.cluster.local:8080/realms/garrison/.well-known/openid-configuration; do sleep 2; done"]
+          # Keycloak itself, and then the realm as the proxy asks it: by its
+          # public name, through Traefik, which answers 502 for a while after
+          # a restart (a cloned test VM's), and the proxy exits on that into a
+          # growing crash-loop backoff.
+          command: [sh, -c, "until wget -q -O /dev/null http://keycloak.garrison.svc.cluster.local:8080/realms/garrison/.well-known/openid-configuration && wget -q --no-check-certificate -O /dev/null https://keycloak.${DOMAIN}/realms/garrison/.well-known/openid-configuration; do sleep 2; done"]
       containers:
         - name: oauth2-proxy
           image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
