@@ -79,6 +79,8 @@ type Poster interface {
 	Channel(ctx context.Context, id string) (gateway.ChannelInfo, error)
 	// Thread is the thread under a message, oldest first.
 	Thread(ctx context.Context, channel, message string) ([]gateway.ThreadMessage, error)
+	// UnitChannel is the address of a unit's channel, "" while it has none.
+	UnitChannel(ctx context.Context, unit string) (string, error)
 }
 
 // GatewayPoster posts through the gateway, which holds Open WebUI's account.
@@ -111,6 +113,26 @@ func (g *GatewayPoster) Channel(ctx context.Context, id string) (gateway.Channel
 		return info, fmt.Errorf("channel %s: %s", id, resp.Status)
 	}
 	return info, json.NewDecoder(resp.Body).Decode(&info)
+}
+
+func (g *GatewayPoster) UnitChannel(ctx context.Context, unit string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.URL+"/internal/units/"+url.PathEscape(unit)+"/channel", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set(gateway.ServiceHeader, g.ServiceKey)
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("the channel of %s: %s", unit, resp.Status)
+	}
+	var out struct {
+		URL string `json:"url"`
+	}
+	return out.URL, json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out)
 }
 
 func (g *GatewayPoster) Post(ctx context.Context, p gateway.Post) (gateway.Posted, error) {

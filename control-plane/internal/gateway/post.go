@@ -215,15 +215,33 @@ func PostHandler(o *OpenWebUI, key string) http.Handler {
 
 // HasChannel tells whether unit ns has its channel yet.
 func (o *OpenWebUI) HasChannel(ctx context.Context, ns string) (bool, error) {
+	url, err := o.UnitChannel(ctx, ns)
+	return url != "", err
+}
+
+// UnitChannel is the address of the unit ns's channel in Open WebUI, where
+// people talk to the agents working there: https://chat.<domain>/channels/<id>.
+// "" while it has none.
+func (o *OpenWebUI) UnitChannel(ctx context.Context, ns string) (string, error) {
 	token, err := o.session(ctx)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	var all []owuiChannel
 	if err := o.call(ctx, token, http.MethodGet, "/api/v1/channels/list", nil, &all); err != nil {
-		return false, err
+		return "", err
 	}
-	return slices.ContainsFunc(all, func(c owuiChannel) bool { return c.Meta[ChannelMarker] == ns }), nil
+	for _, c := range all {
+		if c.Meta[ChannelMarker] == ns {
+			return ChannelURL(o.Domain, c.ID), nil
+		}
+	}
+	return "", nil
+}
+
+// ChannelURL is the address of the channel id in Open WebUI, at chat.<domain>.
+func ChannelURL(domain, id string) string {
+	return "https://chat." + domain + "/channels/" + id
 }
 
 // ChannelInfo is what a channel is to the platform.
@@ -252,6 +270,29 @@ func (o *OpenWebUI) Channel(ctx context.Context, id string) (ChannelInfo, error)
 		return ChannelInfo{Unit: ns, Members: ns != "" && ns != PlatformUnit}, nil
 	}
 	return ChannelInfo{}, nil
+}
+
+// UnitChannelHandler serves GET /internal/units/{unit}/channel for the agent
+// service: {"url": ...}, the unit's channel, "" while it has none.
+func UnitChannelHandler(o *OpenWebUI, key string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if key == "" || !hmac.Equal([]byte(r.Header.Get(ServiceHeader)), []byte(key)) {
+			http.Error(w, "only for the agent service", http.StatusUnauthorized)
+			return
+		}
+		ns := r.PathValue("unit")
+		if validOrg(ns) != nil {
+			http.Error(w, "not a unit", http.StatusBadRequest)
+			return
+		}
+		url, err := o.UnitChannel(r.Context(), ns)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"url": url})
+	})
 }
 
 // ChannelHandler serves GET /internal/channels/{id} for the agent service.

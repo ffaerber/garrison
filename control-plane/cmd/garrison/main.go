@@ -523,29 +523,31 @@ func gatewayCmd(args []string) error {
 	go (&gateway.Members{Gitea: g, Wake: wake.Subscribe(), Events: recorder(store), Keycloak: tools.Keycloak}).Run(ctx, 20*time.Second)
 	// A unit made through an agent: every sync at once, and the agent
 	// answers once its config repo and channel are there.
-	tools.Ready = func(ctx context.Context, ns string) error {
+	tools.Ready = func(ctx context.Context, ns string) (string, error) {
 		wake.Poke()
 		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
 		for {
 			if ok, err := g.Exists(ctx, ns, gateway.ConfigRepo); err == nil && ok {
-				if has, err := sync.HasChannel(ctx, ns); err == nil && has {
-					return nil
+				if url, err := sync.UnitChannel(ctx, ns); err == nil && url != "" {
+					return url, nil
 				}
 			}
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("%s is made, but its config and channel are not there yet; they follow shortly", ns)
+				return "", fmt.Errorf("%s is made, but its config and channel are not there yet; they follow shortly", ns)
 			case <-time.After(time.Second):
 			}
 		}
 	}
+	tools.UnitChannel = sync.UnitChannel
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp)
 	mux.Handle("/mcp/", mcp)
 	mux.Handle("POST /internal/post", gateway.PostHandler(sync, serviceKey))
 	mux.Handle("GET /internal/channels/{id}", gateway.ChannelHandler(sync, serviceKey))
+	mux.Handle("GET /internal/units/{unit}/channel", gateway.UnitChannelHandler(sync, serviceKey))
 	mux.Handle("GET /internal/threads/{channel}/{message}", gateway.ThreadHandler(sync, serviceKey))
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)

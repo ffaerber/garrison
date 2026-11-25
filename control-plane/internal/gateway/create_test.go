@@ -43,20 +43,25 @@ func TestMakingUnitsAndRepos(t *testing.T) {
 	defer srv.Close()
 	var readied []string
 	tools := &Tools{Gitea: &Gitea{URL: srv.URL, User: "admin", Password: "pw"},
-		Ready: func(_ context.Context, ns string) error { readied = append(readied, ns); return nil }}
+		Ready: func(_ context.Context, ns string) (string, error) {
+			readied = append(readied, ns)
+			return "https://chat.home.test/channels/c-" + ns, nil
+		},
+		UnitChannel: func(_ context.Context, ns string) (string, error) { return "https://chat.home.test/channels/c-" + ns, nil }}
 	call := func(who, tool string, args map[string]any) (string, error) {
 		raw, _ := json.Marshal(args)
 		return tools.Call(context.Background(), Person{Name: who}, nil, tool, raw)
 	}
 	// The agent answers once the unit is set up, not before.
 	if out, err := call("alice", "create_unit", map[string]any{"name": "photos", "description": "Our photos"}); err != nil || !strings.Contains(out, "alice as its first admin") ||
-		!strings.Contains(out, "It is ready") || !strings.Contains(out, "the agents (@operator and the others) work in photos") || len(readied) != 1 {
+		!strings.Contains(out, "It is ready") || !strings.Contains(out, "the agents (@operator and the others) work in photos: https://chat.home.test/channels/c-photos") || len(readied) != 1 {
 		t.Errorf("alice: %q %v %v", out, err, readied)
 	}
 	if _, err := call("bob", "create_unit", map[string]any{"name": "bobs"}); err == nil || !strings.Contains(err.Error(), "only root admins may") {
 		t.Errorf("bob: %v", err)
 	}
-	if _, err := call("alice", "create_unit", map[string]any{"name": "homepage"}); err == nil || !strings.Contains(err.Error(), "already") {
+	if _, err := call("alice", "create_unit", map[string]any{"name": "homepage"}); err == nil || !strings.Contains(err.Error(), "already") ||
+		!strings.Contains(err.Error(), "its channel is https://chat.home.test/channels/c-homepage") {
 		t.Errorf("an existing one: %v", err)
 	}
 	for _, bad := range []string{"Photos", "a.b", "../x"} {

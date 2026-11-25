@@ -66,8 +66,11 @@ type Tools struct {
 	// change opened links its card there. "": only Gitea's page.
 	Dashboard string
 	// Ready, if set, waits until a unit just made is set up: its config
-	// repo and its channel.
-	Ready func(ctx context.Context, ns string) error
+	// repo and its channel, whose address it returns.
+	Ready func(ctx context.Context, ns string) (channel string, err error)
+	// UnitChannel, if set, is the address of a unit's channel, "" while it
+	// has none.
+	UnitChannel func(ctx context.Context, ns string) (string, error)
 
 	privateMu sync.Mutex
 	private   map[string]bool // hostnames of private environments, read a few seconds ago
@@ -472,13 +475,20 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 	case "create_unit":
 		name, err := t.Gitea.CreateUnit(ctx, p.Name, a.Name, a.Description)
 		if err != nil {
+			// One that is there already: where to go instead.
+			if errors.Is(err, ErrInvalid) && t.UnitChannel != nil && strings.Contains(err.Error(), "already") {
+				if url, _ := t.UnitChannel(ctx, a.Name); url != "" {
+					return "", fmt.Errorf("%w. If it is that unit: its channel is %s; give the person this link", err, url)
+				}
+			}
 			return "", err
 		}
 		if t.Ready != nil {
-			if err := t.Ready(ctx, name); err != nil {
+			url, err := t.Ready(ctx, name)
+			if err != nil {
 				return fmt.Sprintf("Made the unit %s, with %s as its first admin. %v. Make its repos with create_repo.", name, p.Name, err), nil
 			}
-			return fmt.Sprintf("Made the unit %s, with %s as its first admin. It is ready: its config repo (members.yaml; grants.yaml and routines.yaml give the agents rights and routines there) and its channel %s, where the agents (@operator and the others) work in %s. Make its repos with create_repo.", name, p.Name, name, name), nil
+			return fmt.Sprintf("Made the unit %s, with %s as its first admin. It is ready: its config repo (members.yaml; grants.yaml and routines.yaml give the agents rights and routines there) and its channel, where the agents (@operator and the others) work in %s: %s\nGive the person this link: Open WebUI's sidebar shows a new channel only after its page is reloaded. Make its repos with create_repo.", name, p.Name, name, url), nil
 		}
 		return fmt.Sprintf("Made the unit %s, with %s as its first admin. In a few seconds it has its config repo (members.yaml) and its channel, where the agents work in %s. Make its repos with create_repo.", name, p.Name, name), nil
 	case "create_repo":

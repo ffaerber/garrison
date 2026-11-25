@@ -21,7 +21,7 @@ var findSpec = toolSpec{
 		"properties": map[string]any{
 			// Not "unit": agents are told to pass their own to every
 			// tool that takes one.
-			"in_unit": map[string]any{"type": "string", "description": "the agents as they work in another unit, with its rights there; leave it out for the one you work in, which is what you usually want"},
+			"in_unit": map[string]any{"type": "string", "description": "the agents as they work in another unit, with its rights there, and the link to its channel; leave it out for the one you work in, which is what you usually want"},
 		},
 		"additionalProperties": false,
 	},
@@ -78,6 +78,12 @@ func (s *Server) findAgents(ctx context.Context, c sandbox.Caller, raw json.RawM
 		}
 	} else if ns != asker.Unit {
 		fmt.Fprintf(&b, "\nTo ask one of these working in %s, name it as %s/<agent> in ask_agent.", ns, ns)
+	}
+	// Where to send the person to talk to them.
+	if in.Unit != "" && s.Poster != nil {
+		if url, err := s.Poster.UnitChannel(ctx, ns); err == nil && url != "" {
+			fmt.Fprintf(&b, "\nThe channel of %s, where people talk to its agents: %s", ns, url)
+		}
 	}
 	return strings.TrimSpace(b.String()), false
 }

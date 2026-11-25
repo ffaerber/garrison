@@ -31,6 +31,10 @@ func (f *fakePoster) Channel(_ context.Context, id string) (gateway.ChannelInfo,
 	return f.channels[id], nil
 }
 
+func (f *fakePoster) UnitChannel(_ context.Context, unit string) (string, error) {
+	return "https://chat.home.test/channels/ch-" + unit, nil
+}
+
 // Post keeps p; its message is m<n>, in the channel named or ch-<unit>,
 // and a person mentioned is the Open WebUI user u-<name>.
 func (f *fakePoster) Post(_ context.Context, p gateway.Post) (gateway.Posted, error) {
@@ -143,7 +147,12 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	if strings.Contains(got, "- commander") || strings.Contains(got, "name it as") {
 		t.Errorf("the commander lists itself, or another unit:\n%s", got)
 	}
-	if got := find(c, `{"in_unit":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- media") || !strings.Contains(got, "name it as todo/<agent>") {
+	if strings.Contains(got, "/channels/") {
+		t.Errorf("a channel link without in_unit:\n%s", got)
+	}
+	s.Poster = &fakePoster{}
+	if got := find(c, `{"in_unit":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- media") || !strings.Contains(got, "name it as todo/<agent>") ||
+		!strings.Contains(got, "The channel of todo, where people talk to its agents: https://chat.home.test/channels/ch-todo") {
 		t.Errorf("by unit:\n%s", got)
 	}
 	if got := find(c, `{"in_unit":"nope"}`); !strings.Contains(got, "no agent you may ask") {

@@ -283,4 +283,12 @@ gitea_api "" -o /dev/null -X POST -H 'Content-Type: application/json' \
 check "a skill branch with another file is refused" until_true 90 approval_has "${more_pr:-0}" "^failure.*a skill branch changes only"
 gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$sys/pulls/${more_pr:-0}"
 
+# A unit's channel link, which create_unit gives and the commander passes on
+# (find_agents with in_unit): the agent service asks the gateway for it.
+channel_url() {
+  kubectl --namespace garrison exec deployment/openwebui -- curl -sS --max-time 30 -H "X-Garrison-Service: ${2:-$service_key}" \
+    "http://gateway:8080/internal/units/$1/channel"
+}
+check "the gateway links garrison's channel" grep -qE "\"url\":\"https://chat\\.$DOMAIN/channels/[A-Za-z0-9-]+\"" <<<"$(channel_url garrison)"
+check "only for the agent service"           grep -q "only for the agent service" <<<"$(channel_url garrison wrong)"
 }
