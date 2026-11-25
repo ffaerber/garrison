@@ -105,10 +105,10 @@ button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; 
 button:hover { background: var(--hover); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { color: var(--failed); }
-.setform { display: grid; gap: 12px; }
-.setform label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
-.setform input, .setform textarea { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
-.setform .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.setform, .loginform { display: grid; gap: 12px; }
+.setform label, .loginform label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.setform input, .setform textarea, .loginform input { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
+.setform .row, .loginform .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .hint { font-size: 13px; color: var(--muted); }
 .card .says { margin: 0 0 4px; }
 .card h2 { margin: 18px 0 6px; }
@@ -416,7 +416,7 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 </form>
 <h2>Add a site login of {{.NS}}</h2>
 <p class="note">An account on a web site, for the agents to sign in with, e.g. the scout at a shop. The browser of Garrison types it into that site's pages only; the agents never see the password. It is saved as the secret <code>login-&lt;name&gt;</code>, and an agent may use it only where <code>logins.yaml</code> in {{.NS}}/config names it.</p>
-<form class="panel head setform" method="post" action="/secrets/{{.NS}}" autocomplete="off" id="loginform">
+<form class="panel head loginform" method="post" action="/secrets/{{.NS}}" autocomplete="off" id="loginform">
   <input type="hidden" name="action" value="login">
   <label>Name <input name="login" required maxlength="26" pattern="[a-z0-9]([a-z0-9\-]{0,24}[a-z0-9])?" placeholder="shop" spellcheck="false" autocapitalize="off"></label>
   <label>Site <input name="site" required placeholder="https://shop.example.com" spellcheck="false" autocapitalize="off"></label>

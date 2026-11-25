@@ -86,6 +86,22 @@ const choose = `(() => { const e = document.querySelector(%q); const want = %q.t
   e.value = o.value; e.dispatchEvent(new Event('input', {bubbles: true})); e.dispatchEvent(new Event('change', {bubbles: true}));
   return true; })()`
 
+// typeJS is the script that types text into the field sel: focused, its
+// value set through its native setter (frameworks watch that one), then
+// the events a person's typing fires. It says whether sel is such a field.
+func typeJS(sel, text string) string {
+	q, _ := json.Marshal(sel)
+	t, _ := json.Marshal(text)
+	return fmt.Sprintf(`(() => { const e = document.querySelector(%s);
+  if (!e || !('value' in e) || e.tagName === 'SELECT') return false;
+  e.focus();
+  const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value');
+  if (d && d.set) d.set.call(e, %s); else e.value = %s;
+  e.dispatchEvent(new Event('input', {bubbles: true}));
+  e.dispatchEvent(new Event('change', {bubbles: true}));
+  return true; })()`, q, t, t)
+}
+
 // isSelect tells whether the element sel is a list to choose from.
 func isSelect(ctx context.Context, sel string) bool {
 	var yes bool
@@ -305,12 +321,20 @@ func (b *Browser) Browse(ctx context.Context, key, agent string, token func() (s
 			}
 		}()
 	case a.Type > 0:
-		steps = append(steps,
-			chromedp.SetValue(sel(a.Type), "", chromedp.ByQuery),
-			chromedp.SendKeys(sel(a.Type), a.Text, chromedp.ByQuery))
+		// The value as the page's own code sees one typed: through the
+		// field's native setter, with input and change events. chromedp's
+		// SetValue and SendKeys fail on this Chrome ("could not set value
+		// on node"); Enter then goes to the focused field as a key press.
+		var typed bool
+		steps = append(steps, chromedp.Evaluate(typeJS(sel(a.Type), a.Text), &typed))
 		if a.Submit {
-			steps = append(steps, chromedp.SendKeys(sel(a.Type), kb.Enter, chromedp.ByQuery))
+			steps = append(steps, chromedp.KeyEvent(kb.Enter))
 		}
+		defer func() {
+			if !typed && err == nil {
+				err = fmt.Errorf("%w: element %d takes no text; read the page for its fields", ErrInvalid, a.Type)
+			}
+		}()
 	}
 	if a.Site != nil {
 		// A login goes only into its own site, and a password only into a
