@@ -11,15 +11,25 @@ import (
 // Lazy is a Postgres store that connects when first used, and again after
 // a failure, at most every Retry: the services start before Postgres may
 // answer, and must not wait for it. Events recorded while it cannot connect
-// are logged and dropped.
+// are kept, up to MaxPending, and written once it answers: an agent's work
+// right after a restart was otherwise missing from the feed.
 type Lazy struct {
 	URL   string
 	Retry time.Duration // 0: 30 seconds
 
-	mu    sync.Mutex
-	pg    *Postgres
-	tried time.Time
+	mu       sync.Mutex
+	pg       *Postgres
+	tried    time.Time
+	pending  []Event
+	retrying bool
 }
+
+// MaxPending is how many events Lazy keeps while the database is away; the
+// oldest go first.
+const MaxPending = 1000
+
+// pendingRetry is how often kept events try the database again.
+var pendingRetry = 5 * time.Second
 
 var errNotConnected = errors.New("the events database is not reachable yet")
 
@@ -49,10 +59,66 @@ func (l *Lazy) get(ctx context.Context) (*Postgres, error) {
 func (l *Lazy) Record(ctx context.Context, e Event) {
 	pg, err := l.get(context.WithoutCancel(ctx))
 	if err != nil {
-		log.Printf("events: not recorded: %s %s/%s %q: %v", e.Kind, e.Unit, e.Repo, e.Title, err)
+		l.keep(e)
 		return
 	}
+	l.flush(ctx, pg)
 	pg.Record(ctx, e)
+}
+
+// keep holds e until the database answers, and starts trying it again.
+func (l *Lazy) keep(e Event) {
+	if e.At.IsZero() {
+		e.At = time.Now() // when it happened, not when it is written
+	}
+	l.mu.Lock()
+	if len(l.pending) >= MaxPending {
+		old := l.pending[0]
+		log.Printf("events: not recorded: %s %s/%s %q: more than %d wait for the database", old.Kind, old.Unit, old.Repo, old.Title, MaxPending)
+		l.pending = l.pending[1:]
+	}
+	l.pending = append(l.pending, e)
+	start := !l.retrying
+	l.retrying = true
+	l.mu.Unlock()
+	log.Printf("events: kept until the database answers: %s %s/%s %q", e.Kind, e.Unit, e.Repo, e.Title)
+	if start {
+		go l.retry()
+	}
+}
+
+// retry writes the kept events once the database answers.
+func (l *Lazy) retry() {
+	for {
+		time.Sleep(pendingRetry)
+		l.mu.Lock()
+		l.tried = time.Time{} // try now, not after Retry
+		l.mu.Unlock()
+		if pg, err := l.get(context.Background()); err == nil {
+			l.flush(context.Background(), pg)
+			l.mu.Lock()
+			done := len(l.pending) == 0
+			l.retrying = !done
+			l.mu.Unlock()
+			if done {
+				return
+			}
+		}
+	}
+}
+
+// flush writes the kept events, oldest first.
+func (l *Lazy) flush(ctx context.Context, pg *Postgres) {
+	l.mu.Lock()
+	kept := l.pending
+	l.pending = nil
+	l.mu.Unlock()
+	for _, e := range kept {
+		pg.Record(context.WithoutCancel(ctx), e)
+	}
+	if len(kept) > 0 {
+		log.Printf("events: recorded %d kept while the database was away", len(kept))
+	}
 }
 
 func (l *Lazy) List(ctx context.Context, q Query) ([]Event, error) {
