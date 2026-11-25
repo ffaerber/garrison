@@ -17,6 +17,7 @@ Each scenario starts from a fixture: `deploy` (todo with its apps deployed, alic
 | `operator` | 7, 8, 9 |
 | `leaving` | 5, 5b, 5c, 6 |
 | `guided` | Vague requests (in the browser) |
+| `threads` | Going on in a thread (in the browser) |
 | `journey` | 10 |
 | `ui` | In the browser |
 | `nodes` | More machines (no agents) |
@@ -241,6 +242,16 @@ Played by `guided` (`test/ui/guided.py`), in the browser, as bob and carol, from
 
 1. Bob: *@commander Please make the background blue.* The commander asks which app, as todo has two, and changes nothing yet. Bob: *The todo list, its page.* A pull request on `todo/app`, as bob, sets the page's background to a blue in `page.html` alone; `todo/config` is left alone. Carol approves and merges it in Gitea, and the todo list turns blue.
 2. Bob: *@commander Can the quotes app run at its own address, sayings.<our domain>? It serves the file QUOTES_FILE names; /etc/motd will do for now.* (quotes exits at start without that setting, so the operator rightly proposes no stack without it.) That is the stack's, not the code's: a stack's file name is its address. A pull request on `todo/config`, as bob, changes `stacks/` only, for the address `sayings`, and quotes' code is left alone. It is asked for quotes, which has no stack yet: renaming todo's stack would start it on a new, empty dataset, as a stack's data lives under its name, and the operator says so instead of proposing it.
+
+## Going on in a thread
+
+Played by `threads` (`test/ui/threads.py`), in the browser, as bob, from the fixture `team`. Open WebUI calls an agent only for a message that mentions it or that is a Reply to one of its messages; a thread is not one agent's.
+
+Bob: *@operator Which stacks does the unit todo have?* It answers in the message's thread.
+
+- A plain message in that thread, without @ and not a Reply, gets no answer from any agent.
+- Bob answers the operator's message with its Reply button, without @: the operator answers.
+- Bob mentions @commander in the same thread: the commander answers there, and the operator does not.
 
 ## In the browser
 

@@ -63,19 +63,20 @@ cd "$ROOT"
 #                                                                                 +- 6.6 operator
 #                                                                                 +- 6.7 leaving
 #                                                                                 +- 6.8 guided
+#                                                                                 +- 6.9 threads
 #
 # deploy: the unit todo with its app deployed, alice its only person.
 # team: carol an admin, bob a member, and the agents the scenarios share.
 # Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
 # scenario in a VM of its own, $VM-<step>, cloned from its parent's.
-STEPS=(base install login platform crud ui agent media deploy journey people nodes newsroom team roles change marketing routines commander operator leaving guided)
+STEPS=(base install login platform crud ui agent media deploy journey people nodes newsroom team roles change marketing routines commander operator leaving guided threads)
 declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
   [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [nodes]=deploy [newsroom]=deploy [team]=deploy
-  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team)
+  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team [threads]=team)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
   [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [nodes]=5.5 [newsroom]=5.6 [team]=5.4
-  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8)
+  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8 [threads]=6.9)
 FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
 
@@ -95,7 +96,7 @@ inputs() {
     login)    echo "$shared" test/e2e/scenarios/system.sh ;;
     platform) echo "$shared" test/e2e/stacks ;;
     deploy)   echo "$shared" templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
-    ui|people|guided)
+    ui|people|guided|threads)
               echo "$shared" test/ui/Dockerfile test/ui/run.sh test/ui/lib.py "test/ui/$1.py" ;;
     media)    echo "$shared" test/e2e/media templates/unit-config/README.md ;;
     nodes)    echo "$shared" installer/join.sh installer/node.sh host/hosts.sh ;;
@@ -263,7 +264,7 @@ step_newsroom() {
 # Open WebUI and the dashboard. ui: from the unit todo to its todo app
 # deployed, a screenshot, a scheduled job and a routine's question; people:
 # joining and leaving todo, as Open WebUI shows it; guided: vague requests,
-# and the agents asking what is meant. Talk to the real LLM. The screenshots
+# and the agents asking what is meant; threads: who answers in a thread. Talk to the real LLM. The screenshots
 # of every step land in bin/ui-shots/NAME/.
 browser_scenario() {
   sync_repo
@@ -308,6 +309,7 @@ step_nodes() {
 step_ui()     { browser_scenario ui; }
 step_people() { browser_scenario people; }
 step_guided() { browser_scenario guided; }
+step_threads() { browser_scenario threads; }
 
 # A unit's media library and its file browser; @media makes pictures
 # and a video with a fake ComfyUI outside Garrison, then cuts a short.

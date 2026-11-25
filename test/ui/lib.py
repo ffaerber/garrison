@@ -385,6 +385,14 @@ class Person:
                 if (m.get("meta") or {}).get("model_id") == agent and (m.get("meta") or {}).get("done")]
         return [m.get("content") or " " for m in sorted(done, key=lambda m: m.get("created_at") or 0)]
 
+    def answer_ids(self, message: str, agent: str) -> list[str]:
+        """The ids of agent's finished answers in the thread of message of
+        the open channel, oldest first."""
+        cid = channel_id(self.page.url)
+        done = [m for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")
+                if (m.get("meta") or {}).get("model_id") == agent and (m.get("meta") or {}).get("done")]
+        return [m["id"] for m in sorted(done, key=lambda m: m.get("created_at") or 0)]
+
     def next_answer(self, message: str, agent: str, seen: int, seconds: float = 600) -> str:
         """The agent's answer after the first seen ones in the thread of
         message, once finished; shows the thread."""
@@ -488,6 +496,43 @@ class Person:
                               for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")))
         self.snap("replied")
         return True
+
+    def reply_to(self, message: str, to: str, text: str) -> dict:
+        """In the thread of message of the open channel, answers the message
+        to with its Reply button, as a person does to go on with the agent
+        that wrote it, without mentioning it. Returns the posted message."""
+        p = self.page
+        cid = channel_id(p.url)
+        box = p.locator("#chat-input[aria-label='Reply to thread...']")
+        # A message's id is on two nested elements; its tools are on the outer.
+        target = p.locator(f"[id='message-{message}-{to}']").first
+        for attempt in range(5):
+            p.goto(f"{CHAT}/channels/{cid}?thread={message}")
+            try:
+                box.wait_for(timeout=20_000)
+                target.wait_for(timeout=20_000)
+                # Its tools show while the pointer is over it.
+                target.hover()
+                target.locator("button[aria-label='Reply']").first.click(timeout=10_000)
+                # The box then says whom it answers.
+                p.get_by_text("Replying to", exact=False).first.wait_for(timeout=10_000)
+                box.click()
+                p.keyboard.type(text)
+                p.wait_for_timeout(700)
+                if typed(box.inner_text()).strip().endswith(typed(text)):
+                    break
+            except Exception:  # noqa: BLE001 - the pane redrew under the pointer
+                if attempt == 4:
+                    self.snap("no Reply")
+                    raise
+        else:
+            raise AssertionError(f"the thread's box holds {box.inner_text()!r}")
+        self.snap("replying")
+        p.locator("#send-message-button").last.click()
+        sent = until(20, lambda: next((m for m in self.owui_list(f"/api/v1/channels/{cid}/messages/{message}/thread?limit=50")
+                                       if typed(text) in typed(m.get("content") or "")), None))
+        self.snap("replied with Reply")
+        return sent
 
     # ---------- Gitea ----------
 

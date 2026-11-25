@@ -42,9 +42,10 @@ The VMs run Garrison on Kubernetes (`docs/kubernetes.md`).
                                                                               +- 6.2 change     6.6 operator
                                                                               +- 6.3 marketing  6.7 leaving
                                                                               +- 6.4 routines   6.8 guided
+                                                                                                6.9 threads
 ```
 
-Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`; the browser scenarios (`ui`, `people`, `guided`) run `test/ui/<step>.py` in Playwright's Chromium, and their screenshots land in `bin/ui-shots/<step>/`. What each scenario plays is in `docs/scenarios.md`.
+Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`; the browser scenarios (`ui`, `people`, `guided`, `threads`) run `test/ui/<step>.py` in Playwright's Chromium, and their screenshots land in `bin/ui-shots/<step>/`. What each scenario plays is in `docs/scenarios.md`.
 
 | Step | Kind | Does |
 | --- | --- | --- |
@@ -70,6 +71,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `operator` | scenario | Why an app does not run; a new app from nothing; todo's data back |
 | `leaving` | scenario | Alice removes bob; the desk takes his request; a private repo with a private agent; an agent that may only read |
 | `guided` | scenario | In the browser: bob asks, vaguely, for a blue background; the commander asks which app, and the change goes to the app's code, carol merges and the page turns blue. An address of its own goes to the stack, in todo's config |
+| `threads` | scenario | In the browser: bob asks the operator in todo's channel; a plain message in its thread goes to no agent, its Reply button goes on with the operator without @, and @commander answers in the same thread |
 
 A fixture's snapshot, or a scenario's green mark (`bin/green/<step>`), stays valid while the files its step depends on, and those of every step on its way from `base`, are unchanged; `--list` shows which are. Change one scenario's file and only it reruns; change `lib.sh` or `smoke.sh` and everything from `login` does; change the installer and everything from `install`. Starting from a snapshot boots the VM, so every step also tests a restart.
 
