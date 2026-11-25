@@ -86,7 +86,7 @@ func TestTheStore(t *testing.T) {
 	for _, c := range []struct {
 		who  string
 		want []string
-	}{{"alice", []string{"todo"}}, {"bob", nil}, {"root", []string{"media", "todo"}}} {
+	}{{"alice", []string{"todo"}}, {"bob", nil}, {"root", []string{"garrison", "media", "todo"}}} { // garrison's, for its logins
 		got, err := s.Units(ctx, c.who)
 		if err != nil || !slices.Equal(got, c.want) {
 			t.Errorf("%s manages %v (%v), want %v", c.who, got, err, c.want)
@@ -126,6 +126,7 @@ func TestTheStore(t *testing.T) {
 		{"garrison", "x", "v", "root", ErrPlatformName},
 		{"garrison", "llm-openrouter", "v", "alice", ErrForbidden},
 		{"garrison", "llm-openrouter", "v", "bob", ErrForbidden},
+		{"garrison", "login-shop", "v", "alice", ErrForbidden},
 		{"todo", "Bad_Name", "v", "alice", ErrInvalid},
 		{"todo", "../members", "v", "alice", ErrInvalid},
 		{"todo", strings.Repeat("a", 33), "v", "alice", ErrInvalid},
@@ -149,6 +150,10 @@ func TestTheStore(t *testing.T) {
 	}
 	if enc := g.files["garrison/config/secrets/llm-openrouter.yaml"]; !strings.Contains(enc, "ENC[sk-or-1]") {
 		t.Errorf("garrison's key: %q", enc)
+	}
+	// And the site logins of its channel's agents.
+	if err := s.Set(ctx, "garrison", "login-shop", `{"site":"https://shop.example","username":"u","password":"p"}`, "root"); err != nil {
+		t.Errorf("garrison's login: %v", err)
 	}
 	if err := s.Delete(ctx, "garrison", "llm-openrouter", "alice"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("alice deleted garrison's key: %v", err)

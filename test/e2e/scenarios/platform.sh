@@ -382,7 +382,7 @@ written() { kubectl --namespace garrison exec deployment/gateway -- test -s /etc
 check "the deployer hands it to the gateway" until_true 120 written
 page=$(as_scout "http://$shop_ip/")
 field() { grep -oE "^\[[0-9]+\] input \($1\)" <<<"$page" | head -1 | tr -dc 0-9; }
-user=$(field text) pw=$(field password) note=$(grep -oE '^\[[0-9]+\] input \(text\) "Note' <<<"$page" | tr -dc 0-9)
+user=$(field text) pw=$(field password) note=$(grep -ioE '^\[[0-9]+\] input \(text\) "note' <<<"$page" | tr -dc 0-9)
 check "the scout sees the shop's form"     test -n "$user" -a -n "$pw" -a -n "$note"
 check "a password goes into no other field" grep -q "not a password field" <<<"$(as_scout "{\"login\":\"shop\",\"part\":\"password\",\"type_into\":${note:-0}}")"
 as_scout "{\"login\":\"shop\",\"part\":\"username\",\"type_into\":${user:-0}}" > "$tmp/typed"

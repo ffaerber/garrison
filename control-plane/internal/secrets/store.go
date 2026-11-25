@@ -53,11 +53,18 @@ type Store struct {
 // PlatformUnit has no apps of its config. Its secrets are only the
 // LLM providers' API keys, llm-<provider> (models.KeySecret), which root
 // admins set on the dashboard's Models page and the deployer writes to the
-// agent service's key folder.
+// agent service's key folder, and the site logins of its channel's agents,
+// login-<name>, which the deployer writes for the gateway's browser.
 const PlatformUnit = "garrison"
 
 // ErrPlatformName: a secret of garrison that is not a provider's key.
-var ErrPlatformName = fmt.Errorf("%w: garrison keeps only the LLM providers' keys, llm-<provider>, set on the Models page", ErrInvalid)
+var ErrPlatformName = fmt.Errorf("%w: garrison keeps only the LLM providers' keys, llm-<provider>, set on the Models page, and site logins, login-<name>", ErrInvalid)
+
+// platformName tells whether garrison may keep a secret called name.
+func platformName(name string) bool {
+	_, provider := models.ProviderOf(name)
+	return provider || strings.HasPrefix(name, LoginPrefix)
+}
 
 // ConfigRepo is the repo a unit's secrets are in.
 const ConfigRepo = "config"
@@ -85,9 +92,7 @@ func (s *Store) Units(ctx context.Context, person string) ([]string, error) {
 	}
 	var out []string
 	for _, ns := range orgs {
-		if ns == PlatformUnit {
-			continue
-		}
+		// garrison's too, for root admins: its site logins.
 		ok, err := s.May(ctx, ns, person)
 		if err != nil {
 			return nil, err
@@ -134,7 +139,7 @@ func (s *Store) Set(ctx context.Context, ns, name, value, person string) error {
 	if !Name.MatchString(name) {
 		return fmt.Errorf("%w: a name is lowercase letters, digits and dashes, up to 32", ErrInvalid)
 	}
-	if _, ok := models.ProviderOf(name); ns == PlatformUnit && !ok {
+	if ns == PlatformUnit && !platformName(name) {
 		return ErrPlatformName
 	}
 	if err := CheckValue(value); err != nil {
@@ -169,7 +174,7 @@ func (s *Store) Delete(ctx context.Context, ns, name, person string) error {
 	if !Name.MatchString(name) {
 		return fmt.Errorf("%w: no secret is called %q", ErrInvalid, name)
 	}
-	if _, ok := models.ProviderOf(name); ns == PlatformUnit && !ok {
+	if ns == PlatformUnit && !platformName(name) {
 		return ErrPlatformName
 	}
 	if ok, err := s.May(ctx, ns, person); err != nil {
