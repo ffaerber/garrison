@@ -144,6 +144,11 @@ Played by `commander`. Bob asks the commander in todo's channel which agent make
 - It hands the task to an agent as it works in todo, as the feed shows, and that agent finishes it.
 - Once it has answered, the dashboard no longer lists it.
 
+Then, in a private chat, bob: *In the unit todo, I want a dark mode for the todo app, and I will decide the details along the way with the agent. Hand me over to it.*
+
+- The commander hands him over: the agent's first message, for bob, with his task, appears in todo's channel.
+- Its answer links that channel.
+
 ## 5. Alice removes bob
 
 Alice: *@operator Remove bob from the unit todo.*

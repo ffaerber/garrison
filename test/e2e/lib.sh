@@ -296,6 +296,14 @@ sys.exit(1)' "$id" && return 0
   return 1
 }
 
+# ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
+# through Open WebUI's API, and prints its answer.
+ask_private() {
+  chat_api "$1" --max-time 600 -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3")" \
+    "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
+}
+
 # ---------- sections ----------
 # system: the stacks the installer deploys are up and safe.
 

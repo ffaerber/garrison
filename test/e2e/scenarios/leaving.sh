@@ -28,13 +28,6 @@ check "bob no longer sees todo's channel" until_true 120 no_channel
 echo "# 5b. bob, no longer in todo, asks the desk for a change, in a chat of his own"
 # The desk works there in no unit, but a change to todo's repo goes
 # with the grant todo gives it.
-# ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
-# through Open WebUI's API, and prints its answer.
-ask_private() {
-  chat_api "$1" --max-time 600 -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3")" \
-    "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
-}
 since=$(last_pr app)
 answer=$(ask_private bob garrison/desk "In the repo app of the unit todo, propose a new file IDEAS.md with the line: Dark mode, please. Title: An idea from bob. Read nothing else.")
 opr=$(newest_pr app agent-todo-desk "$since")

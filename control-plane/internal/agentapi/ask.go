@@ -237,7 +237,7 @@ func askSpec(a agents.Agent) toolSpec {
 	}
 	return toolSpec{
 		Name:        "ask_agent",
-		Description: fmt.Sprintf("Hands work to another agent and returns its answer, which ends with its status: done, partial or stuck, and why. It works for the same person, with its own tools and rights, in a workspace of its own. If it is partial or stuck, you may ask it again with a sharper task, up to %d times in all per turn. With background, it works on after this turn and posts its answer in this channel instead (only in a channel).", MaxAsks),
+		Description: fmt.Sprintf("Hands work to another agent and returns its answer, which ends with its status: done, partial or stuck, and why. It works for the same person, with its own tools and rights, in a workspace of its own. If it is partial or stuck, you may ask it again with a sharper task, up to %d times in all per turn. With background, it works on after this turn and posts its answer in the channel instead: in this one, or, from a private chat, in its unit's channel, mentioning the person, who goes on with it there; use that for work with back and forth.", MaxAsks),
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -245,7 +245,7 @@ func askSpec(a agents.Agent) toolSpec {
 				"task":       map[string]any{"type": "string", "description": "what it should do, with what it needs to know, e.g. the repo and branch"},
 				"limits":     map[string]any{"type": "string", "description": "what bounds it: what not to do, how far to go"},
 				"done_when":  map[string]any{"type": "string", "description": "what a good answer looks like"},
-				"background": map[string]any{"type": "boolean", "description": "do not wait; it posts its answer in the channel"},
+				"background": map[string]any{"type": "boolean", "description": "do not wait; it posts its answer in the channel (from a private chat: in its unit's channel, mentioning the person, who goes on there)"},
 			},
 			"required":             []string{"agent", "task", "done_when"},
 			"additionalProperties": false,
@@ -367,9 +367,27 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 
 	if in.Background {
 		channel, inChannel := strings.CutPrefix(c.Chat, "channel:")
-		if s.Poster == nil || (!inChannel && !c.Run.Unattended) {
-			return "error: background works only in a channel, where the answer can be posted; ask without it", true
+		// From a private chat, the asked agent starts the conversation in
+		// its unit's channel, naming the person, who goes on there.
+		handOver := !inChannel && !c.Run.Unattended
+		if !inChannel {
+			channel = "" // the asked agent's unit's
 		}
+		if s.Poster == nil {
+			return "error: background needs the chat's channels; ask without it", true
+		}
+		if handOver {
+			if why, err := s.mayHandOver(ctx, who, target.Unit); err != nil {
+				return "error: " + err.Error(), true
+			} else if why != "" {
+				return "not allowed: " + why + "; ask without background, or tell the person whom to talk to there", true
+			}
+		}
+		mention := ""
+		if handOver {
+			mention = who
+		}
+		task := strings.TrimSpace(in.Task)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), s.turnTimeout())
 			defer cancel()
@@ -384,11 +402,23 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 			if err != nil {
 				answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())
 			}
-			if _, err := s.Poster.Post(pctx, gateway.Post{Agent: target.ID(), Channel: channel,
-				Text: fmt.Sprintf("For %s, asked by %s:\n\n%s", who, c.Agent, answer)}); err != nil {
+			text := fmt.Sprintf("For %s, asked by %s:\n\n%s", who, c.Agent, answer)
+			if handOver {
+				// The task goes with it: the thread is all the agent
+				// knows when the person goes on there.
+				text = fmt.Sprintf("For %s, handed over by %s from a private chat. The task: %s\n\n%s\n\n_Reply to this message to go on with %s._", who, c.Agent, task, answer, target.Name)
+			}
+			if _, err := s.Poster.Post(pctx, gateway.Post{Agent: target.ID(), Channel: channel, Mention: mention, Text: text}); err != nil {
 				log.Printf("agents: %s: %s's answer for %s: %v", who, target.ID(), c.Agent, err)
 			}
 		}()
+		if handOver {
+			where := "the channel of " + target.Unit
+			if url, err := s.Poster.UnitChannel(ctx, target.Unit); err == nil && url != "" {
+				where += " (" + url + ")"
+			}
+			return fmt.Sprintf("%s is working on it and will start the conversation in %s, mentioning %s. Tell the person to go there, with the link, and to answer its message with Reply: the work goes on there, with them. Do not wait for it.", target.ID(), where, who), false
+		}
 		where := "this channel"
 		if !inChannel {
 			where = "the channel of " + target.Unit
@@ -429,6 +459,23 @@ func lesson(ask events.Event, asker, target string, before sandbox.Miss, task st
 	l.Title = fmt.Sprintf("%s got %s to finish by asking again sharper; before, it was %s", asker, target, why)
 	l.Detail = fmt.Sprintf("First task: %s\n\n%s was %s.\n\nThe task that worked: %s", strings.TrimSpace(before.Task), target, why, strings.TrimSpace(task))
 	return l
+}
+
+// mayHandOver says why the person may not be handed over to the channel of
+// unit: one they do not read. garrison's everyone reads; the others its
+// people, and root admins, whom Open WebUI shows every channel. "" if they
+// may.
+func (s *Server) mayHandOver(ctx context.Context, person, unit string) (string, error) {
+	if s.Gitea == nil || unit == agents.PlatformUnit {
+		return "", nil
+	}
+	if admin, err := s.Gitea.IsAdmin(ctx, person); err != nil || admin {
+		return "", err
+	}
+	if role, err := s.Gitea.Role(ctx, unit, person); err != nil || role != "" {
+		return "", err
+	}
+	return fmt.Sprintf("%s is not one of the people of %s, so does not read its channel", person, unit), nil
 }
 
 // instance is the agent asked for as it works: in the unit named, as

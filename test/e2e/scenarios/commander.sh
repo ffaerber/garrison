@@ -102,4 +102,20 @@ while read -r c m; do
     web -o /dev/null -X DELETE -H "Authorization: Bearer $admin_token" "$chat/api/v1/channels/$c/messages/$id/delete"
   done
 done < "$tmp/posted"
+
+echo "# 9c. in a private chat, the commander hands bob over: the agent starts in todo's channel"
+# handed_over: todo's channel holds the agent's first message for bob, with
+# his task, from the commander's hand-over.
+handed_over() {
+  chat_api bob "$chat/api/v1/channels/$(channel_of todo bob)/messages?skip=0&limit=50" | python3 -c '
+import json,sys
+sys.exit(0 if any("handed over by garrison/commander from a private chat" in (m.get("content") or "") and "For bob" in (m.get("content") or "") for m in json.load(sys.stdin)) else 1)'
+}
+answer=$(ask_private bob garrison/commander "In the unit todo, I want a dark mode for the todo app, and I will decide the details along the way with the agent. Hand me over to it.")
+if ! until_true 300 handed_over; then
+  printf 'retry it handed bob over to no one; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_private bob garrison/commander "Please call ask_agent now with background true: agent todo/coder, task: bob wants a dark mode for the todo app of the unit todo and decides the details with you; done_when: your first questions to him.")
+fi
+check "the agent starts the conversation in todo's channel" until_true 300 handed_over
+check "the commander links the channel"    grep -q "chat\.$DOMAIN/channels/" <<<"$answer"
 }

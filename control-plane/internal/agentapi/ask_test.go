@@ -211,8 +211,8 @@ func TestAskingHasLimits(t *testing.T) {
 		t.Errorf("too deep: %q", got)
 	}
 	c = sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}}}
-	if got := ask(c, `{"agent":"homepage/tester","task":"x","done_when":"y","background":true}`); !strings.Contains(got, "only in a channel") {
-		t.Errorf("background outside a channel: %q", got)
+	if got := ask(c, `{"agent":"homepage/tester","task":"x","done_when":"y","background":true}`); !strings.Contains(got, "background needs the chat's channels") {
+		t.Errorf("background without channels: %q", got)
 	}
 }
 
@@ -233,6 +233,60 @@ func TestBackgroundAnswersArePosted(t *testing.T) {
 	posts := poster.all()
 	if len(posts) != 1 || posts[0].Agent != "homepage/tester" || posts[0].Channel != "c1" || !strings.Contains(posts[0].Text, "For alice, asked by homepage/lead:") {
 		t.Errorf("posts: %+v", posts)
+	}
+}
+
+// From a private chat, a background ask hands the person over: the asked
+// agent starts the conversation in its unit's channel, mentioning them,
+// with the task, and the asker gets the channel's link.
+func TestHandingOverFromAPrivateChat(t *testing.T) {
+	s, _, _ := setup(t)
+	withTeam(s)
+	withSandboxes(t, s)
+	poster := &fakePoster{}
+	s.Poster = poster
+	_, content := chatIn(t, s, "chat-9", "homepage/lead", Message{Role: "user", Content: `call ask_agent {"agent":"homepage/tester","task":"A website for our candy.","done_when":"y","background":true}`})
+	if !strings.Contains(content, "will start the conversation in the channel of homepage (https://chat.home.test/channels/ch-homepage), mentioning alice") ||
+		!strings.Contains(content, "answer its message with Reply") {
+		t.Fatalf("content %q", content)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	posts := poster.all()
+	if len(posts) != 1 || posts[0].Agent != "homepage/tester" || posts[0].Channel != "" || posts[0].Mention != "alice" ||
+		!strings.Contains(posts[0].Text, "For alice, handed over by homepage/lead from a private chat. The task: A website for our candy.") ||
+		!strings.Contains(posts[0].Text, "Reply to this message to go on with tester") {
+		t.Errorf("posts: %+v", posts)
+	}
+}
+
+// Only into a channel the person reads: their unit's, garrison's, or any
+// for a root admin.
+func TestHandOverOnlyWhereThePersonReads(t *testing.T) {
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/users/root":
+			io.WriteString(w, `{"is_admin":true}`)
+		case "/api/v1/users/alice", "/api/v1/users/mallory":
+			io.WriteString(w, `{"is_admin":false}`)
+		case "/api/v1/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [alice]\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	s := &Server{Gitea: &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}}
+	for _, c := range []struct {
+		person, unit string
+		ok           bool
+	}{{"alice", "homepage", true}, {"root", "homepage", true}, {"mallory", "garrison", true}, {"mallory", "homepage", false}} {
+		why, err := s.mayHandOver(context.Background(), c.person, c.unit)
+		if err != nil || (why == "") != c.ok {
+			t.Errorf("%s into %s: %q %v", c.person, c.unit, why, err)
+		}
 	}
 }
 

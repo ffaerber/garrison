@@ -184,7 +184,7 @@ A tool, `ask_agent(agent, task, limits, done_when, background)`, served by the a
 - **Finding them:** `find_agents(in_unit)`, for the same agents, lists those it may ask for this person, as they work where the asker does (or in `in_unit`): what each does (`description`), its tools, skills and grants there, and which unit the channel belongs to, with that unit's app repos as the person sees them; with `in_unit`, the link to that unit's channel, which the commander gives when it sends someone there, so the commander knows when "the app" could mean several and asks which. Agents it may not ask, the person may not use, or that may not answer here are left out.
 - **Anyone:** `agents: any` lets an agent ask every agent the person may use. Root admins approve it, as every agent; it adds no rights, as the asked agent still acts as the person.
 - **The feed** has each hand-off, for the person and the asked agent's unit, with its answer; the asked agent's calls are threaded under it.
-- **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
+- **Background:** in a channel, `background: true` returns at once; the asked agent works on and its answer is posted in the channel when done. From a private chat it hands the person over: the asked agent's answer, with the task, starts a conversation in its unit's channel, mentioning the person, who goes on there with Reply; the asker gets the channel's link to give them. Only into a channel the person reads (a unit they are in, `garrison`'s, or any for a root admin); the task is all of the private chat that goes there, as the unit's people read it. It still acts with the person's Keycloak token, which lasts five minutes, so a long background run fails at its later tool calls.
 
 ## Chains of command
 
@@ -205,7 +205,7 @@ A chain of command is the order in which agents do one kind of job, written down
 The commander is for when someone does not know which agent to ask. It is written into `garrison/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI (`garrison/commander`), and every channel's pinned message names it. Like every agent, it goes by its name, `@commander`, in any channel, and works in the channel's unit. It does no work itself: it calls `find_agents`, then
 
 - hands a clear, one-off task (a screenshot, a new repo, why an app does not start) to the agent that fits, with `ask_agent`, working in the same unit (or the one named, as `<unit>/<agent>`); in a channel in the background, so that agent posts its answer there itself;
-- for work with back and forth (a feature, a new app), tells the person which agent to talk to, `@<agent>` in the channel of the unit it is about, and why;
+- for work with back and forth (a feature, a new app), from a private chat hands the person over (`ask_agent` with `background`): the agent starts the conversation in the unit's channel, mentioning them, and the commander gives them the link; in a channel, or for a unit they are not in, it tells them which agent to talk to, `@<agent>` in that unit's channel, with its link, and why;
 - asks one question when it cannot tell, and says when no agent fits and what one would need.
 
 Root admins change it like any agent of `garrison`, by a pull request to its folder.
