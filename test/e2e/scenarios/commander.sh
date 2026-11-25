@@ -104,6 +104,16 @@ while read -r c m; do
 done < "$tmp/posted"
 
 echo "# 9c. in a private chat, the commander hands bob over: the agent starts in todo's channel"
+# ask_chat PERSON AGENT QUESTION: as ask_private, in a chat with an id of its
+# own, as every chat in the browser has: the agent service runs a chat in a
+# sandbox, with ask_agent, only then. Open WebUI keeps a "local:" chat for
+# no one.
+chat_seq=$(date +%s%N)
+ask_chat() {
+  chat_api "$1" --max-time 600 -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "chat_id": sys.argv[3], "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3" "local:e2e-$chat_seq")" \
+    "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
+}
 # handed_over: todo's channel holds the agent's first message for bob, with
 # his task, from the commander's hand-over.
 handed_over() {
@@ -111,10 +121,10 @@ handed_over() {
 import json,sys
 sys.exit(0 if any("handed over by garrison/commander from a private chat" in (m.get("content") or "") and "For bob" in (m.get("content") or "") for m in json.load(sys.stdin)) else 1)'
 }
-answer=$(ask_private bob garrison/commander "In the unit todo, I want a dark mode for the todo app, and I will decide the details along the way with the agent. Hand me over to it.")
+answer=$(ask_chat bob garrison/commander "In the unit todo, I want a dark mode for the todo app, and I will decide the details along the way with the agent. Hand me over to it.")
 if ! until_true 300 handed_over; then
   printf 'retry it handed bob over to no one; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_private bob garrison/commander "Please call ask_agent now with background true: agent todo/coder, task: bob wants a dark mode for the todo app of the unit todo and decides the details with you; done_when: your first questions to him.")
+  answer=$(ask_chat bob garrison/commander "Please call ask_agent now with background true: agent todo/coder, task: bob wants a dark mode for the todo app of the unit todo and decides the details with you; done_when: your first questions to him.")
 fi
 check "the agent starts the conversation in todo's channel" until_true 300 handed_over
 check "the commander links the channel"    grep -q "chat\.$DOMAIN/channels/" <<<"$answer"

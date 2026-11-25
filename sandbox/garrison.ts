@@ -145,6 +145,15 @@ async function proposeWorkspace(p: Proposal, signal?: AbortSignal) {
   let base = await config(top, "garrison.base");
   if (!branch && p.base) base = p.base;
   if (!base) {
+    // The branch the checkout is on, if it is one of the repo's own (dev):
+    // an agent that checked out dev means dev, whether or not it says so.
+    const current = (await git(top, "rev-parse", "--abbrev-ref", "HEAD").catch(() => "")).trim();
+    if (current && current !== "HEAD" && !/^(change|agent|skill)\//.test(current)) {
+      const remote = await git(top, "rev-parse", "--verify", "-q", `refs/remotes/origin/${current}`).catch(() => "");
+      if (remote.trim()) base = current;
+    }
+  }
+  if (!base) {
     base = (await git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").catch(() => "origin/main")).trim().replace(/^origin\//, "");
   }
   await git(top, "add", "-A");
@@ -187,7 +196,7 @@ export default async function (pi: ExtensionAPI) {
           path: Type.String({ description: "the checkout, relative to /data/work, e.g. todo" }),
           title: Type.String({ description: "short title of the change" }),
           description: Type.Optional(Type.String({ description: "why, and what it does" })),
-          base: Type.Optional(Type.String({ description: "the branch the change is for, e.g. dev; default the repo's main branch. Only for the first proposal of a checkout" })),
+          base: Type.Optional(Type.String({ description: "the branch the change is for, e.g. dev; default the branch the checkout is on, else the repo's main branch. Only for the first proposal of a checkout" })),
         }),
         async execute(_id, params, signal) {
           const text = await proposeWorkspace(params as Proposal, signal);
