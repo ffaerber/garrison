@@ -541,7 +541,10 @@ acquire() {
   while :; do
     if [ "${1:-}" = fixture ] || ! compgen -G "$ROOT/bin/slots/want-*" >/dev/null; then
       for i in $(seq "$JOBS"); do
-        if mkdir "$ROOT/bin/slots/$i" 2>/dev/null; then
+        # bash's noclobber creates the file with O_EXCL: one job wins. Not
+        # mkdir: Ubuntu 26.04's (uutils) tells several racing jobs that each
+        # made the same directory, and four ran at once with JOBS=2.
+        if (set -C; echo "$BASHPID" > "$ROOT/bin/slots/$i") 2>/dev/null; then
           SLOT=$i
           rm -f "$ROOT/bin/slots/want-$BASHPID"
           slot_log "+$SLOT"
@@ -552,7 +555,7 @@ acquire() {
     sleep 3
   done
 }
-release() { slot_log "-$SLOT"; rmdir "$ROOT/bin/slots/$SLOT" 2>/dev/null || true; }
+release() { slot_log "-$SLOT"; rm -f "$ROOT/bin/slots/$SLOT"; }
 # slot_log CHANGE: a slot taken (+N) or given back (-N), by which job and
 # process, to bin/slots.log: what to read when more VMs run than JOBS.
 slot_log() { echo "$(date +%T) ${VM#"$BASE_VM"} $BASHPID $1 [$(cd "$ROOT/bin/slots" && echo [0-9]*)]" >> "$ROOT/bin/slots.log"; }
