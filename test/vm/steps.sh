@@ -542,6 +542,7 @@ acquire() {
         if mkdir "$ROOT/bin/slots/$i" 2>/dev/null; then
           SLOT=$i
           rm -f "$ROOT/bin/slots/want-$BASHPID"
+          slot_log "+$SLOT"
           return 0
         fi
       done
@@ -549,7 +550,10 @@ acquire() {
     sleep 3
   done
 }
-release() { rmdir "$ROOT/bin/slots/$SLOT" 2>/dev/null || true; }
+release() { slot_log "-$SLOT"; rmdir "$ROOT/bin/slots/$SLOT" 2>/dev/null || true; }
+# slot_log CHANGE: a slot taken (+N) or given back (-N), by which job and
+# process, to bin/slots.log: what to read when more VMs run than JOBS.
+slot_log() { echo "$(date +%T) ${VM#"$BASE_VM"} $BASHPID $1 [$(cd "$ROOT/bin/slots" && echo [0-9]*)]" >> "$ROOT/bin/slots.log"; }
 
 # clone_from STEP DEST: DEST becomes a copy of the fixture STEP's VM at its
 # snapshot. One clone at a time per source, which is stopped for it.
@@ -573,14 +577,23 @@ clone_from() {
 # free_gb: the memory the host has available, in whole GB.
 free_gb() { awk '/^MemAvailable:/ { print int($2 / 1048576) }' /proc/meminfo; }
 
-# start_vm NAME: boots the VM once the host has FREE_GB available, one boot
-# at a time, so jobs starting together do not all count the same free memory.
+# running_vms: how many VMs of ours run (or boot) now.
+running_vms() {
+  multipass list --format csv 2>/dev/null | awk -F, -v p="$BASE_VM" \
+    'NR > 1 && ($1 == p || index($1, p "-") == 1) && $2 !~ /^(Stopped|Deleted|Suspended)$/' | wc -l
+}
+
+# start_vm NAME: boots the VM once fewer than JOBS of ours run and the host
+# has FREE_GB available, one boot at a time. The count comes first: a VM
+# just booted has not yet taken its 8G, so free memory alone let a seventh
+# boot while six ran (and the slots, which should hold them to JOBS, did
+# not).
 start_vm() {
   (
     flock 9
     local said=
-    while [ "$(free_gb)" -lt "$FREE_GB" ]; do
-      [ -n "$said" ] || { say "Waiting for ${FREE_GB}G of free memory to boot $1 (now $(free_gb)G)"; said=1; }
+    while [ "$(running_vms)" -ge "$JOBS" ] || [ "$(free_gb)" -lt "$FREE_GB" ]; do
+      [ -n "$said" ] || { say "Waiting to boot $1: $(running_vms) VM(s) of ours run (at most $JOBS), ${FREE_GB}G of free memory needed (now $(free_gb)G)"; said=1; }
       sleep 10
     done
     multipass start "$1" >/dev/null
@@ -864,7 +877,7 @@ exec > >(tee "$ROOT/bin/steps.out" 8>&-) 2>&1
 stop_leftovers
 fit_jobs
 [ -z "$from" ] || forget "$from"
-rm -rf "$ROOT/bin/slots" && mkdir -p "$ROOT/bin/slots"
+rm -rf "$ROOT/bin/slots" "$ROOT/bin/slots.log" && mkdir -p "$ROOT/bin/slots"
 rm -f "$ROOT/bin/state/"*
 
 # The trunk, as far as it is needed.
