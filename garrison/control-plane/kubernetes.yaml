@@ -75,6 +75,9 @@ spec:
             # The LLM providers' keys set on the dashboard's Models page, kept
             # encrypted in garrison's config: written here for the agent service.
             - -llm-keys=/etc/garrison/llm-keys
+            # The units' site logins (secrets login-<name>): written here for
+            # the gateway's browser, which alone reads them.
+            - -logins=/etc/garrison/logins
           ports: [{ containerPort: 8090 }]
           volumeMounts:
             - { name: secrets, mountPath: /run/secrets, readOnly: true }
@@ -82,6 +85,7 @@ spec:
             # Only the deployer has the keys; the installer made the directory.
             - { name: sops, mountPath: /etc/garrison/sops }
             - { name: llm-keys, mountPath: /etc/garrison/llm-keys }
+            - { name: logins, mountPath: /etc/garrison/logins }
             # Shared with the CLI on the host: checkouts, state and lock.
             - { name: state, mountPath: /var/lib/garrison/deployer }
       volumes:
@@ -98,6 +102,7 @@ spec:
         - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
         - { name: sops, hostPath: { path: /etc/garrison/sops, type: Directory } }
         - { name: llm-keys, hostPath: { path: /etc/garrison/llm-keys, type: Directory } }
+        - { name: logins, hostPath: { path: /etc/garrison/logins, type: DirectoryOrCreate } }
         - { name: state, hostPath: { path: /var/lib/garrison/deployer, type: DirectoryOrCreate } }
 ---
 # ---------- the gateway ----------
@@ -161,11 +166,15 @@ spec:
             - -hook-url=http://gateway:8080/hook
             # Every change an agent makes, and every refusal, goes to the feed.
             - -events-db=postgres://garrison@postgres:5432/garrison
+            # The units' site logins, which the deployer writes: browse types
+            # them into their own sites for the agents logins.yaml names.
+            - -logins=/etc/garrison/logins
           ports: [{ containerPort: 8080 }]
           volumeMounts:
             - { name: secrets, mountPath: /run/secrets, readOnly: true }
             - { name: install-env, mountPath: /etc/garrison/install.env, readOnly: true }
             - { name: state, mountPath: /var/lib/garrison/deployer, readOnly: true }
+            - { name: logins, mountPath: /etc/garrison/logins, readOnly: true }
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             periodSeconds: 5
@@ -183,6 +192,7 @@ spec:
               - downwardAPI: { items: [{ path: kubernetes.io/serviceaccount/namespace, fieldRef: { fieldPath: metadata.namespace } }] }
         - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
         - { name: state, hostPath: { path: /var/lib/garrison/deployer, type: DirectoryOrCreate } }
+        - { name: logins, hostPath: { path: /etc/garrison/logins, type: DirectoryOrCreate } }
 ---
 # ---------- the agent service ----------
 # The OpenAI-compatible API Open WebUI talks to. Its models are the

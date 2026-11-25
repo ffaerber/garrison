@@ -54,6 +54,7 @@ type Config struct {
 	Events       events.Recorder // optional: the feed, which gets each deploy, removal and failure
 	Keys         *secrets.Keys   // the units' keys, which decrypt stored secrets; nil: apps with them are left alone
 	LLMKeysDir   string          // where the agent service reads the LLM providers' keys, which garrison's config keeps; empty: not written
+	LoginsDir    string          // where the gateway's browser reads the units' site logins (secrets login-*); empty: not written
 
 	password string
 	home     string            // HOME for git, holding the .netrc
@@ -440,6 +441,20 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 		if err := syncLLMKeys(ctx, c.Keys, checkouts["config"], c.LLMKeysDir, filepath.Join(c.WorkDir, llmKeysState),
 			func(e events.Event) { c.record(ctx, e) }); err != nil {
 			log.Printf("llm keys: %v", err)
+		}
+	}
+	// The units' site logins follow every sync too, for the gateway's browser.
+	if c.LoginsDir != "" && c.Keys != nil && c.Apps {
+		cfgDirs := map[string]string{}
+		dirs, _ := filepath.Glob(filepath.Join(c.WorkDir, "apps", "*", "config", "@main"))
+		for _, d := range dirs {
+			cfgDirs[filepath.Base(filepath.Dir(filepath.Dir(d)))] = d
+		}
+		if checkouts["config"] != "" { // garrison's own, for its channel
+			cfgDirs[c.Org] = checkouts["config"]
+		}
+		if err := syncLogins(ctx, c.Keys, cfgDirs, c.LoginsDir); err != nil {
+			log.Printf("logins: %v", err)
 		}
 	}
 	// Dashboards follow every sync; Grafana may still be starting, so a

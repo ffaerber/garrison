@@ -102,6 +102,18 @@ func (s *Server) secretsPost(w http.ResponseWriter, r *http.Request, v events.Vi
 	case "set":
 		err = s.Secrets.Set(r.Context(), ns, name, r.PostForm.Get("value"), v.Person)
 		done, title = "set", fmt.Sprintf("%s set the secret %s of %s", v.Person, name, ns)
+	case "login":
+		// A site's login: secret login-<name>, typed into the site's pages
+		// by the gateway's browser for the agents logins.yaml names.
+		login := r.PostForm.Get("login")
+		name = secrets.LoginPrefix + login
+		var value string
+		if !secrets.LoginName.MatchString(login) {
+			err = fmt.Errorf("%w: a login's name is lowercase letters, digits and dashes, at most 26", secrets.ErrInvalid)
+		} else if value, err = secrets.NewLogin(r.PostForm.Get("site"), r.PostForm.Get("username"), r.PostForm.Get("password")); err == nil {
+			err = s.Secrets.Set(r.Context(), ns, name, value, v.Person)
+		}
+		done, title = "set", fmt.Sprintf("%s set the login %s of %s", v.Person, login, ns)
 	case "delete":
 		err = s.Secrets.Delete(r.Context(), ns, name, v.Person)
 		done, title = "deleted", fmt.Sprintf("%s deleted the secret %s of %s", v.Person, name, ns)

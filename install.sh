@@ -171,6 +171,8 @@ fi
 # above.
 mkdir -p "$ETC/llm-keys"
 chmod 700 "$ETC/llm-keys"
+mkdir -p "$ETC/logins"
+chmod 700 "$ETC/logins"
 install -m 644 "$ROOT/garrison/platform/reserved-hostnames.yaml" "$ETC/reserved-hostnames.yaml"
 
 # The units' secrets are encrypted for their own keys, which the

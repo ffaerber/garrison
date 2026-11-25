@@ -131,3 +131,53 @@ func TestTheSecretsPage(t *testing.T) {
 		t.Error("not deleted")
 	}
 }
+
+// A site login is the secret login-<name>, its site, username and password
+// as JSON; the page never shows it back.
+func TestASiteLogin(t *testing.T) {
+	s, _ := server()
+	f := &fakeSecrets{values: map[string]string{}}
+	s.Secrets = f
+	origin := "https://home.test"
+	w := post(s, "alice", origin, "/secrets/todo", url.Values{"action": {"login"}, "login": {"shop"}, "site": {"Shop.Example.com/login"},
+		"username": {"alice@shop"}, "password": {"pa55 word"}})
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("login: %d %s", w.Code, w.Body)
+	}
+	l, err := secrets.ParseLogin(f.values["todo/login-shop"])
+	if err != nil || l.Site != "https://shop.example.com" || l.Username != "alice@shop" || l.Password != "pa55 word" {
+		t.Errorf("stored %q: %+v %v", f.values["todo/login-shop"], l, err)
+	}
+	if body := get(s, "alice", "/secrets?ns=todo").Body.String(); !strings.Contains(body, "login-shop") || strings.Contains(body, "pa55") || !strings.Contains(body, `id="loginform"`) {
+		t.Errorf("the page:\n%s", body)
+	}
+	for name, form := range map[string]url.Values{
+		"no password":  {"action": {"login"}, "login": {"x"}, "site": {"https://a.example"}, "username": {"u"}},
+		"a bad site":   {"action": {"login"}, "login": {"x"}, "site": {"ftp://a.example"}, "username": {"u"}, "password": {"p"}},
+		"a bad name":   {"action": {"login"}, "login": {"Shop!"}, "site": {"https://a.example"}, "username": {"u"}, "password": {"p"}},
+		"a user in it": {"action": {"login"}, "login": {"x"}, "site": {"https://me:pw@a.example"}, "username": {"u"}, "password": {"p"}},
+	} {
+		if w := post(s, "alice", origin, "/secrets/todo", form); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, w.Code)
+		}
+	}
+	if w := post(s, "dave", origin, "/secrets/todo", url.Values{"action": {"login"}, "login": {"x"}, "site": {"https://a.example"}, "username": {"u"}, "password": {"p"}}); w.Code != http.StatusForbidden {
+		t.Errorf("dave: %d", w.Code)
+	}
+}
+
+func TestLoginFor(t *testing.T) {
+	l := secrets.Login{Site: "https://shop.example.com", Username: "u", Password: "p"}
+	for u, want := range map[string]bool{
+		"https://shop.example.com/login":     true,
+		"https://www.shop.example.com/":      true,
+		"http://shop.example.com/":           false,
+		"https://shop.example.com.evil.org/": false,
+		"https://evilshop.example.com/":      false,
+		"https://example.com/":               false,
+	} {
+		if got := l.For(u); got != want {
+			t.Errorf("For(%q) = %v", u, got)
+		}
+	}
+}

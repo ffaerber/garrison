@@ -55,3 +55,12 @@ The agents are Garrison's, defined in `garrison/config`; each works in every uni
 ```
 
 An agent with grants or routines here acts with an account of its own, `agent-<unit>-<agent>`, which writes only to the repos its grants name.
+
+`logins.yaml`: which agent may sign in to a web site with one of this unit's site logins, for whose requests. An admin adds the login itself (site, username, password) on the dashboard's Secrets page, as `login-<name>`; Garrison's browser types it into that site's own pages only, and the agent never sees the password:
+
+```yaml
+- login: shop           # the secret login-shop
+  agent: scout
+  for: members          # admins, members or everyone
+  unattended: true      # routines may use it too
+```

@@ -305,12 +305,13 @@ check "and no one else"                    bash -c '! kubectl --namespace garris
 # The scout browses the public web in its own browser, through the agents'
 # internet proxy as itself: a public page opens, the home network is
 # refused by the proxy, and Garrison's own pages not at all (a page could
-# have steered it). Called as in a routine, with nobody watching.
+# have steered it). Called as in a routine, with nobody watching. as_scout
+# URL opens a page; as_scout JSON takes browse's arguments.
 as_scout() {
   kubectl --namespace garrison exec -i deployment/openwebui -- curl -sS --max-time 90 \
     -H "X-Garrison-Service: $service_key" -H "X-Garrison-Owner: alice" -H "X-Garrison-Started-By: routine garrison/scout/e2e" \
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":sys.argv[1]}}}))' "$1")" \
+    -d "$(python3 -c 'import json,sys; a=sys.argv[1]; print(json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":json.loads(a) if a.startswith("{") else {"url":a}}}))' "$1")" \
     http://gateway:8080/mcp/garrison/scout | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r.get("result",{}).get("content",[{}])[0].get("text","") or r)'
 }
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -319,4 +320,77 @@ as_scout http://10.43.0.10/ >/dev/null
 refused_home() { logs_since "$since" agents | grep -q "internet: browser: garrison/scout: 10.43.0.10:80 refused"; }
 check "the proxy refuses it the home network" until_true 30 refused_home
 check "and it never opens Garrison's pages" grep -q "does not use Garrison's pages as the person" <<<"$(as_scout "https://$DOMAIN/")"
+
+# A site login: alice adds one of garrison on the dashboard's Secrets page,
+# logins.yaml lets the scout use it for admins in routines, and the deployer
+# hands it to the gateway. The scout signs in to a fake shop (a pod, let
+# through the proxy by INTERNET_ALLOW) without ever seeing the password,
+# which goes only into the shop's password field.
+cat > "$tmp/shop.py" <<'PY'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs
+FORM = b'<!doctype html><title>Shop</title><h1>Shop</h1><form method="post" action="/login"><label>User <input name="user" type="text"></label> <label>Note <input name="note" type="text"></label> <label>Password <input name="pw" type="password"></label> <button>Sign in</button></form>'
+class H(BaseHTTPRequestHandler):
+    def do_GET(self): self.reply(FORM)
+    def do_POST(self):
+        f = parse_qs(self.rfile.read(int(self.headers.get("Content-Length", 0))).decode())
+        ok = f.get("user") == ["scout-e2e"] and f.get("pw") == ["pa55-e2e"]
+        self.reply(b'<!doctype html><title>Shop</title><p>Welcome, scout-e2e</p>' if ok else b'<!doctype html><title>Shop</title><p>Wrong login</p>')
+    def reply(self, body):
+        self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers(); self.wfile.write(body)
+HTTPServer(("", 80), H).serve_forever()
+PY
+kubectl create namespace e2e-shop >/dev/null 2>&1
+kubectl --namespace e2e-shop create configmap shop --from-file=shop.py="$tmp/shop.py" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply --filename - >/dev/null <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: shop, namespace: e2e-shop }
+spec:
+  selector: { matchLabels: { app: shop } }
+  template:
+    metadata: { labels: { app: shop } }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: shop
+          image: python:3.13-alpine
+          command: [python3, /shop/shop.py]
+          volumeMounts: [{ name: shop, mountPath: /shop }]
+      volumes: [{ name: shop, configMap: { name: shop } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: shop, namespace: e2e-shop }
+spec:
+  selector: { app: shop }
+  ports: [{ port: 80 }]
+YAML
+kubectl --namespace e2e-shop rollout status deployment/shop --timeout 300s >/dev/null 2>&1
+shop_ip=$(kubectl --namespace e2e-shop get service shop --output jsonpath='{.spec.clusterIP}')
+sed -i '/^INTERNET_ALLOW=/d' "$ETC/install.env" && echo "INTERNET_ALLOW=$shop_ip/32" >> "$ETC/install.env"
+kubectl --namespace garrison rollout restart deployment/agents >/dev/null && kubectl --namespace garrison rollout status deployment/agents --timeout 300s >/dev/null 2>&1
+shop_allowed() { kubectl --namespace garrison logs deployment/agents --since=5m 2>&1 | grep -q "also lets through \[$shop_ip/32\]"; }
+check "the agents' proxy lets agents reach the shop" until_true 120 shop_allowed
+feed alice / >/dev/null
+check "alice adds the shop's login"        test "$(web -b "$tmp/home-alice.jar" -o /dev/null -w '%{http_code}' -H "Origin: https://$DOMAIN" \
+  --data-urlencode action=login --data-urlencode login=shop --data-urlencode "site=http://$shop_ip" \
+  --data-urlencode username=scout-e2e --data-urlencode password=pa55-e2e "https://$DOMAIN/secrets/garrison")" = 303
+printf -- '- login: shop\n  agent: scout\n  for: admins\n  unattended: true\n' > "$tmp/logins.yaml"
+check "logins.yaml lets the scout use it"  set_config garrison logins.yaml "$tmp/logins.yaml"
+written() { kubectl --namespace garrison exec deployment/gateway -- test -s /etc/garrison/logins/garrison/shop.json; }
+check "the deployer hands it to the gateway" until_true 120 written
+page=$(as_scout "http://$shop_ip/")
+field() { grep -oE "^\[[0-9]+\] input \($1\)" <<<"$page" | head -1 | tr -dc 0-9; }
+user=$(field text) pw=$(field password) note=$(grep -oE '^\[[0-9]+\] input \(text\) "Note' <<<"$page" | tr -dc 0-9)
+check "the scout sees the shop's form"     test -n "$user" -a -n "$pw" -a -n "$note"
+check "a password goes into no other field" grep -q "not a password field" <<<"$(as_scout "{\"login\":\"shop\",\"part\":\"password\",\"type_into\":${note:-0}}")"
+as_scout "{\"login\":\"shop\",\"part\":\"username\",\"type_into\":${user:-0}}" > "$tmp/typed"
+signed=$(as_scout "{\"login\":\"shop\",\"part\":\"password\",\"type_into\":${pw:-0},\"submit\":true}")
+check "the scout signs in with it"         grep -q "Welcome, scout-e2e" <<<"$signed"
+unseen() { ! grep -q "pa55-e2e" "$tmp/typed" && ! grep -q "pa55-e2e" <<<"$signed"; }
+check "and never sees the password"        unseen
+as_scout https://example.org/ >/dev/null
+check "the login goes only into its site"  grep -q "typed only on its own site" <<<"$(as_scout '{"login":"shop","type_into":1}')"
+kubectl delete namespace e2e-shop --wait=false >/dev/null 2>&1
 }

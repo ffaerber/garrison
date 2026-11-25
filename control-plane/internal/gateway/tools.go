@@ -65,6 +65,9 @@ type Tools struct {
 	// Dashboard is the dashboard's address, e.g. https://example.com: a
 	// change opened links its card there. "": only Gitea's page.
 	Dashboard string
+	// LoginsDir holds the units' site logins, <unit>/<name>.json, which the
+	// deployer writes; "": none.
+	LoginsDir string
 	// Ready, if set, waits until a unit just made is set up: its config
 	// repo and its channel, whose address it returns.
 	Ready func(ctx context.Context, ns string) (channel string, err error)
@@ -219,6 +222,8 @@ func baseSpecs() []Spec {
 			"type_into": map[string]any{"type": "integer", "description": "the number of the field to type into"},
 			"text":      str("what to type"),
 			"submit":    map[string]any{"type": "boolean", "description": "press Enter after typing"},
+			"login":     str("instead of text: a site login of your unit (a secret login-<name>, e.g. shop) to type into the field type_into; it is typed only on that login's own site, and you never see it"),
+			"part":      map[string]any{"type": "string", "enum": []string{"username", "password"}, "description": "which part of the login to type; username by default"},
 		}),
 		spec("screenshot", "Takes a screenshot of a page of Garrison, signed in as the person asking (in a routine, with nobody watching, as your own account), and proposes it as a PNG file in a repo: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
 			"unit":        nsArg,
@@ -241,6 +246,7 @@ type args struct {
 	Patch, Base, Branch                                                               string
 	Lines, Width, Height, Number, Click                                               int
 	TypeInto                                                                          int `json:"type_into"`
+	Login, Part                                                                       string
 	Private                                                                           bool
 	Text                                                                              string
 	Submit                                                                            bool
@@ -472,7 +478,14 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if agent != nil {
 			as = agent.ID()
 		}
-		page, err := t.Browser.Browse(ctx, p.Name+"\x00"+agentID(agent), as, token, Action{URL: a.URL, Click: a.Click, Type: a.TypeInto, Text: a.Text, Submit: a.Submit})
+		act := Action{URL: a.URL, Click: a.Click, Type: a.TypeInto, Text: a.Text, Submit: a.Submit}
+		if a.Login != "" {
+			var err error
+			if act, err = t.loginAction(ctx, p, agent, a); err != nil {
+				return "", err
+			}
+		}
+		page, err := t.Browser.Browse(ctx, p.Name+"\x00"+agentID(agent), as, token, act)
 		if err != nil {
 			if page.URL != "" {
 				return "", fmt.Errorf("%w\n%s", err, page)

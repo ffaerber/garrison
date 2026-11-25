@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"garrison/control-plane/internal/secrets"
+
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
@@ -50,6 +52,11 @@ type Action struct {
 	Type   int    // type Text into the element with this number
 	Text   string
 	Submit bool // then press Enter
+	// Site, for a login's part as Text: it is typed only while the page is
+	// on the login's site; Password only into a password field, whose value
+	// no page snapshot shows.
+	Site     *secrets.Login
+	Password bool
 }
 
 // Page is what the agent sees of a page.
@@ -303,6 +310,22 @@ func (b *Browser) Browse(ctx context.Context, key, agent string, token func() (s
 			chromedp.SendKeys(sel(a.Type), a.Text, chromedp.ByQuery))
 		if a.Submit {
 			steps = append(steps, chromedp.SendKeys(sel(a.Type), kb.Enter, chromedp.ByQuery))
+		}
+	}
+	if a.Site != nil {
+		// A login goes only into its own site, and a password only into a
+		// password field, so that no page can have it typed where it is
+		// shown, sent elsewhere or read back.
+		var where, kind string
+		if err := chromedp.Run(actx, chromedp.Evaluate(`location.href`, &where),
+			chromedp.Evaluate(fmt.Sprintf(`((document.querySelector('[data-hc="%d"]') || {}).type || '')`, a.Type), &kind)); err != nil {
+			return Page{}, fmt.Errorf("browser: %w", err)
+		}
+		if !a.Site.For(where) {
+			return Page{}, refused{fmt.Sprintf("the login is for %s, and this page is at %s: it is typed only on its own site", a.Site.Site, where)}
+		}
+		if a.Password && kind != "password" {
+			return Page{}, refused{fmt.Sprintf("element %d is not a password field (%q): a password goes only into one", a.Type, kind)}
 		}
 	}
 	if a.Click > 0 || a.Type > 0 {

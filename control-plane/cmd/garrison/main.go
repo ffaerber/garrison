@@ -283,6 +283,7 @@ func deployCmd(args []string) error {
 	listen := fs.String("listen", "", "address to take Gitea's webhook on (/hook); empty: only check every interval")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches the webhook at")
 	keysDir := fs.String("keys", "", "the units' age keys, which decrypt their stored secrets (e.g. "+etcDir+"/sops); empty: apps with stored secrets are left alone")
+	logins := fs.String("logins", "", "where to write the units' site logins (secrets login-<name>), for the gateway's browser (e.g. "+etcDir+"/logins); empty: not written")
 	llmKeys := fs.String("llm-keys", "", "where to write the LLM providers' keys that garrison's config keeps, for the agent service (e.g. "+etcDir+"/llm-keys); empty: not written")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
@@ -312,6 +313,7 @@ func deployCmd(args []string) error {
 		keys = &secrets.Keys{Dir: *keysDir, Run: secrets.Runner(apply.Exec)}
 		c.Keys = keys
 		c.LLMKeysDir = *llmKeys
+		c.LoginsDir = *logins
 	}
 	store, err := feed.store()
 	if err != nil {
@@ -451,6 +453,7 @@ func gatewayCmd(args []string) error {
 	prometheus := fs.String("prometheus", "http://prometheus:9090", "Prometheus's URL")
 	openwebui := fs.String("openwebui", "http://openwebui:8080", "Open WebUI's URL")
 	browser := fs.String("browser", "http://browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
+	loginsDir := fs.String("logins", "", "the units' site logins the deployer writes, <unit>/<name>.json, for browse; empty: none")
 	webBrowser := fs.String("web-browser", "http://webbrowser:9222", "DevTools of the browser for the public web, which goes out through the agent service's internet proxy; empty: browse only the installation's pages")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	keycloakURL := fs.String("keycloak", "http://keycloak:8080", "Keycloak's URL, for the agents' accounts there; empty: agents get none, and runs without a person cannot browse")
@@ -496,6 +499,7 @@ func gatewayCmd(args []string) error {
 		tools.Keycloak = &gateway.Keycloak{URL: *keycloakURL, User: vars["ADMIN_USER"], Password: g.Password}
 	}
 	serviceKey := gateway.ServiceKey(g.Password)
+	tools.LoginsDir = *loginsDir
 	if *browser != "" {
 		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain, Private: tools.PrivateHost,
 			Web: *webBrowser, ProxyKey: serviceKey}

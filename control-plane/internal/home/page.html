@@ -414,5 +414,15 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
   <label>Value <textarea name="value" required rows="3" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></label>
   <div class="row"><button class="primary">Save</button><span class="hint">Lowercase letters, digits and dashes. Saving under a name that exists replaces its value.</span></div>
 </form>
+<h2>Add a site login of {{.NS}}</h2>
+<p class="note">An account on a web site, for the agents to sign in with, e.g. the scout at a shop. The browser of Garrison types it into that site's pages only; the agents never see the password. It is saved as the secret <code>login-&lt;name&gt;</code>, and an agent may use it only where <code>logins.yaml</code> in {{.NS}}/config names it.</p>
+<form class="panel head setform" method="post" action="/secrets/{{.NS}}" autocomplete="off" id="loginform">
+  <input type="hidden" name="action" value="login">
+  <label>Name <input name="login" required maxlength="26" pattern="[a-z0-9]([a-z0-9\-]{0,24}[a-z0-9])?" placeholder="shop" spellcheck="false" autocapitalize="off"></label>
+  <label>Site <input name="site" required placeholder="https://shop.example.com" spellcheck="false" autocapitalize="off"></label>
+  <label>Username <input name="username" required spellcheck="false" autocapitalize="off" autocomplete="off"></label>
+  <label>Password <input name="password" type="password" required autocomplete="new-password"></label>
+  <div class="row"><button class="primary">Save</button><span class="hint">Saving under a name that exists replaces the login.</span></div>
+</form>
 {{end}}
 {{end}}
