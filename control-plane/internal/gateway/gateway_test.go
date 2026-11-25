@@ -342,7 +342,7 @@ func TestToolsStayInTheirUnit(t *testing.T) {
 		args map[string]any
 	}{
 		{"service_logs", map[string]any{"unit": "garrison", "service": "hello_web"}},            // not a garrison stack
-		{"service_logs", map[string]any{"unit": "garrison", "service": "grafana; id"}},  // not a name
+		{"service_logs", map[string]any{"unit": "garrison", "service": "grafana; id"}},          // not a name
 		{"stack_status", map[string]any{"unit": "homepage", "stack": "grafana"}},                // wrong unit
 		{"read_file", map[string]any{"unit": "garrison", "repo": "grafana", "path": "../../x"}}, // outside the repo
 		{"read_file", map[string]any{"unit": "../admin", "repo": "grafana", "path": "a"}},       // not a unit
@@ -870,7 +870,7 @@ func TestTheBrowserStaysAtHome(t *testing.T) {
 		"http://todo.example.com/":          false, // not https
 		"https://example.com.evil.org/":     false,
 		"https://evilexample.com/":          false,
-		"https://gitea:3000/":         false,
+		"https://gitea:3000/":               false,
 		"https://10.0.0.1/":                 false,
 		"https://user:pw@todo.example.com/": false,
 		"file:///etc/passwd":                false,
@@ -880,6 +880,50 @@ func TestTheBrowserStaysAtHome(t *testing.T) {
 		if got := b.Allowed(u); got != want {
 			t.Errorf("Allowed(%q) = %v, want %v", u, got, want)
 		}
+	}
+}
+
+// The public web is every http and https page outside the installation's
+// names, without a user in its address; browse opens it only with a browser
+// for it and as an agent.
+func TestThePublicWeb(t *testing.T) {
+	b := &Browser{Domain: "example.com"}
+	for u, want := range map[string]bool{
+		"https://example.org/":          true,
+		"http://example.org/a?b=1":      true,
+		"https://example.com.evil.org/": true,
+		"https://todo.example.com/":     false,
+		"https://example.com/":          false,
+		"https://user:pw@example.org/":  false,
+		"file:///etc/passwd":            false,
+		"javascript:alert(1)":           false,
+		"ftp://example.org/":            false,
+		"https:///nohost":               false,
+	} {
+		if got := b.Public(u); got != want {
+			t.Errorf("Public(%q) = %v, want %v", u, got, want)
+		}
+	}
+	none := func() (string, error) { return "", nil }
+	if _, err := b.Browse(context.Background(), "k", "todo/scout", none, Action{URL: "https://example.org/"}); err == nil || !strings.Contains(err.Error(), "only pages at https://<name>.example.com") {
+		t.Errorf("without a browser for the web: %v", err)
+	}
+	b.Web = "http://127.0.0.1:1"
+	if _, err := b.Browse(context.Background(), "k", "", none, Action{URL: "https://example.org/"}); err == nil || !strings.Contains(err.Error(), "only pages at") {
+		t.Errorf("as no agent: %v", err)
+	}
+	if _, err := b.Browse(context.Background(), "k", "todo/scout", none, Action{URL: "file:///etc/passwd"}); err == nil || !strings.Contains(err.Error(), "not a web page") {
+		t.Errorf("a file: %v", err)
+	}
+	// An agent that reaches the whole web never opens Garrison's pages as
+	// the person.
+	tools := &Tools{Browser: b}
+	scout := &agents.Agent{Unit: "todo", Name: "scout", Tools: []string{"browse"}, Internet: agents.Internet{All: true}}
+	if _, err := tools.Call(context.Background(), Person{Name: "bob", Token: "bobs"}, scout, "browse", json.RawMessage(`{"url":"https://todo.example.com/"}`)); err == nil || !strings.Contains(err.Error(), "does not use Garrison's pages as the person") {
+		t.Errorf("the scout on Garrison's pages: %v", err)
+	}
+	if BrowserProxyPassword("k", "todo/scout") == BrowserProxyPassword("k", "todo/coder") || BrowserProxyPassword("k", "a") == BrowserProxyPassword("j", "a") {
+		t.Error("the proxy passwords do not tell agents or keys apart")
 	}
 }
 

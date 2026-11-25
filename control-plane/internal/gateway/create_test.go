@@ -47,7 +47,9 @@ func TestMakingUnitsAndRepos(t *testing.T) {
 			readied = append(readied, ns)
 			return "https://chat.home.test/channels/c-" + ns, nil
 		},
-		UnitChannel: func(_ context.Context, ns string) (string, error) { return "https://chat.home.test/channels/c-" + ns, nil }}
+		UnitChannel: func(_ context.Context, ns string) (string, error) {
+			return "https://chat.home.test/channels/c-" + ns, nil
+		}}
 	call := func(who, tool string, args map[string]any) (string, error) {
 		raw, _ := json.Marshal(args)
 		return tools.Call(context.Background(), Person{Name: who}, nil, tool, raw)

@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -32,7 +35,37 @@ type Browser struct {
 	// as the person. nil: only the dashboard.
 	Private func(host string) bool
 
+	// Web is the DevTools of a second Chrome, for the public web
+	// (http://webbrowser:9222): it reaches the internet only through the
+	// agent service's internet proxy, as the agent browsing, so the agent's
+	// internet in agent.yaml holds, and never the home network. It checks
+	// certificates, and holds no person's token. "": browse stays at the
+	// installation's own names.
+	Web string
+	// ProxyKey is the service key, from which the proxy password of each
+	// agent comes (BrowserProxyPassword).
+	ProxyKey string
+
 	browsing browsing // tabs of browse, by person and agent
+}
+
+// BrowserProxyPassword is the password with which the public web's browser
+// names agent to the agent service's internet proxy: only the gateway,
+// which holds the service key, can make it.
+func BrowserProxyPassword(serviceKey, agent string) string {
+	m := hmac.New(sha256.New, []byte(serviceKey))
+	m.Write([]byte("garrison browser proxy v1\x00" + agent))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// Public tells whether u is a page of the public web to browse: http or
+// https, with no user in it, outside the installation's names.
+func (b *Browser) Public(u string) bool {
+	p, err := url.Parse(u)
+	if err != nil || (p.Scheme != "https" && p.Scheme != "http") || p.User != nil || p.Hostname() == "" {
+		return false
+	}
+	return !b.Allowed("https://" + p.Host + "/")
 }
 
 // Shot is a screenshot and what the page was.
@@ -90,7 +123,11 @@ func (b *Browser) continueAs(e *fetch.EventRequestPaused, token string) *fetch.C
 // devtools is Chrome's DevTools URL with the host as an IP: Chrome refuses
 // requests whose Host header is a name other than localhost.
 func (b *Browser) devtools(ctx context.Context) (string, error) {
-	u, err := url.Parse(b.URL)
+	return devtoolsOf(ctx, b.URL)
+}
+
+func devtoolsOf(ctx context.Context, base string) (string, error) {
+	u, err := url.Parse(base)
 	if err != nil {
 		return "", err
 	}

@@ -211,3 +211,45 @@ func TestPublicOr(t *testing.T) {
 		t.Error("a word was taken for a range")
 	}
 }
+
+// The gateway's browser for the public web names the agent browsing with a
+// password only the service key makes; the proxy then holds it to that
+// agent's internet, as a sandbox of it.
+func TestTheProxyGoesOutForThePublicWebsBrowser(t *testing.T) {
+	s, _, _ := setup(t)
+	agentsWith(s,
+		agents.Agent{Unit: "homepage", Name: "web", Prompt: "p", Internet: agents.Internet{All: true}},
+		agents.Agent{Unit: "homepage", Name: "builder", Prompt: "p", Internet: agents.Internet{Packages: true}},
+	)
+	s.Gateway.ServiceKey = "service-key"
+	p := &InternetProxy{Server: s, AnyPort: true, Allowed: func(netip.Addr) bool { return true }}
+	plain := site(t, false)
+	get := func(user, password string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, plain+"/", nil)
+		r.SetBasicAuth(user, password)
+		r.Header.Set("Proxy-Authorization", r.Header.Get("Authorization"))
+		r.Header.Del("Authorization")
+		w := httptest.NewRecorder()
+		p.ServeHTTP(w, r)
+		return w
+	}
+	if w := get("homepage/web", gateway.BrowserProxyPassword("service-key", "homepage/web")); w.Code != 200 || !strings.Contains(w.Body.String(), "hello from the internet") {
+		t.Errorf("the browser as web: %d %s", w.Code, w.Body)
+	}
+	if w := get("homepage/builder", gateway.BrowserProxyPassword("service-key", "homepage/builder")); w.Code != http.StatusForbidden {
+		t.Errorf("the browser as builder, whose internet is the registries: %d", w.Code)
+	}
+	for name, auth := range map[string][2]string{
+		"another agent's password": {"homepage/builder", gateway.BrowserProxyPassword("service-key", "homepage/web")},
+		"another key":              {"homepage/web", gateway.BrowserProxyPassword("other-key", "homepage/web")},
+		"no user":                  {"", gateway.BrowserProxyPassword("service-key", "")},
+	} {
+		if w := get(auth[0], auth[1]); w.Code == 200 {
+			t.Errorf("%s: let through", name)
+		}
+	}
+	s.Gateway.ServiceKey = "" // without a key, nothing is the browser
+	if w := get("homepage/web", gateway.BrowserProxyPassword("", "homepage/web")); w.Code != http.StatusProxyAuthRequired {
+		t.Errorf("no service key: %d", w.Code)
+	}
+}

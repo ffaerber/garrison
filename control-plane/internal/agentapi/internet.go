@@ -2,6 +2,7 @@ package agentapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"garrison/control-plane/internal/agents"
+	"garrison/control-plane/internal/gateway"
 	"garrison/control-plane/internal/sandbox"
 )
 
@@ -55,24 +57,35 @@ func (p *InternetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("agents: internet: %s: %s: %s %s", c.Person, c.Agent, r.Method, target)
+	who := c.Person + ": " + c.Agent
 	if r.Method == http.MethodConnect {
-		p.tunnel(w, r, target)
+		p.tunnel(w, r, target, who)
 		return
 	}
-	p.forward(w, r)
+	p.forward(w, r, target, who)
 }
 
 func (p *InternetProxy) caller(r *http.Request) (sandbox.Caller, bool) {
 	raw, ok := strings.CutPrefix(r.Header.Get("Proxy-Authorization"), "Basic ")
-	if !ok || p.Server.Sandboxes == nil {
+	if !ok {
 		return sandbox.Caller{}, false
 	}
 	dec, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
 		return sandbox.Caller{}, false
 	}
-	_, token, _ := strings.Cut(string(dec), ":")
-	return p.Server.Sandboxes.Caller(token)
+	user, token, _ := strings.Cut(string(dec), ":")
+	if p.Server.Sandboxes != nil {
+		if c, ok := p.Server.Sandboxes.Caller(token); ok {
+			return c, true
+		}
+	}
+	// The gateway's browser for the public web, as the agent browsing.
+	if key := p.Server.Gateway; key != nil && key.ServiceKey != "" && user != "" &&
+		hmac.Equal([]byte(token), []byte(gateway.BrowserProxyPassword(key.ServiceKey, user))) {
+		return sandbox.Caller{Agent: user, Person: "browser"}, true
+	}
+	return sandbox.Caller{}, false
 }
 
 // target is host:port of the request.
@@ -201,12 +214,13 @@ func (p *InternetProxy) dial(ctx context.Context, network, target string) (net.C
 	return d.DialContext(ctx, network, target)
 }
 
-func (p *InternetProxy) tunnel(w http.ResponseWriter, r *http.Request, target string) {
+func (p *InternetProxy) tunnel(w http.ResponseWriter, r *http.Request, target, who string) {
 	up, err := p.dial(r.Context(), "tcp", target)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, errNotPublic) {
 			status = http.StatusForbidden
+			log.Printf("agents: internet: %s: %s refused: not a public address", who, target)
 		}
 		http.Error(w, err.Error(), status)
 		return
@@ -259,7 +273,7 @@ func (p *InternetProxy) tunnel(w http.ResponseWriter, r *http.Request, target st
 // hop are the headers of one connection, not passed on.
 var hop = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"}
 
-func (p *InternetProxy) forward(w http.ResponseWriter, r *http.Request) {
+func (p *InternetProxy) forward(w http.ResponseWriter, r *http.Request, target, who string) {
 	out := r.Clone(r.Context())
 	out.RequestURI = ""
 	for _, h := range hop {
@@ -272,6 +286,7 @@ func (p *InternetProxy) forward(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if errors.Is(err, errNotPublic) {
 			status = http.StatusForbidden
+			log.Printf("agents: internet: %s: %s refused: not a public address", who, target)
 		}
 		http.Error(w, err.Error(), status)
 		return

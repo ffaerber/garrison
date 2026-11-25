@@ -1,6 +1,7 @@
-# The scout: goes out on the public web, with a browser of its own and no
-# sign-in, and reports back with sources. No access to Garrison's repos or apps.
-description: "Researches on the public web (docs, libraries, prices, how-tos): searches it, reads and collects data from sites with a browser of its own, and answers with sources"
+# The scout: goes out on the public web, searches it, reads and collects
+# data from sites, uses them click by click (forms too), and reports back
+# with sources. No access to Garrison's repos or apps.
+description: "Researches on the public web (docs, libraries, prices, how-tos): searches it, reads and collects data from sites, fills in and sends forms, and answers with sources"
 model: ""
-tools: [web_search]
+tools: [web_search, browse]
 internet: all

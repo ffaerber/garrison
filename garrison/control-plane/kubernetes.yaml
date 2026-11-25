@@ -399,6 +399,48 @@ spec:
           resources:
             limits: { memory: 1Gi }
 ---
+# The browser for the public web, which the gateway's browse drives for
+# agents. Unlike the one above it checks certificates, maps no names to
+# Traefik and holds no person's token; it reaches the internet only through
+# the agent service's internet proxy, as the agent browsing, so the agent's
+# internet holds and the home network stays out of reach (garrison/platform's
+# NetworkPolicy webbrowser allows it nothing else).
+apiVersion: v1
+kind: Service
+metadata:
+  name: webbrowser
+spec:
+  selector: { app: webbrowser }
+  ports: [{ name: devtools, port: 9222 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webbrowser
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: webbrowser } }
+  template:
+    metadata:
+      labels: { app: webbrowser }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: webbrowser
+          image: chromedp/headless-shell:156.0.8078.48
+          command: [/bin/bash, -c]
+          args:
+            - |
+              socat TCP4-LISTEN:9222,fork TCP4:127.0.0.1:9223 &
+              exec /headless-shell/headless-shell --no-sandbox --use-gl=angle --use-angle=swiftshader \
+                --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 \
+                --proxy-server=http://agents.garrison.svc.cluster.local:8072 '--proxy-bypass-list=<-loopback>' \
+                --disable-background-networking --disable-component-update --disable-sync --no-pings \
+                --disable-domain-reliability --force-webrtc-ip-handling-policy=disable_non_proxied_udp
+          ports: [{ containerPort: 9222 }]
+          resources:
+            limits: { memory: 1536Mi }
+---
 # ---------- the user units' pipelines ----------
 # The Docker API for the user runner: only what running jobs needs.
 apiVersion: v1

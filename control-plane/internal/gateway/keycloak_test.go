@@ -216,9 +216,14 @@ func TestARunWithoutAPersonSignsInAsTheAgent(t *testing.T) {
 	if tok, err := tools.signIn(context.Background(), Person{Name: "bob", Token: "bobs"}, agent); err != nil || tok != "bobs" {
 		t.Errorf("person: %q %v", tok, err)
 	}
-	none := &Tools{Browser: &Browser{}}
-	if _, err := none.Call(context.Background(), routine, agent, "browse", json.RawMessage(`{"url":"https://todo.example.test/"}`)); err == nil || !strings.Contains(err.Error(), "gives agents none in Keycloak") {
-		t.Errorf("without Keycloak: %v", err)
+	// Garrison's own pages need a sign-in, which a routine without Keycloak
+	// has not; screenshots are refused before anything runs.
+	none := &Tools{Browser: &Browser{Domain: "example.test"}}
+	if _, err := none.Call(context.Background(), routine, agent, "browse", json.RawMessage(`{"url":"https://todo.example.test/"}`)); err == nil || !strings.Contains(err.Error(), "no account of the agent to sign in with") {
+		t.Errorf("browse without Keycloak: %v", err)
+	}
+	if _, err := none.Call(context.Background(), routine, agent, "screenshot", json.RawMessage(`{"url":"https://todo.example.test/"}`)); err == nil || !strings.Contains(err.Error(), "gives agents none in Keycloak") {
+		t.Errorf("screenshot without Keycloak: %v", err)
 	}
 }
 

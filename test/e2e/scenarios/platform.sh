@@ -301,4 +301,22 @@ searx() {
 }
 check "SearXNG answers the agent service"  until_true 120 searx
 check "and no one else"                    bash -c '! kubectl --namespace garrison exec deployment/openwebui -- curl -sS --max-time 5 -o /dev/null http://searxng:8080/healthz 2>/dev/null'
+
+# The scout browses the public web in its own browser, through the agents'
+# internet proxy as itself: a public page opens, the home network is
+# refused by the proxy, and Garrison's own pages not at all (a page could
+# have steered it). Called as in a routine, with nobody watching.
+as_scout() {
+  kubectl --namespace garrison exec -i deployment/openwebui -- curl -sS --max-time 90 \
+    -H "X-Garrison-Service: $service_key" -H "X-Garrison-Owner: alice" -H "X-Garrison-Started-By: routine garrison/scout/e2e" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse","arguments":{"url":sys.argv[1]}}}))' "$1")" \
+    http://gateway:8080/mcp/garrison/scout | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r.get("result",{}).get("content",[{}])[0].get("text","") or r)'
+}
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+check "the scout opens a public page"      grep -q "Example Domain" <<<"$(as_scout https://example.org/)"
+as_scout http://10.43.0.10/ >/dev/null
+refused_home() { logs_since "$since" agents | grep -q "internet: browser: garrison/scout: 10.43.0.10:80 refused"; }
+check "the proxy refuses it the home network" until_true 30 refused_home
+check "and it never opens Garrison's pages" grep -q "does not use Garrison's pages as the person" <<<"$(as_scout "https://$DOMAIN/")"
 }

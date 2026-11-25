@@ -451,6 +451,7 @@ func gatewayCmd(args []string) error {
 	prometheus := fs.String("prometheus", "http://prometheus:9090", "Prometheus's URL")
 	openwebui := fs.String("openwebui", "http://openwebui:8080", "Open WebUI's URL")
 	browser := fs.String("browser", "http://browser:9222", "headless Chrome's DevTools, for screenshots; empty: none")
+	webBrowser := fs.String("web-browser", "http://webbrowser:9222", "DevTools of the browser for the public web, which goes out through the agent service's internet proxy; empty: browse only the installation's pages")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	keycloakURL := fs.String("keycloak", "http://keycloak:8080", "Keycloak's URL, for the agents' accounts there; empty: agents get none, and runs without a person cannot browse")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
@@ -494,10 +495,11 @@ func gatewayCmd(args []string) error {
 	if *keycloakURL != "" {
 		tools.Keycloak = &gateway.Keycloak{URL: *keycloakURL, User: vars["ADMIN_USER"], Password: g.Password}
 	}
-	if *browser != "" {
-		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain, Private: tools.PrivateHost}
-	}
 	serviceKey := gateway.ServiceKey(g.Password)
+	if *browser != "" {
+		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain, Private: tools.PrivateHost,
+			Web: *webBrowser, ProxyKey: serviceKey}
+	}
 	mcp := &gateway.MCP{
 		Tools:      tools,
 		Verifier:   verifier,
