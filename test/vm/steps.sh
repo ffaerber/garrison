@@ -17,6 +17,9 @@
 #   FREE_GB=12 test/vm/steps.sh    a VM boots only while the host has this
 #                                  much memory available (default 10)
 #   LLM=cloud test/vm/steps.sh     use Ollama's cloud instead of the local Ollama
+#   LLM=server test/vm/steps.sh    use an inference server on the LAN (OpenAI-style):
+#                                  SERVER_LLM_URL and SERVER_LLM_MODEL from the
+#                                  environment or .env; the default when .env names one
 #   COMFYUI=host test/vm/steps.sh media
 #                                  media with a real ComfyUI on this computer,
 #                                  reached at the VM's gateway, port 8188,
@@ -80,11 +83,23 @@ declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]
 FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
 
-# Which LLM the agents use: local (Ollama on this computer, LOCAL_MODEL) or cloud.
-LLM=${LLM:-local}
+# server_setting NAME: NAME from the environment, else from this checkout's
+# .env (which git ignores: a LAN's addresses stay out of the repo).
+server_setting() {
+  local v=${!1:-}
+  [ -n "$v" ] || [ ! -f "$ROOT/.env" ] || v=$(sed -n "s/^$1=//p" "$ROOT/.env" | tr -d '"'"'"'\r' | head -n1)
+  echo "$v"
+}
+SERVER_LLM_URL=$(server_setting SERVER_LLM_URL)
+SERVER_LLM_MODEL=$(server_setting SERVER_LLM_MODEL)
+# Which LLM the agents use: an inference server on the LAN (when .env names
+# one), local (Ollama on this computer, LOCAL_MODEL) or cloud.
+if [ -n "$SERVER_LLM_URL" ] && [ -n "$SERVER_LLM_MODEL" ]; then LLM=${LLM:-server}; else LLM=${LLM:-local}; fi
 COMFYUI=${COMFYUI:-fake}
 LOCAL_MODEL=${LOCAL_MODEL:-qwen3.8-64k:latest}
-case $LLM in local|cloud) ;; *) echo "LLM must be local or cloud" >&2; exit 2 ;; esac
+case $LLM in local|cloud|server) ;; *) echo "LLM must be local, cloud or server" >&2; exit 2 ;; esac
+[ "$LLM" != server ] || { [ -n "$SERVER_LLM_URL" ] && [ -n "$SERVER_LLM_MODEL" ]; } ||
+  { echo "LLM=server needs SERVER_LLM_URL and SERVER_LLM_MODEL (environment or .env)" >&2; exit 2; }
 
 # Files each step depends on, besides this script's own definition of the
 # step: its scenario file, and what every scenario shares.
@@ -196,6 +211,8 @@ step_install() {
   if [ "$LLM" = local ]; then
     in_vm sudo bash -c "gw=\$(ip route | awk '/^default/ { print \$3; exit }')
       { echo LLM_BASE_URL=http://\$gw:11434/v1; echo LLM_MODEL=$LOCAL_MODEL; } >> garrison/$ANSWERS"
+  elif [ "$LLM" = server ]; then
+    in_vm sudo bash -c "{ echo LLM_BASE_URL=$SERVER_LLM_URL; echo LLM_MODEL=$SERVER_LLM_MODEL; } >> garrison/$ANSWERS"
   fi
   in_vm sudo garrison/install.sh --answers "garrison/$ANSWERS"
   in_vm sudo bash -c 'cd garrison && test/e2e/add-test-users.sh'
@@ -335,8 +352,8 @@ step_crud() {
 # placeholder; the cloud gets OLLAMA_API_KEY from this checkout's .env.
 put_llm_key() {
   local key file=$ROOT/bin/llm-api-key-$VM
-  if [ "$LLM" = local ]; then
-    key=ollama
+  if [ "$LLM" = local ] || [ "$LLM" = server ]; then
+    key=ollama   # neither checks a key; Garrison wants one
   else
     [ -f "$ROOT/.env" ] || return 0
     key=$(sed -n 's/^OLLAMA_API_KEY=//p' "$ROOT/.env" | tr -d '"'"'"'\r' | head -n1)
@@ -394,7 +411,7 @@ fingerprint() {
       echo "$prev"
       declare -f "step_$s" sync_repo smoke put_llm_key
       [[ $(declare -f "step_$s") == *scenario* ]] && declare -f scenario browser_scenario
-      [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL"
+      [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL" && { [ "$LLM" != server ] || echo "$SERVER_LLM_URL $SERVER_LLM_MODEL"; }
       [ "$s" = media ] && [ "$COMFYUI" != fake ] && echo "COMFYUI=$COMFYUI"
       files=$(inputs "$s")
       # Without paths, git ls-files would list the whole repo.

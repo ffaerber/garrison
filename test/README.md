@@ -14,12 +14,13 @@ JOBS=4 test/vm/steps.sh          # at most 4 VMs at once
 FREE_GB=12 test/vm/steps.sh      # a VM boots only while this much memory is free (default 10)
 test/vm/watch.py                 # the run, live, in the browser: http://localhost:8099
 LLM=cloud test/vm/steps.sh       # the agents on Ollama's cloud instead of the local Ollama
+LLM=server test/vm/steps.sh      # on an inference server on the LAN (SERVER_LLM_URL, SERVER_LLM_MODEL in .env)
 COMFYUI=host test/vm/steps.sh media  # media with a real ComfyUI on this computer (port 8188 on the VMs' gateway), not the fake
 LOCAL_MODEL=nemotron-3.5-lightning:latest test/vm/steps.sh   # another local model
 test/e2e/smoke.sh roles          # in a VM: one scenario, test/e2e/scenarios/roles.sh
 ```
 
-The agents run on Ollama on this computer by default (`qwen3.8-64k`), reached from the VM through its gateway; Ollama must listen on more than localhost (`OLLAMA_HOST=0.0.0.0`). No key is needed.
+The agents run on an inference server on the LAN when this checkout's `.env` names one (`SERVER_LLM_URL=http://<host>:<port>/v1` and `SERVER_LLM_MODEL`, OpenAI-style, no key; `.env` keeps the LAN's addresses out of the repo), else on Ollama on this computer (`qwen3.8-64k`), reached from the VM through its gateway; Ollama must listen on more than localhost (`OLLAMA_HOST=0.0.0.0`). No key is needed. The LLM is set at install, so changing it reruns everything from install.
 
 ## The tree
 
