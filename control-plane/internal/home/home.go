@@ -182,6 +182,7 @@ var views = []struct{ Name, Label string }{
 	{"changes", "Code and reviews"},
 	{"deploys", "Deploys and alerts"},
 	{"agents", "Agents"},
+	{"lessons", "Lessons"},
 	{"problems", "Problems"},
 }
 
@@ -202,6 +203,9 @@ func query(r *http.Request, v events.Visibility) (events.Query, url.Values) {
 		f.Set("view", view)
 	case "agents":
 		q.Sources = []string{events.SourceGateway, events.SourceAgents}
+		f.Set("view", view)
+	case "lessons":
+		q.Kinds = []string{events.KindLesson}
 		f.Set("view", view)
 	case "problems":
 		q.Problems = true

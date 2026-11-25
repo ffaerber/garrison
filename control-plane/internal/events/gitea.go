@@ -33,6 +33,7 @@ const (
 	KindQuestion      = "question" // an agent asks a person and waits for the answer
 	KindUnit          = "unit"     // a unit is set up
 	KindMedia         = "media"    // an agent made pictures or videos into a media library
+	KindLesson        = "lesson"   // an agent learnt something: a sharper ask helped, a skill proposed or merged
 )
 
 // ApprovalContext is the commit status the gateway's approval check posts.
@@ -78,6 +79,7 @@ func FromGitea(event, delivery string, body []byte) []Event {
 		PullRequest  *struct {
 			Number         int       `json:"number"`
 			Title          string    `json:"title"`
+			Body           string    `json:"body"`
 			HTMLURL        string    `json:"html_url"`
 			Merged         bool      `json:"merged"`
 			MergeCommitSHA string    `json:"merge_commit_sha"`
@@ -192,6 +194,9 @@ func FromGitea(event, delivery string, body []byte) []Event {
 		default:
 			return nil
 		}
+		if ls := skillLessons(e, ns, repo, pr.Head.Ref, pr.Body); ls != nil {
+			return append([]Event{e}, ls...)
+		}
 	case "status":
 		// Pipelines come as workflow runs; of the statuses, the feed keeps
 		// the approval check's verdicts.
@@ -229,6 +234,42 @@ func FromGitea(event, delivery string, body []byte) []Event {
 		return nil
 	}
 	return []Event{e}
+}
+
+// skillLessons are the lessons a skill pull request of garrison/config
+// tells, beside its own event. Opened, an agent may learn a skill: waiting
+// for a root admin. Merged, that entry is done and a new one says the agent
+// learnt it; closed, the entry says it was not taken. Its branch, from the
+// gateway's propose_skill, is skill/<agent>/<skill>-<ms>.
+func skillLessons(pr Event, ns, repo, branch, body string) []Event {
+	rest, ok := strings.CutPrefix(branch, "skill/")
+	agent, skill, _ := strings.Cut(rest, "/")
+	if i := strings.LastIndex(skill, "-"); i > 0 {
+		skill = skill[:i]
+	}
+	// garrison/config, the platform's own, named here as events cannot
+	// import the gateway.
+	if !ok || ns != "garrison" || repo != "config" || agent == "" || skill == "" {
+		return nil
+	}
+	proposed := pr
+	proposed.Kind, proposed.Agent, proposed.Detail = KindLesson, "garrison/"+agent, strings.TrimSpace(body)
+	proposed.Key = fmt.Sprintf("lesson:%s/%s#%d", ns, repo, pr.PR)
+	proposed.Title = fmt.Sprintf("%s may learn the skill %s, proposed in #%d", agent, skill, pr.PR)
+	switch pr.Kind {
+	case KindPROpened:
+		proposed.Status, proposed.Title = StatusWaiting, proposed.Title+": a root admin reviews it"
+		return []Event{proposed}
+	case KindPRMerged:
+		proposed.Status, proposed.Title = StatusOK, proposed.Title+": merged"
+		learnt := proposed
+		learnt.Key, learnt.Title = proposed.Key+":learnt", fmt.Sprintf("%s learnt the skill %s: %s merged #%d", agent, skill, pr.Actor, pr.PR)
+		return []Event{proposed, learnt}
+	case KindPRClosed:
+		proposed.Status, proposed.Title = StatusInfo, proposed.Title+": "+pr.Actor+" closed it unmerged"
+		return []Event{proposed}
+	}
+	return nil
 }
 
 func plural(n int, s string) string {

@@ -143,8 +143,36 @@ type Run struct {
 // Asks counts how often a turn asked each agent, so that a lead asks one
 // again, with a sharper task, only so often.
 type Asks struct {
-	mu sync.Mutex
-	n  map[string]int
+	mu   sync.Mutex
+	n    map[string]int
+	miss map[string]Miss
+}
+
+// Miss is an ask that did not finish: how far the agent got (partial or
+// stuck), why, and the task it had.
+type Miss struct {
+	Status, Why, Task string
+}
+
+// Answered notes how agent's latest answer ended, a zero Miss when it was
+// done, and says the miss before it, if there was one: so a done answer
+// after a miss is a sharper ask that helped. A nil Asks notes nothing.
+func (a *Asks) Answered(agent string, m Miss) (before Miss, ok bool) {
+	if a == nil {
+		return Miss{}, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.miss == nil {
+		a.miss = map[string]Miss{}
+	}
+	before, ok = a.miss[agent]
+	if m.Status == "" {
+		delete(a.miss, agent)
+	} else {
+		a.miss[agent] = m
+	}
+	return before, ok
 }
 
 // Add counts one more ask of agent and says how many there were, this one

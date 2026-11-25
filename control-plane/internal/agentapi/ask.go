@@ -309,20 +309,35 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		Unit: target.Unit, Audience: events.AudienceMembers, Actor: who, Agent: target.ID(), StartedBy: "agent " + c.Agent,
 		Title: fmt.Sprintf("%s %s %s, for %s: %s", c.Agent, asked, target.ID(), who, strings.TrimSpace(in.Task)),
 		Key:   fmt.Sprintf("ask:%s:%s:%d", c.Agent, target.ID(), time.Now().UnixNano())}
-	record := func(ctx context.Context, answer string, err error) {
+	// record ends the hand-off in the feed and says whether it was a lesson:
+	// done this time, after a miss earlier this turn.
+	record := func(ctx context.Context, answer string, err error) (learnt bool) {
+		o := outcomeOf(answer)
+		miss := sandbox.Miss{}
+		if err != nil {
+			miss = sandbox.Miss{Status: "failed", Why: err.Error(), Task: in.Task}
+		} else if o.Status == StatusPartial || o.Status == StatusStuck {
+			miss = sandbox.Miss{Status: o.Status, Why: o.Why, Task: in.Task}
+		}
+		before, missed := c.Run.Asks.Answered(target.ID(), miss)
+		learnt = missed && err == nil && o.Status == StatusDone
 		if s.Events == nil {
-			return
+			return learnt
 		}
 		ev.Status, ev.Detail = events.StatusOK, answer
 		// The feed says when it did not finish, so the lead's next ask,
 		// and a person reading, see why.
-		if o := outcomeOf(answer); o.Status == StatusPartial || o.Status == StatusStuck {
+		if miss.Status != "" && err == nil {
 			ev.Title = strings.TrimSuffix(ev.Title, ".") + " (" + o.Status + ")"
 		}
 		if err != nil {
 			ev.Status, ev.Detail = events.StatusFailed, strings.TrimSpace(err.Error()+"\n\n"+answer)
 		}
 		s.Events.Record(ctx, ev)
+		if learnt {
+			s.Events.Record(ctx, lesson(ev, c.Agent, target.ID(), before, in.Task))
+		}
+		return learnt
 	}
 	if s.Events != nil {
 		s.Events.Record(ctx, ev)
@@ -365,14 +380,33 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 	}
 	_, err = s.sandboxTurn(ctx, run, c.Person, c.Chat, key, target, msg, out)
 	answer := out.answer()
-	record(context.WithoutCancel(ctx), answer, err)
+	learnt := record(context.WithoutCancel(ctx), answer, err)
 	if err != nil {
 		return fmt.Sprintf("%s stopped: %v\nWhat it said before: %s", target.ID(), err, answer), true
 	}
 	if answer == "" {
 		answer = "(no answer)"
 	}
-	return target.ID() + " answers:\n" + answer + retryHint(target.ID(), outcomeOf(answer), n), false
+	hint := retryHint(target.ID(), outcomeOf(answer), n)
+	if learnt && slices.Contains(asker.Tools, "propose_skill") {
+		hint = fmt.Sprintf("\n\nAsking again with a sharper task helped. Once you have answered, propose_skill for %s (or yourself) with what the better task said, so that the next run does not hit the same gap.", agents.NameOf(target.ID()))
+	}
+	return target.ID() + " answers:\n" + answer + hint, false
+}
+
+// lesson is what the feed keeps of an ask that helped: asker asked target
+// again, sharper, after a miss, and this time it was done. ask is the
+// hand-off's own event; before the miss and task the second task.
+func lesson(ask events.Event, asker, target string, before sandbox.Miss, task string) events.Event {
+	l := ask
+	l.Kind, l.Status, l.Key = events.KindLesson, events.StatusOK, ask.Key+":lesson"
+	why := before.Status
+	if before.Why != "" {
+		why += ": " + before.Why
+	}
+	l.Title = fmt.Sprintf("%s got %s to finish by asking again sharper; before, it was %s", asker, target, why)
+	l.Detail = fmt.Sprintf("First task: %s\n\n%s was %s.\n\nThe task that worked: %s", strings.TrimSpace(before.Task), target, why, strings.TrimSpace(task))
+	return l
 }
 
 // instance is the agent asked for as it works: in the unit named, as

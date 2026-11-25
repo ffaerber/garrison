@@ -269,6 +269,10 @@ sys_review alice "${skill_pr:-0}"
 check "alice approves it: she did not write it" until_true 60 approval_has "${skill_pr:-0}" "^success"
 check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$sys/pulls/${skill_pr:-0}/merge")" = 200
 check "the scout has the skill on main"    grep -q "name: e2e-sources" <<<"$(gitea_api "" "$sys/raw/agents/scout/skills/e2e-sources/SKILL.md")"
+# The feed's Lessons: the proposal, done once merged, and that the scout
+# learnt it.
+check "the feed's lessons say it proposed"  until_true 60 in_feed alice view=lessons "e['kind'] == 'lesson' and e['agent'] == 'garrison/scout' and e['pr'] == ${skill_pr:-0} and 'may learn the skill e2e-sources' in e['title'] and e['status'] == 'ok'"
+check "and that the scout learnt it"       until_true 60 in_feed alice view=lessons "e['kind'] == 'lesson' and e['title'] == 'scout learnt the skill e2e-sources: alice merged #${skill_pr:-0}'"
 # Anything else on a skill branch is refused, whoever pushed it.
 out=$(as_coder propose_skill "$(sed 's/e2e-sources/e2e-more/g' <<<"$skill_args")")
 more_pr=$(grep -oE 'garrison/config#[0-9]+' <<<"$out" | grep -oE '[0-9]+$')

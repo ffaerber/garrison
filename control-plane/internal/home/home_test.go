@@ -128,3 +128,18 @@ func TestAPI(t *testing.T) {
 		t.Errorf("dave gets the private push: %d", w.Code)
 	}
 }
+
+// The Lessons view shows what agents learnt, to whom may see each.
+func TestLessonsView(t *testing.T) {
+	s, m := server()
+	ctx := context.Background()
+	m.Record(ctx, events.Event{Source: events.SourceAgents, Kind: events.KindLesson, Status: events.StatusOK, Unit: "todo", Audience: events.AudienceMembers,
+		Actor: "bob", Agent: "todo/scout", Title: "todo/coder got todo/scout to finish by asking again sharper"})
+	body := get(s, "alice", "/?view=lessons").Body.String()
+	if !strings.Contains(body, "got todo/scout to finish") || strings.Contains(body, "deployed todo") || !strings.Contains(body, ">Lessons<") {
+		t.Errorf("the Lessons view:\n%s", body)
+	}
+	if body := get(s, "dave", "/?view=lessons").Body.String(); strings.Contains(body, "got todo/scout to finish") {
+		t.Error("dave, not in todo, sees its lesson")
+	}
+}

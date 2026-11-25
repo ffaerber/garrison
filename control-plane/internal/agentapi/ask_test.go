@@ -872,6 +872,79 @@ func TestAskingAgainWhenStuck(t *testing.T) {
 		`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y"}`); strings.Contains(got, "did not finish") {
 		t.Errorf("a done answer: %s", got)
 	}
+	for _, e := range feed.All() {
+		if e.Kind == events.KindLesson {
+			t.Errorf("a lesson without a sharper ask that helped: %q", e.Title)
+		}
+	}
+}
+
+// A sharper ask that helped is a lesson in the feed, for the unit's people,
+// and its asker is told to propose it as a skill when it may.
+func TestLessonOfAskingAgain(t *testing.T) {
+	s, _, _ := setup(t)
+	withTeam(s)
+	withSandboxes(t, s)
+	feed := &events.Memory{}
+	s.Events = feed
+	c := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}, Asks: &sandbox.Asks{}}}
+	ask := func(args string) string {
+		text, _ := s.askAgent(context.Background(), c, json.RawMessage(args))
+		return text
+	}
+	ask(`{"agent":"homepage/tester","task":"Find the prices.\nStatus: stuck: no page on prices would load","done_when":"y"}`)
+	got := ask(`{"agent":"homepage/tester","task":"Find the prices in the shop's PDF price list.\nStatus: done","done_when":"y"}`)
+	if strings.Contains(got, "did not finish") || strings.Contains(got, "propose_skill") {
+		t.Errorf("a done answer, to a lead without propose_skill: %s", got)
+	}
+	var lessons []events.Event
+	for _, e := range feed.All() {
+		if e.Kind == events.KindLesson {
+			lessons = append(lessons, e)
+		}
+	}
+	if len(lessons) != 1 {
+		t.Fatalf("lessons: %+v", lessons)
+	}
+	l := lessons[0]
+	if l.Unit != "homepage" || l.Audience != events.AudienceMembers || l.Agent != "homepage/tester" || l.Actor != "alice" || l.Status != events.StatusOK ||
+		!strings.Contains(l.Title, "homepage/lead got homepage/tester to finish by asking again sharper; before, it was stuck: no page on prices would load") ||
+		!strings.Contains(l.Detail, "First task: Find the prices.") || !strings.Contains(l.Detail, "The task that worked: Find the prices in the shop's PDF price list.") {
+		t.Errorf("lesson: %+v", l)
+	}
+	// Done again: nothing more learnt.
+	ask(`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y"}`)
+	if n := len(feed.All()); feed.All()[n-1].Kind == events.KindLesson {
+		t.Error("a second done answer is a lesson again")
+	}
+	// A lead that may propose skills is told to.
+	s.Agents = fakeAgents{
+		{Unit: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"homepage/tester"}, Tools: []string{"propose_skill"}},
+		{Unit: "homepage", Name: "tester", Prompt: "Test."},
+	}
+	c.Run.Asks = &sandbox.Asks{}
+	ask(`{"agent":"homepage/tester","task":"Find the prices.\nStatus: partial: no 2025 prices","done_when":"y"}`)
+	if got := ask(`{"agent":"homepage/tester","task":"Find the 2025 prices.\nStatus: done","done_when":"y"}`); !strings.Contains(got, "propose_skill for tester") {
+		t.Errorf("a lead with propose_skill is not told to propose: %s", got)
+	}
+}
+
+func TestLessonHint(t *testing.T) {
+	a := &sandbox.Asks{}
+	if _, ok := a.Answered("x", sandbox.Miss{}); ok {
+		t.Error("a miss out of nothing")
+	}
+	a.Answered("x", sandbox.Miss{Status: "stuck", Why: "w", Task: "t"})
+	a.Answered("x", sandbox.Miss{Status: "partial", Why: "w2", Task: "t2"})
+	if m, ok := a.Answered("x", sandbox.Miss{}); !ok || m.Status != "partial" || m.Task != "t2" {
+		t.Errorf("the miss before: %+v %v", m, ok)
+	}
+	if _, ok := a.Answered("x", sandbox.Miss{}); ok {
+		t.Error("a done answer still remembers the miss")
+	}
+	if _, ok := (*sandbox.Asks)(nil).Answered("x", sandbox.Miss{Status: "stuck"}); ok {
+		t.Error("a nil Asks")
+	}
 }
 
 func TestOutcomeOf(t *testing.T) {
