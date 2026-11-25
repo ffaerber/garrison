@@ -291,4 +291,14 @@ channel_url() {
 }
 check "the gateway links garrison's channel" grep -qE "\"url\":\"https://chat\\.$DOMAIN/channels/[A-Za-z0-9-]+\"" <<<"$(channel_url garrison)"
 check "only for the agent service"           grep -q "only for the agent service" <<<"$(channel_url garrison wrong)"
+
+# The agents' web search: SearXNG answers the agent service as JSON (results
+# depend on the search engines, so only the shape is checked), and no one
+# else reaches it.
+searx() {
+  kubectl --namespace garrison exec deployment/agents -- wget -qO- -T 30 --header 'X-Real-IP: 127.0.0.1' 'http://searxng:8080/search?q=kubernetes&format=json' |
+    python3 -c 'import json,sys; sys.exit(0 if "results" in json.load(sys.stdin) else 1)'
+}
+check "SearXNG answers the agent service"  until_true 120 searx
+check "and no one else"                    bash -c '! kubectl --namespace garrison exec deployment/openwebui -- curl -sS --max-time 5 -o /dev/null http://searxng:8080/healthz 2>/dev/null'
 }

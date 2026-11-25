@@ -52,7 +52,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `base` | fixture | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` |
 | `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; the test people; the system stack checked (`system`) |
 | `login` | fixture | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do |
-| `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page, a skill an agent proposes for another (`propose_skill`) and its lessons in the feed |
+| `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page, a skill an agent proposes for another (`propose_skill`) and its lessons in the feed, the agents' web search (SearXNG) |
 | `crud` | scenario | Every kind of thing a unit holds, made, read, changed and removed without the LLM |
 | `ui` | scenario | In the browser, as alice, bob and the admin: the unit `todo` and its app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. `docs/walkthrough/make.py` takes the walkthrough's pictures from its screenshots |
 | `agent` | fixture | Bob and alice ask the agents of `garrison` in its channel: logs, metrics, proposals, an LLM provider, the scout's browser under gVisor |

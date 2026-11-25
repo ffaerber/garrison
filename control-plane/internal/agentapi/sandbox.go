@@ -360,6 +360,9 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 	if s.mayGenerate(r.Context(), c) {
 		specs = append(specs, generateSpec)
 	}
+	if s.maySearch(r.Context(), c) {
+		specs = append(specs, searchSpec)
+	}
 	writeJSON(w, specs)
 }
 
@@ -383,6 +386,10 @@ func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
 		return
 	case "find_agents":
 		text, isErr := s.findAgents(r.Context(), c, req.Arguments)
+		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
+		return
+	case WebSearch:
+		text, isErr := s.webSearch(r.Context(), c, req.Arguments)
 		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
 		return
 	case askPersonSpec.Name:

@@ -1,0 +1,59 @@
+# Web search for the agents: SearXNG asks the search engines from this
+# machine, without an account, and answers the agent service's tool
+# web_search as JSON (settings.yml). Not routed, and only the agent service
+# reaches it (garrison/platform's NetworkPolicy searxng).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-files
+  annotations:
+    garrison.io/files: settings.yml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+spec:
+  selector: { app: searxng }
+  ports: [{ name: http, port: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: searxng } }
+  template:
+    metadata:
+      labels: { app: searxng }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: searxng
+          image: searxng/searxng:2026.11.9-57ff753ad
+          command: [/bin/sh, -c]
+          args:
+            - |
+              export SEARXNG_SECRET="$(cat /run/secrets/searxng-secret-key)"
+              exec /usr/local/searxng/entrypoint.sh
+          env:
+            # Its settings from Git; /etc/searxng stays its own, writable.
+            - { name: SEARXNG_SETTINGS_PATH, value: /etc/searxng-config/settings.yml }
+          ports: [{ containerPort: 8080 }]
+          volumeMounts:
+            - { name: files, mountPath: /etc/searxng-config, readOnly: true }
+            - { name: config, mountPath: /etc/searxng }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+          resources:
+            limits: { memory: 512Mi }
+      volumes:
+        - { name: files, configMap: { name: searxng-files } }
+        - { name: config, emptyDir: {} }
+        - name: secrets
+          projected:
+            sources:
+              - secret: { name: searxng-secret-key }

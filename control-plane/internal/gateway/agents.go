@@ -25,8 +25,9 @@ func ToolNames() []string {
 }
 
 // AgentServiceTools are tools the agent service serves itself, not the
-// gateway: generate_media, which needs the sandbox's media library.
-var AgentServiceTools = []string{"generate_media"}
+// gateway: generate_media, which needs the sandbox's media library, and
+// web_search, which asks the installation's SearXNG.
+var AgentServiceTools = []string{"generate_media", "web_search"}
 
 // Catalog holds the agents as they work in every unit, as the Open
 // WebUI sync last read them, for the MCP endpoints to look up. An agent it

@@ -73,11 +73,11 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	for p, c := range PlatformFiles() {
 		files[p] = c
 	}
-	// The gateway's tools, and the agent service's generate_media; the
+	// The gateway's tools, and the agent service's generate_media and web_search; the
 	// gateway's own test checks these are all.
 	all := []string{"list_units", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "propose_skill"}
+		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "web_search", "propose_skill"}
 	got, problems, err := Load(context.Background(), files, files, PlatformUnit, all)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +101,10 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		}
 		if (a.Name == "scout") != a.Internet.All {
 			t.Errorf("%s reaches %s", a.Name, a.Internet)
+		}
+		// It searches the web too, through the installation's SearXNG.
+		if a.Name == "scout" && !slices.Contains(a.Tools, "web_search") {
+			t.Errorf("the scout has no web_search")
 		}
 	}
 	// The leads of the chains propose skills for the agents they ask;

@@ -128,7 +128,7 @@ chmod 700 "$ETC"
 # Kubernetes Secrets in the namespace garrison, one key each named like the
 # Secret: a pod mounts the ones it needs at /run/secrets/<name>.
 . "$ROOT/installer/lib.sh"
-for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password garrison-db-password alerts-token gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key; do
+for s in postgres-password keycloak-db-password gitea-db-password grafana-db-password garrison-db-password alerts-token gitea-oidc-secret sso-oidc-secret grafana-oidc-secret openwebui-oidc-secret openwebui-secret-key searxng-secret-key; do
   has_secret "$s" || openssl rand -hex 32 | tr -d '\n' | put_secret "$s"
 done
 # The login proxy needs a cookie secret of exactly 32 bytes.

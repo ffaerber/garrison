@@ -57,7 +57,9 @@ type Server struct {
 	mediaCache mediaCache
 	// ComfyUI, if set with Styles, makes pictures and videos for
 	// generate_media; Styles reads the projects' styles as the person.
-	ComfyUI   *ComfyUI
+	ComfyUI *ComfyUI
+	// Search, if set, is web_search: the installation's SearXNG.
+	Search    *Search
 	Styles    StyleReader
 	outputs   outputs
 	Poster    Poster          // posts answers no message waits for; nil: none

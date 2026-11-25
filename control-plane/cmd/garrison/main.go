@@ -694,6 +694,7 @@ func agentsCmd(args []string) error {
 	config := fs.String("config", etcDir+"/install.env", "installation settings")
 	giteaURL := fs.String("gitea", "http://gitea:3000", "Gitea's URL")
 	gatewayURL := fs.String("gateway", "http://gateway:8080/mcp", "the gateway's MCP endpoint")
+	searchURL := fs.String("search", "http://searxng:8080", "SearXNG, for the agents' web_search")
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
 	keyFile := fs.String("llm-key-file", etcDir+"/llm-api-key", "the install's LLM's API key")
 	keyDir := fs.String("llm-keys", etcDir+"/llm-keys", "the providers' API keys, a file per provider named after it")
@@ -772,6 +773,8 @@ func agentsCmd(args []string) error {
 		srv.ComfyUI, srv.Styles = &agentapi.ComfyUI{URL: u}, g
 		log.Printf("generate_media uses ComfyUI at %s", u)
 	}
+	// The system stack searxng: web_search for agents that list it.
+	srv.Search = &agentapi.Search{URL: *searchURL}
 	srv.Models = &agentapi.Models{
 		Gitea: g, KeyDir: *keyDir, InstallURL: base, InstallModel: model, InstallKey: *keyFile,
 		Events: srv.Events, Domain: domain,

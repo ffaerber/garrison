@@ -1,0 +1,17 @@
+# SearXNG for the agents: web search through this machine, for the agent
+# service's tool web_search. No people use it, so no page, no limiter and
+# no image proxy; it answers JSON. The secret key comes from SEARXNG_SECRET.
+use_default_settings: true
+general:
+  instance_name: Garrison search
+  enable_metrics: false
+server:
+  secret_key: set-by-SEARXNG_SECRET
+  limiter: false
+  public_instance: false
+  image_proxy: false
+search:
+  safe_search: 0
+  formats: [html, json]
+outgoing:
+  request_timeout: 6.0

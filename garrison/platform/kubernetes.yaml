@@ -83,6 +83,18 @@ spec:
     - from: [{ podSelector: { matchLabels: { app: gateway } } }]
       ports: [{ port: 9222 }]
 ---
+# SearXNG, the agents' web search, answers only the agent service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: searxng
+spec:
+  podSelector: { matchLabels: { app: searxng } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: agents } } }]
+      ports: [{ port: 8080 }]
+---
 # Loki takes the logs Alloy ships.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
