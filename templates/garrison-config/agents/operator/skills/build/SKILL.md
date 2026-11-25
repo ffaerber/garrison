@@ -72,7 +72,7 @@ A daily screenshot of the app todo into its repo app, for example, is add_routin
 ```
 - Write the task as you would ask the agent yourself: what to look at, what to do, what to say.
 
-A job several agents do in order is a chain of command (`chains/` in garrison/config; find_agents shows the agent that leads one). Its routine is add_routine with chain instead of agent and task, and repos: the repos it proposes into; the chain's agents that propose get the grants. "Check for software updates every Monday" is add_routine in garrison (root admins only) with chain software-updates, schedule "0 7 * * 1" and repos: the repos of garrison with a compose.yaml (list_repos and list_files show them):
+A job several agents do in order is a chain of command (`chains/` in garrison/config; find_agents shows the agent that leads one). Its routine is add_routine with chain instead of agent and task, and repos: the repos it proposes into; the chain's agents that propose get the grants. "Check for software updates every Monday" is add_routine in garrison (root admins only) with chain software-updates, schedule "0 7 * * 1" and repos: the repos of garrison with a kubernetes.yaml (list_repos and list_files show them):
 
 ```yaml
 # routines.yaml of garrison/config

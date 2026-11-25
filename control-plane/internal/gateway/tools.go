@@ -148,9 +148,9 @@ func baseSpecs() []Spec {
 			"url":     str("the API's base URL, the one /chat/completions and /models are under, e.g. https://openrouter.ai/api/v1"),
 			"include": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "optional: only its models matching one of these patterns, e.g. [\"anthropic/*\"]; empty for all"},
 		}, "name", "url"),
-		spec("list_repos", "Lists the repos of a unit. In garrison, each repo with a compose.yaml is a stack.", map[string]any{"unit": nsArg}, "unit"),
+		spec("list_repos", "Lists the repos of a unit. In garrison, each repo with a kubernetes.yaml is a system stack.", map[string]any{"unit": nsArg}, "unit"),
 		spec("list_files", "Lists a directory of a repo's main branch.", map[string]any{"unit": nsArg, "repo": str("repo name"), "path": str("directory, empty for the top")}, "unit", "repo"),
-		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"unit": nsArg, "repo": str("repo name"), "path": str("file path, e.g. compose.yaml")}, "unit", "repo", "path"),
+		spec("read_file", "Reads a file of a repo's main branch.", map[string]any{"unit": nsArg, "repo": str("repo name"), "path": str("file path, e.g. kubernetes.yaml or members.yaml (at the repo's root)")}, "unit", "repo", "path"),
 		spec("list_changes", "Lists a unit's proposed changes (open pull requests) with their diffs and links.", map[string]any{"unit": nsArg}, "unit"),
 		spec("propose_change", "Proposes a new version of one file as a pull request, as the person asking. Nothing changes until a person allowed to merges it in Gitea; give them the link.", map[string]any{
 			"unit":        nsArg,

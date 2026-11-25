@@ -7,12 +7,12 @@ lead: sentry
 merge: review          # its pull requests wait for a person
 steps:
   - agent: sentry
-    does: "List the software and the versions in use. In garrison, each repo with a compose.yaml pins its images (list_repos, then read_file of each compose.yaml), e.g. gitea/gitea:1.25 or postgres:17-alpine; for a unit asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."
+    does: "List the software and the versions in use. In garrison, each repo with a kubernetes.yaml pins its images in its image: lines (list_repos, then read_file of each kubernetes.yaml), e.g. gitea/gitea:1.25 or postgres:17-alpine; for a unit asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."
   - agent: scout
     does: "For each image and version (only these, nothing else of Garrison), find the newest release on the project's own pages (its releases page, changelog or Docker Hub tags). Per image: the newest version of the same major line, the newest major version if higher, and the link to its release notes."
   - agent: sentry
     does: "Sort what the scout found. A newer minor or patch release of the line in use is an update to propose. A new major release (e.g. PostgreSQL 17 to 18) is only reported, with the link to its upgrade notes: it needs a migration and a person's plan. A tag that names only the line in use (gitea:1.25, postgres:17-alpine) already gets that line's patches when the image is pulled, so it needs no change for them."
   - agent: coder
-    does: "Propose the updates the sentry passes on: one pull request per repo, changing only the image tag in its compose.yaml (or stacks/<app>.yaml), titled 'Update <image> to <version>', with the link to the release notes in the description. Propose nothing else, and say which pull requests you opened, with their links."
+    does: "Propose the updates the sentry passes on: one pull request per repo, changing only the image tag in its kubernetes.yaml (or stacks/<app>.yaml), titled 'Update <image> to <version>', with the link to the release notes in the description. Propose nothing else, and say which pull requests you opened, with their links."
   - agent: sentry
     does: "Report: what is current, the pull requests the coder opened (links), and the major upgrades waiting, with their notes. Nothing deploys until a person merges."
