@@ -1,0 +1,35 @@
+# Questions people ask the agents, for test/e2e/ask-bank.sh: person<TAB>agent<TAB>question.
+# From the fixture team: alice is a root admin and an admin of todo, carol an
+# admin of todo, bob a member of todo. Each is asked in a fresh private chat.
+# Not a pass or fail test: the answers are read, and the prompts made better
+# where an agent goes wrong.
+bob	commander	Which apps run in my units, and are they healthy?
+bob	commander	Which agents are there, and what can each of them do for my unit?
+bob	commander	How do I invite a new person to my unit?
+carol	commander	How do I invite a new person to my unit?
+bob	commander	hi
+bob	commander	what can you do?
+alice	commander	What is Garrison?
+bob	commander	Is the todo app down?
+alice	commander	Why is the todo app slow?
+bob	commander	What changed in the todo app this week?
+bob	commander	Who approved the last change to the todo app?
+bob	commander	Can you make me an admin?
+carol	commander	Add dave to our team as a member.
+carol	commander	The todo page shows an error 500, fix it.
+alice	commander	Make a website for our bakery with the opening hours.
+alice	commander	Are there software updates for our apps? If so, have them proposed.
+alice	commander	Back up the todo database now.
+alice	commander	Restore the todo app to how it was yesterday.
+bob	commander	Delete the todo app.
+alice	commander	Which model do you use?
+alice	commander	Use a cheaper model for the coder.
+alice	commander	How much did the AI cost this month?
+bob	commander	Send me an email when the todo app goes down.
+bob	commander	Take a screenshot of the todo app.
+alice	commander	Every Monday at 9, give me a short report of what happened in todo.
+alice	operator	Create a unit for the marketing team.
+bob	operator	Create a unit for my side project.
+carol	sentry	Show me the errors of the todo app from the last hour.
+alice	scout	Find three open-source alternatives to Trello that run in Docker.
+carol	coder	Add a due date to the todos.

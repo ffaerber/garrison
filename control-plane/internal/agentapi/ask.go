@@ -237,17 +237,17 @@ func askSpec(a agents.Agent) toolSpec {
 	}
 	return toolSpec{
 		Name:        "ask_agent",
-		Description: fmt.Sprintf("Hands work to another agent and returns its answer, which ends with its status: done, partial or stuck, and why. It works for the same person, with its own tools and rights, in a workspace of its own. If it is partial or stuck, you may ask it again with a sharper task, up to %d times in all per turn. With background, it works on after this turn and posts its answer in the channel instead: in this one, or, from a private chat, in its unit's channel, mentioning the person, who goes on with it there; use that for work with back and forth.", MaxAsks),
+		Description: fmt.Sprintf("Hands work to another agent and returns its answer, which ends with its status: done, partial or stuck, and why. It works for the same person, with its own tools and rights, in a workspace of its own. If it is partial or stuck, you may ask it again with a sharper task, up to %d times in all per turn. mode says how: answer, you wait for its answer in this turn (a question, a quick task); hand_over, it works on after this turn and posts its answer in the channel instead: in this one, or, from a private chat, in its unit's channel, mentioning the person, who goes on with it there (work with back and forth).", MaxAsks),
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent":      agent,
-				"task":       map[string]any{"type": "string", "description": "what it should do, with what it needs to know, e.g. the repo and branch"},
-				"limits":     map[string]any{"type": "string", "description": "what bounds it: what not to do, how far to go"},
-				"done_when":  map[string]any{"type": "string", "description": "what a good answer looks like"},
-				"background": map[string]any{"type": "boolean", "description": "do not wait; it posts its answer in the channel (from a private chat: in its unit's channel, mentioning the person, who goes on there)"},
+				"agent":     agent,
+				"task":      map[string]any{"type": "string", "description": "what it should do, with what it needs to know, e.g. the repo and branch"},
+				"limits":    map[string]any{"type": "string", "description": "what bounds it: what not to do, how far to go"},
+				"done_when": map[string]any{"type": "string", "description": "what a good answer looks like"},
+				"mode":      map[string]any{"type": "string", "enum": []string{"answer", "hand_over"}, "description": "answer: wait for its answer now; hand_over: it goes on after this turn and posts in the channel (from a private chat: in its unit's channel, mentioning the person, who goes on there)"},
 			},
-			"required":             []string{"agent", "task", "done_when"},
+			"required":             []string{"agent", "task", "done_when", "mode"},
 			"additionalProperties": false,
 		},
 	}
@@ -261,10 +261,23 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		Task       string `json:"task"`
 		Limits     string `json:"limits"`
 		DoneWhen   string `json:"done_when"`
-		Background bool   `json:"background"`
+		Mode       string `json:"mode"`
+		Background bool   `json:"background"` // the old way to say hand_over
 	}
 	if err := json.Unmarshal(raw, &in); err != nil || strings.TrimSpace(in.Task) == "" {
-		return "error: ask_agent needs agent, task and done_when", true
+		return "error: ask_agent needs agent, task, done_when and mode", true
+	}
+	// A choice the model must make: a flag it could leave out was left out
+	// even when the person asked for a hand-over, and the agent answered
+	// into the private chat instead of starting in its unit's channel.
+	switch {
+	case in.Mode == "hand_over":
+		in.Background = true
+	case in.Mode == "answer", in.Mode == "" && in.Background:
+	case in.Mode == "":
+		return "error: ask_agent needs mode: answer (wait for its answer now) or hand_over (it goes on with the person in the channel); call it again with one", true
+	default:
+		return fmt.Sprintf("error: mode %q: answer or hand_over", in.Mode), true
 	}
 	asker, ok, err := s.Agents.Get(ctx, c.Agent)
 	if err != nil || !ok {

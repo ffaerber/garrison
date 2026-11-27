@@ -1,9 +1,9 @@
 # The setup in the browser, right after the install, as a person completes
 # it: the link the installer printed, the first root admin, the AI providers,
 # each tested with its key, and the default model, tested with a question.
-# From test/vm/steps.sh: SETUP_PROVIDERS ("name=url ...", GATEWAY standing
-# for this VM's gateway, where the host's Ollama is), SETUP_DEFAULT
-# (provider/model), and for ollama-cloud its key in $ETC/test-provider-key.
+# From test/vm/steps.sh, out of .env: SETUP_PROVIDERS (PROVIDERS, "name=url
+# ...", GATEWAY standing for this VM's gateway), SETUP_DEFAULT (DEFAULT_MODEL),
+# and each provider's key, if it has one, in $ETC/test-provider-keys/<name>.
 
 # setup_form FIELD=VALUE...: the setup's form, with the cookie of its link;
 # prints the status and where it leads, the page in $tmp/setup.html.
@@ -16,7 +16,7 @@ setup_form() {
 
 section_setup() {
   echo "# the setup in the browser"
-  local link pr res name url key=$ETC/test-provider-key password
+  local link pr res name url keys=$ETC/test-provider-keys password
   link=$(cat "$ETC/setup-link" 2>/dev/null)
   check "the installer wrote the setup's link, root only" bash -c '[[ $0 == "https://'"$DOMAIN"'/setup?token="* ]] && [ "$(stat -c %a '"$ETC"'/setup-link)" = 600 ]' "$link"
   # The dashboard may still be starting right after the install.
@@ -35,17 +35,16 @@ section_setup() {
 
   # The providers, each tested as it is added; a wrong key is refused.
   for pair in $SETUP_PROVIDERS; do
-    name=${pair%%=*} url=${pair#*=}
-    url=${url/GATEWAY/$(ip route | awk '/^default/ { print $3; exit }')}
-    if [ "$name" = ollama-cloud ]; then
-      check "Ollama's cloud with a wrong key is refused" bash -c 'grep -q "^400" <<<"$0" && grep -q "The test failed" '"$tmp/setup.html" "$(setup_form action=provider name=ollama-cloud "url=$url" key=wrong)"
-      res=$(setup_form action=provider name=ollama-cloud "url=$url" "key@$key")
+    name=${pair%%=*} url=$(vm_url "${pair#*=}")
+    if [ -s "$keys/$name" ]; then
+      check "$name with a wrong key is refused" bash -c 'grep -q "^400" <<<"$0" && grep -q "The test failed" '"$tmp/setup.html" "$(setup_form action=provider "name=$name" "url=$url" key=wrong)"
+      res=$(setup_form action=provider "name=$name" "url=$url" "key@$keys/$name")
     else
       res=$(setup_form action=provider "name=$name" "url=$url")
     fi
     check "$name works: it lists its models" grep -q "^303 .*works" <<<"$res"
   done
-  rm -f "$key"
+  rm -rf "$keys"
   check "the page offers their models for the default" grep -qF "value=\"$SETUP_DEFAULT\"" <<<"$(web -b "$tmp/setup.jar" "https://$DOMAIN/setup")"
 
   # The default, tested with a question, then saved.

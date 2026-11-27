@@ -1,11 +1,14 @@
 package home
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -80,6 +83,10 @@ type appView struct {
 	Desired     int      `json:"desired"`
 	Running     int      `json:"running"`
 	State       string   `json:"state"` // up, starting or down
+	Stack       string   `json:"stack"` // the environment's stack name
+	// Snapshot: this person may take a snapshot of it (a person of the unit,
+	// or a root admin; not the platform's own).
+	Snapshot bool `json:"-"`
 }
 
 // visibleApps are the apps this person may see, with their state.
@@ -93,7 +100,8 @@ func (s *Server) visibleApps(ctx context.Context, v events.Visibility) ([]appVie
 		if !SeesApp(v, a.Unit) {
 			continue
 		}
-		view := appView{Unit: a.Unit, App: a.App, Environment: a.Environment, Desired: a.Desired, Running: a.Running}
+		view := appView{Unit: a.Unit, App: a.App, Environment: a.Environment, Desired: a.Desired, Running: a.Running, Stack: a.Stack,
+			Snapshot: s.Snapshots != nil && a.Unit != agents.PlatformUnit && (v.All || v.Members[a.Unit])}
 		for _, h := range a.Hosts {
 			view.URLs = append(view.URLs, "https://"+h+"/")
 		}
@@ -112,8 +120,70 @@ func (s *Server) visibleApps(ctx context.Context, v events.Visibility) ([]appVie
 
 // appsView is the Apps page: the apps by unit, garrison's first.
 type appsView struct {
-	Units []appUnit
-	Error string
+	Units  []appUnit
+	Error  string
+	Notice string
+}
+
+// Snapshots takes a snapshot of an environment on request: the deployer's.
+type Snapshots interface {
+	Snapshot(ctx context.Context, unit, stack, by string) (string, error)
+}
+
+// snapshotPost takes a snapshot of an environment (unit, stack), for a
+// person of its unit or a root admin, and goes back to the Apps page.
+func (s *Server) snapshotPost(w http.ResponseWriter, r *http.Request, v events.Visibility) {
+	if r.Header.Get("Origin") != "https://"+s.Domain {
+		http.Error(w, "this form is only taken from the dashboard's own page", http.StatusForbidden)
+		return
+	}
+	unit, stack := r.FormValue("unit"), r.FormValue("stack")
+	if unit == agents.PlatformUnit || !(v.All || v.Members[unit]) {
+		http.Error(w, "only the people of a unit, and root admins, take its snapshots", http.StatusForbidden)
+		return
+	}
+	name, err := s.Snapshots.Snapshot(r.Context(), unit, stack, v.Person)
+	notice := ""
+	switch {
+	case err != nil:
+		log.Printf("home: %s: snapshot of %s/%s: %v", v.Person, unit, stack, err)
+		notice = "The snapshot failed: " + err.Error()
+	case name == "":
+		notice = stack + " holds no data, so there is nothing to snapshot."
+	default:
+		notice = fmt.Sprintf("Took the snapshot %s of %s. It is kept with the others, and a restore can go back to it.", name, stack)
+	}
+	http.Redirect(w, r, "/apps?notice="+url.QueryEscape(notice), http.StatusSeeOther)
+}
+
+// RemoteSnapshots asks the deployer, with the service key.
+func RemoteSnapshots(deployer, key string) Snapshots {
+	return remoteSnapshots{url: strings.TrimSuffix(deployer, "/"), key: key}
+}
+
+type remoteSnapshots struct{ url, key string }
+
+func (d remoteSnapshots) Snapshot(ctx context.Context, unit, stack, by string) (string, error) {
+	body, _ := json.Marshal(map[string]string{"by": by})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+"/snapshots/"+url.PathEscape(unit)+"/"+url.PathEscape(stack), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-Garrison-Service", d.key)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(data)))
+	}
+	var out struct {
+		Snapshot string `json:"snapshot"`
+	}
+	return out.Snapshot, json.Unmarshal(data, &out)
 }
 
 type appUnit struct {
@@ -122,7 +192,7 @@ type appUnit struct {
 }
 
 func (s *Server) appsPage(w http.ResponseWriter, r *http.Request, v events.Visibility) {
-	p := feedPage{Who: v.Person, Domain: s.Domain, All: v.All, Now: s.now(), AppsPage: &appsView{}}
+	p := feedPage{Who: v.Person, Domain: s.Domain, All: v.All, Now: s.now(), AppsPage: &appsView{Notice: r.URL.Query().Get("notice")}}
 	apps, err := s.visibleApps(r.Context(), v)
 	if err != nil {
 		log.Printf("home: apps: %v", err)

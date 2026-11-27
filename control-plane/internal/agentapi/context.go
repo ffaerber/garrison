@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"garrison/control-plane/internal/models"
 )
 
 // A model's context window: how many tokens a request may hold, prompt and
@@ -37,7 +39,8 @@ const contextFor = 10 * time.Minute
 // Context is model's context window on l's server, or DefaultContext if it
 // does not say. It asks the OpenAI-style /models, whose entries some
 // servers give the window (llama.cpp's meta.n_ctx, vLLM's max_model_len,
-// others' context_length), then Ollama's /api/show (num_ctx, else the
+// Anthropic's max_input_tokens, others' context_length), then Ollama's
+// /api/show (num_ctx, else the
 // model's own context length).
 func (l *LLM) Context(ctx context.Context, model string) int {
 	if l == nil || l.URL == "" || model == "" {
@@ -73,6 +76,7 @@ func (l *LLM) get(ctx context.Context, method, url string, body []byte, out any)
 	if k := l.key(); k != "" {
 		req.Header.Set("Authorization", "Bearer "+k)
 	}
+	req.Header.Set("anthropic-version", models.AnthropicVersion) // Anthropic's /models wants it
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -95,7 +99,7 @@ func (l *LLM) fromModels(ctx context.Context, model string) int {
 		if m["id"] != model {
 			continue
 		}
-		for _, k := range []string{"context_length", "max_model_len", "context_window", "max_context_length"} {
+		for _, k := range []string{"context_length", "max_model_len", "context_window", "max_context_length", "max_input_tokens"} {
 			if n := number(m[k]); n > 0 {
 				return n
 			}

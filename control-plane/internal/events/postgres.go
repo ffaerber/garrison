@@ -66,7 +66,7 @@ func Open(ctx context.Context, url string, wait time.Duration) (*Postgres, error
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		_, err = pool.Exec(ctx, schema+routineSchema+questionSchema+traceSchema+inviteSchema)
+		_, err = pool.Exec(ctx, schema+routineSchema+questionSchema+traceSchema+inviteSchema+shotSchema)
 		if err == nil || time.Now().After(deadline) || ctx.Err() != nil {
 			break
 		}
@@ -249,6 +249,7 @@ func (p *Postgres) Prune(ctx context.Context) {
 		}
 		p.PruneTraces(ctx)
 		p.PruneInvites(ctx)
+		p.PruneShots(ctx)
 		select {
 		case <-ctx.Done():
 			return

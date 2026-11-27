@@ -1,9 +1,9 @@
 # animalfacts: a YouTube channel as a unit, made the way a person would make
 # it: alice asks @designer to set up the project with no workflow of her own,
 # merges what it proposes, and then asks for five narrated shorts of about 30
-# seconds. Needs the real ComfyUI and text-to-speech service on the computer
-# running the VM (COMFYUI=host) and a text-to-speech service such as Kokoro
-# (TTS_URL; host: port 8880 of that computer); it draws on its GPU and takes long.
+# seconds. Needs a real ComfyUI (COMFYUI_URL) and a text-to-speech service
+# such as Kokoro (TTS_URL), from .env (test/vm/steps.sh); it draws on the GPU
+# and takes long.
 # Checks that the workflows name only models ComfyUI has, that every short
 # looks and sounds alike (one picture style, one video style, one voice),
 # that each is 9:16, about 30 s, with sound, and that the links it gives are
@@ -12,22 +12,21 @@
 
 section_animalfacts() {
 echo "# animalfacts: a channel of narrated animal shorts, set up and made by @designer"
-if [ "${COMFYUI:-fake}" != host ] || [ -z "${TTS_URL:-}" ]; then
-  echo "skip: needs a real ComfyUI on the host and a text-to-speech service (COMFYUI=host TTS_URL=...)"
+if [ -z "${COMFYUI_URL:-}" ] || [ -z "${TTS_URL:-}" ]; then
+  echo "skip: needs a real ComfyUI and a text-to-speech service (COMFYUI_URL and TTS_URL in .env)"
   return 0
 fi
-local host_ip lib_ds lib answers pa tts
-host_ip=$(ip route | awk '/^default/ { print $3; exit }')
-tts=$TTS_URL
-[ "$tts" != host ] || tts=http://$host_ip:8880
+local comfy lib_ds lib answers pa tts
+comfy=$(vm_url "$COMFYUI_URL")
+tts=$(vm_url "$TTS_URL")
 lib_ds=garrison/ns/animalfacts/shares/animalfacts.shares.media
 lib=$tmp/animalfacts
 answers=$tmp/animalfacts-answers
 : > "$answers"
 pa=$api/repos/animalfacts/shorts
 
-check "a real ComfyUI answers on the host, with a GPU" bash -c \
-  'curl -sf --max-time 10 "http://$0:8188/system_stats" | grep -q "\"type\": \"cuda\""' "$host_ip"
+check "a real ComfyUI answers, with a GPU" bash -c \
+  'curl -sf --max-time 10 "$0/system_stats" | grep -q "\"type\": \"cuda\""' "$comfy"
 check "a text-to-speech service answers"   bash -c \
   'curl -sf --max-time 10 "$0/v1/voices" | grep -q voices' "$tts"
 check "alice signs in to the chat"         chat_login alice
@@ -48,11 +47,11 @@ mkdir -p "$lib" && mount -t zfs "$lib_ds" "$lib"
 
 echo "# ComfyUI and the voice, outside Garrison"
 sed -i '/^COMFYUI_URL=/d; /^TTS_URL=/d' $ETC/install.env
-{ echo "COMFYUI_URL=http://$host_ip:8188"; echo "TTS_URL=$tts"; } >> $ETC/install.env
+{ echo "COMFYUI_URL=$comfy"; echo "TTS_URL=$tts"; } >> $ETC/install.env
 kubectl --namespace garrison rollout restart deployment/agents >/dev/null && kubectl --namespace garrison rollout status deployment/agents --timeout 300s >/dev/null 2>&1
 af_agents_say() {
   local l; l=$(kubectl --namespace garrison logs deployment/agents --since=3m 2>&1)
-  grep -q "generate_media uses ComfyUI at http://$host_ip:8188" <<<"$l" && grep -qF "generate_speech uses the text-to-speech service at $tts" <<<"$l"
+  grep -qF "generate_media uses ComfyUI at $comfy" <<<"$l" && grep -qF "generate_speech uses the text-to-speech service at $tts" <<<"$l"
 }
 check "the agent service uses both"        until_true 120 af_agents_say
 check "the project animalfacts/shorts, only its README" installer/push-repo.sh --update animalfacts/shorts test/e2e/media/animalfacts
@@ -93,13 +92,13 @@ for e in json.load(sys.stdin).get("tree", []):
 af_pr_files
 # models_ok: every model file a workflow names is one ComfyUI has.
 models_ok() {
-  python3 - "$tmp/af-pr" "$host_ip" <<'PY'
+  python3 - "$tmp/af-pr" "$comfy" <<'PY'
 import glob, json, sys, urllib.request
 root, host = sys.argv[1], sys.argv[2]
 have = set()
-for folder in json.load(urllib.request.urlopen(f"http://{host}:8188/models", timeout=10)):
+for folder in json.load(urllib.request.urlopen(f"{host}/models", timeout=10)):
     try:
-        have |= set(json.load(urllib.request.urlopen(f"http://{host}:8188/models/{folder}", timeout=10)))
+        have |= set(json.load(urllib.request.urlopen(f"{host}/models/{folder}", timeout=10)))
     except Exception:
         pass
 bad, named = [], 0

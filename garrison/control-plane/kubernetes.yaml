@@ -164,6 +164,8 @@ spec:
             - -password-file=/run/secrets/admin-password
             # Wakes the build account, member and agent syncs on Gitea's events.
             - -hook-url=http://gateway:8080/hook
+            # Snapshots on request (take_snapshot), taken by the deployer.
+            - -deployer=http://deployer:8090
             # Every change an agent makes, and every refusal, goes to the feed.
             - -events-db=postgres://garrison@postgres:5432/garrison
             # The units' site logins, which the deployer writes: browse types
@@ -355,6 +357,8 @@ spec:
             - -deployer=http://deployer:8090
             # Which agents work now, for the header and the feed.
             - -agents=http://agents:8070
+            # Each unit's unit.md, for the Units page.
+            - -gateway=http://gateway:8080
             # The setup (/setup): it makes the first root admin in Keycloak,
             # open only with the token of the link the installer printed.
             - -keycloak=http://keycloak:8080

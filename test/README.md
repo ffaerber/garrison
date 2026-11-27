@@ -14,15 +14,14 @@ JOBS=4 test/vm/steps.sh          # at most 4 VMs at once
 FREE_GB=12 test/vm/steps.sh      # a VM boots only while this much memory is free (default 10)
 test/vm/watch.py                 # the run, live, in the browser: http://localhost:8099
 test/vm/agents-live.py garrison-k3s-animalfacts   # the agents in a VM, live: thinking, tool calls, results
-LLM=cloud test/vm/steps.sh       # the agents on Ollama's cloud instead of the local Ollama
-LLM=server test/vm/steps.sh      # on an inference server on the LAN (SERVER_LLM_URL, SERVER_LLM_MODEL in .env)
-COMFYUI=fake test/vm/steps.sh media  # media with the fake ComfyUI, though a real one answers on this computer
-test/vm/steps.sh animalfacts     # five narrated shorts on the real ComfyUI and Kokoro (TTS_URL in .env); watch them in bin/animalfacts/
-LOCAL_MODEL=nemotron-3.5-lightning:latest test/vm/steps.sh   # another local model
+COMFYUI_URL= test/vm/steps.sh media  # media with the fake ComfyUI, though .env names a real one
+test/vm/steps.sh animalfacts     # five narrated shorts on the real ComfyUI and Kokoro (COMFYUI_URL, TTS_URL in .env); watch them in bin/animalfacts/
+LOCAL_MODEL=nemotron-3.5-lightning:latest test/vm/steps.sh   # another model of the local Ollama, without PROVIDERS
 test/e2e/smoke.sh roles          # in a VM: one scenario, test/e2e/scenarios/roles.sh
+test/vm/ask-bank.sh garrison-k3s-commander   # ask the agents the questions of test/e2e/questions.tsv, each in a fresh private chat; the answers, with flags for known mistakes, in bin/ask-bank/
 ```
 
-The agents run on an inference server on the LAN when this checkout's `.env` names one (`SERVER_LLM_URL=http://<host>:<port>/v1` and `SERVER_LLM_MODEL`, OpenAI-style, no key; `.env` keeps the LAN's addresses out of the repo), else on Ollama on this computer (`qwen3.8-64k`), reached from the VM through its gateway; Ollama must listen on more than localhost (`OLLAMA_HOST=0.0.0.0`). No key is needed. The LLM is set at install, so changing it reruns everything from install.
+This computer's settings come from this checkout's `.env`, which git ignores, so addresses on your network and keys stay out of the repo; `.env.example` lists them all. `PROVIDERS` are the AI providers the setup adds after the install, `name=url` each (OpenAI-style APIs; `GATEWAY` in a URL is this computer as a VM reaches it), with their keys as `<NAME>_API_KEY` (`OLLAMA_CLOUD_API_KEY` for `ollama-cloud`), which go into the VM as files; `DEFAULT_MODEL` is the default model, and `AGENT_MODELS` puts agents on models of their own. Without `PROVIDERS`, the agents run on Ollama on this computer (`LOCAL_MODEL`, default `qwen3.8-64k`), which must listen on more than localhost (`OLLAMA_HOST=0.0.0.0`). `COMFYUI_URL` and `TTS_URL` are the real ComfyUI and text-to-speech service for `media` and `animalfacts`; without them, the ones on this computer when they answer. The providers are set in the setup, at install, so changing them reruns everything from install.
 
 ## The tree
 
@@ -53,7 +52,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | Step | Kind | Does |
 | --- | --- | --- |
 | `base` | fixture | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` |
-| `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; then its setup in the browser (`scenarios/setup.sh`): the first root admin `owner`, the AI providers for `LLM` (`local`, `server` named `SERVER_LLM_NAME`, or `cloud`, plus Ollama's cloud when `AGENT_MODELS` names one of its models), each tested, and the default, tested and saved; the test people; the system stack checked (`system`) |
+| `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; then its setup in the browser (`scenarios/setup.sh`): the first root admin `owner`, the AI providers of `PROVIDERS`, each tested (a wrong key refused), and the default, tested and saved; the test people; the system stack checked (`system`) |
 | `login` | fixture | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do |
 | `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page (a provider's key, choosing an agent's model), a skill an agent proposes for another (`propose_skill`) and its lessons in the feed, the agents' web search (SearXNG) |
 | `crud` | scenario | Every kind of thing a unit holds, made, read, changed and removed without the LLM |

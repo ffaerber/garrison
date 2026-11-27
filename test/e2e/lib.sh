@@ -75,6 +75,9 @@ gitea_api() {
 api=https://git.$DOMAIN/api/v1
 # Every system stack is a repo of the garrison organisation; traefik stands in for them.
 repo=$api/repos/garrison/traefik
+# vm_url URL: URL with GATEWAY, this machine's gateway, which is the computer
+# running a test VM, as its address (test/vm/steps.sh, .env).
+vm_url() { echo "${1//GATEWAY/$(ip route | awk '/^default/ { print $3; exit }')}"; }
 # until_true SECONDS COMMAND...: retry until the command succeeds.
 until_true() {
   local deadline=$((SECONDS + $1)); shift
@@ -298,6 +301,19 @@ sys.exit(1)' "$id" && return 0
 
 # ask_private PERSON AGENT QUESTION: asks an agent in a chat of PERSON's own,
 # through Open WebUI's API, and prints its answer.
+# ask_chat PERSON AGENT QUESTION: as ask_private, in a chat with an id of its
+# own (ASK_CHAT, else a fresh one), as every chat in the browser has: only then
+# does the agent service run it in a sandbox, with unit.md, ask_agent and the
+# workspace's tools; without one it runs its older loop.
+ask_chat() {
+  chat_api "$1" --max-time 900 -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "chat_id": sys.argv[3], "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3" "${ASK_CHAT:-local:e2e-$(date +%s%N)}")" \
+    "$chat/api/chat/completions" | python3 -c '
+import json,sys
+raw=sys.stdin.read()
+try: print(json.loads(raw)["choices"][0]["message"]["content"])
+except Exception: sys.exit("no answer: " + raw[:300])'
+}
 ask_private() {
   chat_api "$1" --max-time 600 -X POST -H 'Content-Type: application/json' \
     -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3")" \

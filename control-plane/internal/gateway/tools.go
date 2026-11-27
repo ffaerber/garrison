@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"garrison/control-plane/internal/agents"
 	"garrison/control-plane/internal/apply"
 	"garrison/control-plane/internal/changes"
+	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/gitops"
 	"garrison/control-plane/internal/render"
 	"garrison/control-plane/internal/stack"
@@ -53,6 +55,13 @@ const PlatformUnit = "garrison"
 // Nothing here merges or deploys, except merge_change for agents whose
 // grants allow it (grants.go).
 type Tools struct {
+	// Deployer takes snapshots on request (take_snapshot), with
+	// ServiceKey; "" for none.
+	Deployer   string
+	ServiceKey string
+	// Shots keeps screenshots shown in a chat (screenshot without repo);
+	// nil: screenshots only go into repos.
+	Shots      events.Shots
 	Gitea      *Gitea
 	Run        apply.Runner // docker CLI
 	WorkDir    string       // the deployer's state, read-only
@@ -134,6 +143,7 @@ func SpecsFor(a *agents.Agent) []Spec {
 func baseSpecs() []Spec {
 	return []Spec{
 		spec("list_units", "Lists the units (Gitea organisations).", nil),
+		spec("read_unit", "Reads unit.md of a unit, generated now: its people, its apps (where they answer, at which commit, whether they run), its repos with their last change, and the agents' rights and routines there; as the person you work for may see it. Without unit, the one you work in.", map[string]any{"unit": str("the unit, e.g. todo; empty for the one you work in")}),
 		spec("list_stacks", "Lists a unit's stacks with the commit the deployer deployed, the addresses each answers at (every environment's), and each of their services with ready/desired replicas and image.", map[string]any{"unit": nsArg}, "unit"),
 		spec("stack_status", "Shows the pods (in garrison) or tasks (in other units) of one stack: their state and any error. Use it to see why a service does not run.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
 		spec("service_logs", "Shows the last lines of a service's logs.", map[string]any{
@@ -143,6 +153,7 @@ func baseSpecs() []Spec {
 		}, "unit", "service"),
 		spec("service_usage", "Shows CPU and memory use of a stack's services over the last minutes, from Prometheus.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
 		spec("list_snapshots", "Lists the snapshots of one environment's data, oldest first: deploy-… taken before each redeploy, restore-… the state before a restore, autosnap_… on a schedule. To bring the data back to one, propose restores/<name>.yaml in the unit's config (stack, environment, snapshot); once merged, the app stops, its data is copied back and it starts again. Data written since is lost, but kept in the restore-… snapshot taken first.", map[string]any{"unit": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "unit", "stack"),
+		spec("take_snapshot", "Takes a snapshot of one environment's data now, e.g. before something risky: manual-<time>, kept with the others (list_snapshots), usable for a restore. It changes no data, so it needs no review; any person of the unit may ask for one, and the feed records it.", map[string]any{"unit": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "unit", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*), the kubelet's container metrics (container_*, labelled with namespace, pod and container) and garrison_pod_info{namespace, pod, unit, stack, service}, which says what a pod belongs to: join with * on (namespace, pod) group_left (stack, service) garrison_pod_info.", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a unit: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"unit": nsArg}, "unit"),
 		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
@@ -225,7 +236,7 @@ func baseSpecs() []Spec {
 			"login":     str("instead of text: a site login of your unit (a secret login-<name>, e.g. shop) to type into the field type_into; it is typed only on that login's own site, and you never see it"),
 			"part":      map[string]any{"type": "string", "enum": []string{"username", "password"}, "description": "which part of the login to type; username by default"},
 		}),
-		spec("screenshot", "Takes a screenshot of a page of Garrison, signed in as the person asking (in a routine, with nobody watching, as your own account), and proposes it as a PNG file in a repo: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
+		spec("screenshot", "Takes a screenshot of a page of Garrison, signed in as the person asking (in a routine, with nobody watching, as your own account). Without repo, it is shown in the chat: the answer gives its address, which goes into your answer as it is; use that when someone wants to see a page. With repo and path, it is proposed as a PNG file in that repo, only when someone asks for it there: a pull request, as the person, or with your account where a grant lets you propose there (in a routine, one with unattended: true). Only pages at https://<name>.<domain> load; requests elsewhere are refused.", map[string]any{
 			"unit":        nsArg,
 			"repo":        str("repo the PNG goes into"),
 			"path":        str("file path of the PNG, ending in .png, e.g. docs/screenshots/todo.png"),
@@ -235,7 +246,7 @@ func baseSpecs() []Spec {
 			"full_page":   map[string]any{"type": "boolean", "description": "the whole page instead of the window; default false"},
 			"title":       str("short title of the change"),
 			"description": str("why, and what it shows"),
-		}, "unit", "repo", "path", "url", "title"),
+		}, "url"),
 	}
 }
 
@@ -315,6 +326,12 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			fmt.Fprintf(&b, "%s\t%s\n", n.Name, n.Description)
 		}
 		return b.String(), nil
+	case "read_unit":
+		unit := a.Unit
+		if unit == "" && agent != nil {
+			unit = agent.Unit
+		}
+		return t.UnitMD(ctx, p.Name, unit)
 	case "list_stacks":
 		stacks, err := t.Stacks(ctx, a.Unit)
 		if err != nil {
@@ -360,6 +377,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		out, err := t.Run(ctx, nil, nil, "kubectl", "logs", "--namespace", render.NamespaceOf(stack), "deployment/"+svc,
 			"--all-containers", "--timestamps", "--tail", fmt.Sprint(n))
 		return string(out), err
+	case "take_snapshot":
+		return t.takeSnapshot(ctx, p, a.Unit, a.Stack)
 	case "list_snapshots":
 		if err := t.ownStack(a.Unit, a.Stack); err != nil {
 			return "", err
@@ -592,6 +611,9 @@ func (t *Tools) signIn(ctx context.Context, p Person, agent *agents.Agent) (stri
 func (t *Tools) screenshot(ctx context.Context, p Person, agent *agents.Agent, a args) (string, error) {
 	if t.Browser == nil {
 		return "", errors.New("no browser is set up")
+	}
+	if a.Repo == "" {
+		return t.showShot(ctx, p, agent, a)
 	}
 	if !strings.HasSuffix(strings.ToLower(a.Path), ".png") {
 		return "", fmt.Errorf("%w: path %q must end in .png", ErrInvalid, a.Path)
@@ -1191,4 +1213,91 @@ func (t *Tools) createBranch(ctx context.Context, p Person, a args) (string, err
 		}
 	}
 	return out + fmt.Sprintf("\nNo stack of %s deploys this branch: it is only a branch. To deploy it, propose an environment %s in the stack's file in %s/config.", a.Unit, a.Branch, a.Unit), nil
+}
+
+// takeSnapshot asks the deployer for a snapshot of an environment, for a
+// person of the unit (or a root admin).
+func (t *Tools) takeSnapshot(ctx context.Context, p Person, unit, envStack string) (string, error) {
+	if t.Deployer == "" {
+		return "", refused{"this installation takes no snapshots on request"}
+	}
+	if err := validOrg(unit); err != nil {
+		return "", err
+	}
+	admin, err := t.Gitea.IsAdmin(ctx, p.Name)
+	if err != nil {
+		return "", err
+	}
+	if !admin && !t.inUnit(ctx, p.Name, unit) {
+		return "", fmt.Errorf("%w: %s is not in the unit %s", ErrForbidden, p.Name, unit)
+	}
+	body, _ := json.Marshal(map[string]string{"by": p.Name})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(t.Deployer, "/")+"/snapshots/"+url.PathEscape(unit)+"/"+url.PathEscape(envStack), bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set(ServiceHeader, t.ServiceKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("%w: %s; list_stacks names the environments", ErrInvalid, strings.TrimSpace(string(data)))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("the snapshot failed: %s %s", resp.Status, strings.TrimSpace(string(data)))
+	}
+	var out struct {
+		Snapshot string `json:"snapshot"`
+	}
+	json.Unmarshal(data, &out)
+	if out.Snapshot == "" {
+		return fmt.Sprintf("%s holds no data, so there is nothing to snapshot.", envStack), nil
+	}
+	return fmt.Sprintf("Took the snapshot %s of %s, for %s. It is kept with the others (list_snapshots); a restore to it is proposed as restores/<name>.yaml in %s/config.", out.Snapshot, envStack, p.Name, unit), nil
+}
+
+// showShot takes a screenshot to show in the chat: kept in Shots, at the
+// dashboard's /shots/<id>.png, for the person, the unit's people and root
+// admins. "Screenshot: <address>" is its answer's first line, which the agent
+// service shows as the picture.
+func (t *Tools) showShot(ctx context.Context, p Person, agent *agents.Agent, a args) (string, error) {
+	if t.Shots == nil || t.Dashboard == "" {
+		return "", refused{"this installation keeps no screenshots to show; give repo and path to propose one as a file"}
+	}
+	w, h := a.Width, a.Height
+	if w == 0 {
+		w = 1280
+	}
+	if h == 0 {
+		h = 800
+	}
+	if w < 320 || w > 2560 || h < 240 || h > 2000 {
+		return "", fmt.Errorf("%w: the window must be 320 to 2560 wide and 240 to 2000 high", ErrInvalid)
+	}
+	unit := a.Unit
+	if unit == "" && agent != nil {
+		unit = agent.Unit
+	}
+	token, err := t.signIn(ctx, p, agent)
+	if err != nil {
+		return "", err
+	}
+	shot, err := t.Browser.Shoot(ctx, token, a.URL, w, h, a.FullPage)
+	if err != nil {
+		return "", err
+	}
+	id, err := t.Shots.SaveShot(ctx, events.Shot{Unit: unit, Person: p.Name, URL: shot.URL, PNG: shot.PNG})
+	if err != nil {
+		return "", err
+	}
+	blocked := ""
+	if shot.Blocked > 0 {
+		blocked = fmt.Sprintf(" %d requests to other hosts were blocked, so parts from elsewhere may be missing.", shot.Blocked)
+	}
+	return fmt.Sprintf("Screenshot: %s/shots/%s.png\nOf %s, %dx%d, page title %q.%s Put the address into your answer as it is; it shows the picture to whom may see it, for 14 days. Nothing was proposed.",
+		strings.TrimSuffix(t.Dashboard, "/"), id, shot.URL, w, h, shot.Title, blocked), nil
 }

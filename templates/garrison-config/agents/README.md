@@ -7,7 +7,7 @@ An installation starts with these, each with only the tools its role needs:
 | Agent | Role |
 | --- | --- |
 | `operator` | Sets up and changes units, repos and apps; every tool |
-| `commander` | Finds the agent for a task and hands it over; no tools of its own |
+| `commander` | Finds the agent for a task and hands it over; its tools, `list_units`, `read_unit` and `list_models`, only read which units the person is in, what each is, and the models |
 | `coder` | Changes code as pull requests (`propose_patch`; `merge_change` where a grant allows) and reviews pull requests; reaches the package registries |
 | `sentry` | Reads state, logs and metrics, tries the apps in the browser, and explains what is wrong; takes screenshots it proposes into a repo, and changes nothing else; asks the scout about the web; fits `on_alert` routines |
 | `scout` | Researches on the public web, with a browser of its own (the command `web`) and no sign-in; no access to Garrison's repos or apps |

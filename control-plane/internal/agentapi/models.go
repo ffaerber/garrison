@@ -132,9 +132,7 @@ func (m *Models) list(ctx context.Context, name string, p models.Provider) ([]st
 	if err != nil {
 		return nil, err
 	}
-	if key := l.key(); key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
+	models.ListHeaders(req, l.key())
 	client := &http.Client{Timeout: 30 * time.Second}
 	if m.HTTP != nil {
 		client = m.HTTP

@@ -88,7 +88,7 @@ func TestAnAgentAsksAnother(t *testing.T) {
 	withTeam(s)
 	d := withSandboxes(t, s)
 	reasoning, content := chatIn(t, s, "chat-1", "homepage/lead", Message{Role: "user",
-		Content: `call ask_agent {"agent":"homepage/tester","task":"Check the login page.","limits":"Read only.","done_when":"It says whether it works."}`})
+		Content: `call ask_agent {"agent":"homepage/tester","task":"Check the login page.","limits":"Read only.","done_when":"It says whether it works.","mode":"answer"}`})
 	for _, want := range []string{"called: homepage/tester answers:", "echo: homepage/lead asks you, working for alice.", "Task: Check the login page.", "Limits: Read only.", "A good answer: It says whether it works."} {
 		if !strings.Contains(content, want) {
 			t.Errorf("content lacks %q: %s", want, content)
@@ -105,7 +105,7 @@ func TestAnAgentAsksAnother(t *testing.T) {
 	if content != "tools: 3" { // read_file from the gateway, ask_agent and find_agents
 		t.Errorf("lead's tools: %q", content)
 	}
-	_, content = chatIn(t, s, "chat-2", "homepage/loner", Message{Role: "user", Content: `call ask_agent {"agent":"homepage/tester","task":"x","done_when":"y"}`})
+	_, content = chatIn(t, s, "chat-2", "homepage/loner", Message{Role: "user", Content: `call ask_agent {"agent":"homepage/tester","task":"x","done_when":"y","mode":"answer"}`})
 	if !strings.Contains(content, "error: not allowed: you may ask only") {
 		t.Errorf("loner asked: %q", content)
 	}
@@ -168,7 +168,7 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	// It asks any agent by its name, which works where it does, and the
 	// feed has the hand-off and its end.
 	_, content := chatIn(t, s, "chat-1", "homepage/commander", Message{Role: "user",
-		Content: `call ask_agent {"agent":"designer","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
+		Content: `call ask_agent {"agent":"designer","task":"Screenshot the homepage.","done_when":"A pull request with it.","mode":"answer"}`})
 	if !strings.Contains(content, "homepage/designer answers:") {
 		t.Fatalf("content %q", content)
 	}
@@ -183,11 +183,11 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		t.Errorf("feed: %+v", ask)
 	}
 	// Another unit's, by <unit>/<agent>.
-	if _, content = chatIn(t, s, "chat-2", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"todo/operator","task":"x","done_when":"y"}`}); !strings.Contains(content, "todo/operator answers:") {
+	if _, content = chatIn(t, s, "chat-2", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"todo/operator","task":"x","done_when":"y","mode":"answer"}`}); !strings.Contains(content, "todo/operator answers:") {
 		t.Errorf("asked todo's: %q", content)
 	}
 	for _, self := range []string{"commander", "garrison/commander", "todo/commander"} {
-		if _, content = chatIn(t, s, "chat-1", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"` + self + `","task":"x","done_when":"y"}`}); !strings.Contains(content, "you do not ask yourself") {
+		if _, content = chatIn(t, s, "chat-1", "homepage/commander", Message{Role: "user", Content: `call ask_agent {"agent":"` + self + `","task":"x","done_when":"y","mode":"answer"}`}); !strings.Contains(content, "you do not ask yourself") {
 			t.Errorf("asked itself as %s: %q", self, content)
 		}
 	}
@@ -203,11 +203,11 @@ func TestAskingHasLimits(t *testing.T) {
 		return text
 	}
 	c := sandbox.Caller{Agent: "homepage/tester", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead", "homepage/tester"}}}
-	if got := ask(c, `{"agent":"homepage/lead","task":"x","done_when":"y"}`); !strings.Contains(got, "already part of this run") {
+	if got := ask(c, `{"agent":"homepage/lead","task":"x","done_when":"y","mode":"answer"}`); !strings.Contains(got, "already part of this run") {
 		t.Errorf("a cycle: %q", got)
 	}
 	c = sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"a/x", "a/y", "homepage/lead"}}}
-	if got := ask(c, `{"agent":"homepage/tester","task":"x","done_when":"y"}`); !strings.Contains(got, "the most there may be") {
+	if got := ask(c, `{"agent":"homepage/tester","task":"x","done_when":"y","mode":"answer"}`); !strings.Contains(got, "the most there may be") {
 		t.Errorf("too deep: %q", got)
 	}
 	c = sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}}}
@@ -905,7 +905,7 @@ func TestAskingAgainWhenStuck(t *testing.T) {
 	}
 	c := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}, Asks: &sandbox.Asks{}}}
 	// The fake sandbox echoes its message: a task's own line is its answer's.
-	stuck := `{"agent":"homepage/tester","task":"Find the prices.\nStatus: stuck: no page on prices would load","done_when":"y"}`
+	stuck := `{"agent":"homepage/tester","task":"Find the prices.\nStatus: stuck: no page on prices would load","done_when":"y","mode":"answer"}`
 	got := ask(c, stuck)
 	for _, want := range []string{"Status: done", "Status: stuck: <what blocked you", "homepage/tester did not finish (stuck)", "ask it once more with a sharper task", "2 more time(s)"} {
 		if !strings.Contains(got, want) {
@@ -932,7 +932,7 @@ func TestAskingAgainWhenStuck(t *testing.T) {
 	}
 	// Done: no hint.
 	if got := ask(sandbox.Caller{Agent: "homepage/lead", Chat: "chat-2", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/lead"}, Asks: &sandbox.Asks{}}},
-		`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y"}`); strings.Contains(got, "did not finish") {
+		`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y","mode":"answer"}`); strings.Contains(got, "did not finish") {
 		t.Errorf("a done answer: %s", got)
 	}
 	for _, e := range feed.All() {
@@ -955,8 +955,8 @@ func TestLessonOfAskingAgain(t *testing.T) {
 		text, _ := s.askAgent(context.Background(), c, json.RawMessage(args))
 		return text
 	}
-	ask(`{"agent":"homepage/tester","task":"Find the prices.\nStatus: stuck: no page on prices would load","done_when":"y"}`)
-	got := ask(`{"agent":"homepage/tester","task":"Find the prices in the shop's PDF price list.\nStatus: done","done_when":"y"}`)
+	ask(`{"agent":"homepage/tester","task":"Find the prices.\nStatus: stuck: no page on prices would load","done_when":"y","mode":"answer"}`)
+	got := ask(`{"agent":"homepage/tester","task":"Find the prices in the shop's PDF price list.\nStatus: done","done_when":"y","mode":"answer"}`)
 	if strings.Contains(got, "did not finish") || strings.Contains(got, "propose_skill") {
 		t.Errorf("a done answer, to a lead without propose_skill: %s", got)
 	}
@@ -976,7 +976,7 @@ func TestLessonOfAskingAgain(t *testing.T) {
 		t.Errorf("lesson: %+v", l)
 	}
 	// Done again: nothing more learnt.
-	ask(`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y"}`)
+	ask(`{"agent":"homepage/tester","task":"Check it.\nStatus: done","done_when":"y","mode":"answer"}`)
 	if n := len(feed.All()); feed.All()[n-1].Kind == events.KindLesson {
 		t.Error("a second done answer is a lesson again")
 	}
@@ -986,8 +986,8 @@ func TestLessonOfAskingAgain(t *testing.T) {
 		{Unit: "homepage", Name: "tester", Prompt: "Test."},
 	}
 	c.Run.Asks = &sandbox.Asks{}
-	ask(`{"agent":"homepage/tester","task":"Find the prices.\nStatus: partial: no 2025 prices","done_when":"y"}`)
-	if got := ask(`{"agent":"homepage/tester","task":"Find the 2025 prices.\nStatus: done","done_when":"y"}`); !strings.Contains(got, "propose_skill for tester") {
+	ask(`{"agent":"homepage/tester","task":"Find the prices.\nStatus: partial: no 2025 prices","done_when":"y","mode":"answer"}`)
+	if got := ask(`{"agent":"homepage/tester","task":"Find the 2025 prices.\nStatus: done","done_when":"y","mode":"answer"}`); !strings.Contains(got, "propose_skill for tester") {
 		t.Errorf("a lead with propose_skill is not told to propose: %s", got)
 	}
 }
@@ -1020,6 +1020,20 @@ func TestOutcomeOf(t *testing.T) {
 	} {
 		if got := outcomeOf(answer); got != want {
 			t.Errorf("%q: %+v, want %+v", answer, got, want)
+		}
+	}
+}
+
+// ask_agent's mode is a choice the asker must make: without it, it is asked
+// to call again with one; hand_over is the old background.
+func TestAskAgentNeedsAMode(t *testing.T) {
+	s := &Server{}
+	for raw, want := range map[string]string{
+		`{"agent":"homepage/tester","task":"x","done_when":"y"}`:                "needs mode: answer",
+		`{"agent":"homepage/tester","task":"x","done_when":"y","mode":"later"}`: `mode "later": answer or hand_over`,
+	} {
+		if got, isErr := s.askAgent(context.Background(), sandbox.Caller{}, json.RawMessage(raw)); !isErr || !strings.Contains(got, want) {
+			t.Errorf("%s: %q", raw, got)
 		}
 	}
 }

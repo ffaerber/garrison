@@ -44,6 +44,28 @@ for n in $(gitea_api "" "$hp/app/pulls?state=open&limit=50" | python3 -c 'import
   gitea_api alice -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$hp/app/pulls/$n"
 done
 
+echo "# 4b2. a screenshot to see, in the chat"
+# Without a repo, the screenshot is shown, not proposed: the answer has the
+# picture, at the dashboard's /shots/<id>.png, which bob may open and
+# someone outside todo may not.
+since=$(last_pr app)
+answer=$(ask_agent todo bob "Show me a screenshot of https://todo.$DOMAIN/ here in the chat. Do not put it into a repo." marketing)
+shot=$(grep -oE "https://$DOMAIN/shots/[0-9a-f]{32}\.png" <<<"$answer" | head -n1)
+check "the answer shows the picture"       bash -c '[ -n "$0" ] && grep -qF "]($0)" <<<"$1"' "$shot" "$answer"
+shot_code() { feed "$1" /api/events?limit=1 >/dev/null; web -b "$tmp/home-$1.jar" -o /dev/null -w '%{http_code}' "$shot"; }
+check "bob may open it"                    test "$(shot_code bob)" = 200
+check "nothing was proposed for it"        test "$(last_pr app)" = "$since"
+
+echo "# a snapshot on request, from the dashboard's Apps page"
+# bob, a member of todo, takes a snapshot of its app now: it needs no
+# review, as it changes no data.
+snap_res=$(feed bob /api/events?limit=1 >/dev/null; web -b "$tmp/home-bob.jar" -o /dev/null -w '%{redirect_url}' -H "Origin: https://$DOMAIN" -X POST -d unit=todo -d stack=todo "https://$DOMAIN/apps/snapshot")
+snap=$(grep -oE 'manual-[0-9]{8}-[0-9]{6}' <<<"$(python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote_plus(sys.argv[1]))' "$snap_res")" | head -n1)
+check "bob takes a snapshot of todo"       test -n "$snap"
+snap_there() { zfs list -t snapshot -H -o name 2>/dev/null | grep -q "/stacks/todo@$snap$"; }
+check "it is there, on the machine"        until_true 60 snap_there
+check "the feed says bob took it"          until_true 30 in_feed alice ns=todo "e['kind'] == 'snapshot' and e['actor'] == 'bob' and '$snap' in e['title']"
+
 echo "# 4c. the marketing agent follows its skill"
 since=$(last_pr app)
 at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -83,7 +105,7 @@ echo "# 4e. the marketing agent works in a sandbox of its own"
 sb=$(sandbox_of todo/marketing)
 check "the channel's turns with it ran in its sandbox" test -n "$sb"
 check "the sandbox holds no LLM key and no token" \
-  bash -c 'k=$(cat "$1"); p() { kubectl --namespace garrison-sandboxes "$@"; }; { [ ${#k} -lt 16 ] || ! p get pod "$0" -o yaml | grep -qF -- "$k"; } && [ "$(p exec "$0" -- env | grep -c "^GARRISON_")" = 4 ] && ! p exec "$0" -- ls /etc/garrison 2>/dev/null && ! p exec "$0" -- ls /var/run/secrets/kubernetes.io 2>/dev/null' "$sb" "$ETC/llm-api-key"
+  bash -c 'k=$(cat "$1"); p() { kubectl --namespace garrison-sandboxes "$@"; }; { [ ${#k} -lt 16 ] || ! p get pod "$0" -o yaml | grep -qF -- "$k"; } && [ "$(p exec "$0" -- env | grep "^GARRISON_" | cut -d= -f1 | sort | tr "\n" " ")" = "GARRISON_API GARRISON_CONTEXT GARRISON_MAX_TOKENS GARRISON_MODEL GARRISON_PROMPT GARRISON_TOKEN " ] && ! p exec "$0" -- ls /etc/garrison 2>/dev/null && ! p exec "$0" -- ls /var/run/secrets/kubernetes.io 2>/dev/null' "$sb" "$ETC/llm-api-key"
 check "it runs under gVisor"               test "$(kubectl --namespace garrison-sandboxes get pod "$sb" -o jsonpath='{.spec.runtimeClassName}')" = gvisor
 check "as root, in gVisor's own kernel"    bash -c "$(declare -f in_sandbox); [ \"\$(in_sandbox $sb id -u)\" = 0 ] && in_sandbox $sb dmesg | grep -q gVisor"
 check "it cannot reach the internet"       bash -c "$(declare -f in_sandbox); ! in_sandbox $sb curl -sS -m 5 -o /dev/null https://example.org"

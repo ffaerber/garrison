@@ -202,10 +202,10 @@ A chain of command is the order in which agents do one kind of job, written down
 
 ## The commander
 
-The commander is for when someone does not know which agent to ask. It is written into `garrison/config` at install (`agents: any`, no tools), is the default model of new chats in Open WebUI (`garrison/commander`), and every channel's pinned message names it. Like every agent, it goes by its name, `@commander`, in any channel, and works in the channel's unit. It does no work itself: it calls `find_agents`, then
+The commander is for when someone does not know which agent to ask. It is written into `garrison/config` at install (`agents: any`; its one tool, `list_units`, only reads which units the person is in, so that in a private chat "my unit" means the person's one unit, or it asks naming them), is the default model of new chats in Open WebUI (`garrison/commander`), and every channel's pinned message names it. Like every agent, it goes by its name, `@commander`, in any channel, and works in the channel's unit. It does no work itself: it calls `find_agents`, then
 
 - hands a clear, one-off task (a screenshot, a new repo, why an app does not start) to the agent that fits, with `ask_agent`, working in the same unit (or the one named, as `<unit>/<agent>`); in a channel in the background, so that agent posts its answer there itself;
-- for work with back and forth (a feature, a new app), from a private chat hands the person over (`ask_agent` with `background`): the agent starts the conversation in the unit's channel, mentioning them, and the commander gives them the link; in a channel, or for a unit they are not in, it tells them which agent to talk to, `@<agent>` in that unit's channel, with its link, and why;
+- for work with back and forth (a feature, a new app), from a private chat hands the person over (`ask_agent` with `mode: hand_over`, a choice the agent must make: an optional flag was left out even when asked for): the agent starts the conversation in the unit's channel, mentioning them, and the commander gives them the link; in a channel, or for a unit they are not in, it tells them which agent to talk to, `@<agent>` in that unit's channel, with its link, and why;
 - asks one question when it cannot tell, and says when no agent fits and what one would need.
 
 Root admins change it like any agent of `garrison`, by a pull request to its folder.

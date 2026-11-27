@@ -16,6 +16,20 @@ import (
 // models for this key, and does the model chosen as the default answer a
 // question.
 
+// AnthropicVersion is sent with every request for a provider's models:
+// Anthropic's OpenAI-compatible API (https://api.anthropic.com/v1) answers
+// chat completions as OpenAI's do, but its /models wants this header, which
+// other providers ignore.
+const AnthropicVersion = "2023-06-01"
+
+// ListHeaders sets what a request for a provider's models carries.
+func ListHeaders(req *http.Request, key string) {
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	req.Header.Set("anthropic-version", AnthropicVersion)
+}
+
 // List asks the OpenAI-compatible API at baseURL for its models, with key
 // if set: GET <baseURL>/models. It returns their names, sorted.
 func List(ctx context.Context, client *http.Client, baseURL, key string) ([]string, error) {
@@ -23,9 +37,7 @@ func List(ctx context.Context, client *http.Client, baseURL, key string) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
+	ListHeaders(req, key)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach %s: %w", baseURL, err)

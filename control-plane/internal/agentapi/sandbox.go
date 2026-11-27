@@ -73,7 +73,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 	// The model's full id: the sandbox's LLM requests are routed by it.
 	llm, upstream, model := s.route(ctx, a.ID(), a.Model)
 	a.Internet = s.internet(ctx, a)
-	system := agents.System(a, s.Domain) + "\n\n" + Workspace
+	system := agents.System(a, s.Domain) + fmt.Sprintf("\n\nYou run on the model %s (root admins choose each agent's model on the dashboard's Models page).", model) + "\n\n" + Workspace
 	if a.Internet.None() {
 		system += Offline
 	} else {
@@ -110,6 +110,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 			return err
 		}
 		text, images := msg(st.MessageCount == 0)
+		text = s.unitContext(ctx, chat, a, person, st.MessageCount == 0) + text
 		tr := s.startTrace(ctx, a, a.Unit, person, chat, run, text)
 		turn, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -217,11 +218,23 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 
 // missingCards are the lines of cards whose link the answer lacks, each
 // once.
+//
+// A screenshot shown in the chat (Screenshot: <address>) is the picture
+// itself, as Markdown, unless the answer shows it as a picture already.
 func missingCards(answer string, cards []string) []string {
 	var out []string
 	for _, line := range cards {
 		url := strings.TrimSpace(line[strings.Index(line, "https://"):])
-		if !strings.Contains(answer, url) && !slices.Contains(out, line) {
+		if strings.HasPrefix(line, "Screenshot: ") {
+			if !strings.Contains(answer, "]("+url+")") {
+				line = "![Screenshot](" + url + ")"
+			} else {
+				continue
+			}
+		} else if strings.Contains(answer, url) {
+			continue
+		}
+		if !slices.Contains(out, line) {
 			out = append(out, line)
 		}
 	}
@@ -229,8 +242,9 @@ func missingCards(answer string, cards []string) []string {
 }
 
 // reviewLine is how the gateway's tools name a link the person must have:
-// a change's card (Tools.links), or where a new provider's key goes.
-var reviewLine = regexp.MustCompile(`(?m)^(Review it: https://\S+/c/[a-z0-9-]+/[A-Za-z0-9._-]+/[0-9]+|Set its API key: https://\S+/models\?provider=\S+)$`)
+// a change's card (Tools.links), where a new provider's key goes, or a
+// screenshot to show.
+var reviewLine = regexp.MustCompile(`(?m)^(Review it: https://\S+/c/[a-z0-9-]+/[A-Za-z0-9._-]+/[0-9]+|Set its API key: https://\S+/models\?provider=\S+|Screenshot: https://\S+/shots/[0-9a-f]{32}\.png)$`)
 
 // promptFrom is what Pi gets of Open WebUI's request: the newest message
 // with its images, and Open WebUI's own system messages (a channel thread's

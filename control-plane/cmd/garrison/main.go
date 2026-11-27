@@ -367,6 +367,8 @@ func deployCmd(args []string) error {
 			// The dashboard's Apps page: every address and what runs behind it.
 			"GET /apps": cluster.AppsHandler(),
 		}
+		// The gateway asks for a snapshot here, for a person of the unit.
+		extra["POST /snapshots/{unit}/{stack}"] = c.SnapshotHandler(gateway.ServiceKey(strings.TrimSpace(string(pw))), gateway.ServiceHeader)
 		if keys != nil {
 			// The dashboard asks for a unit's public keys here, to
 			// encrypt the secrets people set.
@@ -458,6 +460,7 @@ func gatewayCmd(args []string) error {
 	webBrowser := fs.String("web-browser", "http://webbrowser:9222", "DevTools of the browser for the public web, which goes out through the agent service's internet proxy; empty: browse only the installation's pages")
 	clients := fs.String("clients", "openwebui", "Keycloak clients whose access tokens are accepted, comma-separated")
 	keycloakURL := fs.String("keycloak", "http://keycloak:8080", "Keycloak's URL, for the agents' accounts there; empty: agents get none, and runs without a person cannot browse")
+	deployerURL := fs.String("deployer", "", "the deployer's URL, which takes snapshots on request (take_snapshot), e.g. http://deployer:8090; empty: none")
 	hookURL := fs.String("hook-url", "", "the URL Gitea reaches this server's webhook (/hook) at; empty: only check every interval")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
@@ -500,6 +503,10 @@ func gatewayCmd(args []string) error {
 		tools.Keycloak = &gateway.Keycloak{URL: *keycloakURL, User: vars["ADMIN_USER"], Password: g.Password}
 	}
 	serviceKey := gateway.ServiceKey(g.Password)
+	tools.Deployer, tools.ServiceKey = *deployerURL, serviceKey
+	if store != nil {
+		tools.Shots = store // screenshots shown in a chat
+	}
 	tools.LoginsDir = *loginsDir
 	if *browser != "" {
 		tools.Browser = &gateway.Browser{URL: *browser, Domain: domain, Private: tools.PrivateHost,
@@ -555,6 +562,9 @@ func gatewayCmd(args []string) error {
 	mux.Handle("POST /internal/post", gateway.PostHandler(sync, serviceKey))
 	mux.Handle("GET /internal/channels/{id}", gateway.ChannelHandler(sync, serviceKey))
 	mux.Handle("GET /internal/units/{unit}/channel", gateway.UnitChannelHandler(sync, serviceKey))
+	// unit.md, for the agent service's turns and the dashboard's unit pages.
+	mux.Handle("GET /internal/units/{unit}/unit.md", gateway.UnitMDHandler(tools, serviceKey))
+	mux.Handle("GET /internal/people/{person}/units.md", gateway.UnitMDHandler(tools, serviceKey))
 	mux.Handle("GET /internal/threads/{channel}/{message}", gateway.ThreadHandler(sync, serviceKey))
 	if *hookURL != "" {
 		secret := hooks.Secret(g.Password, *hookURL)
@@ -770,6 +780,7 @@ func agentsCmd(args []string) error {
 		Gitea:        g,
 		Media:        g,
 		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
+		Units:        &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
 		Events:       recorder(store),
 	}
 	// Each turn's trace, for the dashboard's agent pages (kept 14 days).
@@ -956,6 +967,7 @@ func homeCmd(args []string) error {
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
 	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys for the secrets page and the apps for the Apps page (e.g. http://deployer:8090); empty: neither page")
 	agentsURL := fs.String("agents", "", "the agent service's URL, which says which agents work now (e.g. http://agents:8070); empty: the dashboard does not show it")
+	gatewayURL := fs.String("gateway", "", "the gateway's URL, which gives each unit's unit.md for the Units page (e.g. http://gateway:8080); empty: no Units page")
 	keycloakURL := fs.String("keycloak", "", "Keycloak's URL, where the setup makes the first root admin (e.g. http://keycloak:8080); empty: no setup")
 	setupToken := fs.String("setup-token-file", "", "the setup's token, which the installer printed in its link; with -keycloak and -deployer, /setup completes the installation")
 	feed := eventsFlags(fs)
@@ -988,12 +1000,16 @@ func homeCmd(args []string) error {
 		s.Secrets = &secrets.Store{Gitea: g, Recipients: secrets.Remote(*deployer), Run: secrets.Runner(apply.Exec), Domain: vars["DOMAIN"]}
 		s.Providers = homeProviders{g}
 		s.Apps = home.RemoteApps(*deployer)
+		s.Snapshots = home.RemoteSnapshots(*deployer, gateway.ServiceKey(g.Password))
 	}
 	if *agentsURL != "" {
 		s.Running = home.RemoteRunning(*agentsURL, gateway.ServiceKey(g.Password))
 	}
+	if *gatewayURL != "" {
+		s.Units = home.RemoteUnits(*gatewayURL, gateway.ServiceKey(g.Password))
+	}
 	if store != nil {
-		s.Traces = store
+		s.Traces, s.Shots = store, store
 	}
 	s.PlatformUser = vars["ADMIN_USER"]
 	if *keycloakURL != "" {

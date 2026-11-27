@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -121,5 +122,39 @@ func TestSeesApp(t *testing.T) {
 	v := events.Visibility{Repos: map[string]bool{"todo/config": true}}
 	if !SeesApp(v, "garrison") || !SeesApp(v, "todo") || SeesApp(v, "lab") {
 		t.Error("SeesApp")
+	}
+}
+
+type fakeSnapshots struct{ taken []string }
+
+func (f *fakeSnapshots) Snapshot(_ context.Context, unit, stack, by string) (string, error) {
+	f.taken = append(f.taken, unit+"/"+stack+" by "+by)
+	return "manual-20261127-180000", nil
+}
+
+// Snapshot now: for the people of a unit and root admins, on its apps, not
+// on the platform's own.
+func TestSnapshotNow(t *testing.T) {
+	s := appsServer()
+	snaps := &fakeSnapshots{}
+	s.Snapshots = snaps
+	body := get(s, "erin", "/apps").Body.String()
+	if !strings.Contains(body, `<input type="hidden" name="unit" value="lab">`) || strings.Count(body, "Snapshot now") != 1 {
+		t.Errorf("erin, in lab, sees one button, on lab's app:\n%s", body)
+	}
+	if body := get(s, "root", "/apps").Body.String(); strings.Contains(body, `name="unit" value="garrison"`) {
+		t.Error("a button on the platform's own app")
+	}
+	w := post(s, "erin", "https://home.test", "/apps/snapshot", url.Values{"unit": {"lab"}, "stack": {"secret"}})
+	if w.Code != 303 || !strings.Contains(w.Header().Get("Location"), "manual-20261127-180000") || len(snaps.taken) != 1 || snaps.taken[0] != "lab/secret by erin" {
+		t.Errorf("erin's snapshot: %d %s %v", w.Code, w.Header().Get("Location"), snaps.taken)
+	}
+	for _, c := range []struct{ who, unit string }{{"frank", "lab"}, {"erin", "todo"}, {"root", "garrison"}} {
+		if w := post(s, c.who, "https://home.test", "/apps/snapshot", url.Values{"unit": {c.unit}, "stack": {"x"}}); w.Code != 403 {
+			t.Errorf("%s on %s: %d", c.who, c.unit, w.Code)
+		}
+	}
+	if w := post(s, "erin", "https://other.test", "/apps/snapshot", url.Values{"unit": {"lab"}, "stack": {"secret"}}); w.Code != 403 {
+		t.Errorf("from another site: %d", w.Code)
 	}
 }

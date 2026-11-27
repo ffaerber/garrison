@@ -27,23 +27,23 @@ check "which makes the media library"      zfs list "$lib_ds"
 mkdir -p "$lib" && mount -t zfs "$lib_ds" "$lib"
 
 echo "# ComfyUI, outside Garrison"
-# COMFYUI=host: a real one on the computer running the VM, at the VM's
-# gateway, as the local Ollama is; it really draws, on its GPU. Otherwise a
-# fake one in the VM, which hands back a fixed picture and clip.
-comfy_pid=
-if [ "${COMFYUI:-fake}" = host ]; then
-  host_ip=$(ip route | awk '/^default/ { print $3; exit }')
-  check "a real ComfyUI answers on the host, with a GPU" bash -c \
-    'curl -sf --max-time 10 "http://$0:8188/system_stats" | grep -q "\"type\": \"cuda\""' "$host_ip"
+# COMFYUI_URL (from .env, see test/vm/steps.sh): a real one, which really
+# draws, on its GPU. Otherwise a fake one in the VM, which hands back a fixed
+# picture and clip.
+comfy_pid= comfy=
+if [ -n "${COMFYUI_URL:-}" ]; then
+  comfy=$(vm_url "$COMFYUI_URL")
+  check "a real ComfyUI answers, with a GPU" bash -c \
+    'curl -sf --max-time 10 "$0/system_stats" | grep -q "\"type\": \"cuda\""' "$comfy"
 else
   mkdir -p "$tmp/comfy" && cp test/e2e/media/picture.png test/e2e/media/clip.mp4 "$tmp/comfy/"
   python3 test/e2e/media/comfy.py 8188 "$tmp/comfy" & comfy_pid=$!
-  host_ip=$(ip route get 1.1.1.1 | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+  comfy=http://$(ip route get 1.1.1.1 | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}'):8188
 fi
 trap '[ -z "$comfy_pid" ] || kill $comfy_pid 2>/dev/null; rm -rf "$tmp"' EXIT
-sed -i '/^COMFYUI_URL=/d' $ETC/install.env && echo "COMFYUI_URL=http://$host_ip:8188" >> $ETC/install.env
+sed -i '/^COMFYUI_URL=/d' $ETC/install.env && echo "COMFYUI_URL=$comfy" >> $ETC/install.env
 kubectl --namespace garrison rollout restart deployment/agents >/dev/null && kubectl --namespace garrison rollout status deployment/agents --timeout 300s >/dev/null 2>&1
-agents_say() { kubectl --namespace garrison logs "deployment/agents" --since=3m 2>&1 | grep -q "generate_media uses ComfyUI at http://$host_ip:8188"; }
+agents_say() { kubectl --namespace garrison logs "deployment/agents" --since=3m 2>&1 | grep -qF "generate_media uses ComfyUI at $comfy"; }
 check "the agent service uses it"          until_true 120 agents_say
 check "the project media/demo goes to Gitea" installer/push-repo.sh --update media/demo test/e2e/media/demo
 

@@ -128,4 +128,15 @@ if ! until_true 300 handed_over; then
 fi
 check "the agent starts the conversation in todo's channel" until_true 300 handed_over
 check "the commander links the channel"    grep -q "chat\.$DOMAIN/channels/" <<<"$answer"
+
+echo "# 9d. \"my units\" in a private chat: all of bob's units, without asking back"
+# Open WebUI's suggestion sends this as it is. bob is in todo and family by
+# now: a question that only looks needs no choice, so the commander answers
+# for each (from unit.md, or asking the agents), and asks neither which unit
+# nor leave to look.
+chat_seq=$(date +%s%N) # a new chat, as a click on the suggestion starts
+answer=$(ask_chat bob garrison/commander "Which apps run in my units, and are they healthy?")
+check "it answers for todo, and whether its app runs" bash -c 'grep -qi "todo" <<<"$0" && grep -qiE "running|healthy|up|ready" <<<"$0"' "$answer"
+check "without asking which unit, or leave to look" bash -c '! grep -qiE "which unit|which one|want me to|shall i|should i ask|or all" <<<"$0"' "$answer"
+[ $failed -eq 0 ] || printf 'note  it said: %s\n' "$(head -c 400 <<<"$answer" | tr '\n' ' ')"
 }

@@ -16,12 +16,14 @@ import (
 const (
 	DeploySnapshot  = "deploy-"  // taken by the deployer before it redeploys an environment
 	RestoreSnapshot = "restore-" // the state an environment had before a restore
+	ManualSnapshot  = "manual-"  // taken when a person or an agent asked for one
 )
 
 // How many of the deployer's snapshots an environment keeps; Sanoid prunes its own.
 const (
 	KeepDeploys  = 10
 	KeepRestores = 5
+	KeepManuals  = 20
 )
 
 // RestoredProperty is the ZFS user property on an environment's dataset that
@@ -70,7 +72,7 @@ func SnapshotEnv(ctx context.Context, run Runner, root string, s *stack.Stack, e
 	if _, err := run(ctx, nil, nil, "zfs", "snapshot", "-r", ds+"@"+name); err != nil {
 		return false, err
 	}
-	for prefix, keep := range map[string]int{DeploySnapshot: KeepDeploys, RestoreSnapshot: KeepRestores} {
+	for prefix, keep := range map[string]int{DeploySnapshot: KeepDeploys, RestoreSnapshot: KeepRestores, ManualSnapshot: KeepManuals} {
 		if strings.HasPrefix(name, prefix) {
 			return true, prune(ctx, run, ds, prefix, keep)
 		}

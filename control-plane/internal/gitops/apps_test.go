@@ -626,3 +626,36 @@ func TestTheUnitsPeople(t *testing.T) {
 		t.Fatalf("options: %v %v", o.Members, err)
 	}
 }
+
+// A snapshot on request: of a deployed environment, named manual-<time>,
+// recorded in the feed with who asked; none of an environment not there.
+func TestASnapshotOnRequest(t *testing.T) {
+	c, f := setupApps(t)
+	feed := &events.Memory{}
+	c.Events = feed
+	ctx := context.Background()
+	apps, errs := c.syncApps(ctx, false, map[string]App{})
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if err := c.writeState(State{Stacks: map[string]string{}, Apps: apps}); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	name, err := c.TakeSnapshot(ctx, "homepage", "todo", "alice")
+	if err != nil || !strings.HasPrefix(name, "manual-") {
+		t.Fatalf("%q %v", name, err)
+	}
+	if got := f.called("zfs snapshot -r garrison/ns/homepage/stacks/todo@" + name); len(got) != 1 {
+		t.Errorf("calls = %v", f.calls)
+	}
+	es, _ := feed.List(ctx, events.Query{Visibility: events.Visibility{All: true}})
+	if len(es) == 0 || es[0].Kind != events.KindSnapshot || es[0].Actor != "alice" || !strings.Contains(es[0].Title, "alice took the snapshot "+name+" of todo") {
+		t.Errorf("feed: %+v", es)
+	}
+	for _, c2 := range [][2]string{{"homepage", "nothing"}, {"other", "todo"}, {"../x", "todo"}} {
+		if _, err := c.TakeSnapshot(ctx, c2[0], c2[1], "alice"); !errors.Is(err, ErrNoEnvironment) {
+			t.Errorf("%v: %v", c2, err)
+		}
+	}
+}

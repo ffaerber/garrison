@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{else if .Models}}Models · {{else if .PeoplePage}}People · {{else if .AppsPage}}Apps · {{end}}Garrison</title>
+<title>{{if .Event}}{{.Event.Title}} · {{else if .Card}}{{.Card.Card.Title}} · {{else if .Secrets}}Secrets · {{else if .Models}}Models · {{else if .PeoplePage}}People · {{else if .UnitsPage}}{{if .UnitsPage.Unit}}{{.UnitsPage.Unit}} · {{end}}Units · {{else if .AppsPage}}Apps · {{end}}Garrison</title>
 <style>
 {{template "css"}}</style>
 </head>
 <body>
 {{sprite}}
-<header><div class="bar"><a class="brand" href="/">Garrison</a>{{if or .HasSecrets .HasApps .HasAgents}}<nav class="nav"><a href="/"{{if not (or .Secrets .Models .AppsPage .AgentsPage .TracePage .PeoplePage)}} class="on"{{end}}>Feed</a>{{if .HasAgents}}<a href="/agents"{{if or .AgentsPage .TracePage}} class="on"{{end}}>Agents</a>{{end}}{{if .HasApps}}<a href="/apps"{{if .AppsPage}} class="on"{{end}}>Apps</a>{{end}}{{if .HasPeople}}<a href="/people"{{if .PeoplePage}} class="on"{{end}}>People</a>{{end}}{{if .HasSecrets}}<a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a>{{end}}{{if .HasModels}}<a href="/models"{{if .Models}} class="on"{{end}}>Models</a>{{end}}</nav>{{end}}{{if ge .Working 0}}<a class="working{{if .Working}} busy{{end}}" href="/#running" title="Agents working now, in every unit">{{if .Working}}<i></i>{{.Working}} agent{{if ne .Working 1}}s{{end}} working{{else}}no agent working{{end}}</a>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
+<header><div class="bar"><a class="brand" href="/">Garrison</a>{{if or .HasSecrets .HasApps .HasAgents .HasUnits .HasPeople}}<nav class="nav"><a href="/"{{if not (or .Secrets .Models .AppsPage .AgentsPage .TracePage .PeoplePage .UnitsPage)}} class="on"{{end}}>Feed</a>{{if .HasUnits}}<a href="/u"{{if .UnitsPage}} class="on"{{end}}>Units</a>{{end}}{{if .HasAgents}}<a href="/agents"{{if or .AgentsPage .TracePage}} class="on"{{end}}>Agents</a>{{end}}{{if .HasApps}}<a href="/apps"{{if .AppsPage}} class="on"{{end}}>Apps</a>{{end}}{{if .HasPeople}}<a href="/people"{{if .PeoplePage}} class="on"{{end}}>People</a>{{end}}{{if .HasSecrets}}<a href="/secrets"{{if .Secrets}} class="on"{{end}}>Secrets</a>{{end}}{{if .HasModels}}<a href="/models"{{if .Models}} class="on"{{end}}>Models</a>{{end}}</nav>{{end}}{{if ge .Working 0}}<a class="working{{if .Working}} busy{{end}}" href="/#running" title="Agents working now, in every unit">{{if .Working}}<i></i>{{.Working}} agent{{if ne .Working 1}}s{{end}} working{{else}}no agent working{{end}}</a>{{end}}<span class="who">{{.Who}}{{if .All}} · root admin{{end}}</span></div></header>
 <main>
-{{if .Event}}{{template "event" .}}{{else if .Card}}{{template "card" .Card}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else if .Models}}{{template "models" .Models}}{{else if .PeoplePage}}{{template "people" .PeoplePage}}{{else if .AppsPage}}{{template "apps" .AppsPage}}{{else if .AgentsPage}}{{template "agents" .AgentsPage}}{{else if .TracePage}}{{template "trace" .TracePage}}{{else}}{{template "feed" .}}{{end}}
+{{if .Event}}{{template "event" .}}{{else if .Card}}{{template "card" .Card}}{{else if .Secrets}}{{template "secrets" .Secrets}}{{else if .Models}}{{template "models" .Models}}{{else if .PeoplePage}}{{template "people" .PeoplePage}}{{else if .UnitsPage}}{{template "units" .UnitsPage}}{{else if .AppsPage}}{{template "apps" .AppsPage}}{{else if .AgentsPage}}{{template "agents" .AgentsPage}}{{else if .TracePage}}{{template "trace" .TracePage}}{{else}}{{template "feed" .}}{{end}}
 </main>
 <dialog id="modal" aria-label="Details">
   <button class="close" type="button" aria-label="Close" title="Close (Esc)">&times;</button>
@@ -278,6 +278,7 @@
 {{define "apps"}}
 <h1>Apps</h1>
 <p class="note">Everything with an address in Garrison: its own pages, and every environment of the units' apps, as the deployer runs them now. A new unit's app appears here once it is deployed. The same list, as JSON, is at <code>/api/apps</code>.</p>
+{{if .Notice}}<div class="notice">{{.Notice}}</div>{{end}}
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 {{range .Units}}<h2>{{.Name}}</h2>
 <div class="panel"><ul class="names apps">{{range .Apps}}<li data-app="{{.Unit}}/{{.App}}/{{.Environment}}">
@@ -285,6 +286,7 @@
   <span><strong>{{.App}}</strong>{{if ne .Environment "main"}} <span class="chip">{{.Environment}}</span>{{end}}</span>
   <span class="urls">{{range .URLs}}<a href="{{.}}">{{.}}</a> {{end}}</span>
   <span class="hint state">{{.State}}</span>
+  {{if .Snapshot}}<form method="post" action="/apps/snapshot" title="A copy of its data now, kept with the others; a restore can go back to it"><input type="hidden" name="unit" value="{{.Unit}}"><input type="hidden" name="stack" value="{{.Stack}}"><button>Snapshot now</button></form>{{end}}
 </li>{{end}}</ul></div>
 {{else}}{{if not .Error}}<div class="panel empty">Nothing with an address runs yet that you may see.</div>{{end}}{{end}}
 {{end}}
@@ -524,6 +526,9 @@ button.danger { color: var(--failed); }
 .setform input, .setform textarea, .loginform input { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
 .setform .row, .loginform .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .chooseform { display: grid; gap: 10px; }
+.unitmd h1 { margin: 6px 0 10px; } .unitmd h2 { font-size: 15px; margin: 18px 0 6px; color: var(--muted); }
+.unitmd h1 + p, .unitmd p { margin: 6px 0; } .unitlist { margin: 4px 0; padding-left: 18px; } .unitlist li { margin: 3px 0; overflow-wrap: anywhere; }
+.unitmd + .unitmd { margin-top: 12px; }
 dialog#modal { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 dialog#modal::backdrop { background: rgba(10,12,16,.45); }
 #modal-body { padding: 8px 18px 18px; overflow: auto; max-height: calc(100vh - 50px); }
@@ -748,4 +753,12 @@ ul.files { list-style: none; margin: 0; padding: 0; font-size: 14px; display: gr
 </main>
 </body>
 </html>
+{{end}}
+
+{{define "units"}}
+{{if .Unit}}<a class="back" href="/u">← Your units</a>{{else}}<h1>Your units</h1>
+<p class="note">Each unit as it is now: its people, apps, repos and the agents' rights there. Generated as you look, from Git and the cluster; the agents get the same with every turn.</p>{{end}}
+{{if .Err}}<div class="error">{{.Err}}</div>{{end}}
+<div class="panel head unitmd">{{.Body}}</div>
+{{if .Raw}}<p class="hint"><a href="{{.Raw}}">As Markdown</a>: unit.md, as an agent reads it.</p>{{end}}
 {{end}}

@@ -34,3 +34,19 @@ func TestTheAnswerLinksTheModelsPage(t *testing.T) {
 		t.Errorf("missing: %q", got)
 	}
 }
+
+// A screenshot shown in the chat is the picture, unless the answer shows it.
+func TestAScreenshotIsShownAsAPicture(t *testing.T) {
+	text := "Screenshot: https://garrison.test/shots/0123456789abcdef0123456789abcdef.png\nOf https://todo.garrison.test/, 1280x800."
+	cards := reviewLine.FindAllString(text, -1)
+	if len(cards) != 1 {
+		t.Fatalf("found %v", cards)
+	}
+	url := "https://garrison.test/shots/0123456789abcdef0123456789abcdef.png"
+	if got := missingCards("Here it is: "+url, cards); len(got) != 1 || got[0] != "![Screenshot]("+url+")" {
+		t.Errorf("a bare link: %v", got)
+	}
+	if got := missingCards("Here it is:\n\n![the todo app]("+url+")", cards); len(got) != 0 {
+		t.Errorf("shown already: %v", got)
+	}
+}

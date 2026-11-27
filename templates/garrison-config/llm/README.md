@@ -14,6 +14,8 @@ The LLMs Garrison's agents use. Root admins change these files by pull request.
     openrouter:
       url: https://openrouter.ai/api/v1
       include: ["anthropic/*", "openai/gpt-6*"]   # optional: only these of its models
+    claude:                        # Anthropic's OpenAI-compatible API
+      url: https://api.anthropic.com/v1
     local:
       url: http://192.168.1.10:11434/v1
   ```

@@ -69,6 +69,12 @@ type Server struct {
 	// that make people or set their passwords, sent by hand.
 	People  People
 	Invites events.Invites
+	// Units, if set, backs the Units page: each unit's unit.md.
+	Units UnitPages
+	// Snapshots, if set, takes snapshots from the Apps page.
+	Snapshots Snapshots
+	// Shots, if set, serves the screenshots agents showed in a chat.
+	Shots events.Shots
 
 	mu    sync.Mutex
 	cache map[string]cached
@@ -134,6 +140,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /setup", s.setupPost)
 	mux.HandleFunc("GET /join", s.joinPage)
 	mux.HandleFunc("POST /join", s.joinPost)
+	if s.Shots != nil {
+		mux.Handle("GET /shots/{file}", s.signedIn(s.shotFile))
+	}
+	if s.Units != nil {
+		mux.Handle("GET /u", s.signedIn(s.unitsPage))
+		mux.Handle("GET /u/{unit}", s.signedIn(s.unitsPage))
+	}
 	if s.People != nil && s.Invites != nil {
 		mux.Handle("GET /people", s.signedIn(s.peoplePage))
 		mux.Handle("POST /people", s.signedIn(s.peoplePost))
@@ -151,6 +164,9 @@ func (s *Server) Handler() http.Handler {
 	if s.Apps != nil {
 		mux.Handle("GET /apps", s.signedIn(s.appsPage))
 		mux.Handle("GET /api/apps", s.signedIn(s.apiApps))
+		if s.Snapshots != nil {
+			mux.Handle("POST /apps/snapshot", s.signedIn(s.snapshotPost))
+		}
 	}
 	mux.Handle("GET /secrets", s.signedIn(s.secretsPage))
 	mux.Handle("POST /secrets/{ns}", s.signedIn(s.secretsPost))
@@ -302,6 +318,8 @@ type feedPage struct {
 	HasSecrets bool         // the dashboard has a secrets page
 	Models     *modelsView  // the Models page
 	PeoplePage *peopleView  // the People page
+	UnitsPage  *unitsView   // the Units page
+	HasUnits   bool         // the dashboard has a Units page
 	HasPeople  bool         // the dashboard has a People page
 	HasModels  bool         // the dashboard has a Models page, and this is a root admin
 	AppsPage   *appsView    // the Apps page
@@ -317,6 +335,7 @@ func (s *Server) render(w http.ResponseWriter, name string, p feedPage) {
 	s.agentNames()
 	p.HasSecrets = s.Secrets != nil
 	p.HasPeople = s.People != nil && s.Invites != nil
+	p.HasUnits = s.Units != nil
 	p.HasModels = s.Secrets != nil && s.Providers != nil && p.All
 	p.HasApps = s.Apps != nil
 	p.HasAgents = s.Traces != nil
@@ -521,4 +540,27 @@ func sourceName(s string) string {
 		return "dashboard"
 	}
 	return s
+}
+
+// shotFile serves a screenshot an agent showed in a chat, to whom may see it
+// (events.Visibility.SeesShot); for anyone else, as for one not there, 404.
+func (s *Server) shotFile(w http.ResponseWriter, r *http.Request, v events.Visibility) {
+	id, ok := strings.CutSuffix(r.PathValue("file"), ".png")
+	if !ok || len(id) != 32 {
+		http.NotFound(w, r)
+		return
+	}
+	shot, found, err := s.Shots.Shot(r.Context(), id)
+	if err != nil {
+		http.Error(w, "it cannot be read right now", http.StatusServiceUnavailable)
+		return
+	}
+	if !found || !v.SeesShot(shot) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Write(shot.PNG)
 }

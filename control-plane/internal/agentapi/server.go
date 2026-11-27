@@ -68,7 +68,9 @@ type Server struct {
 	Search    *Search
 	Styles    StyleReader
 	outputs   outputs
-	Poster    Poster          // posts answers no message waits for; nil: none
+	Poster    Poster        // posts answers no message waits for; nil: none
+	Units     UnitDescriber // unit.md for each turn; nil: none
+	sent      sentUnits
 	Events    events.Recorder // the feed, which gets the routines' runs; nil: none
 	Questions *Questions      // what routines asked people (ask_person); nil: they cannot ask
 }

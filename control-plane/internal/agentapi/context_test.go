@@ -13,6 +13,12 @@ func TestTheContextWindowComesFromTheServer(t *testing.T) {
 		switch r.URL.Path {
 		case "/llamacpp/v1/models":
 			io.WriteString(w, `{"data": [{"id": "other", "meta": {"n_ctx": 8192}}, {"id": "qwen3.8-27b", "meta": {"n_ctx": 65536}}]}`)
+		case "/anthropic/v1/models":
+			if r.Header.Get("anthropic-version") == "" {
+				http.Error(w, "anthropic-version: header is required", http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `{"data": [{"id": "claude-sonnet-5-5", "max_input_tokens": 1000000}], "has_more": false}`)
 		case "/vllm/v1/models":
 			io.WriteString(w, `{"data": [{"id": "big", "max_model_len": 131072}]}`)
 		case "/ollama/v1/models":
@@ -33,11 +39,12 @@ func TestTheContextWindowComesFromTheServer(t *testing.T) {
 		url, model string
 		want       int
 	}{
-		{srv.URL + "/llamacpp/v1", "qwen3.8-27b", 65536},      // a llama.cpp server: meta.n_ctx
-		{srv.URL + "/vllm/v1", "big", 131072},                 // vLLM: max_model_len
-		{srv.URL + "/ollama/v1", "qwen3.8-64k:latest", 65536}, // Ollama: its num_ctx
-		{srv.URL + "/ollama/v1", "plain", 32768},              // Ollama: the model's length
-		{srv.URL + "/nothing/v1", "x", DefaultContext},        // says nothing
+		{srv.URL + "/llamacpp/v1", "qwen3.8-27b", 65536},          // a llama.cpp server: meta.n_ctx
+		{srv.URL + "/vllm/v1", "big", 131072},                     // vLLM: max_model_len
+		{srv.URL + "/anthropic/v1", "claude-sonnet-5-5", 1000000}, // Anthropic: max_input_tokens, with its header
+		{srv.URL + "/ollama/v1", "qwen3.8-64k:latest", 65536},     // Ollama: its num_ctx
+		{srv.URL + "/ollama/v1", "plain", 32768},                  // Ollama: the model's length
+		{srv.URL + "/nothing/v1", "x", DefaultContext},            // says nothing
 		{"http://127.0.0.1:1/v1", "unreachable", DefaultContext},
 	} {
 		if got := (&LLM{URL: c.url}).Context(context.Background(), c.model); got != c.want {

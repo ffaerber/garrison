@@ -91,6 +91,11 @@ spec:
               value: '{"0": {"enable": true, "auth_type": "system_oauth", "headers": {"X-Garrison-Chat": "{{CHAT_ID}}", "X-Garrison-Task": "{{TASK}}"}}}'
             # New chats start with the commander, which finds the agent for a task.
             - { name: DEFAULT_MODELS, value: garrison/commander }
+            # The suggestions of a new chat, for the commander, its default:
+            # Garrison's, not Open WebUI's examples. A title is two lines; a
+            # click sends the text at once, so each is a whole question.
+            - name: DEFAULT_PROMPT_SUGGESTIONS
+              value: '[{"title": ["Who can help me", "the agents and what they do"], "content": "Which agents are there, and what can each of them do for my unit?"}, {"title": ["What runs here", "the apps of my unit and their state"], "content": "Which apps run in my units, and are they healthy?"}, {"title": ["Make a website", "from a Garrison template"], "content": "Which websites can you make for my unit from a template, and what do you need from me to start?"}, {"title": ["Software updates", "for our apps"], "content": "Are there software updates for our apps? If so, have them proposed."}, {"title": ["Invite someone", "to my unit"], "content": "How do I invite a new person to my unit?"}]'
             # One channel per unit, kept by the gateway: the team chat
             # where people mention the agents.
             - { name: ENABLE_CHANNELS, value: "True" }

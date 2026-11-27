@@ -61,6 +61,12 @@ Alice adds the agent `marketing` (folder `agents/marketing` in `garrison/config`
 - The gateway's browser loads the todo app signed in as bob and the agent opens a pull request on `todo/app`, as bob, holding the PNG.
 - The pull request says it shows the todo app as bob, with the page title *Our todos*, not the sign-in page.
 
+Then bob: *Show me a screenshot of https://todo.<domain>/ here in the chat. Do not put it into a repo.*
+
+- The answer shows the picture, at the dashboard's `/shots/<id>.png`, which bob may open; nothing is proposed for it.
+
+Then bob clicks **Snapshot now** for todo on the dashboard's Apps page: a `manual-…` snapshot of its data is on the machine, without a review, and the feed says bob took it.
+
 ## 4c. The marketing agent follows its skill
 
 Bob: *@marketing Make the homepage screenshots of the todo app.*
@@ -149,6 +155,10 @@ Then, in a private chat, bob: *In the unit todo, I want a dark mode for the todo
 
 - The commander hands him over: the agent's first message, for bob, with his task, appears in todo's channel.
 - Its answer links that channel.
+
+Then, in another private chat, bob clicks Open WebUI's suggestion *Which apps run in my units, and are they healthy?*
+
+- bob is in todo and family by then. A question that only looks needs no choice: the commander answers for each of his units, from their unit.md (which its turn begins with) or by asking the agents, saying for todo whether its app runs, and asks neither which unit nor leave to look.
 
 ## 5. Alice removes bob
 

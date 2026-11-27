@@ -25,6 +25,7 @@ const (
 	KindDeploy        = "deploy"
 	KindUndeploy      = "undeploy"
 	KindRestore       = "restore"
+	KindSnapshot      = "snapshot" // a snapshot someone asked for
 	KindRoutine       = "routine"
 	KindAsk           = "ask" // an agent handed work to another
 	KindAlert         = "alert"
