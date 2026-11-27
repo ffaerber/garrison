@@ -47,14 +47,14 @@ agents_say() { kubectl --namespace garrison logs "deployment/agents" --since=3m 
 check "the agent service uses it"          until_true 120 agents_say
 check "the project media/demo goes to Gitea" installer/push-repo.sh --update media/demo test/e2e/media/demo
 
-echo "# @media makes pictures and a video in the project's styles"
+echo "# @designer makes pictures and a video in the project's styles"
 media_channel() { channel_of media alice >/dev/null; }
 check "media has its channel"              until_true 120 media_channel
-answer=$(ask_agent media alice "For the project media/demo: make two pictures of the fox riding a bike in the style comic, and one short video of the fox waving in the style motion. Do not ask back." media)
+answer=$(ask_agent media alice "For the project media/demo: make two pictures of the fox riding a bike in the style comic, and one short video of the fox waving in the style motion. Do not ask back." designer)
 made() { [ "$(ls "$lib"/demo/*.png 2>/dev/null | wc -l)" -ge 2 ] && ls "$lib"/demo/*.mp4 >/dev/null 2>&1; }
 if ! made; then
-  printf 'retry @media did not make them; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent media alice "Please call generate_media now: project media/demo, style comic, prompt 'the fox riding a bike', count 2. Then generate_media with project media/demo, style motion, prompt 'the fox waving', count 1." media)
+  printf 'retry @designer did not make them; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent media alice "Please call generate_media now: project media/demo, style comic, prompt 'the fox riding a bike', count 2. Then generate_media with project media/demo, style motion, prompt 'the fox waving', count 1." designer)
 fi
 check "two pictures and a video, in the library" made
 first=$(ls "$lib"/demo/comic-*.png 2>/dev/null | head -n1)
@@ -74,16 +74,16 @@ else
   check "a video of the style's 49 frames" test "$(probe -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "/d/${video##*/}")" = 49
 fi
 check "alice signs in to her dashboard"    until_true 60 home_login alice
-check "the feed has what it made, for media's people" in_feed alice ns=media "e['kind'] == 'media' and e['agent'] == 'media/media'"
+check "the feed has what it made, for media's people" in_feed alice ns=media "e['kind'] == 'media' and e['agent'] == 'media/designer'"
 
-echo "# @media cuts a short from them"
-# Cutting takes a while: wait as long as a turn may last, so a retry does
-# not queue behind the first request.
-answer=$(ASK_WAIT=660 ask_agent media alice "Make a short vertical video of at most 15 seconds from the pictures and the video of the project demo. Do not ask back." media)
+echo "# @designer cuts a short from them"
+# Cutting takes a while: wait as long as a turn of media may last (30
+# minutes), so a retry does not queue behind the first request.
+answer=$(ASK_WAIT=1860 ask_agent media alice "Make a short vertical video of at most 15 seconds from the pictures and the video of the project demo. Do not ask back." designer)
 short() { ls "$lib"/demo/shorts/short-*.mp4 >/dev/null 2>&1; }
 if ! short; then
-  printf 'retry @media made no short; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ASK_WAIT=660 ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." media)
+  printf 'retry @designer made no short; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ASK_WAIT=1860 ask_agent media alice "Please make it now with ffmpeg: the files in /data/media/demo/, 1080x1920, at most 15 seconds, written to /data/media/demo/shorts/short-<YYYYMMDD-HHMMSS>.mp4." designer)
 fi
 check "a short in the library"             short
 # The short with its .json beside it, the finished one; else the newest
@@ -121,9 +121,12 @@ check "past the sign-in, it takes nothing" past
 kill $comfy_pid 2>/dev/null || true
 
 echo "# a chain of command: software updates"
-# An app of media pinned to an old release. alice asks the commander about
-# updates; it hands the chain software-updates to its lead, the sentry,
-# which asks the scout (the real web) and then the coder, in that order.
+# Two apps of media pinned to old releases: whoami by semantic version, and
+# Chrome's headless shell, whose majors come every four weeks, so that a
+# version-number rule ("only report a new major") would never update it.
+# alice asks the commander about updates; it hands the chain
+# software-updates to its lead, the sentry, which asks the scout (the real
+# web) and then the coder, in that order.
 cat > "$tmp/greeter.yaml" <<'YAML'
 stack: greeter
 unit: media
@@ -133,11 +136,22 @@ services:
 environments:
   main: {}
 YAML
+cat > "$tmp/shell.yaml" <<'YAML'
+stack: shell
+unit: media
+entrypoint: chrome
+services:
+  chrome: { image: chromedp/headless-shell:150.0.7871.125, port: 9222, resources: { memory: 512Mi } }
+environments:
+  main: { private: true }
+YAML
 check "media runs traefik/whoami:v1.10.0"  set_stack media greeter "$tmp/greeter.yaml"
+check "and chromedp/headless-shell:150.0.7871.125" set_stack media shell "$tmp/shell.yaml"
 asked_from=$(feed alice "/api/events?limit=1" | python3 -c 'import json,sys; e=json.load(sys.stdin); print(e[0]["id"] if e else 0)')
 answer=$(ask_agent media alice "Are there software updates for the apps of the unit media? If so, have them proposed." commander)
-# update_pr: the open pull request in media/config, by alice, that changes
-# only the tag of whoami in stacks/greeter.yaml to a newer one.
+# update_pr FILE IMAGE OLD: an open pull request in media/config, by alice,
+# whose only change to stacks/FILE.yaml is IMAGE's tag, from OLD to a newer
+# one; other files of the same pull request may change too.
 update_pr() {
   local n
   for n in $(gitea_api "" "$api/repos/media/config/pulls?state=open&limit=50" | python3 -c '
@@ -146,20 +160,27 @@ for p in json.load(sys.stdin):
     if p["user"]["login"] == "alice": print(p["number"])'); do
     gitea_api "" "$api/repos/media/config/pulls/$n.diff" | python3 -c '
 import re,sys
-d=sys.stdin.read()
-minus=[l for l in d.splitlines() if l.startswith("-") and not l.startswith("---")]
-plus=[l for l in d.splitlines() if l.startswith("+") and not l.startswith("+++")]
-new=re.findall(r"traefik/whoami:v(\d+)\.(\d+)(?:\.(\d+))?", "\n".join(plus))
-ok = "stacks/greeter.yaml" in d and len(minus) == 1 and len(plus) == 1 and "whoami:v1.10.0" in minus[0] and new and tuple(int(x or 0) for x in new[0]) > (1, 10, 0)
-sys.exit(0 if ok else 1)' && { echo "$n"; return 0; }
+file, image, old = sys.argv[1:4]
+d = sys.stdin.read()
+part = re.search(r"^diff --git a/stacks/%s\.yaml .*?(?=^diff --git |\Z)" % re.escape(file), d, re.S | re.M)
+if not part: sys.exit(1)
+lines = part.group(0).splitlines()
+minus = [l for l in lines if l.startswith("-") and not l.startswith("---")]
+plus = [l for l in lines if l.startswith("+") and not l.startswith("+++")]
+num = lambda t: tuple(int(x) for x in re.findall(r"\d+", t))
+new = re.findall(re.escape(image) + r":v?([0-9][0-9.]*)", "\n".join(plus))
+ok = len(minus) == 1 and len(plus) == 1 and image + ":" + old in minus[0] and new and num(new[0]) > num(old)
+sys.exit(0 if ok else 1)' "$1" "$2" "$3" && { echo "$n"; return 0; }
   done
   return 1
 }
-if ! until_true 900 update_pr >/dev/null; then
-  printf 'retry no update was proposed; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
-  answer=$(ask_agent media alice "Please hand this to the sentry as the chain software-updates says: check stacks/greeter.yaml of media/config (traefik/whoami:v1.10.0) for a newer release, and have the coder propose it." commander)
+both_prs() { update_pr greeter traefik/whoami v1.10.0 && update_pr shell chromedp/headless-shell 150.0.7871.125; }
+if ! until_true 900 both_prs >/dev/null; then
+  printf 'retry not both updates were proposed; it said: %s\n' "$(head -c 300 <<<"$answer" | tr '\n' ' ')"
+  answer=$(ask_agent media alice "Please hand this to the sentry as the chain software-updates says: check stacks/greeter.yaml (traefik/whoami:v1.10.0) and stacks/shell.yaml (chromedp/headless-shell:150.0.7871.125) of media/config for newer releases, and have the coder propose them." commander)
 fi
-check "an update is proposed: only the tag of whoami, newer" until_true 900 update_pr
+check "an update is proposed: only the tag of whoami, newer" until_true 900 update_pr greeter traefik/whoami v1.10.0
+check "and of Chrome, a newer major: not only reported" until_true 300 update_pr shell chromedp/headless-shell 150.0.7871.125
 # chain_order: the feed has commander → sentry, then sentry → scout before
 # sentry → coder.
 chain_order() {

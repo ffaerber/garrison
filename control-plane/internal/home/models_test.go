@@ -3,6 +3,7 @@ package home
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -52,7 +53,28 @@ func (f *rootKeys) Delete(ctx context.Context, ns, name, p string) error {
 type fakeProviders struct {
 	p        models.Providers
 	c        models.Catalog
+	agents   []AgentModel
 	proposed []string
+	chosen   []string
+}
+
+func (f *fakeProviders) Agents(context.Context) ([]AgentModel, error) { return f.agents, nil }
+func (f *fakeProviders) ProposeModels(_ context.Context, person, def string, choose map[string]string) (int, error) {
+	if person != "alice" {
+		return 0, changes.ErrForbidden
+	}
+	for _, id := range append([]string{def}, slices.Collect(maps.Values(choose))...) {
+		if _, ok := f.c[id]; id != "" && !ok {
+			return 0, fmt.Errorf("%w: %s is not offered", models.ErrInvalidProvider, id)
+		}
+	}
+	keys := slices.Sorted(maps.Keys(choose))
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, k+"="+choose[k])
+	}
+	f.chosen = append(f.chosen, fmt.Sprintf("%s %s %s", person, def, strings.Join(parts, " ")))
+	return 11, nil
 }
 
 func (f *fakeProviders) Providers(context.Context) (models.Providers, models.Catalog, bool, error) {
@@ -143,6 +165,36 @@ func TestTheModelsPage(t *testing.T) {
 	}
 	if _, ok := keys.values["garrison/llm-groq"]; ok {
 		t.Error("a refused provider left its key")
+	}
+
+	// Choosing the models: every model offered (off ones marked), and one
+	// change for all of them.
+	prov.agents = []AgentModel{{Name: "coder", Description: "Codes"}, {Name: "operator", Description: "Operates"}}
+	body = get(s, "alice", "/models").Body.String()
+	for _, want := range []string{`name="default"`, `<option value="ollama-cloud/gpt-oss:120b" selected>gpt-oss:120b</option>`,
+		`<option value="ollama-cloud/qwen">qwen (off)</option>`, `name="agent-coder"`, `name="agent-operator"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %q in the page", want)
+		}
+	}
+	w = post(s, "alice", origin, "/models", url.Values{"action": {"choose"}, "default": {"ollama-cloud/gpt-oss:120b"}, "agent-coder": {"ollama-cloud/qwen"}, "agent-operator": {""}})
+	if w.Code != 303 || w.Header().Get("Location") != "/c/garrison/config/11" {
+		t.Fatalf("choose: %d %s\n%s", w.Code, w.Header().Get("Location"), w.Body)
+	}
+	if len(prov.chosen) != 1 || prov.chosen[0] != "alice ollama-cloud/gpt-oss:120b coder=ollama-cloud/qwen operator=" {
+		t.Errorf("chosen: %v", prov.chosen)
+	}
+	if w := post(s, "alice", origin, "/models", url.Values{"action": {"choose"}, "agent-coder": {"nowhere/x"}}); w.Code != 400 || !strings.Contains(w.Body.String(), "not offered") {
+		t.Errorf("a model not offered: %d", w.Code)
+	}
+	if w := post(s, "dave", origin, "/models", url.Values{"action": {"choose"}, "agent-coder": {"ollama-cloud/qwen"}}); w.Code != 403 {
+		t.Errorf("dave chose: %d", w.Code)
+	}
+	// An agent with a model of its own has it chosen.
+	prov.agents[0].Model = "ollama-cloud/qwen"
+	body = get(s, "alice", "/models").Body.String()
+	if !strings.Contains(body, `<option value="ollama-cloud/qwen" selected>`) {
+		t.Errorf("after choosing:\n%s", body)
 	}
 
 	// Deleting a key.

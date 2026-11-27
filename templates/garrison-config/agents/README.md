@@ -11,7 +11,7 @@ An installation starts with these, each with only the tools its role needs:
 | `coder` | Changes code as pull requests (`propose_patch`; `merge_change` where a grant allows) and reviews pull requests; reaches the package registries |
 | `sentry` | Reads state, logs and metrics, tries the apps in the browser, and explains what is wrong; takes screenshots it proposes into a repo, and changes nothing else; asks the scout about the web; fits `on_alert` routines |
 | `scout` | Researches on the public web, with a browser of its own (the command `web`) and no sign-in; no access to Garrison's repos or apps |
-| `media` | Makes pictures and videos with ComfyUI in a project's styles (`generate_media`), and cuts short vertical videos from them with ffmpeg, into the unit's media library; its skill `media-project` says how a project is laid out |
+| `designer` | Makes pictures and videos with ComfyUI in a project's styles (`generate_media`, with `media_models` for the models ComfyUI has), its shorts made of video clips only and its turns up to 30 minutes (`turn: 30m`), speaks narrations in the project's voice (`generate_speech`, with a text-to-speech service such as Kokoro), and cuts short vertical videos from them with ffmpeg, into the unit's media library; its skill `media-project` says how a project is laid out |
 
 Change them, switch one off (`enabled: false`) or add your own.
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 // where a person would: its browser shows the pages behind the sign-in as
 // the agent, also in a run without a person. Each agent with an account in
 // Gitea (see Members.accounts) has one of the same name in the realm
-// garrison, e.g. agent-todo-media, disabled when its Gitea account is
+// garrison, e.g. agent-todo-designer, disabled when its Gitea account is
 // locked.
 //
 // Nobody else signs in with them. Their passwords, and the secret of the
@@ -238,7 +239,7 @@ func (k *Keycloak) user(ctx context.Context, account string) (*kcUser, error) {
 	return &found[0], nil
 }
 
-// Keep makes the account of the agent id (e.g. todo/media) when it is
+// Keep makes the account of the agent id (e.g. todo/designer) when it is
 // missing, and enables or disables it. It asks Keycloak again only when
 // what it set last differs.
 func (k *Keycloak) Keep(ctx context.Context, account, id string, enabled bool) error {
@@ -341,4 +342,138 @@ func (k *Keycloak) Token(ctx context.Context, account, id string) (string, error
 	k.tokens[account] = t
 	k.mu.Unlock()
 	return t.raw, nil
+}
+
+// RootTeamGroup is the realm's group of root admins.
+const RootTeamGroup = "root-admins"
+
+func (k *Keycloak) rootGroup(ctx context.Context) (string, error) {
+	var groups []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if _, err := k.admin(ctx, http.MethodGet, "/groups?exact=true&search="+RootTeamGroup, nil, &groups); err != nil {
+		return "", err
+	}
+	for _, g := range groups {
+		if g.Name == RootTeamGroup {
+			return g.ID, nil
+		}
+	}
+	return "", fmt.Errorf("keycloak: the realm %s has no group %s", kcRealm, RootTeamGroup)
+}
+
+// RootAdmins are the people of the group root-admins, by username, but for
+// the platform's own account (k.User), which the installer makes.
+func (k *Keycloak) RootAdmins(ctx context.Context) ([]string, error) {
+	id, err := k.rootGroup(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var members []struct {
+		Username string `json:"username"`
+		Enabled  bool   `json:"enabled"`
+	}
+	if _, err := k.admin(ctx, http.MethodGet, "/groups/"+id+"/members?max=1000", nil, &members); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, m := range members {
+		if m.Enabled && !strings.EqualFold(m.Username, k.User) {
+			out = append(out, m.Username)
+		}
+	}
+	return out, nil
+}
+
+// AddRootAdmin makes the person username, with email and password, and
+// puts them in root-admins. A username that is taken is refused.
+func (k *Keycloak) AddRootAdmin(ctx context.Context, username, email, password string) error {
+	return k.AddPerson(ctx, username, email, password, true)
+}
+
+// AddPerson makes the person username, with email and password, a root
+// admin if root. A username or email that is taken is ErrInvalid.
+func (k *Keycloak) AddPerson(ctx context.Context, username, email, password string, root bool) error {
+	gid := ""
+	if root {
+		var err error
+		if gid, err = k.rootGroup(ctx); err != nil {
+			return err
+		}
+	}
+	status, err := k.admin(ctx, http.MethodPost, "/users", map[string]any{
+		"username": username, "email": email, "emailVerified": true, "enabled": true,
+		"firstName": username, "lastName": "-",
+		"credentials": []map[string]any{{"type": "password", "value": password, "temporary": false}},
+	}, nil)
+	if status == http.StatusConflict {
+		return fmt.Errorf("%w: the username %s, or that email, is taken", ErrInvalid, username)
+	}
+	if err != nil {
+		return err
+	}
+	if !root {
+		return nil
+	}
+	u, err := k.user(ctx, username)
+	if err != nil {
+		return err
+	}
+	if u == nil {
+		return fmt.Errorf("keycloak: %s was made but cannot be found", username)
+	}
+	_, err = k.admin(ctx, http.MethodPut, "/users/"+u.ID+"/groups/"+gid, nil, nil)
+	return err
+}
+
+// SetPassword sets the password of the person username, as a reset link
+// does; a username that is no person, or the platform's account, is
+// ErrInvalid.
+func (k *Keycloak) SetPassword(ctx context.Context, username, password string) error {
+	if strings.EqualFold(username, k.User) || strings.HasPrefix(username, "agent-") {
+		return fmt.Errorf("%w: %s is no person", ErrInvalid, username)
+	}
+	u, err := k.user(ctx, username)
+	if err != nil {
+		return err
+	}
+	if u == nil {
+		return fmt.Errorf("%w: there is nobody called %s", ErrInvalid, username)
+	}
+	_, err = k.admin(ctx, http.MethodPut, "/users/"+u.ID+"/reset-password", map[string]any{"type": "password", "value": password, "temporary": false}, nil)
+	return err
+}
+
+// RealmPerson is someone who signs in to Garrison.
+type RealmPerson struct {
+	Username, Email string
+	Root            bool // a root admin
+	Enabled         bool
+}
+
+// People are the people of the realm, sorted, without the platform's
+// account and the agents' accounts.
+func (k *Keycloak) People(ctx context.Context) ([]RealmPerson, error) {
+	var users []struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Enabled  bool   `json:"enabled"`
+	}
+	if _, err := k.admin(ctx, http.MethodGet, "/users?briefRepresentation=true&max=2000", nil, &users); err != nil {
+		return nil, err
+	}
+	roots, err := k.RootAdmins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []RealmPerson
+	for _, u := range users {
+		if strings.EqualFold(u.Username, k.User) || strings.HasPrefix(u.Username, "agent-") {
+			continue
+		}
+		out = append(out, RealmPerson{Username: u.Username, Email: u.Email, Enabled: u.Enabled, Root: slices.Contains(roots, u.Username)})
+	}
+	slices.SortFunc(out, func(a, b RealmPerson) int { return strings.Compare(a.Username, b.Username) })
+	return out, nil
 }

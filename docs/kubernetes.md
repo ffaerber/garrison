@@ -73,7 +73,7 @@ Each chat with an agent runs in a pod of its own in the namespace `garrison-sand
 
 Who may do what (`garrison/platform/kubernetes.yaml`):
 - **Role `agents`:** the agent service may create, attach to and delete pods and claims there, and nothing else.
-- **ValidatingAdmissionPolicy `garrison-sandboxes`:** the API server refuses any pod there that is not a sandbox. It must have the sandbox image, gVisor, one container, no privileges, no host network or processes, a memory limit of at most 2Gi and no API token, and it may mount only its own claim and its unit's media library. This takes the place of the sandbox guard, which checked Docker containers the same way.
+- **ValidatingAdmissionPolicy `garrison-sandboxes`:** the API server refuses any pod there that is not a sandbox. It must have the sandbox image, gVisor, one container, no privileges, no host network or processes, a memory limit of at most 4Gi (an agent's `agent.yaml` may ask for up to that, `memory`; the default is 1Gi) and no API token, and it may mount only its own claim and its unit's media library. This takes the place of the sandbox guard, which checked Docker containers the same way.
 - **NetworkPolicy `sandboxes`:** a sandbox reaches the cluster's DNS and the agent service's LLM, tools and internet proxy (ports 8071 and 8072), nothing else. Nothing reaches a sandbox.
 
 The image is large (Chromium, ffmpeg, Node). The DaemonSet `sandbox-image` keeps it on every machine, so a chat's first message does not wait minutes for a pull. The deployer exports `garrison_sandbox_info{pod, agent, person, chat}`, which the Agents dashboard joins with the kubelet's metrics.

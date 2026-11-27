@@ -116,14 +116,14 @@ func TestAnAgentAsksAnother(t *testing.T) {
 func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	s, _, _ := setup(t)
 	commander := agents.Agent{Name: "commander", Prompt: "Command.", Asks: []string{agents.AnyAgent}}
-	media := agents.Agent{Name: "media", Description: "Makes screenshots", Prompt: "Shoot.", Tools: []string{"screenshot"},
+	designer := agents.Agent{Name: "designer", Description: "Makes screenshots", Prompt: "Shoot.", Tools: []string{"screenshot"},
 		Skills: []agents.Skill{{Name: "thumbs", Description: "thumbnails"}}}
 	operator := agents.Agent{Name: "operator", Description: "Runs things", Prompt: "Run."}
 	var list fakeAgents
 	for _, ns := range []string{"garrison", "homepage", "todo"} {
-		for _, a := range []agents.Agent{commander, media, operator} {
+		for _, a := range []agents.Agent{commander, designer, operator} {
 			a.Unit = ns
-			if ns == "homepage" && a.Name == "media" {
+			if ns == "homepage" && a.Name == "designer" {
 				a.Grants = []agents.Grant{{Repo: "site", Branch: "dev", Level: agents.LevelAutonomous, For: agents.ForMembers}}
 			}
 			list = append(list, a)
@@ -139,7 +139,7 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	}
 	c := sandbox.Caller{Agent: "homepage/commander", Chat: "chat-1", Person: "alice", Run: sandbox.Run{Chain: []string{"homepage/commander"}}}
 	got := find(c, `{}`)
-	for _, want := range []string{"- media: Makes screenshots", "tools: screenshot", "skills: thumbs (thumbnails)", "may autonomous on homepage/site into dev, for members", "- operator: Runs things"} {
+	for _, want := range []string{"- designer: Makes screenshots", "tools: screenshot", "skills: thumbs (thumbnails)", "may autonomous on homepage/site into dev, for members", "- operator: Runs things"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("find_agents lacks %q:\n%s", want, got)
 		}
@@ -151,7 +151,7 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 		t.Errorf("a channel link without in_unit:\n%s", got)
 	}
 	s.Poster = &fakePoster{}
-	if got := find(c, `{"in_unit":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- media") || !strings.Contains(got, "name it as todo/<agent>") ||
+	if got := find(c, `{"in_unit":"todo"}`); strings.Contains(got, "homepage/site") || !strings.Contains(got, "- designer") || !strings.Contains(got, "name it as todo/<agent>") ||
 		!strings.Contains(got, "The channel of todo, where people talk to its agents: https://chat.home.test/channels/ch-todo") {
 		t.Errorf("by unit:\n%s", got)
 	}
@@ -161,15 +161,15 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 	// An agent with a list finds only those on it.
 	lead := sandbox.Caller{Agent: "homepage/lead", Chat: "chat-1", Person: "alice"}
 	s.Agents = append(s.Agents.(fakeAgents), agents.Agent{Unit: "homepage", Name: "lead", Prompt: "Lead.", Asks: []string{"operator"}})
-	if got := find(lead, `{}`); strings.Contains(got, "- media") || !strings.Contains(got, "- operator") {
+	if got := find(lead, `{}`); strings.Contains(got, "- designer") || !strings.Contains(got, "- operator") {
 		t.Errorf("the lead finds:\n%s", got)
 	}
 
 	// It asks any agent by its name, which works where it does, and the
 	// feed has the hand-off and its end.
 	_, content := chatIn(t, s, "chat-1", "homepage/commander", Message{Role: "user",
-		Content: `call ask_agent {"agent":"media","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
-	if !strings.Contains(content, "homepage/media answers:") {
+		Content: `call ask_agent {"agent":"designer","task":"Screenshot the homepage.","done_when":"A pull request with it."}`})
+	if !strings.Contains(content, "homepage/designer answers:") {
 		t.Fatalf("content %q", content)
 	}
 	var ask *events.Event
@@ -178,8 +178,8 @@ func TestTheCommanderFindsAndHandsOver(t *testing.T) {
 			ask = &e
 		}
 	}
-	if ask == nil || ask.Status != events.StatusOK || ask.Unit != "homepage" || ask.Agent != "homepage/media" || ask.Actor != "alice" ||
-		ask.StartedBy != "agent homepage/commander" || !strings.Contains(ask.Title, "homepage/commander asked homepage/media, for alice: Screenshot the homepage.") {
+	if ask == nil || ask.Status != events.StatusOK || ask.Unit != "homepage" || ask.Agent != "homepage/designer" || ask.Actor != "alice" ||
+		ask.StartedBy != "agent homepage/commander" || !strings.Contains(ask.Title, "homepage/commander asked homepage/designer, for alice: Screenshot the homepage.") {
 		t.Errorf("feed: %+v", ask)
 	}
 	// Another unit's, by <unit>/<agent>.

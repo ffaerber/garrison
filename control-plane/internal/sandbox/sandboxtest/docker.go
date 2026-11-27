@@ -41,6 +41,7 @@ type Container struct {
 	Env             []string
 	Labels          map[string]string
 	Mounts          []Mount
+	Memory          int64
 	Running         bool
 	Removed         bool
 	messages        int
@@ -113,6 +114,7 @@ func (d *Docker) serve(w http.ResponseWriter, r *http.Request) {
 			HostConfig struct {
 				Runtime string
 				Mounts  []Mount
+				Memory  int64
 			}
 		}
 		json.NewDecoder(r.Body).Decode(&b)
@@ -130,7 +132,7 @@ func (d *Docker) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.Created++
-		c := &Container{ID: fmt.Sprintf("c%d", d.Created), Name: name, Image: b.Image, Env: b.Env, Labels: b.Labels, Runtime: b.HostConfig.Runtime, User: b.User, Mounts: b.HostConfig.Mounts}
+		c := &Container{ID: fmt.Sprintf("c%d", d.Created), Name: name, Image: b.Image, Env: b.Env, Labels: b.Labels, Runtime: b.HostConfig.Runtime, User: b.User, Mounts: b.HostConfig.Mounts, Memory: b.HostConfig.Memory}
 		d.Containers[name+"#"+c.ID] = c
 		d.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)

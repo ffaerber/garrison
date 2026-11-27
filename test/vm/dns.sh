@@ -56,6 +56,10 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable garrison-test-dns >/dev/null 2>&1
+# A clone of a VM this ran on starts the service with the other VM's
+# address, which fails until systemd stops trying ("start request
+# repeated too quickly"): that is cleared before it starts again.
+systemctl reset-failed garrison-test-dns 2>/dev/null || true
 systemctl restart garrison-test-dns
 VMSCRIPT
 )

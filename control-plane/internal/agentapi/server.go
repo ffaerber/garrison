@@ -58,6 +58,12 @@ type Server struct {
 	// ComfyUI, if set with Styles, makes pictures and videos for
 	// generate_media; Styles reads the projects' styles as the person.
 	ComfyUI *ComfyUI
+	// Speech, if set with Styles, is generate_speech: the installation's
+	// text-to-speech service; the project's narration.yaml names the voice.
+	Speech *Speech
+	// Traces, if set, records each turn's trace (thinking, tool calls and
+	// results) for the dashboard's agent pages.
+	Traces events.Tracer
 	// Search, if set, is web_search: the installation's SearXNG.
 	Search    *Search
 	Styles    StyleReader
@@ -208,13 +214,16 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusForbidden, why)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), s.turnTimeout())
+	ctx, cancel := context.WithTimeout(r.Context(), s.turnTimeout(agent))
 	defer cancel()
 
 	out := newWriter(w, req.Model, req.Stream)
 	var rounds int
 	if s.Sandboxes != nil && chat != "" {
 		run := sandbox.Run{Token: raw, StartedBy: "person", Chain: []string{agent.ID()}, Admin: person.Admin, Show: out.reasoning}
+		if n := len(req.Messages); n > 0 {
+			run.Task = req.Messages[n-1].Text()
+		}
 		msg := func(fresh bool) (string, []sandbox.Image) { return promptFrom(req.Messages, fresh) }
 		rounds, err = s.sandboxTurn(ctx, run, person.Name, chat, chat+"\x00"+agent.ID(), agent, msg, out)
 	} else {
@@ -252,7 +261,12 @@ func (s *Server) placed(ctx context.Context, model, chat string) (string, error)
 	return ns + "/" + name, nil
 }
 
-func (s *Server) turnTimeout() time.Duration {
+// turnTimeout is how long a turn of a may take: its agent.yaml's turn, else
+// the service's.
+func (s *Server) turnTimeout(a agents.Agent) time.Duration {
+	if a.Turn > 0 {
+		return a.Turn
+	}
 	if s.TurnTimeout > 0 {
 		return s.TurnTimeout
 	}

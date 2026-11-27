@@ -196,6 +196,10 @@ func setup(t *testing.T) (*MCP, *fakeGitea) {
 			return []byte(`{"items":[{"kind":"Deployment","metadata":{"name":"grafana","labels":{"garrison.io/stack":"grafana"}},
 				"spec":{"replicas":1,"template":{"spec":{"containers":[{"image":"grafana/grafana:12"}]}}},"status":{"readyReplicas":1}}]}`), nil
 		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "ingresses" && slices.Contains(args, "--all-namespaces") {
+			return []byte(`{"items":[{"metadata":{"labels":{"garrison.io/stack":"todo"}},"spec":{"rules":[{"host":"todo.example.com"}]}},
+				{"metadata":{"labels":{"garrison.io/stack":"todo"}},"spec":{"rules":[{"host":"dev-todo.example.com"}]}}]}`), nil
+		}
 		if name == "kubectl" && args[0] == "get" && args[1] == "pods" {
 			return []byte(`{"items":[{"metadata":{"name":"grafana-abc"},"status":{"phase":"Running","containerStatuses":[
 				{"name":"grafana","ready":false,"restartCount":3,"state":{"waiting":{"reason":"CrashLoopBackOff","message":"back-off"}},
@@ -308,7 +312,8 @@ func TestEveryoneMayLook(t *testing.T) {
 		t.Errorf("stack_status = %q", text)
 	}
 	text, isErr = callText(t, m, "tok-bob", "list_stacks", map[string]any{"unit": "homepage"})
-	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || !strings.Contains(text, "  todo_web 1/1 git.example.com/homepage/todo:fedcba987654") || strings.Contains(text, "grafana") {
+	if isErr || !strings.Contains(text, "todo (commit fedcba987654)") || !strings.Contains(text, "  todo_web 1/1 git.example.com/homepage/todo:fedcba987654") || strings.Contains(text, "grafana") ||
+		!strings.Contains(text, "  at https://dev-todo.example.com/\n  at https://todo.example.com/") {
 		t.Errorf("list_stacks homepage = %q", text)
 	}
 	text, isErr = callText(t, m, "tok-bob", "list_snapshots", map[string]any{"unit": "homepage", "stack": "todo"})

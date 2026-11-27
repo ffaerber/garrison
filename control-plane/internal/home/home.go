@@ -8,6 +8,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -48,14 +49,30 @@ type Server struct {
 	// Running, if set, says which agents work now: a count in every page's
 	// header, who and what on the feed, and /api/running.
 	Running Running
+	// Traces, if set, backs the Agents page: each agent's turns, step by
+	// step, for those who may read their answers.
+	Traces Traces
 	// MergeWait is how long Approve and merge waits for the checks the
 	// approval starts (garrison/approval); 0: 40 seconds.
 	MergeWait time.Duration
 	Domain    string
 	Now       func() time.Time
+	// Setup, if set, backs the setup at /setup, open with the token in
+	// SetupTokenFile until a root admin and the providers are there.
+	Setup          Setup
+	SetupTokenFile string
+	// PlatformUser is the platform's own account, which is no person.
+	PlatformUser string
+	// HTTP asks the LLM providers the setup tests; nil: a client of its own.
+	HTTP *http.Client
+	// People and Invites, if set, back the People page and /join: links
+	// that make people or set their passwords, sent by hand.
+	People  People
+	Invites events.Invites
 
 	mu    sync.Mutex
 	cache map[string]cached
+	draft setupDraft
 }
 
 type cached struct {
@@ -72,11 +89,21 @@ var page = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"iso":    func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
 	"short":  func(s string) string { return s[:min(7, len(s))] },
 	"group":  group,
+	"icon":   icon,
+	"svg":    svgIcon,
+	"sprite": func() template.HTML { return sprite },
+	"title":  titleHTML,
+	"agent":  agentTag,
+	"person": personTag,
 	"source": sourceName,
 	"entry":  func(e events.Event, now time.Time, this bool) entry { return entry{E: e, Now: now, This: this} },
 	"card":   func(c changes.Card) string { return changes.Path(c.Unit, c.Repo, c.Number) },
 	"join":   func(s []string) string { return strings.Join(s, ", ") },
 	"chain":  func(s []string) string { return strings.Join(s, " → ") },
+	"where":  where,
+	"took":   took,
+	"name":   func(id string) string { _, n, _ := strings.Cut(id, "/"); return n },
+	"unitOf": func(id string) string { u, _, _ := strings.Cut(id, "/"); return u },
 	"state": func(s string) string {
 		if s == "" {
 			return "pending"
@@ -103,6 +130,14 @@ func (s *Server) now() time.Time {
 // Handler serves the pages.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /setup", s.setupPage)
+	mux.HandleFunc("POST /setup", s.setupPost)
+	mux.HandleFunc("GET /join", s.joinPage)
+	mux.HandleFunc("POST /join", s.joinPost)
+	if s.People != nil && s.Invites != nil {
+		mux.Handle("GET /people", s.signedIn(s.peoplePage))
+		mux.Handle("POST /people", s.signedIn(s.peoplePost))
+	}
 	mux.Handle("GET /{$}", s.signedIn(s.feed))
 	mux.Handle("GET /feed", s.signedIn(s.more))
 	mux.Handle("GET /waiting", s.signedIn(s.waiting))
@@ -121,6 +156,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /secrets/{ns}", s.signedIn(s.secretsPost))
 	mux.Handle("GET /models", s.signedIn(s.modelsPage))
 	mux.Handle("POST /models", s.signedIn(s.modelsPost))
+	if s.Traces != nil {
+		mux.Handle("GET /agents", s.signedIn(s.agentsPage))
+		mux.Handle("GET /agents/{unit}/{name}", s.signedIn(s.agentsPage))
+		mux.Handle("GET /runs/{id}", s.signedIn(s.tracePage))
+		mux.Handle("GET /api/runs/{id}", s.signedIn(s.apiTrace))
+	}
 	mux.Handle("GET /c/{ns}/{repo}/{n}", s.signedIn(s.cardPage))
 	mux.Handle("POST /c/{ns}/{repo}/{n}", s.signedIn(s.cardPost))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
@@ -146,6 +187,10 @@ func (s *Server) signedIn(h handler) http.Handler {
 			return
 		}
 		v, err := s.visibility(r.Context(), who)
+		if errors.Is(err, events.ErrNoAccount) {
+			s.firstVisit(w, r, who)
+			return
+		}
 		if err != nil {
 			log.Printf("home: %s: %v", who, err)
 			http.Error(w, "cannot tell what you may see right now; try again", http.StatusServiceUnavailable)
@@ -153,6 +198,19 @@ func (s *Server) signedIn(h handler) http.Handler {
 		}
 		h(w, r, v)
 	})
+}
+
+// firstVisit is the page for someone whose Gitea account is not made yet,
+// such as the first root admin right after the setup: Gitea makes it as
+// they sign in there, which, signed in to Keycloak already, takes one click.
+func (s *Server) firstVisit(w http.ResponseWriter, r *http.Request, who string) {
+	back := "https://" + s.Domain + r.URL.RequestURI()
+	gitea := "https://git." + s.Domain + "/user/oauth2/keycloak?redirect_to=" + url.QueryEscape(back)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := page.ExecuteTemplate(w, "first", map[string]string{"Who": who, "Gitea": gitea, "Back": back, "Domain": s.Domain}); err != nil {
+		log.Printf("home: first visit: %v", err)
+	}
 }
 
 // visibility asks Access, at most every 20 seconds per person.
@@ -237,22 +295,31 @@ type feedPage struct {
 	Fragment   bool // only the entries, for the live updates and the next page
 	Event      *events.Event
 	Thread     []events.Event
+	Story      *story // what belongs to the event, newest first
 	Error      string
 	Notice     string       // what the person just did, e.g. a merge
 	Secrets    *secretsView // the secrets page
 	HasSecrets bool         // the dashboard has a secrets page
 	Models     *modelsView  // the Models page
+	PeoplePage *peopleView  // the People page
+	HasPeople  bool         // the dashboard has a People page
 	HasModels  bool         // the dashboard has a Models page, and this is a root admin
 	AppsPage   *appsView    // the Apps page
 	HasApps    bool         // the dashboard has an Apps page
 	Running    *runningView // the agents at work, on the feed
+	AgentsPage *agentsView  // the Agents page, or one agent's
+	TracePage  *traceView   // one turn of an agent
+	HasAgents  bool         // the dashboard has the Agents page
 	Working    int          // how many agents work now, in every unit, for the header; -1: unknown
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, p feedPage) {
+	s.agentNames()
 	p.HasSecrets = s.Secrets != nil
+	p.HasPeople = s.People != nil && s.Invites != nil
 	p.HasModels = s.Secrets != nil && s.Providers != nil && p.All
 	p.HasApps = s.Apps != nil
+	p.HasAgents = s.Traces != nil
 	p.Working = -1
 	if s.Running != nil && !p.Fragment {
 		// The count in the header is everyone's: which units and agents
@@ -348,7 +415,18 @@ func (s *Server) event(w http.ResponseWriter, r *http.Request, v events.Visibili
 	if err != nil {
 		log.Printf("home: thread of %d: %v", id, err)
 	}
-	s.render(w, "page", feedPage{Who: v.Person, Domain: s.Domain, All: v.All, Event: &e, Thread: thread, Now: s.now(), Views: views})
+	st := storyOf(e, thread)
+	p := feedPage{Who: v.Person, Domain: s.Domain, All: v.All, Event: &e, Thread: thread, Story: &st, Now: s.now(), Views: views}
+	if r.URL.Query().Get("part") == "1" {
+		// Only the event, for the feed's window over itself.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		s.agentNames()
+		if err := page.ExecuteTemplate(w, "eventbody", p); err != nil {
+			log.Printf("home: event %d: %v", id, err)
+		}
+		return
+	}
+	s.render(w, "page", p)
 }
 
 // apiList answers the feed's filters (ns, view, q, after, before, limit) as JSON.

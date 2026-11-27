@@ -1,0 +1,10 @@
+# The designer agent: pictures and videos with ComfyUI, in a project's styles,
+# into the unit's media library, and short vertical videos cut from them.
+description: Makes pictures and videos with ComfyUI in a project's styles, and cuts short vertical videos (YouTube shorts, reels) from them, in the unit's media library
+model: ""
+# A short is several video clips of a minute or more each: its turns may
+# take half an hour, not the usual ten minutes; and ffmpeg, cutting 1080p
+# clips with crossfades, needs more than the usual 1 GiB.
+turn: 30m
+memory: 4Gi
+tools: [generate_media, generate_speech, list_repos, list_files, read_file, list_stacks, propose_change, propose_patch]

@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"garrison/templates"
 
@@ -61,7 +62,22 @@ type Agent struct {
 	Routines    []Routine
 	Internet    Internet // what its sandbox reaches through the proxy
 	Chains      []Chain  // the chains of command it is part of; every one for the commander
+	// Turn is how long one of its turns may take; 0: the agent service's
+	// default (10 minutes). For agents whose work takes long, e.g. designer,
+	// whose videos take minutes each.
+	Turn time.Duration
+	// Memory is its sandbox's memory in bytes; 0: the agent service's
+	// default (1 GiB). For agents whose tools need more, e.g. designer's ffmpeg.
+	Memory int64
 }
+
+// MaxMemory is the most memory an agent.yaml may give its sandbox: the
+// most the admission policy garrison-sandboxes lets a sandbox have
+// (garrison/platform/kubernetes.yaml).
+const MaxMemory = 4 << 30
+
+// MaxTurn is the longest turn an agent.yaml may give its agent.
+const MaxTurn = 30 * time.Minute
 
 // ID is the instance: <unit>/<agent>. Garrison's, garrison/<agent>, is
 // the model id in the chat.
@@ -131,6 +147,8 @@ type config struct {
 	Agents      askList  `yaml:"agents,omitempty"`
 	Internet    Internet `yaml:"internet,omitempty"`
 	Enabled     *bool    `yaml:"enabled,omitempty"`
+	Turn        string   `yaml:"turn,omitempty"`   // e.g. 30m: how long a turn may take, at most MaxTurn
+	Memory      string   `yaml:"memory,omitempty"` // e.g. 4Gi: its sandbox's memory, 256Mi to MaxMemory
 	// Not here any more: each unit gives the agent these in its own
 	// config repo, or none.
 	Repos    any `yaml:"repos,omitempty"`
@@ -461,6 +479,21 @@ func load(ctx context.Context, f Files, unit, name string, tools []string, share
 		}
 		skills = append(skills, own[name])
 	}
+	var turn time.Duration
+	if c.Turn != "" {
+		d, err := time.ParseDuration(c.Turn)
+		if err != nil || d < time.Minute || d > MaxTurn {
+			why = append(why, fmt.Sprintf("turn %q: a duration from 1m to %s, e.g. 30m", c.Turn, MaxTurn))
+		}
+		turn = d
+	}
+	var memory int64
+	if c.Memory != "" {
+		memory = parseMemory(c.Memory)
+		if memory < 256<<20 || memory > MaxMemory {
+			why = append(why, fmt.Sprintf("memory %q: from 256Mi to %dGi, e.g. 4Gi", c.Memory, MaxMemory>>30))
+		}
+	}
 	if len(why) > 0 {
 		return Agent{}, why, nil
 	}
@@ -470,8 +503,21 @@ func load(ctx context.Context, f Files, unit, name string, tools []string, share
 	return Agent{
 		Unit: unit, Name: name, Description: c.Description, Model: c.Model,
 		Tools: []string(c.Tools), Prompt: prompt, Skills: skills,
-		Visible: c.Visible, Asks: asks, Internet: c.Internet,
+		Visible: c.Visible, Asks: asks, Internet: c.Internet, Turn: turn, Memory: memory,
 	}, nil, nil
+}
+
+// parseMemory reads a size such as 512Mi or 4Gi; 0 if it is none.
+func parseMemory(s string) int64 {
+	for suffix, unit := range map[string]int64{"Mi": 1 << 20, "Gi": 1 << 30} {
+		if n, ok := strings.CutSuffix(s, suffix); ok {
+			var v int64
+			if _, err := fmt.Sscanf(n, "%d", &v); err == nil && fmt.Sprint(v) == n {
+				return v * unit
+			}
+		}
+	}
+	return 0
 }
 
 // loadSkills reads the skills in dir, one folder each.
@@ -559,7 +605,7 @@ var OperatorPrompt = templates.File(templates.Platform, Dir+"/"+OperatorName+"/"
 const Platform = `How Garrison works:
 - A unit is a Gitea organisation: the home of a team or of apps. Its people are in members.yaml in its repo config: admins approve and merge changes, members change its repos. Everyone signed in reads its public repos; its private repos only its people.
 - The agents are all garrison's, folders under agents/ in garrison/config (agent.yaml, prompt.md), which only root admins change; each works in every unit, mentioned by its name (@operator) in the unit's channel. A unit gives them rights of their own in grants.yaml and routines (work they start by themselves: on a schedule, on a push, on an alert) in routines.yaml of its config, each entry naming the agent. An agent's model is empty for the default or an enabled model of llm/models.yaml in garrison/config, as <provider>/<model> (list_models lists them).
-- More models come from another LLM provider, an OpenAI-compatible API: a root admin adds it with add_provider, a pull request on llm/providers.yaml; once merged, its models appear in llm/models.yaml, turned off until enabled. Its API key is set only on the dashboard's Models page: never ask for one, and never repeat or use one a person pastes into the chat; tell them to replace it at the provider, as the chat keeps it.
+- More models come from another LLM provider, an OpenAI-compatible API: a root admin adds it with add_provider, a pull request on llm/providers.yaml; once merged, its models appear in llm/models.yaml, turned off until a root admin chooses them on the dashboard's Models page, where the default model and each agent's are chosen. Its API key is set only on the dashboard's Models page: never ask for one, and never repeat or use one a person pastes into the chat; tell them to replace it at the provider, as the chat keeps it.
 - The unit garrison is the platform itself (Traefik, Keycloak, Gitea, Grafana, the control plane): one repo per stack with a kubernetes.yaml (its Kubernetes manifests), which only root admins change. Never put an app into garrison.
 - A unit's apps are files in its repo config: stacks/<name>.yaml, one per app, each deployed as https://<name>.<domain>. Apps never go into garrison.
 - An app from elsewhere (e.g. Immich) is only that file, with fixed images: no repo of its own.
@@ -624,6 +670,9 @@ func System(a Agent, domain string) string {
 	}
 	b.WriteString(strings.TrimSpace(a.Prompt))
 	b.WriteString("\n\n" + Platform)
+	// Templates and docs write addresses as https://<name>.<domain>; an
+	// answer that copied one gave a link nobody could open.
+	fmt.Fprintf(&b, "- Every address you give is a real one: the domain is %s (an app named files answers at https://files.%s/), and list_stacks shows each app's addresses as it is deployed. Never write a placeholder such as <domain> or <name> into an answer, nor an address you have not seen.\n", domain, domain)
 	if a.Internet.None() {
 		b.WriteString(offline)
 	} else {

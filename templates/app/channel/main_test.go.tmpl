@@ -1,0 +1,128 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// library writes a media library: two shorts of the project shorts (one with
+// its narration's text in its .json, one naming its narration file), an
+// empty one, pictures and drafts that must stay unseen, and a link out.
+func library(t *testing.T) string {
+	root := t.TempDir()
+	write := func(p, s string) {
+		p = filepath.Join(root, p)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("shorts/shorts/short-1.mp4", "MP4 octopus")
+	write("shorts/shorts/short-1.mp4.json", `{"title": "The octopus", "narration": "An octopus has <b>three</b> hearts.", "made": "2026-11-26T10:00:00Z"}`)
+	write("shorts/shorts/short-2.mp4", "MP4 axolotl")
+	write("shorts/shorts/short-2.mp4.json", `{"files": ["picture-1.png", "narration-axolotl-1.mp3"], "made": "2026-11-26T11:00:00Z"}`)
+	write("shorts/narration-axolotl-1.mp3.json", `{"narration": "Axolotls regrow their legs."}`)
+	write("shorts/shorts/short-3.mp4", "MP4 otter")
+	write("shorts/shorts/short-3.json", `{"title": "The sea otter", "narration": "Otters hold hands.", "made": "2026-11-26T09:00:00Z"}`)
+	write("shorts/shorts/empty.mp4", "")
+	write("shorts/shorts/notes.txt", "draft")
+	write("shorts/picture-1.png", "PNG")
+	write("other/shorts/short-9.mp4", "MP4 other")
+	os.WriteFile(filepath.Join(t.TempDir(), "secret.mp4"), []byte("secret"), 0o644)
+	os.Symlink("/etc/hostname", filepath.Join(root, "shorts/shorts/link.mp4"))
+	return root
+}
+
+func get(h http.Handler, path string, header ...string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("GET", path, nil)
+	for i := 0; i+1 < len(header); i += 2 {
+		r.Header.Set(header[i], header[i+1])
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+func TestThePageListsTheShortsWithTheirText(t *testing.T) {
+	app := &App{Library: &Library{Root: library(t), Project: "shorts"}, Title: "Animal Facts"}
+	w := get(app.Routes(), "/")
+	body := w.Body.String()
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, body)
+	}
+	for _, want := range []string{"Animal Facts", "3 shorts", "The sea otter", "Otters hold hands.", "The octopus", "An octopus has &lt;b&gt;three&lt;/b&gt; hearts.", "Axolotls regrow their legs.", `src="/video/shorts/short-1.mp4"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %q in the page", want)
+		}
+	}
+	// Newest first; nothing empty, linked or of another project.
+	if strings.Index(body, "short-2.mp4") > strings.Index(body, "short-1.mp4") {
+		t.Error("not newest first")
+	}
+	for _, not := range []string{"empty.mp4", "link.mp4", "short-9", "<script"} {
+		if strings.Contains(body, not) {
+			t.Errorf("%q in the page", not)
+		}
+	}
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "media-src 'self'") || strings.Contains(csp, "script-src") {
+		t.Errorf("CSP: %s", csp)
+	}
+}
+
+func TestOnlyTheShortsAreServed(t *testing.T) {
+	app := &App{Library: &Library{Root: library(t)}}
+	h := app.Routes()
+	if w := get(h, "/video/shorts/short-1.mp4"); w.Code != 200 || w.Body.String() != "MP4 octopus" || w.Header().Get("Content-Type") != "video/mp4" {
+		t.Errorf("short: %d %q", w.Code, w.Body.String())
+	}
+	if w := get(h, "/video/shorts/short-1.mp4", "Range", "bytes=4-"); w.Code != 206 || w.Body.String() != "octopus" {
+		t.Errorf("range: %d %q", w.Code, w.Body.String())
+	}
+	// Every project's shorts, without PROJECT.
+	if w := get(h, "/video/other/short-9.mp4"); w.Code != 200 {
+		t.Errorf("other project: %d", w.Code)
+	}
+	for _, p := range []string{"/video/shorts/notes.txt", "/video/shorts/empty.mp4", "/video/shorts/link.mp4", "/video/shorts/..%2fpicture-1.png", "/video/shorts/picture-1.png", "/picture-1.png", "/video/../../etc/hostname"} {
+		if w := get(h, p); w.Code == 200 {
+			t.Errorf("%s served: %q", p, w.Body.String())
+		}
+	}
+}
+
+func TestAPrivateOneTakesOnlyThroughTheSignIn(t *testing.T) {
+	app := &App{Library: &Library{Root: library(t)}, IngressKey: "k1"}
+	h := app.Routes()
+	if w := get(h, "/"); w.Code != 403 {
+		t.Errorf("without the key: %d", w.Code)
+	}
+	if w := get(h, "/video/shorts/short-1.mp4"); w.Code != 403 {
+		t.Errorf("a video without the key: %d", w.Code)
+	}
+	if w := get(h, "/", ingressHeader, "k1"); w.Code != 200 {
+		t.Errorf("with the key: %d", w.Code)
+	}
+	if w := get(h, "/healthz"); w.Code != 200 {
+		t.Errorf("healthz: %d", w.Code)
+	}
+}
+
+func TestANewShortShowsAfterAWhile(t *testing.T) {
+	root := library(t)
+	l := &Library{Root: root, Project: "shorts", Every: time.Hour}
+	if n := len(l.Shorts()); n != 3 {
+		t.Fatalf("%d shorts", n)
+	}
+	os.WriteFile(filepath.Join(root, "shorts/shorts/short-4.mp4"), []byte("MP4"), 0o644)
+	if n := len(l.Shorts()); n != 3 {
+		t.Errorf("read again before Every: %d", n)
+	}
+	l.at = time.Time{}
+	if n := len(l.Shorts()); n != 4 {
+		t.Errorf("not read again after Every: %d", n)
+	}
+}

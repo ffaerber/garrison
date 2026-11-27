@@ -136,7 +136,9 @@ func (g *Gitea) Visibility(ctx context.Context, person string) (events.Visibilit
 	var u struct {
 		IsAdmin bool `json:"is_admin"`
 	}
-	if _, err := g.do(ctx, "", http.MethodGet, "/users/"+person, nil, &u); err != nil {
+	if status, err := g.do(ctx, "", http.MethodGet, "/users/"+person, nil, &u); status == http.StatusNotFound {
+		return v, events.ErrNoAccount
+	} else if err != nil {
 		return v, err
 	}
 	if u.IsAdmin {

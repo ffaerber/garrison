@@ -147,7 +147,7 @@ func TestRestoreEnv(t *testing.T) {
 	if scale < 0 || mount < scale || copy < mount || umount < copy {
 		t.Errorf("calls = %v", f.calls)
 	}
-	if got := Restored(ctx, f.run, "", s, "main"); got != "c0ffee" {
+	if got, err := Restored(ctx, f.run, "", s, "main"); err != nil || got != "c0ffee" {
 		t.Errorf("Restored = %q", got)
 	}
 

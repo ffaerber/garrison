@@ -259,6 +259,16 @@ func (r *Routines) Check(ctx context.Context) {
 	}
 }
 
+// NothingToDo is a routine's whole answer when it found nothing to do: the
+// feed records the run, but nothing is posted in the channel, so a routine
+// that runs often to pick up new work stays quiet between jobs.
+const NothingToDo = "NOTHING TO DO"
+
+// quiet tells whether a routine's answer is NothingToDo.
+func quiet(answer string) bool {
+	return strings.Trim(strings.TrimSpace(answer), ".*`\"'") == NothingToDo
+}
+
 func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, key, why string) {
 	s := r.Server
 	// Into the unit's channel, which only its people read.
@@ -294,7 +304,7 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 	}
 	log.Printf("routines: %s for %s: %s", key, rt.Owner, why)
 	record(events.StatusRunning, "")
-	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links.`, rt.Name, rt.Owner, why, a.Unit)
+	text := fmt.Sprintf(`This is your routine %q, for %s, started because %s. Nobody is watching: you act with your own account, and change only what your grants for runs without a person allow; otherwise you read and report. Your last message is posted in the channel of %s for its people to read, so say plainly what you found or did, with links. If you found nothing to do, answer only %s: then nothing is posted.`, rt.Name, rt.Owner, why, a.Unit, NothingToDo)
 	if s.Questions != nil && s.Poster != nil {
 		text += fmt.Sprintf(" If you need something only %s can tell you (a choice, a missing fact, an approval), ask them with ask_person and end your turn: you go on here when they answer.", rt.Owner)
 	}
@@ -311,7 +321,7 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 			}
 		}
 	}
-	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout())
+	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout(a))
 	defer cancel()
 	out := &collect{}
 	_, err = s.sandboxTurn(tctx, run, rt.Owner, "routine:"+key, "routine\x00"+key, a, msg, out)
@@ -325,6 +335,9 @@ func (r *Routines) run(ctx context.Context, a agents.Agent, rt agents.Routine, k
 		log.Printf("routines: %s: %v", key, err)
 		answer = strings.TrimSpace(answer + "\n\nIt stopped: " + err.Error())
 		record(events.StatusFailed, answer)
+	} else if quiet(answer) {
+		record(events.StatusOK, "Nothing to do.")
+		return
 	} else {
 		record(events.StatusOK, answer)
 	}

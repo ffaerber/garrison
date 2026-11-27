@@ -40,6 +40,13 @@ type Want struct {
 	// Media, if set, is the unit whose media library the sandbox mounts at
 	// /data/media; a change restarts the sandbox between turns.
 	Media string
+	// Context, if set, is the model's context window in tokens, which Pi
+	// keeps its conversation within (compacting it) and its answers to.
+	Context int
+	// Memory, if set, is the sandbox's memory in bytes instead of the
+	// Manager's: an agent's agent.yaml may ask for more, e.g. designer, whose
+	// ffmpeg cuts videos.
+	Memory int64
 }
 
 // Unit is the unit the agent works in, from Agent.
@@ -121,6 +128,7 @@ type Run struct {
 	Unattended bool     // nobody is watching: a routine
 	Owner      string   // then: the routine's owner
 	Admin      bool     // the person is a root admin
+	Task       string   // what the person asked, without the chat's context: the title of the turn's trace
 	// Merge is the merge mode of the chain a routine runs (agents.Merge*),
 	// which the gateway holds the run to; "" for other runs. Answered: the
 	// run went on after its owner answered a question (ask_person).
@@ -222,7 +230,7 @@ func (m *Manager) Turn(ctx context.Context, want Want, run Run, fn func(*Session
 	defer s.turn.Unlock()
 
 	s.mu.Lock()
-	stale := s.pi != nil && (s.want.Definition != want.Definition || s.want.Media != want.Media || s.image != m.Image)
+	stale := s.pi != nil && (s.want.Definition != want.Definition || s.want.Media != want.Media || s.want.Memory != want.Memory || s.want.Context != want.Context || s.image != m.Image)
 	if s.pi != nil {
 		select {
 		case <-s.pi.Done():
@@ -326,15 +334,25 @@ func (m *Manager) start(ctx context.Context, s *Session) error {
 	if err != nil {
 		return err
 	}
+	memory := m.Memory
+	if want.Memory > 0 {
+		memory = want.Memory
+	}
 	spec := Spec{
 		Name: s.name, Image: m.Image, Labels: labels, Network: m.Network, Volume: s.name,
-		Memory: m.Memory, CPUs: m.CPUs, Pids: m.Pids, Runtime: m.Runtime, Media: want.Media,
+		Memory: memory, CPUs: m.CPUs, Pids: m.Pids, Runtime: m.Runtime, Media: want.Media,
 		Env: []string{
 			"GARRISON_API=" + api,
 			"GARRISON_TOKEN=" + token,
 			"GARRISON_MODEL=" + want.Model,
 			"GARRISON_PROMPT=" + want.Prompt,
 		},
+	}
+	if want.Context > 0 {
+		// An answer may take an eighth of the window, at most 16384: Pi
+		// compacts a conversation once it nears the window less its
+		// reserve, and a turn's tool results still need room after that.
+		spec.Env = append(spec.Env, fmt.Sprintf("GARRISON_CONTEXT=%d", want.Context), fmt.Sprintf("GARRISON_MAX_TOKENS=%d", min(want.Context/8, 16384)))
 	}
 	if proxy != "" {
 		// The token names the sandbox to the proxy, as to the API: it counts

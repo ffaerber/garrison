@@ -1,6 +1,6 @@
 # Installer
 
-Bootstrap Compose file and setup wizard, with an answers-file mode for headless installs.
+The installer's helpers. The machine's settings come from an answers file; the rest of the setup (the first root admin, the AI providers, the default model) happens in the browser, at the link the installer prints.
 
 Only the headless mode exists, in `/install.sh`:
 

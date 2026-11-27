@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,7 +82,13 @@ func (l *LLM) client() *http.Client {
 	return &http.Client{Timeout: 5 * time.Minute}
 }
 
+// ErrNoProvider: Garrison has no LLM yet, before its setup is complete.
+var ErrNoProvider = errors.New("Garrison has no AI provider yet: a root admin completes the setup first, with the link the installer printed (/etc/garrison/setup-link on the machine)")
+
 func (l *LLM) post(ctx context.Context, body any) (*http.Response, error) {
+	if l == nil || l.URL == "" {
+		return nil, ErrNoProvider
+	}
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, err

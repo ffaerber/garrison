@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -202,5 +203,34 @@ func TestTheMediaLibraryIsBound(t *testing.T) {
 	ask(t, m, w, "hi")
 	if d.Created != 2 || d.Running() != 1 {
 		t.Errorf("created %d, running %d", d.Created, d.Running())
+	}
+}
+
+// An agent that asks for more memory gets it; a change restarts its sandbox
+// between turns.
+func TestAnAgentsOwnMemory(t *testing.T) {
+	m, d := manager(t)
+	w := sandbox.Want{Key: "chat\x00a/media", Agent: "a/media", Person: "alice", Definition: "1"}
+	ask(t, m, w, "one")
+	w.Memory = 4 << 30
+	ask(t, m, w, "two")
+	var mems []int64
+	for _, c := range d.Containers {
+		mems = append(mems, c.Memory)
+	}
+	if d.Created != 2 || !slices.Contains(mems, int64(1<<30)) || !slices.Contains(mems, int64(4<<30)) {
+		t.Errorf("created %d, memory %v", d.Created, mems)
+	}
+}
+
+// The model's context window reaches Pi, with an eighth of it for an answer.
+func TestTheContextWindowReachesPi(t *testing.T) {
+	m, d := manager(t)
+	w := sandbox.Want{Key: "chat\x00a/b", Agent: "a/b", Person: "alice", Definition: "1", Context: 65536}
+	ask(t, m, w, "one")
+	for _, c := range d.Containers {
+		if !slices.Contains(c.Env, "GARRISON_CONTEXT=65536") || !slices.Contains(c.Env, "GARRISON_MAX_TOKENS=8192") {
+			t.Errorf("env %v", c.Env)
+		}
 	}
 }

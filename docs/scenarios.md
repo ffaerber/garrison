@@ -236,6 +236,15 @@ Played by `people` (`test/ui/people.py`), in the browser, as alice, bob and caro
 4. **Leaving, as vaguely:** alice tells the commander *bob isn't on the project any more*. It asks to confirm, or proposes it at once: a pull request takes bob out of the members and keeps alice and carol admins; carol approves it in Gitea and alice merges it.
 5. **After leaving:** the channel is gone from bob's sidebar and Open WebUI refuses him its messages, even by its address; alice and carol still have it, with its history.
 
+## Invited with a link
+
+Played by `invites`, from the fixture `team`, in the browser (`test/ui/invites.py`, each person in a browser of their own, frank and bob in fresh ones, as someone opening a link they were sent), with the dashboard's People page and its links, which people send by hand (Garrison sends no mail). Who may make links and what a link refuses (weak passwords, a taken username, the platform's account) are checked with plain requests before (`test/e2e/scenarios/invites.sh`).
+
+1. **A unit's admin invites:** carol, an admin of todo, makes a link for frank as a member of todo; bob, a member, may not invite, and carol may not invite without a unit. The link is shown once.
+2. **Accepting:** frank opens the link without an account, chooses his username and password, and signs in with them; on his first visit the dashboard has him open Gitea once, which makes his account there, and he comes back. The link works once.
+3. **The unit's rules hold:** accepting proposes frank in todo's `members.yaml`, in carol's name; it waits for another admin, alice approves it, carol merges it, and frank is in todo's team.
+4. **A root admin's links:** alice invites someone without a unit and revokes the link, which then opens nothing; she makes bob a link to set a new password, which carol, not a root admin, may not; bob sets one and signs in with it.
+
 ## Vague requests
 
 Played by `guided` (`test/ui/guided.py`), in the browser, as bob and carol, from the fixture `team`. todo has two apps, `todo/app` (the todo list) and `todo/quotes`.
@@ -252,6 +261,21 @@ Bob: *@operator Which stacks does the unit todo have?* It answers in the message
 - A plain message in that thread, without @ and not a Reply, gets no answer from any agent.
 - Bob answers the operator's message with its Reply button, without @: the operator answers.
 - Bob mentions @commander in the same thread: the commander answers there, and the operator does not.
+
+## A channel of animal shorts
+
+`animalfacts` (`test/e2e/scenarios/animalfacts.sh`), on the real ComfyUI and text-to-speech service (Kokoro) of the computer running the VM:
+
+1. Alice creates the unit animalfacts with its file browser, and the project `animalfacts/shorts` with only a README: a YouTube channel of 30-second animal facts, one look, a calm narrator.
+2. She asks `@designer` to set the project up without giving it a workflow. It proposes one pull request: a picture style for key pictures and a video style that starts from a picture (Wan 2.2 image to video), with workflows that name only models ComfyUI has and copy the examples `media_models` gives, and `narration.yaml` with a voice. She merges it.
+3. She asks for five shorts, one at a time: the octopus, the axolotl, the hummingbird, the sea otter, the pangolin. Each is 9:16, 25 to 35 seconds, made of video clips only, with the narration as its sound. When `@designer` proposes a fix to the project, Alice merges it, as a person would.
+4. Alice's dashboard lists `@designer`'s turns on its agent page, each with its thinking and tool calls; Bob, in no unit here, sees none of them.
+5. All of them look and sound alike: one video style, one voice (the project's); every clip of a short starts from its one key picture, so it shows the same animal; each short moves (no still stretch over 2 seconds) and sounds at -14 LUFS, 48 kHz stereo.
+6. She asks `@operator` for a public website of the channel. It makes `animalfacts-site` from the app template `channel` and proposes its stack, which mounts the library read-only; once merged and built, the page opens without a sign-in, lists the five shorts with what is said in each, plays them, and serves nothing else of the library.
+7. Storyboards: the operator makes `animalfacts/storyboards` from its template, Alice adds the routine its README gives, and the chain `storyboards` (via the commander) proposes two stories with sources, 75 to 90 words of narration and 5 to 7 clip scenes. They wait for her; once she merges them, the routine has `@designer` make the first story's short, named after it, and the website shows it by itself.
+8. Every address in the answers is a real one, and `@designer` links the file browser.
+
+The shorts, narrations and pictures land in `bin/animalfacts/`, to judge by eye whether the style holds; with `KEEP=1` the VM stays, and `test/vm/dns.sh` opens its site at `https://animalfacts-site.garrison.test`.
 
 ## In the browser
 

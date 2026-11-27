@@ -1,0 +1,164 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Short is a finished short of the library: <project>/shorts/<name>.mp4,
+// with what its .json says of it.
+type Short struct {
+	Project string    // the project's folder, e.g. shorts
+	Name    string    // the file's name, e.g. short-20261126-101500.mp4
+	Title   string    // what it is about
+	Text    string    // what is spoken in it, or its captions
+	Made    time.Time // when it was made
+	Size    int64
+	path    string
+}
+
+// URL is where the page serves the short's video.
+func (s Short) URL() string { return "/video/" + s.Project + "/" + s.Name }
+
+// sidecar is what @designer writes beside each file, as <file>.json. Every
+// field is optional: older shorts have fewer.
+type sidecar struct {
+	Title     string   `json:"title"`
+	Narration string   `json:"narration"`
+	Captions  any      `json:"captions"`
+	Made      string   `json:"made"`
+	Files     []string `json:"files"`
+}
+
+// Library reads the finished shorts of a media library: only the .mp4 files
+// in each project's shorts/ folder, never anything else in it.
+type Library struct {
+	Root    string // where the library is mounted, e.g. /media
+	Project string // only this project's folder; empty: every project
+	// Every is how long a listing is kept before the folder is read again.
+	Every time.Duration
+
+	mu     sync.Mutex
+	at     time.Time
+	shorts []Short
+}
+
+// Shorts lists the shorts, newest first.
+func (l *Library) Shorts() []Short {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.shorts != nil && time.Since(l.at) < l.Every {
+		return l.shorts
+	}
+	l.shorts, l.at = l.read(), time.Now()
+	return l.shorts
+}
+
+// Find is the short of a project by name, if the library lists it.
+func (l *Library) Find(project, name string) (Short, bool) {
+	for _, s := range l.Shorts() {
+		if s.Project == project && s.Name == name {
+			return s, true
+		}
+	}
+	return Short{}, false
+}
+
+func (l *Library) read() []Short {
+	projects := []string{l.Project}
+	if l.Project == "" {
+		entries, _ := os.ReadDir(l.Root)
+		projects = projects[:0]
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				projects = append(projects, e.Name())
+			}
+		}
+	}
+	out := []Short{}
+	for _, p := range projects {
+		dir := filepath.Join(l.Root, p, "shorts")
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			name := e.Name()
+			// Plain files only: a link could point out of the library.
+			if !e.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.ToLower(filepath.Ext(name)) != ".mp4" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || info.Size() == 0 {
+				continue
+			}
+			s := Short{Project: p, Name: name, Made: info.ModTime(), Size: info.Size(), path: filepath.Join(dir, name)}
+			var sc sidecar
+			// Beside it as <name>.mp4.json, or as <name>.json.
+			raw, err := os.ReadFile(s.path + ".json")
+			if err != nil {
+				raw, err = os.ReadFile(strings.TrimSuffix(s.path, filepath.Ext(s.path)) + ".json")
+			}
+			if err == nil && json.Unmarshal(raw, &sc) == nil {
+				s.Title = strings.TrimSpace(sc.Title)
+				s.Text = strings.TrimSpace(sc.Narration)
+				if s.Text == "" {
+					s.Text = narrationOf(filepath.Join(l.Root, p), sc.Files)
+				}
+				if s.Text == "" {
+					s.Text = captionsText(sc.Captions)
+				}
+				if t, err := time.Parse(time.RFC3339, sc.Made); err == nil {
+					s.Made = t
+				}
+			}
+			if s.Title == "" {
+				s.Title = strings.TrimSuffix(name, filepath.Ext(name))
+			}
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Made.After(out[j].Made) })
+	return out
+}
+
+// narrationOf is the text of the first narration among files, the files a
+// short is made of, by the .json generate_speech wrote beside it.
+func narrationOf(project string, files []string) string {
+	for _, f := range files {
+		base := filepath.Base(f)
+		if !strings.HasPrefix(base, "narration-") {
+			continue
+		}
+		var sc sidecar
+		if raw, err := os.ReadFile(filepath.Join(project, base+".json")); err == nil && json.Unmarshal(raw, &sc) == nil && sc.Narration != "" {
+			return strings.TrimSpace(sc.Narration)
+		}
+	}
+	return ""
+}
+
+// captionsText is a short's captions as one text: a string, or a list of
+// strings or of objects with a text.
+func captionsText(c any) string {
+	switch v := c.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []any:
+		var parts []string
+		for _, x := range v {
+			switch y := x.(type) {
+			case string:
+				parts = append(parts, y)
+			case map[string]any:
+				if t, ok := y["text"].(string); ok {
+					parts = append(parts, t)
+				}
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, " "))
+	}
+	return ""
+}

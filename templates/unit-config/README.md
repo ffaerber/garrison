@@ -8,7 +8,7 @@ What this unit is: who belongs to it, its apps, and what Garrison's agents may d
 
 ## Media
 
-The unit's media library is the share `media`: a folder of pictures, videos and other files its people and agents share. It exists once a stack mounts it. Then the agents see it at `/data/media` in this unit's channel and routines, and `@media` makes pictures, videos and short videos into it. This file browser, `stacks/files.yaml`, shows it at `https://files.<domain>`: everyone signed in looks and downloads, and this unit's people (`{{members}}`, from `members.yaml`) upload, rename and delete.
+The unit's media library is the share `media`: a folder of pictures, videos and other files its people and agents share. It exists once a stack mounts it. Then the agents see it at `/data/media` in this unit's channel and routines, and `@designer` makes pictures, videos and short videos into it. This file browser, `stacks/files.yaml`, shows it at `https://files.<domain>`: everyone signed in looks and downloads, and this unit's people (`{{members}}`, from `members.yaml`) upload, rename and delete.
 
 ```yaml
 entrypoint: web

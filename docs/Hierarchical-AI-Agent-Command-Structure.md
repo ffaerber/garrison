@@ -33,7 +33,7 @@ The ranks of a military hierarchy map onto what Garrison has. Ranks are a matter
 | 0, human command | Root admins for the platform; a unit's admins and members for the unit | Keycloak group `root-admins`; `<unit>/config/members.yaml` |
 | 1, chief of staff | The `commander`: finds the agent or chain for a request and hands it over | `garrison/config/agents/commander/` |
 | 2, chain lead | The `lead` of a chain: runs its steps one after another | `garrison/config/chains/<name>.yaml` |
-| 3, specialists | The agents of the steps: `coder`, `scout`, `sentry`, `media`, `operator` | `garrison/config/agents/<name>/` |
+| 3, specialists | The agents of the steps: `coder`, `scout`, `sentry`, `designer`, `operator` | `garrison/config/agents/<name>/` |
 | Oversight | An agent with review rights but no command over others (below) | Design |
 
 Example, the chains of today:

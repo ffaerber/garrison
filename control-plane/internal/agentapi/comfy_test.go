@@ -18,10 +18,11 @@ import (
 // fakeComfy: a run finishes after two looks at its history and makes one
 // PNG, or fails if the prompt says "fail".
 type fakeComfy struct {
-	mu     sync.Mutex
-	queued []map[string]map[string]any
-	looks  map[string]int
-	refuse bool
+	mu       sync.Mutex
+	queued   []map[string]map[string]any
+	looks    map[string]int
+	refuse   bool
+	uploaded map[string][]byte
 }
 
 func (f *fakeComfy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +58,28 @@ func (f *fakeComfy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, `{"`+id+`":{"status":{"status_str":"success","completed":true},"outputs":{"9":{"images":[{"filename":"ComfyUI_0001_.png","subfolder":"","type":"output"},{"filename":"preview.png","subfolder":"","type":"temp"}]}}}}`)
+	case r.Method == "POST" && r.URL.Path == "/upload/image":
+		file, head, err := r.FormFile("image")
+		if err != nil || r.FormValue("overwrite") != "true" {
+			http.Error(w, "bad upload", http.StatusBadRequest)
+			return
+		}
+		data, _ := io.ReadAll(file)
+		if f.uploaded == nil {
+			f.uploaded = map[string][]byte{}
+		}
+		f.uploaded[head.Filename] = data
+		io.WriteString(w, `{"name":"`+head.Filename+`","subfolder":"","type":"input"}`)
+	case r.URL.Path == "/models":
+		io.WriteString(w, `["checkpoints", "configs", "vae", "text_encoders", "diffusion_models"]`)
+	case r.URL.Path == "/models/diffusion_models":
+		io.WriteString(w, `["wan2.1_t2v_1.3B_fp16.safetensors", "z_image_turbo_bf16.safetensors"]`)
+	case r.URL.Path == "/models/text_encoders":
+		io.WriteString(w, `["qwen_3_4b.safetensors"]`)
+	case r.URL.Path == "/models/vae":
+		io.WriteString(w, `["ae.safetensors", "wan_2.1_vae.safetensors"]`)
+	case strings.HasPrefix(r.URL.Path, "/models/"):
+		io.WriteString(w, `[]`)
 	case r.URL.Path == "/view":
 		io.WriteString(w, "PNG of "+r.URL.Query().Get("filename"))
 	default:
@@ -104,12 +127,14 @@ func comfyServer(t *testing.T) (*Server, *fakeComfy) {
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	s := &Server{ComfyUI: &ComfyUI{URL: srv.URL, Every: time.Millisecond, Wait: 5 * time.Second}, Styles: styles{
-		"media/demo/styles/comic.yaml":    comicStyle,
-		"media/demo/workflows/comic.json": comicWorkflow,
-		"media/demo/styles/broken.yaml":   "workflow: workflows/comic.json\nnodes:\n  prompt: { node: \"66\", input: text }\n",
-		"media/demo/styles/noprompt.yaml": "workflow: workflows/comic.json\n",
-		"media/demo/styles/escape.yaml":   "workflow: ../../secret/x.json\nnodes:\n  prompt: { node: \"6\", input: text }\n",
-		"media/demo/styles/plain.yaml":    "workflow: workflows/comic.json\nseed: 42\nnodes:\n  prompt: { node: \"6\", input: text }\n",
+		"media/demo/styles/comic.yaml":     comicStyle,
+		"media/demo/workflows/comic.json":  comicWorkflow,
+		"media/demo/styles/broken.yaml":    "workflow: workflows/comic.json\nnodes:\n  prompt: { node: \"66\", input: text }\n",
+		"media/demo/styles/noprompt.yaml":  "workflow: workflows/comic.json\n",
+		"media/demo/styles/escape.yaml":    "workflow: ../../secret/x.json\nnodes:\n  prompt: { node: \"6\", input: text }\n",
+		"media/demo/styles/plain.yaml":     "workflow: workflows/comic.json\nseed: 42\nnodes:\n  prompt: { node: \"6\", input: text }\n",
+		"media/demo/styles/moving.yaml":    "workflow: workflows/moving.json\nnodes:\n  prompt: { node: \"6\", input: text }\n  image: { node: \"56\", input: image }\n",
+		"media/demo/workflows/moving.json": `{"6": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}}, "56": {"class_type": "LoadImage", "inputs": {"image": "example.png"}}, "9": {"class_type": "SaveImage", "inputs": {}}}`,
 	}}
 	return s, f
 }
@@ -220,5 +245,91 @@ func TestComfyUITimesOut(t *testing.T) {
 	c := &ComfyUI{URL: srv.URL, Every: time.Millisecond, Wait: 50 * time.Millisecond}
 	if _, err := c.Run(context.Background(), map[string]map[string]any{}); err == nil || !strings.Contains(err.Error(), "did not finish") {
 		t.Errorf("%v", err)
+	}
+}
+
+func TestMediaModels(t *testing.T) {
+	s, _ := comfyServer(t)
+	models, err := s.ComfyUI.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models["diffusion_models"]) != 2 || len(models["vae"]) != 2 || models["checkpoints"] != nil {
+		t.Fatalf("models: %v", models)
+	}
+	text := describeModels(models)
+	// Z-Image has all its files; Wan lacks its text encoder; no checkpoints.
+	for _, want := range []string{"diffusion_models: wan2.1_t2v_1.3B_fp16.safetensors, z_image_turbo_bf16.safetensors", "Z-Image Turbo", "type lumina2",
+		// The example that ran, with the files this ComfyUI has.
+		"A workflow that ran", `"unet_name": "z_image_turbo_bf16.safetensors"`, `"weight_dtype": "default"`, `"class_type": "SaveImage"`, `prompt: { node: "6", input: text }`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in:\n%s", want, text)
+		}
+	}
+	for _, not := range []string{"Wan 2.1", "CheckpointLoaderSimple", "checkpoints:"} {
+		if strings.Contains(text, not) {
+			t.Errorf("%q in:\n%s", not, text)
+		}
+	}
+	// Another file of the same model: the example names it.
+	other := describeModels(map[string][]string{"diffusion_models": {"z_image_turbo_fp8.safetensors"}, "text_encoders": {"qwen_3_4b.safetensors"}, "vae": {"ae.safetensors"}})
+	if !strings.Contains(other, `"unet_name": "z_image_turbo_fp8.safetensors"`) || strings.Contains(other, "z_image_turbo_bf16") {
+		t.Errorf("the example keeps the demo's file:\n%s", other)
+	}
+	// Wan 2.2 beside Wan 2.1: both offered, Wan 2.2 first, with its example.
+	both := describeModels(map[string][]string{
+		"diffusion_models": {"wan2.1_t2v_1.3B_fp16.safetensors", "wan2.2_ti2v_5B_fp16.safetensors"},
+		"text_encoders":    {"umt5_xxl_fp16.safetensors"}, "vae": {"wan_2.1_vae.safetensors", "wan2.2_vae.safetensors"}})
+	i22, i21 := strings.Index(both, "### Wan 2.2"), strings.Index(both, "### Wan 2.1")
+	if i22 < 0 || i21 < 0 || i22 > i21 || !strings.Contains(both, `"class_type": "Wan22ImageToVideoLatent"`) || !strings.Contains(both, `frames: { node: "55", input: length }`) {
+		t.Errorf("Wan 2.2 not offered first with its example:\n%s", both)
+	}
+	if !strings.Contains(both, "image to video") || !strings.Contains(both, `image: { node: "56", input: image }`) || !strings.Contains(both, `"class_type": "LoadImage"`) {
+		t.Errorf("no image-to-video example:\n%s", both)
+	}
+	if !strings.Contains(describeModels(nil), "no models") {
+		t.Error("an empty ComfyUI is not said so")
+	}
+}
+
+func TestAStyleThatStartsFromAPicture(t *testing.T) {
+	s, f := comfyServer(t)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), []byte("key picture")...)
+	gen := func(args map[string]any) ([]Output, error) {
+		raw, _ := json.Marshal(args)
+		return s.generate(context.Background(), alice, raw)
+	}
+	out, err := gen(map[string]any{"project": "media/demo", "style": "moving", "prompt": "the octopus swims", "count": 2,
+		"image": "/data/media/demo/key-octopus.png", "image_name": "key-octopus.png", "image_data": png})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.uploaded) != 1 || len(f.queued) != 2 {
+		t.Fatalf("uploaded %d, queued %d", len(f.uploaded), len(f.queued))
+	}
+	var name string
+	for n, data := range f.uploaded {
+		name = n
+		if string(data) != string(png) || !strings.HasPrefix(n, "garrison-") || !strings.HasSuffix(n, ".png") {
+			t.Errorf("uploaded %q: %q", n, data)
+		}
+	}
+	// Uploaded once, and every clip starts from it.
+	for i, q := range f.queued {
+		if q["56"]["inputs"].(map[string]any)["image"] != name {
+			t.Errorf("run %d starts from %v", i, q["56"]["inputs"])
+		}
+	}
+	if out[0].Made["image"] != "/data/media/demo/key-octopus.png" {
+		t.Errorf("made: %+v", out[0].Made)
+	}
+	for _, bad := range []map[string]any{
+		{"project": "media/demo", "style": "moving", "prompt": "x"},                                                      // it needs a picture
+		{"project": "media/demo", "style": "comic", "prompt": "x", "image_name": "a.png", "image_data": png},             // it takes none
+		{"project": "media/demo", "style": "moving", "prompt": "x", "image_name": "a.txt", "image_data": []byte("text")}, // not a picture
+	} {
+		if _, err := gen(bad); err == nil {
+			t.Errorf("%v: no error", bad["style"])
+		}
 	}
 }

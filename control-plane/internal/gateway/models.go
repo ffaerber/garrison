@@ -144,8 +144,132 @@ func (g *Gitea) ProposeProvider(ctx context.Context, as, name, apiURL string, in
 	if err != nil {
 		return Change{}, fmt.Errorf("%w: %s", ErrInvalid, strings.TrimPrefix(err.Error(), models.ErrInvalidProvider.Error()+": "))
 	}
-	desc := fmt.Sprintf("Adds the LLM provider %s, %s, to %s. Once it is merged, the model sync asks it for its models within a minute and proposes them in %s, turned off; enable those agents may use there.\n\nIts API key is not in this change: a root admin sets it on the dashboard's Models page, which keeps it encrypted.", name, apiURL, models.ProvidersFile, models.ModelsFile)
+	desc := fmt.Sprintf("Adds the LLM provider %s, %s, to %s. Once it is merged, the model sync asks it for its models within a few minutes and lists them in %s, turned off; choose those agents use on the dashboard's Models page.\n\nIts API key is not in this change: a root admin sets it on the dashboard's Models page, which keeps it encrypted.", name, apiURL, models.ProvidersFile, models.ModelsFile)
 	return g.Propose(ctx, as, models.Unit, models.Repo, models.ProvidersFile, string(content), "Add the LLM provider "+name, desc, "", note)
+}
+
+// ProposeModels proposes, as the root admin as, the models agents use, in
+// one pull request: def as the default model (providers.yaml), and the agents
+// of choose, by name, on another (their agent.yaml's model; "" for the
+// default). Each model chosen is <provider>/<model> of models.yaml that its
+// provider still offers; the ones not on yet are turned on with it.
+// Agents left out keep theirs. Nothing to change is ErrInvalid.
+func (g *Gitea) ProposeModels(ctx context.Context, as, def string, choose map[string]string, note string) (Change, error) {
+	if admin, err := g.IsAdmin(ctx, as); err != nil {
+		return Change{}, err
+	} else if !admin {
+		return Change{}, fmt.Errorf("%w: only root admins choose the models", ErrForbidden)
+	}
+	l, ok, err := g.LLM(ctx, "main")
+	if err != nil {
+		return Change{}, err
+	}
+	if !ok {
+		return Change{}, fmt.Errorf("%w: garrison/config has no %s yet; the agent service writes it once it starts", ErrInvalid, models.ProvidersFile)
+	}
+	offered := func(id string) error {
+		if m, ok := l.Catalog[id]; !ok || m.Gone != "" {
+			return fmt.Errorf("%w: %s is not a model the providers offer (%s)", ErrInvalid, id, models.ModelsFile)
+		}
+		return nil
+	}
+	files := map[string]string{}
+	var enable, said []string
+	if def == "" {
+		def = l.Providers.Default
+	}
+	if def != l.Providers.Default {
+		if err := offered(def); err != nil {
+			return Change{}, err
+		}
+		raw, err := g.File(ctx, models.Unit, models.Repo, models.ProvidersFile)
+		if err != nil {
+			return Change{}, err
+		}
+		out, err := models.SetDefault(raw, def)
+		if err != nil {
+			return Change{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		files[models.ProvidersFile] = string(out)
+		said = append(said, "the default "+def)
+	}
+	enable = append(enable, def)
+	defs, err := g.Definitions(ctx)
+	if err != nil {
+		return Change{}, err
+	}
+	known := map[string]agents.Agent{}
+	for _, a := range defs {
+		known[a.Name] = a
+	}
+	for _, name := range sortedKeys(choose) {
+		a, ok := known[name]
+		if !ok {
+			return Change{}, fmt.Errorf("%w: garrison has no agent %s", ErrInvalid, name)
+		}
+		want := choose[name]
+		if want != "" {
+			if err := offered(want); err != nil {
+				return Change{}, err
+			}
+			enable = append(enable, want)
+		}
+		have := ""
+		if a.Model != "" {
+			_, _, have = l.Providers.Resolve(a.Model)
+		}
+		if have == want {
+			continue
+		}
+		path := fmt.Sprintf("%s/%s/agent.yaml", agents.Dir, name)
+		raw, err := g.File(ctx, models.Unit, models.Repo, path)
+		if err != nil {
+			return Change{}, err
+		}
+		out, err := models.SetAgentModel(path, raw, want)
+		if err != nil {
+			return Change{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		files[path] = string(out)
+		if want == "" {
+			said = append(said, name+" on the default")
+		} else {
+			said = append(said, name+" on "+want)
+		}
+	}
+	if next, changed := l.Catalog.Enable(enable...); changed {
+		files[models.ModelsFile] = string(next.Marshal())
+	}
+	if len(files) == 0 {
+		return Change{}, fmt.Errorf("%w: these are the models already in use; nothing to change", ErrInvalid)
+	}
+	title := "Models: " + strings.Join(said, ", ")
+	if len(said) == 0 {
+		title = "Models: turn on " + def
+	}
+	if len(title) > 200 {
+		title = title[:200]
+	}
+	var b strings.Builder
+	b.WriteString("Chosen on the dashboard's Models page.\n\n")
+	if _, ok := files[models.ProvidersFile]; ok {
+		fmt.Fprintf(&b, "- **Default model**, for every agent whose `agent.yaml` names none: %s (was %s)\n", def, l.Providers.Default)
+	}
+	for _, name := range sortedKeys(choose) {
+		if _, ok := files[fmt.Sprintf("%s/%s/agent.yaml", agents.Dir, name)]; !ok {
+			continue
+		}
+		if choose[name] == "" {
+			fmt.Fprintf(&b, "- **%s** uses the default model\n", name)
+		} else {
+			fmt.Fprintf(&b, "- **%s** uses %s\n", name, choose[name])
+		}
+	}
+	if _, ok := files[models.ModelsFile]; ok {
+		b.WriteString("\nModels chosen that were turned off are turned on in `" + models.ModelsFile + "`.\n")
+	}
+	b.WriteString("\nOnce merged, the agents use them from their next turn.")
+	return g.ProposeAs(ctx, as, models.Unit, models.Repo, files, title, b.String(), "", note)
 }
 
 // ProposeFiles proposes files (nil: deletes) for a repo's main branch as a

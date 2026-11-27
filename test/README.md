@@ -13,9 +13,11 @@ KEEP=1 test/vm/steps.sh guided   # keep a passing scenario's VM, to look around 
 JOBS=4 test/vm/steps.sh          # at most 4 VMs at once
 FREE_GB=12 test/vm/steps.sh      # a VM boots only while this much memory is free (default 10)
 test/vm/watch.py                 # the run, live, in the browser: http://localhost:8099
+test/vm/agents-live.py garrison-k3s-animalfacts   # the agents in a VM, live: thinking, tool calls, results
 LLM=cloud test/vm/steps.sh       # the agents on Ollama's cloud instead of the local Ollama
 LLM=server test/vm/steps.sh      # on an inference server on the LAN (SERVER_LLM_URL, SERVER_LLM_MODEL in .env)
-COMFYUI=host test/vm/steps.sh media  # media with a real ComfyUI on this computer (port 8188 on the VMs' gateway), not the fake
+COMFYUI=fake test/vm/steps.sh media  # media with the fake ComfyUI, though a real one answers on this computer
+test/vm/steps.sh animalfacts     # five narrated shorts on the real ComfyUI and Kokoro (TTS_URL in .env); watch them in bin/animalfacts/
 LOCAL_MODEL=nemotron-3.5-lightning:latest test/vm/steps.sh   # another local model
 test/e2e/smoke.sh roles          # in a VM: one scenario, test/e2e/scenarios/roles.sh
 ```
@@ -51,13 +53,14 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | Step | Kind | Does |
 | --- | --- | --- |
 | `base` | fixture | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` |
-| `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; the test people; the system stack checked (`system`) |
+| `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; then its setup in the browser (`scenarios/setup.sh`): the first root admin `owner`, the AI providers for `LLM` (`local`, `server` named `SERVER_LLM_NAME`, or `cloud`, plus Ollama's cloud when `AGENT_MODELS` names one of its models), each tested, and the default, tested and saved; the test people; the system stack checked (`system`) |
 | `login` | fixture | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do |
-| `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page, a skill an agent proposes for another (`propose_skill`) and its lessons in the feed, the agents' web search (SearXNG) |
+| `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page (a provider's key, choosing an agent's model), a skill an agent proposes for another (`propose_skill`) and its lessons in the feed, the agents' web search (SearXNG) |
 | `crud` | scenario | Every kind of thing a unit holds, made, read, changed and removed without the LLM |
 | `ui` | scenario | In the browser, as alice, bob and the admin: the unit `todo` and its app, built as `deploy` builds it, a dev branch, a screenshot, a second person, routines and a scheduled job. `docs/walkthrough/make.py` takes the walkthrough's pictures from its screenshots |
-| `agent` | fixture | Bob and alice ask the agents of `garrison` in its channel: logs, metrics, proposals, an LLM provider, the scout's browser under gVisor |
-| `media` | scenario | A unit's media library and file browser, `@media` with a fake ComfyUI (a real one with `COMFYUI=host`), a short, and the chain `software-updates` |
+| `agent` | fixture | With `AGENT_MODELS` (e.g. `coder=ollama-cloud/glm-5.3`, from the environment or `.env`), alice first puts those agents on those models on the Models page, one pull request that the install's admin approves (`scenarios/models.sh`); the setup added Ollama's cloud with `OLLAMA_API_KEY`. Then bob and alice ask the agents of `garrison` in its channel: logs, metrics, proposals, an LLM provider, the scout's browser under gVisor |
+| `media` | scenario | A unit's media library and file browser, `@designer` with the real ComfyUI of this computer when it answers on port 8188 with a GPU (else a fake one), a short, and the chain `software-updates`, which must propose both a semantic-version update and Chrome's next major |
+| `animalfacts` | scenario | A YouTube channel as a unit: `@designer` sets up its project with no workflow given (only models ComfyUI has), then makes five narrated 30-second shorts that must look and sound alike, and `@operator` puts them on a public website (template `channel`). Needs the real ComfyUI on this computer and a text-to-speech service such as Kokoro (`TTS_URL` in `.env`, or one on port 8880 here), else skipped; the shorts land in `bin/animalfacts/` |
 | `deploy` | fixture | The unit `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
 | `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
 | `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
@@ -73,6 +76,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `leaving` | scenario | Alice removes bob; the desk takes his request; a private repo with a private agent; an agent that may only read |
 | `guided` | scenario | In the browser: bob asks, vaguely, for a blue background; the commander asks which app, and the change goes to the app's code, carol merges and the page turns blue. An address of its own goes to the stack, in todo's config |
 | `threads` | scenario | In the browser: bob asks the operator in todo's channel; a plain message in its thread goes to no agent, its Reply button goes on with the operator without @, and @commander answers in the same thread |
+| `invites` | scenario | In the browser, the People page's links: carol, an admin of todo, invites frank, who makes his account with the link; the pull request on todo's `members.yaml` in carol's name waits for alice's approval; alice's link without a unit, revoked; her password link for bob |
 
 A fixture's snapshot, or a scenario's green mark (`bin/green/<step>`), stays valid while the files its step depends on, and those of every step on its way from `base`, are unchanged; `--list` shows which are. Change one scenario's file and only it reruns; change `lib.sh` or `smoke.sh` and everything from `login` does; change the installer and everything from `install`. Starting from a snapshot boots the VM, so every step also tests a restart.
 

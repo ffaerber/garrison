@@ -130,15 +130,15 @@ check "rejected stacks were not deployed"  bash -c '! kubectl get namespace app-
 check "hello still answers after the rejected deploys"   status_is 200 hello / 30
 
 echo "# models"
-# The model list in garrison's config: written from the install's LLM, then
-# kept current by the model sync's pull requests. A fake provider, a static
+# The model list in garrison's config: written by the setup, then kept
+# current by the model sync. A fake provider, a static
 # file served on this machine, stands in for OpenRouter and the like.
 sys=$api/repos/garrison/config
 llm_file() { gitea_api "" "$sys/raw/llm/$1?ref=${2:-main}"; }
 seeded() { llm_file providers.yaml | grep -q '^default: ' && llm_file models.yaml | grep -q 'enabled: true'; }
-check "garrison's config gets the model list" until_true 180 seeded
-install_model=$(sed -n 's/^LLM_MODEL=//p' $ETC/install.env)
-check "its default is the install's model, enabled" \
+check "garrison's config has the model list from the setup" until_true 180 seeded
+install_model=$(llm_file providers.yaml | sed -n 's#^default: *"\{0,1\}[^/"]*/\([^"]*\)"\{0,1\}.*#\1#p')
+check "its default is the setup's model, enabled" \
   bash -c 'grep -qF "/$1\"" <<<"$2" && grep -qF "/$1\": {enabled: true" <<<"$3"' _ "$install_model" "$(llm_file providers.yaml)" "$(llm_file models.yaml)"
 check "everyone signed in may read it" test "$(gitea_api bob -o /dev/null -w '%{http_code}' "$sys/raw/llm/models.yaml")" = 200
 check "the agent service reads keys from a root-only folder" test "$(stat -c %a $ETC/llm-keys)" = 700
@@ -163,21 +163,15 @@ sys_approval() { gitea_api "" "$sys/commits/$(gitea_api "" "$sys/pulls/$1" | pyt
 import json,sys
 for s in json.load(sys.stdin).get("statuses") or []:
     if s["context"] == "garrison/approval": print(s["status"], s["description"]); break'; }
-check "the model sync proposes the provider's models" until_true 180 models_pr_with "fake: 2 new"
-pr=$(models_pr)
-proposed=$(llm_file models.yaml "$(models_branch)")
+fake_listed() { grep -qF '"fake/fake-small": {enabled: false' <<<"$(llm_file models.yaml)"; }
+check "the model sync lists the provider's models on main by itself" until_true 180 fake_listed
+listed=$(llm_file models.yaml)
 check "they come turned off, only those include names" \
-  bash -c 'grep -qF "\"fake/fake-small\": {enabled: false" <<<"$0" && grep -qF "\"fake/fake-large\": {enabled: false" <<<"$0" && ! grep -q other-model <<<"$0"' "$proposed"
-check "the install's models are kept"      grep -qF "/$install_model\": {enabled: true" <<<"$proposed"
+  bash -c 'grep -qF "\"fake/fake-small\": {enabled: false" <<<"$0" && grep -qF "\"fake/fake-large\": {enabled: false" <<<"$0" && ! grep -q other-model <<<"$0"' "$listed"
+check "the install's models are kept"      grep -qF "/$install_model\": {enabled: true" <<<"$listed"
+check "without a pull request"             test -z "$(models_pr)"
 approval_has() { sys_approval "$1" | grep -q "$2"; }
 sys_review() { gitea_api "$1" -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"event":"APPROVED","body":"Looks right."}' "$sys/pulls/$2/reviews"; }
-check "it waits for a root admin's approval" until_true 60 approval_has "$pr" "^pending"
-sys_review bob "$pr"; sleep 25
-check "bob's approval does not count"      approval_has "$pr" "^pending"
-sys_review alice "$pr"
-check "alice's does"                       until_true 60 approval_has "$pr" "^success"
-check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$sys/pulls/$pr/merge")" = 200
-check "main lists fake's models"           grep -qF '"fake/fake-small"' <<<"$(llm_file models.yaml)"
 
 # An agent may name only an enabled model: refused while fake-small is off,
 # taken once the same pull request enables it.
@@ -207,6 +201,14 @@ sed -i 's#include: \["fake-\*"\]#include: ["fake-small", "fake-large"]#' "$tmp/p
 check "alice narrows the provider"         set_config garrison llm/providers.yaml "$tmp/providers.yaml"
 check "the next sync proposes fake-large as retired" until_true 180 models_pr_with "Retired: fake/fake-large"
 check "with the date it went"              grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: [0-9-]+\}' <<<"$(llm_file models.yaml "$(models_branch)")"
+pr=$(models_pr)
+check "it waits for a root admin's approval" until_true 60 approval_has "$pr" "^pending"
+sys_review bob "$pr"; sleep 25
+check "bob's approval does not count"      approval_has "$pr" "^pending"
+sys_review alice "$pr"
+check "alice's does"                       until_true 60 approval_has "$pr" "^success"
+check "alice merges it"                    test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"Do":"merge"}' "$sys/pulls/$pr/merge")" = 200
+check "main marks fake-large retired"      grep -qE '"fake/fake-large": \{enabled: false, added: [0-9-]+, gone: ' <<<"$(llm_file models.yaml)"
 kill "$fake_pid" 2>/dev/null || true
 
 echo "# an LLM provider and its key, on the dashboard's Models page"
@@ -238,6 +240,18 @@ gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"sta
 check "alice deletes the key"              grep -q '^303' <<<"$(models_post alice action=delete name=smoke)"
 key_gone() { [ ! -e $ETC/llm-keys/smoke ]; }
 check "and the deployer removes its file"  until_true 90 key_gone
+
+echo "# the models agents use, chosen on the Models page"
+page=$(feed alice /models)
+check "the page offers every model, off ones marked" bash -c 'grep -qF "<option value=\"fake/fake-small\">fake-small (off)</option>" <<<"$0" && grep -qF "name=\"agent-coder\"" <<<"$0" && ! grep -qF "fake/fake-large\"" <<<"$0"' "$page"
+res=$(models_post alice action=choose "default=$(llm_file providers.yaml | sed -n 's/^default: *"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p')" agent-coder=fake/fake-small)
+check "alice puts the coder on fake-small; she lands on its change" landed
+choose_pr=$(grep -oE '/c/garrison/config/[0-9]+$' <<<"$res" | grep -oE '[0-9]+$')
+check "one change: the coder's agent.yaml, and the model turned on" test "$(gitea_api "" "$sys/pulls/${choose_pr:-0}/files" | python3 -c 'import json,sys; print(" ".join(sorted(f["filename"] for f in json.load(sys.stdin))))')" = "agents/coder/agent.yaml llm/models.yaml"
+check "it waits for another root admin: alice wrote it" until_true 90 approval_has "${choose_pr:-0}" "^pending"
+check "a model the providers no longer offer is refused" grep -q '^400' <<<"$(models_post alice action=choose agent-coder=fake/fake-large)"
+check "bob may not choose"                 grep -q '^403' <<<"$(models_post bob action=choose agent-coder=fake/fake-small)"
+gitea_api "" -o /dev/null -X PATCH -H 'Content-Type: application/json' -d '{"state":"closed"}' "$sys/pulls/${choose_pr:-0}"
 
 echo "# an agent proposes a skill for the agent it asks; a root admin approves it"
 # The coder leads the chain news-page, so it asks the scout. It calls

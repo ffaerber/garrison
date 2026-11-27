@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"garrison/control-plane/internal/events"
 	"garrison/control-plane/internal/gateway"
+	"garrison/control-plane/internal/models"
 )
 
 type recorded struct {
@@ -30,9 +32,11 @@ func (r *recorded) Record(_ context.Context, e events.Event) {
 
 func TestModelsRouteAndSeed(t *testing.T) {
 	// A provider: lists its models, and says which key it got.
+	var listed atomic.Value
+	listed.Store(`{"data":[{"id":"small"},{"id":"large"}]}`)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
-			io.WriteString(w, `{"data":[{"id":"small"},{"id":"large"}]}`)
+			io.WriteString(w, listed.Load().(string))
 			return
 		}
 		http.NotFound(w, r)
@@ -42,6 +46,7 @@ func TestModelsRouteAndSeed(t *testing.T) {
 	var mu sync.Mutex
 	files := map[string]string{}
 	var commits []string
+	pulls := 0
 	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -55,6 +60,9 @@ func TestModelsRouteAndSeed(t *testing.T) {
 			http.NotFound(w, r)
 		case p == "/pulls" && r.Method == http.MethodGet:
 			io.WriteString(w, "[]")
+		case p == "/pulls" && r.Method == http.MethodPost:
+			pulls++
+			io.WriteString(w, `{"number": 7, "html_url": "https://git.home.test/garrison/config/pulls/7"}`)
 		case p == "/contents" && r.Method == http.MethodPost:
 			var body struct {
 				Branch, Message string
@@ -131,5 +139,40 @@ func TestModelsRouteAndSeed(t *testing.T) {
 	}
 	if len(commits) != 1 {
 		t.Errorf("committed again: %v", commits)
+	}
+
+	// Only new models: on main at once, turned off, without a pull request.
+	listed.Store(`{"data":[{"id":"small"},{"id":"large"},{"id":"glm-5.3"}]}`)
+	if link, err := m.Sync(ctx); err != nil || link != "" {
+		t.Fatal(link, err)
+	}
+	if len(commits) != 2 || !strings.HasPrefix(commits[1], "main: Models, turned off: local: 1 new") || pulls != 0 ||
+		!strings.Contains(files["llm/models.yaml"], `"local/glm-5.3": {enabled: false`) {
+		t.Fatalf("added: %v %d\n%s", commits, pulls, files["llm/models.yaml"])
+	}
+
+	// One gone: proposed, for a person to see which agents it touches.
+	listed.Store(`{"data":[{"id":"small"},{"id":"glm-5.3"}]}`)
+	if link, err := m.Sync(ctx); err != nil || !strings.HasSuffix(link, "/pulls/7") {
+		t.Fatal(link, err)
+	}
+	if pulls != 1 || len(commits) != 3 || commits[2] != "main: Models: local: 1 retired" {
+		t.Errorf("gone: %v %d", commits, pulls)
+	}
+}
+
+func TestOnlyAdded(t *testing.T) {
+	for _, c := range []struct {
+		changes []models.Change
+		want    bool
+	}{
+		{nil, false},
+		{[]models.Change{{Provider: "a", Added: []string{"a/x"}}, {Provider: "b", Unreachable: "401"}}, true},
+		{[]models.Change{{Provider: "a", Added: []string{"a/x"}}, {Provider: "b", Gone: []string{"b/y"}}}, false},
+		{[]models.Change{{Provider: "a", Dropped: []string{"a/z"}}}, false},
+	} {
+		if got := onlyAdded(c.changes); got != c.want {
+			t.Errorf("%+v: %v", c.changes, got)
+		}
 	}
 }

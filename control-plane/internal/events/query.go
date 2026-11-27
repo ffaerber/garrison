@@ -2,9 +2,14 @@ package events
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 )
+
+// ErrNoAccount: the person has no Gitea account yet, which Gitea makes the
+// first time they open it; until then nothing tells what they may see.
+var ErrNoAccount = errors.New("no Gitea account yet")
 
 // Store keeps events and answers the dashboard.
 type Store interface {

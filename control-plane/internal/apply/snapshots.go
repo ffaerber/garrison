@@ -133,19 +133,23 @@ func ListSnapshots(ctx context.Context, run Runner, ds string, depth int) (map[s
 }
 
 // Restored is the restore request last carried out on an environment, or "".
-func Restored(ctx context.Context, run Runner, root string, s *stack.Stack, env string) string {
+//
+// An error means it cannot be told now (the cluster still starting, the
+// machine away): never that it was not restored, which would restore it
+// again over what was written since.
+func Restored(ctx context.Context, run Runner, root string, s *stack.Stack, env string) (string, error) {
 	ctx, err := onEnv(ctx, run, s, env)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	out, err := run(ctx, nil, nil, "zfs", "get", "-H", "-o", "value", RestoredProperty, EnvDataset(root, s, env))
 	if err != nil {
-		return ""
+		return "", err
 	}
 	if v := strings.TrimSpace(string(out)); v != "-" {
-		return v
+		return v, nil
 	}
-	return ""
+	return "", nil
 }
 
 // StopTimeout is how long RestoreEnv waits for an environment's containers to stop.

@@ -130,13 +130,19 @@ func (c *Config) restores(ctx context.Context, ns, cfgDir string, stacks map[str
 			errs = append(errs, fmt.Errorf("%s: there is no stack %s that could be read", at, r.Stack))
 			continue
 		}
-		if apply.Restored(ctx, c.Run, "", s, r.Environment) == id {
-			continue // done before
-		}
 		app, ok := deployed[appKey(ns, r.Stack, r.Environment)]
 		if !ok {
 			errs = append(errs, fmt.Errorf("%s: %s is not deployed in %s", at, r.Stack, r.Environment))
 			continue
+		}
+		done, err := apply.Restored(ctx, c.Run, "", s, r.Environment)
+		if err != nil {
+			// Not knowing is not "not done": it is asked again next sync.
+			log.Printf("apps: %s: cannot tell yet whether it was restored: %v", at, err)
+			continue
+		}
+		if done == id {
+			continue // done before
 		}
 		// A request that failed is not tried again until the deployer
 		// restarts: it would stop the app on every sync.

@@ -134,7 +134,7 @@ func SpecsFor(a *agents.Agent) []Spec {
 func baseSpecs() []Spec {
 	return []Spec{
 		spec("list_units", "Lists the units (Gitea organisations).", nil),
-		spec("list_stacks", "Lists a unit's stacks with the commit the deployer deployed, and each of their services with ready/desired replicas and image.", map[string]any{"unit": nsArg}, "unit"),
+		spec("list_stacks", "Lists a unit's stacks with the commit the deployer deployed, the addresses each answers at (every environment's), and each of their services with ready/desired replicas and image.", map[string]any{"unit": nsArg}, "unit"),
 		spec("stack_status", "Shows the pods (in garrison) or tasks (in other units) of one stack: their state and any error. Use it to see why a service does not run.", map[string]any{"unit": nsArg, "stack": str("stack name, e.g. grafana")}, "unit", "stack"),
 		spec("service_logs", "Shows the last lines of a service's logs.", map[string]any{
 			"unit":    nsArg,
@@ -146,7 +146,7 @@ func baseSpecs() []Spec {
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*), the kubelet's container metrics (container_*, labelled with namespace, pod and container) and garrison_pod_info{namespace, pod, unit, stack, service}, which says what a pod belongs to: join with * on (namespace, pod) group_left (stack, service) garrison_pod_info.", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a unit: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"unit": nsArg}, "unit"),
 		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
-		spec("add_provider", "Proposes another LLM provider, an OpenAI-compatible API, in llm/providers.yaml of garrison/config, as a pull request by the person asking; only root admins may. Once merged, its models are listed by the model sync, turned off until a root admin enables them. Never ask for or pass its API key: the person sets it on the dashboard's Models page, whose link the answer gives. If they paste a key into the chat, do not repeat or use it; tell them to replace it at the provider, as the chat keeps it, and to set the new one on that page.", map[string]any{
+		spec("add_provider", "Proposes another LLM provider, an OpenAI-compatible API, in llm/providers.yaml of garrison/config, as a pull request by the person asking; only root admins may. Once merged, its models are listed by the model sync, turned off until a root admin chooses them on the dashboard's Models page. Never ask for or pass its API key: the person sets it on the dashboard's Models page, whose link the answer gives. If they paste a key into the chat, do not repeat or use it; tell them to replace it at the provider, as the chat keeps it, and to set the new one on that page.", map[string]any{
 			"name":    str("the provider's name in Garrison: lowercase letters, digits and dashes, at most 28, e.g. openrouter"),
 			"url":     str("the API's base URL, the one /chat/completions and /models are under, e.g. https://openrouter.ai/api/v1"),
 			"include": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "optional: only its models matching one of these patterns, e.g. [\"anthropic/*\"]; empty for all"},
@@ -203,7 +203,7 @@ func baseSpecs() []Spec {
 			"repo":        str("lowercase letters, digits and dashes; an app's repo is named after it, e.g. immich"),
 			"description": str("what it holds"),
 			"private":     map[string]any{"type": "boolean", "description": "only the unit's people may read it; default false"},
-			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: todo, a todo app in Go on Postgres (page.html, main.go, its tests), behind the sign-in; news, a page of what is new on the topics of its topics.md, which the chain news-page keeps current; empty for nothing"},
+			"template":    map[string]any{"type": "string", "enum": append([]string{""}, templates.Apps()...), "description": "what it starts with: todo, a todo app in Go on Postgres (page.html, main.go, its tests), behind the sign-in; news, a page of what is new on the topics of its topics.md, which the chain news-page keeps current; channel, the public page of the unit's channel, listing every short @designer made in its media library, to watch with its spoken text; storyboards, one story per short (narration and scenes), which the chain storyboards writes and @designer makes into shorts once merged; empty for nothing"},
 		}, "unit", "repo"),
 		spec("create_branch", "Makes a branch of a repo from the tip of another (main by default), as the person asking, if they may push there. When a stack in the unit's config deploys that branch of the repo as an environment (dev, for one), the deployer deploys it once its pipeline has built the image, and the answer gives its address. Only for a branch the person asked for by name: a change goes to main through propose_patch, which makes its own branch; never make a branch to put a change on.", map[string]any{
 			"unit":   nsArg,
@@ -326,6 +326,9 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		var b strings.Builder
 		for _, s := range stacks {
 			fmt.Fprintf(&b, "%s (commit %.12s)\n", s.Name, s.Commit)
+			for _, u := range s.Addresses {
+				fmt.Fprintf(&b, "  at %s\n", u)
+			}
 			for _, svc := range s.Services {
 				fmt.Fprintf(&b, "  %s %s %s\n", svc.Name, svc.Replicas, svc.Image)
 			}
@@ -417,12 +420,15 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 		if err != nil {
 			return "", err
 		}
-		keys := "the dashboard's Models page"
+		keys, keyLine := "the dashboard's Models page", ""
 		if t.Dashboard != "" {
 			keys = strings.TrimSuffix(t.Dashboard, "/") + "/models?provider=" + url.QueryEscape(a.Name)
+			// A line of its own: the agent service adds it to an answer
+			// that left it out, as it does the card's.
+			keyLine = "\nSet its API key: " + keys
 		}
-		return fmt.Sprintf("Opened change %s/%s#%d, which adds the LLM provider %s at %s. Nothing is changed yet: a root admin must review and merge it. Its API key goes on %s, never into this chat: say so, with that link. Once merged, its models come in llm/models.yaml, turned off.\n%s",
-			c.Unit, c.Repo, c.Number, a.Name, a.URL, keys, t.links(c)), nil
+		return fmt.Sprintf("Opened change %s/%s#%d, which adds the LLM provider %s at %s. Nothing is changed yet: a root admin must review and merge it. Its API key goes on %s, never into this chat: say so, with that link. Once merged, its models come in llm/models.yaml, turned off.\n%s%s",
+			c.Unit, c.Repo, c.Number, a.Name, a.URL, keys, t.links(c), keyLine), nil
 	case "list_repos":
 		repos, err := t.Gitea.Repos(ctx, p.Name, a.Unit)
 		if err != nil {
@@ -914,6 +920,9 @@ type Stack struct {
 	Name     string    `json:"name"`
 	Commit   string    `json:"commit"`
 	Services []Service `json:"services"`
+	// Addresses are where it answers: https://<host>/ of its Ingresses,
+	// every environment's, so that agents link the real ones.
+	Addresses []string `json:"addresses,omitempty"`
 }
 
 type Service struct {
@@ -943,12 +952,56 @@ func (t *Tools) Stacks(ctx context.Context, unit string) ([]Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	where := []string{"--all-namespaces", "--selector", render.LabelUnit + "=" + unit}
+	if unit == PlatformUnit {
+		where = []string{"--namespace", system.Namespace}
+	}
+	hosts := t.addresses(ctx, where...)
 	names := stackNames(state, unit)
 	var stacks []Stack
 	for _, name := range sortedKeys(names) {
-		stacks = append(stacks, Stack{Name: name, Commit: names[name], Services: byStack[name]})
+		stacks = append(stacks, Stack{Name: name, Commit: names[name], Services: byStack[name], Addresses: hosts[name]})
 	}
 	return stacks, nil
+}
+
+// addresses are the https:// addresses of the Ingresses kubectl finds with
+// where, by stack (system.StackLabel); none if it cannot read them, as a
+// list of stacks is useful without.
+func (t *Tools) addresses(ctx context.Context, where ...string) map[string][]string {
+	out, err := t.Run(ctx, nil, nil, "kubectl", append([]string{"get", "ingresses", "--output", "json"}, where...)...)
+	if err != nil {
+		return nil
+	}
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Labels map[string]string
+			}
+			Spec struct {
+				Rules []struct {
+					Host string
+				}
+			}
+		}
+	}
+	if json.Unmarshal(out, &list) != nil {
+		return nil
+	}
+	hosts := map[string][]string{}
+	for _, in := range list.Items {
+		stack := in.Metadata.Labels[system.StackLabel]
+		for _, r := range in.Spec.Rules {
+			u := "https://" + r.Host + "/"
+			if stack != "" && r.Host != "" && !slices.Contains(hosts[stack], u) {
+				hosts[stack] = append(hosts[stack], u)
+			}
+		}
+	}
+	for _, h := range hosts {
+		slices.Sort(h)
+	}
+	return hosts
 }
 
 // workloads are the Deployments, StatefulSets and DaemonSets that kubectl

@@ -341,7 +341,7 @@ Their answer: %s
 
 Go on with your task where you stopped. Nobody is watching, as before: your last message is posted in the question's thread, for %s and the unit's people, so say plainly what you did or found, with links. Ask again with ask_person only if you must.`, x.Person, x.Text, x.Answer, x.Person)
 	msg := func(bool) (string, []sandbox.Image) { return text, nil }
-	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout())
+	tctx, cancel := context.WithTimeout(ctx, s.turnTimeout(a))
 	defer cancel()
 	out := &collect{}
 	_, err = s.sandboxTurn(tctx, run, rec.Owner, x.Chat, x.Key, a, msg, out)

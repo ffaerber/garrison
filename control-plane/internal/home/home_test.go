@@ -1,6 +1,7 @@
 package home
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 type access map[string]events.Visibility
 
 func (a access) Visibility(_ context.Context, who string) (events.Visibility, error) {
+	if who == "newcomer" {
+		return events.Visibility{}, events.ErrNoAccount
+	}
 	v := a[who]
 	v.Person = who
 	return v, nil
@@ -26,7 +30,7 @@ func server() (*Server, *events.Memory) {
 	m.Record(ctx, events.Event{Source: events.SourceDeployer, Kind: events.KindDeploy, Status: events.StatusOK, Unit: "todo", Repo: "app", Commit: "m1", Title: "deployed todo/todo@main"})
 	m.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPush, Unit: "todo", Repo: "secret", Commit: "s1", Title: "alice pushed to secret"})
 	m.Record(ctx, events.Event{Source: events.SourceGitea, Kind: events.KindPRMerged, Status: events.StatusOK, Unit: "todo", Repo: "app", PR: 3, Commit: "m1", Title: "carol merged #3 <b>Our todos</b>"})
-	m.Record(ctx, events.Event{Source: events.SourceGateway, Kind: "browse", Status: events.StatusRefused, Unit: "todo", Audience: events.AudienceMembers, Actor: "bob", Agent: "todo/media", Title: "bob through todo/media: browse was refused"})
+	m.Record(ctx, events.Event{Source: events.SourceGateway, Kind: "browse", Status: events.StatusRefused, Unit: "todo", Audience: events.AudienceMembers, Actor: "bob", Agent: "todo/designer", Title: "bob through todo/designer: browse was refused"})
 	a := access{
 		"alice": {All: true},
 		"dave":  {Repos: map[string]bool{"todo/app": true, "todo/config": true}},
@@ -102,11 +106,42 @@ func TestLiveUpdates(t *testing.T) {
 	}
 }
 
-func TestTheThreadShowsHowItWasHandled(t *testing.T) {
+// An entry's page tells what belongs to it, newest first, and what ties
+// them; for the feed's window, only the entry, without the page around it.
+func TestTheStoryOfAnEntry(t *testing.T) {
 	s, _ := server()
 	body := get(s, "dave", "/e/3").Body.String()
-	if !strings.Contains(body, "How it was handled") || !strings.Contains(body, "deployed todo/todo@main") {
+	list := body[strings.Index(body, "Everything about")+1:]
+	merge, deploy := strings.Index(list, "carol merged #3"), strings.Index(list, "deployed todo/todo@main")
+	if !strings.Contains(body, "Everything about pull request #3 of todo/app") || merge < 0 || deploy < 0 || merge > deploy { // the merge is the newer here
 		t.Errorf("the merge's page:\n%s", body)
+	}
+	part := get(s, "dave", "/e/3?part=1").Body.String()
+	if strings.Contains(part, "<html") || strings.Contains(part, "← Feed") || !strings.Contains(part, "Everything about pull request #3") {
+		t.Errorf("the window's part:\n%s", part)
+	}
+	if !strings.Contains(body, `id="modal"`) {
+		t.Error("the page has no window")
+	}
+}
+
+// The same commit deployed again and again is one step, with a count.
+func TestRepeatsFoldIntoOneStep(t *testing.T) {
+	at := time.Now()
+	e := events.Event{ID: 15, Kind: events.KindDeploy, Status: events.StatusOK, Unit: "garrison", Repo: "sso", Commit: "22bb2201234", Title: "deployed the system stack sso at 22bb220", At: at}
+	again := func(id int64, d time.Duration) events.Event { x := e; x.ID, x.At = id, at.Add(d); return x }
+	st := storyOf(e, []events.Event{again(90, 2*time.Hour), e, again(40, time.Hour)})
+	if st.About != "commit 22bb220 of garrison/sso" || !st.Only || len(st.Steps) != 1 || st.Steps[0].Times != 3 || !st.Steps[0].This {
+		t.Errorf("%+v", st)
+	}
+	if !st.Steps[0].At[2].Equal(at) || !st.Steps[0].At[0].Equal(at.Add(2*time.Hour)) {
+		t.Errorf("not newest first: %v", st.Steps[0].At)
+	}
+	// A deploy of a commit names the repo its push or merge came from.
+	d := events.Event{ID: 221, Kind: events.KindDeploy, Unit: "todo", Commit: "2d455f9133eb", At: at}
+	push := events.Event{ID: 216, Kind: events.KindPush, Unit: "todo", Repo: "config", Commit: "2d455f9133eb", At: at.Add(-time.Minute)}
+	if st := storyOf(d, []events.Event{push, d}); st.About != "commit 2d455f9 of todo/config" || st.Steps[0].E.ID != 221 {
+		t.Errorf("%+v", st)
 	}
 }
 
@@ -136,10 +171,54 @@ func TestLessonsView(t *testing.T) {
 	m.Record(ctx, events.Event{Source: events.SourceAgents, Kind: events.KindLesson, Status: events.StatusOK, Unit: "todo", Audience: events.AudienceMembers,
 		Actor: "bob", Agent: "todo/scout", Title: "todo/coder got todo/scout to finish by asking again sharper"})
 	body := get(s, "alice", "/?view=lessons").Body.String()
-	if !strings.Contains(body, "got todo/scout to finish") || strings.Contains(body, "deployed todo") || !strings.Contains(body, ">Lessons<") {
+	if !strings.Contains(body, "@scout</span> to finish") || !strings.Contains(body, "@coder</span> got") || strings.Contains(body, "deployed todo") || !strings.Contains(body, ">Lessons<") {
 		t.Errorf("the Lessons view:\n%s", body)
 	}
-	if body := get(s, "dave", "/?view=lessons").Body.String(); strings.Contains(body, "got todo/scout to finish") {
+	if body := get(s, "dave", "/?view=lessons").Body.String(); strings.Contains(body, "@scout</span> to finish") {
 		t.Error("dave, not in todo, sees its lesson")
+	}
+}
+
+// Someone without a Gitea account yet, as the first root admin right after
+// the setup, is sent to make it, and back.
+func TestTheFirstVisitMakesTheGiteaAccount(t *testing.T) {
+	s, _ := server()
+	w := get(s, "newcomer", "/models")
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, "Open Gitea once") ||
+		!strings.Contains(body, `href="https://git.home.test/user/oauth2/keycloak?redirect_to=https%3A%2F%2Fhome.test%2Fmodels"`) {
+		t.Errorf("%d\n%s", w.Code, body)
+	}
+}
+
+// A commit links to Gitea, in the repo it is in, also when its event
+// names none.
+func TestCommitsLinkToGitea(t *testing.T) {
+	sys := events.Event{Kind: events.KindDeploy, Commit: "22bb2201234", Title: "deployed the system stack sso at 22bb220"}
+	restore := events.Event{Kind: events.KindDeploy, Unit: "todo", Commit: "2d455f9133eb", Title: "todo/config/restores/todo.yaml: todo not started again: ..."}
+	app := events.Event{Kind: events.KindDeploy, Unit: "todo", Repo: "app", Commit: "m1"}
+	pushed := events.Event{Kind: events.KindDeploy, Unit: "shop", Commit: "abc"}
+	push := events.Event{Kind: events.KindPush, Unit: "shop", Repo: "site", Commit: "abc"}
+	for _, c := range []struct {
+		e       events.Event
+		related []events.Event
+		want    string
+	}{
+		{sys, nil, "garrison/sso"},
+		{restore, nil, "todo/config"},
+		{app, nil, "todo/app"},
+		{pushed, []events.Event{push}, "shop/site"},
+		{events.Event{Kind: events.KindDeploy, Unit: "shop", Commit: "zzz"}, nil, ""},
+	} {
+		if got := commitRepo(c.e, c.related); got != c.want {
+			t.Errorf("%q: %q, want %q", c.e.Title, got, c.want)
+		}
+	}
+	s, m := server()
+	m.Record(context.Background(), sys)
+	es, _ := m.List(context.Background(), events.Query{Visibility: events.Visibility{All: true}})
+	body := get(s, "alice", fmt.Sprintf("/e/%d", es[0].ID)).Body.String()
+	if !strings.Contains(body, `href="https://git.home.test/garrison/sso/commit/22bb2201234"`) {
+		t.Errorf("no link to the commit:\n%s", body)
 	}
 }

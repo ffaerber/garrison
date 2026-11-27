@@ -20,6 +20,9 @@ type fakeGitea struct {
 	commit map[string]string            // repo -> HEAD
 	failOn string                       // stack whose deploy fails
 	calls  []string
+	// notReady: the Kubernetes API does not answer yet, as right after a
+	// restart.
+	notReady bool
 }
 
 func newFake(t *testing.T) *fakeGitea {
@@ -56,6 +59,12 @@ func (f *fakeGitea) api(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeGitea) run(_ context.Context, _ []string, _ []byte, name string, args ...string) ([]byte, error) {
+	if name == "kubectl" && strings.Join(args, " ") == "get --raw /readyz" {
+		if f.notReady {
+			return nil, errors.New("couldn't get current server API group list: connection refused")
+		}
+		return []byte("ok"), nil
+	}
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	switch {
@@ -219,5 +228,26 @@ func TestNetrcNamesTheGiteaHost(t *testing.T) {
 	c.prepare()
 	if netrc, _ := os.ReadFile(filepath.Join(c.WorkDir, "home", "gitea", ".netrc")); !strings.HasPrefix(string(netrc), "machine gitea login admin ") {
 		t.Errorf(".netrc = %q", netrc)
+	}
+}
+
+// Right after a restart the Kubernetes API answers later than the
+// deployer: a sync then applies nothing and fails nothing, and the next one
+// deploys everything.
+func TestNothingIsAppliedBeforeTheAPIIsReady(t *testing.T) {
+	c, f := setup(t)
+	f.notReady = true
+	if _, err := c.Once(context.Background()); err == nil || !strings.Contains(err.Error(), "not ready yet") {
+		t.Fatalf("sync before the API: %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("it did something: %v", f.calls)
+	}
+	f.notReady = false
+	if _, err := c.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.deploys(), " "); got != "grafana traefik control-plane" {
+		t.Errorf("deploys once ready: %q", got)
 	}
 }

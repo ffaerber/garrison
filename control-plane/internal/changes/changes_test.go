@@ -13,7 +13,7 @@ func TestWhatFilesAreFor(t *testing.T) {
 		{"config", "members.yaml", "who belongs here"},
 		{"config", "stacks/shop.yaml", "how the app shop is deployed"},
 		{"config", "restores/x.yaml", "brings an app's data back"},
-		{"config", "agents/media/prompt.md", "the agent media"},
+		{"config", "agents/designer/prompt.md", "the agent designer"},
 		{"app", ".gitea/workflows/nightly.yaml", "a pipeline or scheduled job"},
 		{"app", "docs/shots/home.png", "a picture"},
 		{"app", "stacks/x.yaml", ""}, // only config's stacks deploy

@@ -166,6 +166,28 @@ func Approval(base, head Roster, authors []string, approvers, rootAdmins []strin
 	return false, why
 }
 
+// SoleRoot tells whether a change of garrison's config was written by its
+// only root admin alone: then nobody else could approve it, as in a unit of
+// one person, and it goes in. roots are the people (see people): right
+// after the setup, its first root admin is the only one.
+func SoleRoot(authors, roots []string) (string, bool) {
+	if len(roots) != 1 || len(authors) == 0 {
+		return "", false
+	}
+	for _, a := range authors {
+		if a != roots[0] {
+			return "", false
+		}
+	}
+	return roots[0], true
+}
+
+// people are the root admins but for the platform's own account, which
+// every installation has and nobody works as.
+func people(roots []string, platform string) []string {
+	return slices.DeleteFunc(slices.Clone(roots), func(r string) bool { return r == platform })
+}
+
 var allUnits = []string{"repo.code", "repo.issues", "repo.pulls", "repo.releases", "repo.wiki", "repo.projects", "repo.packages", "repo.actions"}
 
 func unitsMap(access string) map[string]string {
@@ -635,7 +657,13 @@ func (m *Members) platform(ctx context.Context, roots []string) error {
 	} else if err != nil {
 		return err
 	}
-	if err := m.protect(ctx, ns, []string{RootTeam}, 1); err != nil {
+	// The only root admin has nobody to approve their change: Gitea asks
+	// for no approval then, garrison/approval for theirs (see SoleRoot).
+	required := 1
+	if len(people(roots, m.Gitea.User)) == 1 {
+		required = 0
+	}
+	if err := m.protect(ctx, ns, []string{RootTeam}, required); err != nil {
 		return err
 	}
 	if err := m.syncTeam(ctx, ns, RootTeam, teams[RootTeam], roots); err != nil {
@@ -967,6 +995,14 @@ func (m *Members) approvals(ctx context.Context, ns string, base *Roster, roots 
 				}
 			}
 			ok, why := Approval(before, head, authors, approvers, roots)
+			if ns == PlatformUnit && !ok {
+				// The only root admin has nobody to approve their own
+				// change (Gitea lets nobody approve their own pull
+				// request): it goes in, and merging is their review.
+				if only, alone := SoleRoot(authors, people(roots, g.User)); alone {
+					ok, why = true, only+" is the only root admin: merging it is the review"
+				}
+			}
 			desc = why
 			if ok {
 				state = "success"

@@ -14,7 +14,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { basename, join, resolve } from "node:path";
 
@@ -101,8 +101,18 @@ type Made = { id: string; name: string; made: Record<string, unknown> };
 
 // generate makes media with ComfyUI, through the agent service, into
 // /data/media/<project>/, each with a .json of how it was made.
-async function generate(params: { project: string }, signal?: AbortSignal): Promise<string> {
-  const r = await call("/media/generate", params, signal);
+async function generate(params: { project: string; image?: string }, signal?: AbortSignal, path = "/media/generate"): Promise<string> {
+  if (params.image) {
+    // A picture to start from: the agent service has no library, so the
+    // picture goes along. Only from the library or the workspace.
+    const file = await realpath(resolve("/data/work", params.image)).catch(() => "");
+    if (!file || !(file.startsWith(media + "/") || file.startsWith("/data/work/"))) {
+      throw new Error(`image ${params.image}: no such picture in /data/media or /data/work`);
+    }
+    if ((await stat(file)).size > 20 << 20) throw new Error(`image ${params.image}: at most 20 MB`);
+    params = { ...params, image_name: basename(file), image_data: (await readFile(file)).toString("base64") } as typeof params;
+  }
+  const r = await call(path, params, signal);
   // 200: { files, error? } (error: what stopped it, after the files made);
   // otherwise the API's { error: { message } }.
   let out: { files?: Made[]; error?: string | { message?: string } };
@@ -205,14 +215,15 @@ export default async function (pi: ExtensionAPI) {
       });
       continue;
     }
-    if (spec.name === "generate_media") {
+    if (spec.name === "generate_media" || spec.name === "generate_speech") {
+      const path = spec.name === "generate_media" ? "/media/generate" : "/media/speak";
       pi.registerTool({
         name: spec.name,
         label: spec.name,
         description: spec.description,
         parameters: Type.Unsafe(spec.input_schema),
         async execute(_id, params, signal) {
-          return { content: [{ type: "text", text: await generate(params as { project: string }, signal) }], details: {} };
+          return { content: [{ type: "text", text: await generate(params as { project: string; image?: string }, signal, path) }], details: {} };
         },
       });
       continue;

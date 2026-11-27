@@ -355,6 +355,10 @@ spec:
             - -deployer=http://deployer:8090
             # Which agents work now, for the header and the feed.
             - -agents=http://agents:8070
+            # The setup (/setup): it makes the first root admin in Keycloak,
+            # open only with the token of the link the installer printed.
+            - -keycloak=http://keycloak:8080
+            - -setup-token-file=/run/secrets/setup-token
           ports: [{ containerPort: 8060 }]
           volumeMounts:
             - { name: secrets, mountPath: /run/secrets, readOnly: true }
@@ -365,8 +369,36 @@ spec:
       volumes:
         - name: secrets
           projected:
-            sources: [{ secret: { name: admin-password } }, { secret: { name: garrison-db-password } }]
+            sources:
+              - { secret: { name: admin-password } }
+              - { secret: { name: garrison-db-password } }
+              # Installations from before the setup have none.
+              - { secret: { name: setup-token, optional: true } }
         - { name: install-env, hostPath: { path: /etc/garrison/install.env, type: File } }
+---
+# The setup and the People page's links, without the sign-in in front of
+# them: nobody could sign in yet, or the person has no account (or forgot
+# its password).
+# The dashboard opens it only with the setup's token, and only until it is
+# complete; the rest of the dashboard stays behind the sign-in. Traefik
+# ranks routes by the length of their rule, and Path(`/setup`) is as long as
+# the dashboard's PathPrefix(`/`): without a priority, the one with the
+# sign-in won.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: home-setup
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "1000"
+spec:
+  rules:
+    - host: ${DOMAIN}
+      http:
+        paths:
+          - { path: /setup, pathType: Exact, backend: { service: { name: home, port: { name: http } } } }
+          # A person's link from the People page: an invite, or a new
+          # password. Only its token lets one in, once.
+          - { path: /join, pathType: Exact, backend: { service: { name: home, port: { name: http } } } }
 ---
 # ---------- the agents' browser ----------
 # Headless Chrome for the agents' screenshot tool, driven by the gateway.

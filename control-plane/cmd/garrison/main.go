@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"maps"
 	"slices"
 	"strings"
 	"syscall"
@@ -738,13 +739,11 @@ func agentsCmd(args []string) error {
 	if domain == "" || vars["ADMIN_USER"] == "" {
 		return fmt.Errorf("%s must set DOMAIN and ADMIN_USER", *config)
 	}
-	model := vars["LLM_MODEL"]
-	if model == "" {
+	// The install's LLM, if its answers named one: the first provider. Else
+	// the setup on the dashboard adds the providers.
+	model, base := vars["LLM_MODEL"], vars["LLM_BASE_URL"]
+	if base != "" && model == "" {
 		model = "gpt-oss:120b"
-	}
-	base := vars["LLM_BASE_URL"]
-	if base == "" {
-		base = "https://ollama.com/v1"
 	}
 	password, err := os.ReadFile(*passwordFile)
 	if err != nil {
@@ -773,11 +772,21 @@ func agentsCmd(args []string) error {
 		Poster:       &agentapi.GatewayPoster{URL: strings.TrimSuffix(*gatewayURL, "/mcp"), ServiceKey: gateway.ServiceKey(g.Password)},
 		Events:       recorder(store),
 	}
+	// Each turn's trace, for the dashboard's agent pages (kept 14 days).
+	if store != nil {
+		srv.Traces = store
+	}
 	// ComfyUI, outside Garrison, e.g. http://192.168.1.20:8188: the agents'
 	// generate_media, into their unit's media library.
 	if u := vars["COMFYUI_URL"]; u != "" {
 		srv.ComfyUI, srv.Styles = &agentapi.ComfyUI{URL: u}, g
 		log.Printf("generate_media uses ComfyUI at %s", u)
+	}
+	// A text-to-speech service outside Garrison with an OpenAI-style
+	// /v1/audio/speech, e.g. Kokoro: the agents' generate_speech.
+	if u := vars["TTS_URL"]; u != "" {
+		srv.Speech, srv.Styles = &agentapi.Speech{URL: u}, g
+		log.Printf("generate_speech uses the text-to-speech service at %s", u)
 	}
 	// The system stack searxng: web_search for agents that list it.
 	srv.Search = &agentapi.Search{URL: *searchURL}
@@ -947,6 +956,8 @@ func homeCmd(args []string) error {
 	passwordFile := fs.String("password-file", etcDir+"/admin-password", "password of the Gitea admin account")
 	deployer := fs.String("deployer", "", "the deployer's URL, which gives the units' public keys for the secrets page and the apps for the Apps page (e.g. http://deployer:8090); empty: neither page")
 	agentsURL := fs.String("agents", "", "the agent service's URL, which says which agents work now (e.g. http://agents:8070); empty: the dashboard does not show it")
+	keycloakURL := fs.String("keycloak", "", "Keycloak's URL, where the setup makes the first root admin (e.g. http://keycloak:8080); empty: no setup")
+	setupToken := fs.String("setup-token-file", "", "the setup's token, which the installer printed in its link; with -keycloak and -deployer, /setup completes the installation")
 	feed := eventsFlags(fs)
 	fs.Parse(args)
 
@@ -981,6 +992,18 @@ func homeCmd(args []string) error {
 	if *agentsURL != "" {
 		s.Running = home.RemoteRunning(*agentsURL, gateway.ServiceKey(g.Password))
 	}
+	if store != nil {
+		s.Traces = store
+	}
+	s.PlatformUser = vars["ADMIN_USER"]
+	if *keycloakURL != "" {
+		kc := &gateway.Keycloak{URL: *keycloakURL, User: vars["ADMIN_USER"], Password: g.Password}
+		if *setupToken != "" && s.Secrets != nil {
+			s.Setup = homeSetup{g: g, kc: kc, secrets: s.Secrets}
+			s.SetupTokenFile = *setupToken
+		}
+		s.People, s.Invites = homePeople{g: g, kc: kc}, store
+	}
 	server := &http.Server{Addr: *listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -1009,12 +1032,98 @@ func zone(name string) *time.Location {
 	return loc
 }
 
+// homePeople is Keycloak and Gitea for the People page and its links.
+type homePeople struct {
+	g  *gateway.Gitea
+	kc *gateway.Keycloak
+}
+
+func (h homePeople) List(ctx context.Context) ([]home.Person, error) {
+	list, err := h.kc.People(ctx)
+	out := make([]home.Person, 0, len(list))
+	for _, p := range list {
+		out = append(out, home.Person{Username: p.Username, Email: p.Email, Root: p.Root, Enabled: p.Enabled})
+	}
+	return out, err
+}
+
+func (h homePeople) Add(ctx context.Context, username, email, password string) error {
+	return h.kc.AddPerson(ctx, username, email, password, false)
+}
+
+func (h homePeople) SetPassword(ctx context.Context, username, password string) error {
+	return h.kc.SetPassword(ctx, username, password)
+}
+
+func (h homePeople) ProposeMember(ctx context.Context, as, unit, person, role string) (int, error) {
+	c, err := h.g.ProposeMember(ctx, as, unit, person, role, "")
+	return c.Number, err
+}
+
+// homeSetup is Keycloak and garrison's config for the dashboard's setup.
+type homeSetup struct {
+	g       *gateway.Gitea
+	kc      *gateway.Keycloak
+	secrets home.Secrets
+}
+
+func (h homeSetup) RootAdmins(ctx context.Context) ([]string, error) { return h.kc.RootAdmins(ctx) }
+
+func (h homeSetup) AddRootAdmin(ctx context.Context, username, email, password string) error {
+	return h.kc.AddRootAdmin(ctx, username, email, password)
+}
+
+func (h homeSetup) Configured(ctx context.Context) (bool, error) {
+	raw, err := h.g.File(ctx, models.Unit, models.Repo, models.ProvidersFile)
+	return strings.TrimSpace(raw) != "", err
+}
+
+// Save stores the keys first, so the agent service has them once the
+// providers are on main, then writes both files in one commit.
+func (h homeSetup) Save(ctx context.Context, person string, providers, catalog []byte, keys map[string]string) error {
+	for _, name := range slices.Sorted(maps.Keys(keys)) {
+		if err := h.secrets.Set(ctx, secrets.PlatformUnit, models.KeySecret(name), keys[name], h.g.User); err != nil {
+			return fmt.Errorf("the key of %s: %w", name, err)
+		}
+	}
+	return h.g.Commit(ctx, models.Unit, models.Repo, "The LLM providers and the default model, from the setup", person,
+		map[string][]byte{models.ProvidersFile: providers, models.ModelsFile: catalog})
+}
+
 // homeProviders is garrison's config for the dashboard's Models page.
 type homeProviders struct{ g *gateway.Gitea }
 
 func (h homeProviders) Providers(ctx context.Context) (models.Providers, models.Catalog, bool, error) {
 	l, ok, err := h.g.LLM(ctx, "main")
 	return l.Providers, l.Catalog, ok, err
+}
+
+func (h homeProviders) Agents(ctx context.Context) ([]home.AgentModel, error) {
+	defs, err := h.g.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	l, _, err := h.g.LLM(ctx, "main")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]home.AgentModel, 0, len(defs))
+	for _, a := range defs {
+		m := a.Model
+		if m != "" {
+			_, _, m = l.Providers.Resolve(m)
+		}
+		out = append(out, home.AgentModel{Name: a.Name, Description: a.Description, Model: m})
+	}
+	return out, nil
+}
+
+func (h homeProviders) ProposeModels(ctx context.Context, person, def string, choose map[string]string) (int, error) {
+	c, err := h.g.ProposeModels(ctx, person, def, choose, "")
+	if errors.Is(err, gateway.ErrInvalid) {
+		err = fmt.Errorf("%w: %v", models.ErrInvalidProvider, err)
+	}
+	return c.Number, err
 }
 
 func (h homeProviders) ProposeProvider(ctx context.Context, person, name, apiURL string, include []string) (int, error) {

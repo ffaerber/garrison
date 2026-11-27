@@ -39,12 +39,16 @@ spec:
       # the realm answers, e.g. after a reboot.
       initContainers:
         - name: wait-for-keycloak
-          image: busybox:1.37
+          image: curlimages/curl:8.20.0
           # Keycloak itself, and then the realm as the proxy asks it: by its
-          # public name, through Traefik, which answers 502 for a while after
-          # a restart (a cloned test VM's), and the proxy exits on that into a
-          # growing crash-loop backoff.
-          command: [sh, -c, "until wget -q -O /dev/null http://keycloak.garrison.svc.cluster.local:8080/realms/garrison/.well-known/openid-configuration && wget -q --no-check-certificate -O /dev/null https://keycloak.${DOMAIN}/realms/garrison/.well-known/openid-configuration; do sleep 2; done"]
+          # public name, through Traefik, with the certificate checked as the
+          # proxy checks it (the installation's, else a public CA's). After a
+          # restart (a cloned test VM's) Traefik answers 502 for a while, and
+          # then with its own default certificate until it has loaded the
+          # installation's; the proxy exits on either into a growing
+          # crash-loop backoff.
+          command: [sh, -c, "until curl -sf -o /dev/null http://keycloak.garrison.svc.cluster.local:8080/realms/garrison/.well-known/openid-configuration && { curl -sf -o /dev/null --cacert /run/secrets/tls.crt https://keycloak.${DOMAIN}/realms/garrison/.well-known/openid-configuration || curl -sf -o /dev/null https://keycloak.${DOMAIN}/realms/garrison/.well-known/openid-configuration; }; do sleep 2; done"]
+          volumeMounts: [{ name: secrets, mountPath: /run/secrets, readOnly: true }]
       containers:
         - name: oauth2-proxy
           image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0

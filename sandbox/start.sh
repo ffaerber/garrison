@@ -5,6 +5,10 @@
 #   GARRISON_TOKEN   names this chat to it
 #   GARRISON_MODEL   the agent's model
 #   GARRISON_PROMPT  the agent's system prompt with the platform's rules
+#   GARRISON_CONTEXT, GARRISON_MAX_TOKENS  the model's context window and how
+#                    much of it an answer may take, from its server: Pi
+#                    compacts the conversation to fit (128000 and 16384 if
+#                    unknown)
 # /data is the chat's volume: the workspace and Pi's session, kept between
 # containers, so a chat resumes where it left off.
 set -eu
@@ -15,7 +19,8 @@ cat > "$HOME/.pi/agent/models.json" <<EOF
 {"providers": {"garrison": {
   "baseUrl": "$GARRISON_API/v1", "api": "openai-completions", "apiKey": "GARRISON_TOKEN",
   "compat": {"supportsDeveloperRole": false},
-  "models": [{"id": "$GARRISON_MODEL", "reasoning": true, "contextWindow": 128000}]}}}
+  "models": [{"id": "$GARRISON_MODEL", "reasoning": true,
+    "contextWindow": ${GARRISON_CONTEXT:-128000}, "maxTokens": ${GARRISON_MAX_TOKENS:-16384}}]}}}
 EOF
 # Git: the platform's repos through the agent service, read-only, as the
 # person whose turn runs (see garrison.ts for proposing changes).

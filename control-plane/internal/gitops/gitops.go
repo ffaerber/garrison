@@ -337,6 +337,13 @@ func (c *Config) Sync(ctx context.Context, force bool) (State, error) {
 	if err != nil {
 		return prev, err
 	}
+	// Right after a restart the Kubernetes API answers a while later than
+	// the deployer: everything would fail, and the feed fill with failed
+	// deploys and restores that were never tried. It waits for the next
+	// sync instead, with nothing recorded.
+	if err := c.apiReady(ctx); err != nil {
+		return prev, fmt.Errorf("the Kubernetes API is not ready yet, so nothing is applied: %w", err)
+	}
 	repos, err := c.repos(ctx)
 	if err != nil {
 		return prev, err
@@ -491,4 +498,21 @@ func (c *Config) Once(ctx context.Context) (State, error) {
 		return State{}, err
 	}
 	return c.Sync(ctx, true)
+}
+
+// apiReady tells whether the Kubernetes API answers and says it is ready.
+func (c *Config) apiReady(ctx context.Context) error {
+	if c.Run == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := c.Run(ctx, nil, nil, "kubectl", "get", "--raw", "/readyz")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(out)) != "ok" {
+		return fmt.Errorf("/readyz: %.200s", out)
+	}
+	return nil
 }

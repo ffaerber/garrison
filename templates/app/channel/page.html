@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<style>
+  :root { color-scheme: light dark; --bg: #faf8f5; --fg: #1d1b19; --muted: #6b655e; --card: #ffffff; --line: #e8e3dc; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161514; --fg: #f1eee9; --muted: #a39d95; --card: #201f1d; --line: #34312d; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { max-width: 1100px; margin: 0 auto; padding: 32px 16px 8px; }
+  h1 { margin: 0; font-size: 2rem; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 24px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  article { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+  video { width: 100%; aspect-ratio: 9 / 16; background: #000; display: block; }
+  .text { padding: 12px 14px 16px; }
+  h2 { margin: 0 0 4px; font-size: 1.05rem; }
+  time { color: var(--muted); font-size: .85rem; }
+  .said { margin: 8px 0 0; white-space: pre-line; }
+  .empty { grid-column: 1 / -1; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{.Title}}</h1>
+  {{with .About}}<p>{{.}}</p>{{end}}
+  <p>{{len .Shorts}} short{{if ne (len .Shorts) 1}}s{{end}}</p>
+</header>
+<main>
+{{range .Shorts}}
+  <article id="{{.Project}}-{{.Name}}">
+    <video controls preload="metadata" playsinline src="{{.URL}}"></video>
+    <div class="text">
+      <h2>{{.Title}}</h2>
+      <time datetime="{{.Made.Format "2006-01-02T15:04:05Z07:00"}}">{{date .Made}}</time>
+      {{with .Text}}<p class="said">{{.}}</p>{{end}}
+    </div>
+  </article>
+{{else}}
+  <p class="empty">No shorts yet.</p>
+{{end}}
+</main>
+</body>
+</html>

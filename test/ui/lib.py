@@ -247,6 +247,78 @@ class Person:
         self.snap("dashboard")
         return self.name in p.locator(".who").inner_text()
 
+    # ---------- the dashboard's People page and its links ----------
+
+    def invite(self, unit: str = "", role: str = "member", note: str = "") -> str:
+        """Makes a link on the People page; returns it, as shown once."""
+        p = self.page
+        p.goto(f"{HOME}/people")
+        form = p.locator("form.setform")
+        form.locator("select[name=unit]").select_option(unit)
+        if unit:
+            form.locator("select[name=role]").select_option(role)
+        form.locator("input[name=note]").fill(note)
+        form.get_by_role("button", name="Make the link").click()
+        p.wait_for_selector("#link input")
+        self.snap(f"invite {unit or 'no unit'}")
+        return p.locator("#link input").input_value()
+
+    def password_link(self, username: str) -> str:
+        """Makes a link for username to set a new password; returns it."""
+        p = self.page
+        p.goto(f"{HOME}/people")
+        p.locator("li", has=p.locator(f"code:text-is('{username}')")).get_by_role("button", name="Password link").click()
+        p.wait_for_selector("#link input")
+        self.snap(f"password link {username}")
+        return p.locator("#link input").input_value()
+
+    def revoke(self, note: str):
+        """Revokes the open link whose note is note."""
+        p = self.page
+        p.goto(f"{HOME}/people")
+        p.once("dialog", lambda d: d.accept())
+        p.locator("li", has_text=note).get_by_role("button", name="Revoke").click()
+        p.wait_for_selector(".notice")
+        self.snap("revoked")
+        return "no longer works" in p.locator(".notice").inner_text()
+
+    def join(self, link: str, username: str = "") -> str:
+        """Opens a link and fills in its form with the person's password
+        (and username, for an invite); returns the page's heading."""
+        p = self.page
+        p.goto(link)
+        self.snap("join")
+        if username:
+            p.fill("input[name=username]", username)
+        p.fill("input[name=password]", self.password)
+        p.fill("input[name=again]", self.password)
+        p.locator("form button.primary").click()
+        p.wait_for_selector("h1")
+        self.snap("joined")
+        return p.locator("h1").inner_text()
+
+    def link_works(self, link: str) -> bool:
+        p = self.page
+        p.goto(link)
+        return p.locator("form input[name=password]").count() > 0
+
+    def first_visit(self) -> bool:
+        """Signs in to the dashboard for the first time: it sends the person
+        to Gitea once, which makes their account, and they come back."""
+        p = self.page
+        p.goto(f"{HOME}/")
+        if p.locator("#username").count():
+            self.keycloak()
+        p.wait_for_selector("#gitea, .who")
+        if p.locator("#gitea").count():
+            self.snap("first visit")
+            p.click("#gitea")
+            p.wait_for_url(re.compile(rf"^({re.escape(GIT)}|{re.escape(HOME)})/"), timeout=60_000)
+            p.goto(f"{HOME}/")
+        p.wait_for_selector(".who")
+        self.snap("dashboard")
+        return self.name in p.locator(".who").inner_text()
+
     # ---------- Open WebUI ----------
 
     def dismiss(self):

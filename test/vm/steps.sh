@@ -20,6 +20,11 @@
 #   LLM=server test/vm/steps.sh    use an inference server on the LAN (OpenAI-style):
 #                                  SERVER_LLM_URL and SERVER_LLM_MODEL from the
 #                                  environment or .env; the default when .env names one
+#   AGENT_MODELS="coder=ollama-cloud/glm-5.3" test/vm/steps.sh
+#                                  agents on another model than the install's,
+#                                  chosen on the dashboard's Models page in the
+#                                  agent fixture (scenario models), with
+#                                  OLLAMA_API_KEY from .env; also from .env
 #   COMFYUI=host test/vm/steps.sh media
 #                                  media with a real ComfyUI on this computer,
 #                                  reached at the VM's gateway, port 8188,
@@ -67,19 +72,20 @@ cd "$ROOT"
 #                                                                                 +- 6.7 leaving
 #                                                                                 +- 6.8 guided
 #                                                                                 +- 6.9 threads
+#                                                                                 +- 6.10 invites
 #
 # deploy: the unit todo with its app deployed, alice its only person.
 # team: carol an admin, bob a member, and the agents the scenarios share.
 # Each scenario is test/e2e/scenarios/<name>.sh (see docs/scenarios.md).
 # The trunk (base, install, login) lives in $VM; every other fixture and
 # scenario in a VM of its own, $VM-<step>, cloned from its parent's.
-STEPS=(base install login platform crud ui agent media deploy journey people nodes newsroom team roles change marketing routines commander operator leaving guided threads)
+STEPS=(base install login platform crud ui agent media animalfacts deploy journey people nodes newsroom team roles change marketing routines commander operator leaving guided threads invites)
 declare -A PARENT=([base]="" [install]=base [login]=install [platform]=login [crud]=login [ui]=login
-  [agent]=login [media]=agent [deploy]=login [journey]=deploy [people]=deploy [nodes]=deploy [newsroom]=deploy [team]=deploy
-  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team [threads]=team)
+  [agent]=login [media]=agent [animalfacts]=agent [deploy]=login [journey]=deploy [people]=deploy [nodes]=deploy [newsroom]=deploy [team]=deploy
+  [roles]=team [change]=team [marketing]=team [routines]=team [commander]=team [operator]=team [leaving]=team [guided]=team [threads]=team [invites]=team)
 declare -A NUMBER=([base]=1 [install]=2 [login]=3 [platform]=4.1 [crud]=4.2 [ui]=4.3
-  [agent]=4.4 [media]=5.1 [deploy]=4.5 [journey]=5.2 [people]=5.3 [nodes]=5.5 [newsroom]=5.6 [team]=5.4
-  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8 [threads]=6.9)
+  [agent]=4.4 [media]=5.1 [animalfacts]=5.7 [deploy]=4.5 [journey]=5.2 [people]=5.3 [nodes]=5.5 [newsroom]=5.6 [team]=5.4
+  [roles]=6.1 [change]=6.2 [marketing]=6.3 [routines]=6.4 [commander]=6.5 [operator]=6.6 [leaving]=6.7 [guided]=6.8 [threads]=6.9 [invites]=6.10)
 FIXTURES=" base install login agent deploy team "
 TRUNK=" base install login "
 
@@ -92,10 +98,25 @@ server_setting() {
 }
 SERVER_LLM_URL=$(server_setting SERVER_LLM_URL)
 SERVER_LLM_MODEL=$(server_setting SERVER_LLM_MODEL)
+# The provider's name the setup gives the inference server, e.g. gpu-box.
+SERVER_LLM_NAME=$(server_setting SERVER_LLM_NAME)
+SERVER_LLM_NAME=${SERVER_LLM_NAME:-server}
+[[ $SERVER_LLM_NAME =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "SERVER_LLM_NAME: lowercase letters, digits and dashes" >&2; exit 2; }
 # Which LLM the agents use: an inference server on the LAN (when .env names
 # one), local (Ollama on this computer, LOCAL_MODEL) or cloud.
 if [ -n "$SERVER_LLM_URL" ] && [ -n "$SERVER_LLM_MODEL" ]; then LLM=${LLM:-server}; else LLM=${LLM:-local}; fi
-COMFYUI=${COMFYUI:-fake}
+# ComfyUI and the text-to-speech service: the real ones on this computer
+# (host) when they answer, ComfyUI with a GPU; else a fake ComfyUI, and no
+# speech, which animalfacts needs.
+host_has() { curl -sf --max-time 5 "$1" 2>/dev/null | grep -q "$2"; }
+COMFYUI=${COMFYUI:-$(host_has http://localhost:8188/system_stats '"type": "cuda"' && echo host || echo fake)}
+# The text-to-speech service (Kokoro): TTS_URL from the environment or .env,
+# reached from the VM; else "host" when one answers on this computer's 8880.
+TTS_URL=${TTS_URL:-$(server_setting TTS_URL)}
+[ -n "$TTS_URL" ] || ! host_has http://localhost:8880/v1/voices voices || TTS_URL=host
+# Agents on a model of their own, e.g. "coder=ollama-cloud/glm-5.3": agent=provider/model, spaces between.
+AGENT_MODELS=$(server_setting AGENT_MODELS)
+[[ $AGENT_MODELS =~ ^[a-z0-9=/:._\ -]*$ ]] || { echo "AGENT_MODELS: agent=provider/model, separated by spaces" >&2; exit 2; }
 LOCAL_MODEL=${LOCAL_MODEL:-qwen3.8-64k:latest}
 case $LLM in local|cloud|server) ;; *) echo "LLM must be local, cloud or server" >&2; exit 2 ;; esac
 [ "$LLM" != server ] || { [ -n "$SERVER_LLM_URL" ] && [ -n "$SERVER_LLM_MODEL" ]; } ||
@@ -107,15 +128,17 @@ inputs() {
   local shared="test/e2e/smoke.sh test/e2e/lib.sh test/e2e/ready.sh test/e2e/scenarios/$1.sh"
   case $1 in
     base)     ;;
-    install)  echo install.sh installer garrison control-plane schemas templates files sandbox go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh ;;
+    install)  echo install.sh installer garrison control-plane schemas templates files sandbox go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh test/e2e/scenarios/setup.sh test/e2e/lib.sh ;;
     login)    echo "$shared" test/e2e/scenarios/system.sh ;;
     platform) echo "$shared" test/e2e/stacks ;;
     deploy)   echo "$shared" templates/app test/e2e/apps/quotes installer/push-repo.sh ;;
-    ui|people|guided|threads)
+    ui|people|guided|threads|invites)
               echo "$shared" test/ui/Dockerfile test/ui/run.sh test/ui/lib.py "test/ui/$1.py" ;;
-    media)    echo "$shared" test/e2e/media templates/unit-config/README.md ;;
+    media|animalfacts)
+              echo "$shared" test/e2e/media templates/unit-config/README.md ;;
     nodes)    echo "$shared" installer/join.sh installer/node.sh host/hosts.sh ;;
     newsroom) echo "$shared" templates/app/news ;;
+    agent)    echo "$shared" test/e2e/scenarios/models.sh ;;
     team|roles|change|marketing|routines|commander|operator|leaving)
               echo "$shared" test/e2e/apps ;;
     *)        echo "$shared" ;;
@@ -201,22 +224,42 @@ step_base() {
   sync_repo
 }
 
-# The installer, then the test people.
+# The installer, then its setup in the browser as a person does it (the
+# first root admin, the AI providers, the default model), then the test
+# people.
 step_install() {
   sync_repo
   put_llm_key
-  # LLM=local (the default): the agents use Ollama on this computer, which
-  # the VM reaches through its gateway; nothing to pay for. LLM=cloud: Ollama's
-  # cloud with OLLAMA_API_KEY from .env.
-  if [ "$LLM" = local ]; then
-    in_vm sudo bash -c "gw=\$(ip route | awk '/^default/ { print \$3; exit }')
-      { echo LLM_BASE_URL=http://\$gw:11434/v1; echo LLM_MODEL=$LOCAL_MODEL; } >> garrison/$ANSWERS"
-  elif [ "$LLM" = server ]; then
-    in_vm sudo bash -c "{ echo LLM_BASE_URL=$SERVER_LLM_URL; echo LLM_MODEL=$SERVER_LLM_MODEL; } >> garrison/$ANSWERS"
-  fi
+  put_provider_key
   in_vm sudo garrison/install.sh --answers "garrison/$ANSWERS"
+  in_vm sudo bash -c "cd garrison && SETUP_PROVIDERS='$(setup_providers)' SETUP_DEFAULT='$(setup_default)' WAIT_READY=600 test/e2e/smoke.sh setup"
   in_vm sudo bash -c 'cd garrison && test/e2e/add-test-users.sh'
   smoke system
+}
+
+# setup_providers: the providers the setup adds, "name=url ...". LLM=local
+# (the default): Ollama on this computer, which the VM reaches through its
+# gateway (GATEWAY); server: the inference server of .env (SERVER_LLM_NAME,
+# default server); cloud: Ollama's cloud, with OLLAMA_API_KEY from .env, which
+# is also added when AGENT_MODELS names one of its models.
+setup_providers() {
+  local out
+  case $LLM in
+    local)  out="local=http://GATEWAY:11434/v1" ;;
+    server) out="$SERVER_LLM_NAME=$SERVER_LLM_URL" ;;
+    cloud)  out="ollama-cloud=https://ollama.com/v1" ;;
+  esac
+  [ "$LLM" = cloud ] || [[ " $AGENT_MODELS" != *=ollama-cloud/* ]] || out+=" ollama-cloud=https://ollama.com/v1"
+  echo "$out"
+}
+
+# setup_default: the default model the setup chooses.
+setup_default() {
+  case $LLM in
+    local)  echo "local/$LOCAL_MODEL" ;;
+    server) echo "$SERVER_LLM_NAME/$SERVER_LLM_MODEL" ;;
+    cloud)  echo "ollama-cloud/gpt-oss:120b" ;;
+  esac
 }
 
 # Signing in through Keycloak as admin, alice and bob, and what each may do.
@@ -235,7 +278,7 @@ step_platform() {
 step_agent() {
   sync_repo
   put_llm_key
-  smoke agent
+  in_vm sudo bash -c "cd garrison && AGENT_MODELS='$AGENT_MODELS' WAIT_READY=600 test/e2e/smoke.sh models agent"
 }
 
 # A unit with an app of its own, built by its pipeline on the user
@@ -255,6 +298,7 @@ scenario() {
 }
 step_team()      { scenario team; }
 step_roles()     { scenario roles; }
+step_invites()   { browser_scenario invites; }
 step_change()    { scenario change; }
 step_marketing() { scenario marketing; }
 step_routines()  { scenario routines; }
@@ -328,13 +372,30 @@ step_people() { browser_scenario people; }
 step_guided() { browser_scenario guided; }
 step_threads() { browser_scenario threads; }
 
-# A unit's media library and its file browser; @media makes pictures
+# A unit's media library and its file browser; @designer makes pictures
 # and a video with a fake ComfyUI outside Garrison, then cuts a short.
 # Talks to the real LLM.
 step_media() {
   sync_repo
   put_llm_key
   in_vm sudo bash -c "cd garrison && COMFYUI=$COMFYUI WAIT_READY=600 test/e2e/smoke.sh media"
+}
+
+# animalfacts: a YouTube channel as a unit; @designer sets up its project
+# with no workflow given and makes five narrated 30-second shorts, on the
+# real ComfyUI and text-to-speech service of this computer (skipped without
+# them). The shorts land in bin/animalfacts/ to watch. Talks to the real LLM.
+step_animalfacts() {
+  sync_repo
+  put_llm_key
+  local rc=0 out=$ROOT/bin/animalfacts
+  in_vm sudo bash -c "cd garrison && COMFYUI=$COMFYUI TTS_URL=$TTS_URL WAIT_READY=600 test/e2e/smoke.sh animalfacts" || rc=$?
+  if in_vm test -s /home/ubuntu/animalfacts.tar; then
+    multipass transfer "$VM:animalfacts.tar" "$ROOT/bin/animalfacts.tar" &&
+      rm -rf "$out" && mkdir -p "$out" && tar -C "$out" -xf "$ROOT/bin/animalfacts.tar" || true
+    rm -f "$ROOT/bin/animalfacts.tar"
+  fi
+  return $rc
 }
 
 # Every kind of thing a unit holds, made, read, changed and removed:
@@ -363,6 +424,20 @@ put_llm_key() {
   multipass transfer "$file" "$VM:llm-api-key"
   rm -f "$file"
   in_vm sudo bash -c 'mkdir -p -m 700 /etc/garrison && touch /etc/garrison/llm-api-key && chmod 600 /etc/garrison/llm-api-key && cat ~ubuntu/llm-api-key > /etc/garrison/llm-api-key && rm ~ubuntu/llm-api-key'
+}
+
+# Puts the key of Ollama's cloud, when the setup adds it (OLLAMA_API_KEY from
+# .env), in /etc/garrison/test-provider-key in the VM, as a file, for the
+# scenario setup to give on its page.
+put_provider_key() {
+  local key file=$ROOT/bin/provider-key-$VM
+  [[ " $(setup_providers)" == *" ollama-cloud="* ]] && [ -f "$ROOT/.env" ] || return 0
+  key=$(sed -n 's/^OLLAMA_API_KEY=//p' "$ROOT/.env" | tr -d '"'"'"'\r' | head -n1)
+  [ -n "$key" ] || return 0
+  (umask 077; printf '%s' "$key" > "$file")
+  multipass transfer "$file" "$VM:provider-key"
+  rm -f "$file"
+  in_vm sudo bash -c 'install -m 600 ~ubuntu/provider-key /etc/garrison/test-provider-key && rm ~ubuntu/provider-key'
 }
 
 smoke() {
@@ -409,10 +484,12 @@ fingerprint() {
   for s in $(path "$1"); do
     prev=$({
       echo "$prev"
-      declare -f "step_$s" sync_repo smoke put_llm_key
+      declare -f "step_$s" sync_repo smoke put_llm_key put_provider_key setup_providers setup_default
       [[ $(declare -f "step_$s") == *scenario* ]] && declare -f scenario browser_scenario
-      [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL" && { [ "$LLM" != server ] || echo "$SERVER_LLM_URL $SERVER_LLM_MODEL"; }
+      [ "$s" = install ] && echo "LLM=$LLM LOCAL_MODEL=$LOCAL_MODEL AGENT_MODELS=$AGENT_MODELS" && { [ "$LLM" != server ] || echo "$SERVER_LLM_NAME $SERVER_LLM_URL $SERVER_LLM_MODEL"; }
       [ "$s" = media ] && [ "$COMFYUI" != fake ] && echo "COMFYUI=$COMFYUI"
+      [ "$s" = animalfacts ] && echo "COMFYUI=$COMFYUI TTS_URL=$TTS_URL"
+      [ "$s" = agent ] && echo "AGENT_MODELS=$AGENT_MODELS"
       files=$(inputs "$s")
       # Without paths, git ls-files would list the whole repo.
       if [ -n "$files" ]; then

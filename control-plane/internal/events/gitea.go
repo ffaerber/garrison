@@ -29,6 +29,7 @@ const (
 	KindAsk           = "ask" // an agent handed work to another
 	KindAlert         = "alert"
 	KindSecret        = "secret"   // a secret set or deleted in the dashboard
+	KindPeople        = "people"   // an invite or reset link made, a person joined
 	KindModel         = "model"    // an agent's model cannot be used: it got the default
 	KindQuestion      = "question" // an agent asks a person and waits for the answer
 	KindUnit          = "unit"     // a unit is set up

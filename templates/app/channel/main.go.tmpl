@@ -1,0 +1,101 @@
+// Channel is the public page of a unit's channel: every finished short of
+// its media library, newest first, to watch, with what is said in it. It
+// reads the library read-only and serves only the shorts (<project>/shorts/
+// *.mp4), never the pictures, drafts or uploads beside them. It has no
+// JavaScript: everything it shows is escaped text.
+package main
+
+import (
+	"crypto/subtle"
+	"embed"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+//go:embed page.html
+var files embed.FS
+
+var page = template.Must(template.New("page.html").Funcs(template.FuncMap{
+	"date": func(t time.Time) string { return t.Format("2 January 2006") },
+}).ParseFS(files, "page.html"))
+
+// App serves the page and the shorts.
+type App struct {
+	Library *Library
+	Title   string // the channel's name
+	About   string // a line about it
+	// IngressKey, if set, must come with every request but /healthz: a
+	// private environment's proof that the request came through the
+	// installation's sign-in. A public one has none.
+	IngressKey string
+}
+
+const ingressHeader = "X-Garrison-Ingress"
+
+func (a *App) Routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", a.guard(a.index))
+	mux.HandleFunc("GET /video/{project}/{name}", a.guard(a.video))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
+	return mux
+}
+
+func (a *App) guard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if a.IngressKey != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get(ingressHeader)), []byte(a.IngressKey)) != 1 {
+			http.Error(w, "only through the installation's sign-in", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (a *App) index(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// No scripts, no frames; videos only from here.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if err := page.Execute(w, map[string]any{"Title": a.Title, "About": a.About, "Shorts": a.Library.Shorts()}); err != nil {
+		log.Printf("page: %v", err)
+	}
+}
+
+// video serves a short the library lists, with ranges, so players seek.
+func (a *App) video(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.Library.Find(r.PathValue("project"), r.PathValue("name"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(s.path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeContent(w, r, s.Name, s.Made, f)
+}
+
+func env(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
+func main() {
+	app := &App{
+		Library:    &Library{Root: env("LIBRARY", "/media"), Project: os.Getenv("PROJECT"), Every: 30 * time.Second},
+		Title:      env("TITLE", "{{repo}}"),
+		About:      os.Getenv("ABOUT"),
+		IngressKey: os.Getenv("GARRISON_INGRESS_KEY"),
+	}
+	log.Printf("channel: %d shorts in %s, on :8080", len(app.Library.Shorts()), app.Library.Root)
+	srv := &http.Server{Addr: ":8080", Handler: app.Routes(), ReadHeaderTimeout: 10 * time.Second}
+	log.Fatal(srv.ListenAndServe())
+}

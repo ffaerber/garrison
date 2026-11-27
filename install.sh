@@ -32,7 +32,8 @@ done
 [ -r "$ANSWERS" ] || fail "cannot read answers file $ANSWERS"
 
 DOMAIN= TLS_MODE=selfsigned ADMIN_USER=admin ADMIN_EMAIL= ADMIN_PASSWORD= POOL_DEVICE= POOL_SIZE=20G REGISTRY_MIRROR=
-LLM_BASE_URL=https://ollama.com/v1 LLM_MODEL=gpt-oss:120b LLM_API_KEY= TIMEZONE=
+# The LLM: optional. Without it, the setup in the browser adds the providers.
+LLM_BASE_URL= LLM_MODEL= LLM_API_KEY= TIMEZONE=
 # shellcheck disable=SC1090
 . "$ANSWERS"
 # The time zone routines' schedules are read in; the machine's by default.
@@ -139,6 +140,15 @@ if [ ! -s "$ETC/admin-password" ]; then
   (umask 077; printf '%s' "${ADMIN_PASSWORD:-$(openssl rand -hex 16)}" > "$ETC/admin-password")
 fi
 has_secret admin-password || put_secret admin-password < "$ETC/admin-password"
+
+# The setup's token: whoever has the link with it completes the
+# installation in the browser (the first root admin, the LLM providers).
+# It opens the setup only until that is done.
+if [ ! -s "$ETC/setup-token" ]; then
+  (umask 077; openssl rand -hex 24 | tr -d '\n' > "$ETC/setup-token")
+fi
+has_secret setup-token || put_secret setup-token < "$ETC/setup-token"
+(umask 077; printf 'https://%s/setup?token=%s\n' "$DOMAIN" "$(cat "$ETC/setup-token")" > "$ETC/setup-link")
 
 if [ ! -s "$ETC/tls.crt" ]; then
   (umask 077; openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
@@ -361,8 +371,16 @@ cat <<MSG
   Gitea     https://git.$DOMAIN
   Chat      https://chat.$DOMAIN  (one agent per unit)
   Grafana   https://grafana.$DOMAIN
-  Admin     $ADMIN_USER (password in $ETC/admin-password)
+  Platform  $ADMIN_USER, Garrison's own account (password in $ETC/admin-password);
+            people get accounts of their own, the first one in the setup
   TLS       self-signed; certificate in $ETC/tls.crt
+
+  Complete the setup in your browser: the first root admin, the AI providers
+  and the default model. Until then, the agents have no model to think with.
+
+    $(cat "$ETC/setup-link")
+
+  (also in $ETC/setup-link, readable by root only)
 MSG
 # Shown once: the file goes now.
 if [ -s "$ETC/sops/recovery-key.txt" ]; then

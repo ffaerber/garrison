@@ -71,7 +71,7 @@ type prompt func(fresh bool) (string, []sandbox.Image)
 // sandbox, with chat; person is whom it counts against.
 func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat, key string, a agents.Agent, msg prompt, out output) (int, error) {
 	// The model's full id: the sandbox's LLM requests are routed by it.
-	_, _, model := s.route(ctx, a.ID(), a.Model)
+	llm, upstream, model := s.route(ctx, a.ID(), a.Model)
 	a.Internet = s.internet(ctx, a)
 	system := agents.System(a, s.Domain) + "\n\n" + Workspace
 	if a.Internet.None() {
@@ -94,7 +94,8 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 	}
 	want := sandbox.Want{
 		Key: key, Chat: chat, Agent: a.ID(), Person: person,
-		Model: model, Prompt: system, Definition: definition(model, system, a), Media: media,
+		Model: model, Prompt: system, Definition: definition(model, system, a), Media: media, Memory: a.Memory,
+		Context: llm.Context(ctx, upstream),
 	}
 	max := s.MaxToolCalls
 	if max <= 0 {
@@ -109,6 +110,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 			return err
 		}
 		text, images := msg(st.MessageCount == 0)
+		tr := s.startTrace(ctx, a, a.Unit, person, chat, run, text)
 		turn, cancel := context.WithCancel(ctx)
 		defer cancel()
 		capped := false
@@ -128,6 +130,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 			streamed, wrote = true, true
 		}
 		err = pi.Prompt(turn, text, images, func(ev sandbox.Event) {
+			tr.event(ev)
 			switch ev.Type {
 			case "message_update":
 				if ev.Delta == nil {
@@ -191,11 +194,14 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 			}
 		})
 		if capped && ctx.Err() == nil {
-			return fmt.Errorf("it used all %d tool calls of a turn; ask it to go on", max)
+			err = fmt.Errorf("it used all %d tool calls of a turn; ask it to go on", max)
+			tr.end(err, calls)
+			return err
 		}
 		if err == nil && failure != "" {
 			err = errors.New(failure)
 		}
+		tr.end(err, calls)
 		if err == nil {
 			// A change the person is to approve or merge: its card's link
 			// is in the answer, also when the model left it out.
@@ -214,7 +220,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 func missingCards(answer string, cards []string) []string {
 	var out []string
 	for _, line := range cards {
-		url := strings.TrimSpace(strings.TrimPrefix(line, "Review it:"))
+		url := strings.TrimSpace(line[strings.Index(line, "https://"):])
 		if !strings.Contains(answer, url) && !slices.Contains(out, line) {
 			out = append(out, line)
 		}
@@ -222,8 +228,9 @@ func missingCards(answer string, cards []string) []string {
 	return out
 }
 
-// reviewLine is how the gateway's tools name a change's card (Tools.links).
-var reviewLine = regexp.MustCompile(`(?m)^Review it: https://\S+/c/[a-z0-9-]+/[A-Za-z0-9._-]+/[0-9]+$`)
+// reviewLine is how the gateway's tools name a link the person must have:
+// a change's card (Tools.links), or where a new provider's key goes.
+var reviewLine = regexp.MustCompile(`(?m)^(Review it: https://\S+/c/[a-z0-9-]+/[A-Za-z0-9._-]+/[0-9]+|Set its API key: https://\S+/models\?provider=\S+)$`)
 
 // promptFrom is what Pi gets of Open WebUI's request: the newest message
 // with its images, and Open WebUI's own system messages (a channel thread's
@@ -284,6 +291,7 @@ func (s *Server) SandboxHandler() http.Handler {
 	mux.HandleFunc("GET /tools", s.sandboxTools)
 	mux.HandleFunc("POST /tools/call", s.sandboxCall)
 	mux.HandleFunc("POST /media/generate", s.sandboxGenerate)
+	mux.HandleFunc("POST /media/speak", s.sandboxSpeak)
 	mux.HandleFunc("GET /media/out/{id}", s.sandboxOutput)
 	if s.Git != nil {
 		mux.Handle("/git/", s.Git.Handler(s.caller))
@@ -358,7 +366,10 @@ func (s *Server) sandboxTools(w http.ResponseWriter, r *http.Request) {
 		specs = append(specs, askPersonSpec)
 	}
 	if s.mayGenerate(r.Context(), c) {
-		specs = append(specs, generateSpec)
+		specs = append(specs, generateSpec, modelsSpec)
+	}
+	if s.maySpeak(r.Context(), c) {
+		specs = append(specs, speechSpec)
 	}
 	if s.maySearch(r.Context(), c) {
 		specs = append(specs, searchSpec)
@@ -386,6 +397,10 @@ func (s *Server) sandboxCall(w http.ResponseWriter, r *http.Request) {
 		return
 	case "find_agents":
 		text, isErr := s.findAgents(r.Context(), c, req.Arguments)
+		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
+		return
+	case MediaModels:
+		text, isErr := s.mediaModels(r.Context(), c)
 		writeJSON(w, map[string]any{"text": text, "is_error": isErr})
 		return
 	case WebSearch:

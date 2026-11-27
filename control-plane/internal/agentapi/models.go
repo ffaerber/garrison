@@ -3,7 +3,6 @@ package agentapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -37,11 +36,12 @@ type Models struct {
 	Events                               events.Recorder
 	Domain                               string
 
-	mu     sync.Mutex
-	l      gateway.LLM
-	ok     bool
-	read   time.Time
-	warned map[string]string // agent and model: the day it was told
+	mu          sync.Mutex
+	l           gateway.LLM
+	ok          bool
+	read        time.Time
+	warned      map[string]string // agent and model: the day it was told
+	unreachable bool              // the last sync could not ask a provider
 }
 
 // cacheFor is how long the model files are kept before reading them again.
@@ -178,7 +178,7 @@ func (m *Models) Sync(ctx context.Context) (string, error) {
 	seed := rawP == ""
 	if seed {
 		if m.InstallURL == "" {
-			return "", errors.New("no providers.yaml, and no LLM in install.env to write one from")
+			return "", nil // the setup writes the first providers
 		}
 		rawP = string(models.Seed(m.InstallURL, m.InstallModel))
 	}
@@ -204,6 +204,9 @@ func (m *Models) Sync(ctx context.Context) (string, error) {
 		}
 		lists[name] = ids
 	}
+	m.mu.Lock()
+	m.unreachable = len(errs) > 0
+	m.mu.Unlock()
 	today := time.Now().Format(time.DateOnly)
 	next, changes := models.Sync(p, have, lists, errs, today)
 	want := next.Marshal()
@@ -218,11 +221,48 @@ func (m *Models) Sync(ctx context.Context) (string, error) {
 		_, err := g.ProposeFiles(ctx, models.Unit, models.Repo, models.Branch, "", "", nil)
 		return "", err
 	}
+	if onlyAdded(changes) {
+		// New models come turned off: listing them changes what no agent
+		// uses, and turning one on is a reviewed change (the Models page's,
+		// or by hand). So they go to main at once, and a new provider's
+		// models can be chosen right after its change is merged.
+		var added []string
+		for _, c := range changes {
+			if len(c.Added) > 0 {
+				added = append(added, fmt.Sprintf("%s: %d new", c.Provider, len(c.Added)))
+			}
+		}
+		if err := g.Commit(ctx, models.Unit, models.Repo, "Models, turned off: "+strings.Join(added, "; "), g.User,
+			map[string][]byte{models.ModelsFile: want}); err != nil {
+			return "", err
+		}
+		m.invalidate()
+		_, err := g.ProposeFiles(ctx, models.Unit, models.Repo, models.Branch, "", "", nil)
+		return "", err
+	}
 	title, body, err := m.describe(ctx, changes, next)
 	if err != nil {
 		return "", err
 	}
 	return g.ProposeFiles(ctx, models.Unit, models.Repo, models.Branch, title, body, map[string][]byte{models.ModelsFile: want})
+}
+
+func (m *Models) wasUnreachable() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.unreachable
+}
+
+// onlyAdded tells whether a sync only found new models.
+func onlyAdded(changes []models.Change) bool {
+	added := false
+	for _, c := range changes {
+		if len(c.Gone)+len(c.Back)+len(c.Dropped) > 0 {
+			return false
+		}
+		added = added || len(c.Added) > 0
+	}
+	return added
 }
 
 func (m *Models) invalidate() {
@@ -291,7 +331,13 @@ func (m *Models) describe(ctx context.Context, changes []models.Change, next mod
 	return "Models: " + strings.Join(parts, "; "), b.String(), nil
 }
 
-// Run syncs at start, daily, and soon after providers.yaml changes.
+// retryUnreachable is how soon a sync that could not ask a provider runs
+// again: a new provider's key may reach the agent service a moment after
+// the provider is merged.
+const retryUnreachable = 2 * time.Minute
+
+// Run syncs at start, daily, soon after providers.yaml changes, and again
+// soon after a provider could not be asked.
 func (m *Models) Run(ctx context.Context, check, every time.Duration) {
 	var last string
 	var at time.Time
@@ -300,7 +346,7 @@ func (m *Models) Run(ctx context.Context, check, every time.Duration) {
 		switch {
 		case err != nil:
 			log.Printf("models: %v", err)
-		case raw != last || time.Since(at) >= every:
+		case raw != last || time.Since(at) >= every || m.wasUnreachable() && time.Since(at) >= retryUnreachable:
 			link, err := m.Sync(ctx)
 			if err != nil {
 				log.Printf("models: sync: %v", err)

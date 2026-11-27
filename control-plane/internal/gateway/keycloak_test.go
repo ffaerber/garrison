@@ -135,8 +135,8 @@ func TestAnAgentSignsInWithItsOwnAccount(t *testing.T) {
 	f, srv := newFakeKeycloak(t)
 	k := &Keycloak{URL: srv.URL, User: "root", Password: "pw"}
 	ctx := context.Background()
-	tok, err := k.Token(ctx, "agent-todo-media", "todo/media")
-	if err != nil || tok != "token-of-agent-todo-media" {
+	tok, err := k.Token(ctx, "agent-todo-designer", "todo/designer")
+	if err != nil || tok != "token-of-agent-todo-designer" {
 		t.Fatalf("token %q %v", tok, err)
 	}
 	c := f.clients["c1"]
@@ -146,21 +146,21 @@ func TestAnAgentSignsInWithItsOwnAccount(t *testing.T) {
 	if len(f.mappers) != 1 || f.mappers[0] != "audience-sso" {
 		t.Errorf("mappers %v", f.mappers)
 	}
-	u := f.users["agent-todo-media"]
-	if u["enabled"] != true || u["emailVerified"] != true || u["lastName"] != "todo media" || strings.Contains(u["lastName"].(string), "/") {
+	u := f.users["agent-todo-designer"]
+	if u["enabled"] != true || u["emailVerified"] != true || u["lastName"] != "todo designer" || strings.Contains(u["lastName"].(string), "/") {
 		t.Errorf("user %v", u)
 	}
-	if f.password["agent-todo-media"] == "" || f.password["agent-todo-media"] == "pw" {
-		t.Errorf("password %q", f.password["agent-todo-media"])
+	if f.password["agent-todo-designer"] == "" || f.password["agent-todo-designer"] == "pw" {
+		t.Errorf("password %q", f.password["agent-todo-designer"])
 	}
 	n := len(f.calls)
-	if tok, err := k.Token(ctx, "agent-todo-media", "todo/media"); err != nil || tok != "token-of-agent-todo-media" || len(f.calls) != n {
+	if tok, err := k.Token(ctx, "agent-todo-designer", "todo/designer"); err != nil || tok != "token-of-agent-todo-designer" || len(f.calls) != n {
 		t.Errorf("second token %q %v, %d calls more", tok, err, len(f.calls)-n)
 	}
 
 	// Another gateway, with the same admin password, signs in as it too.
 	other := &Keycloak{URL: srv.URL, User: "root", Password: "pw"}
-	if tok, err := other.Token(ctx, "agent-todo-media", "todo/media"); err != nil || tok != "token-of-agent-todo-media" {
+	if tok, err := other.Token(ctx, "agent-todo-designer", "todo/designer"); err != nil || tok != "token-of-agent-todo-designer" {
 		t.Errorf("after a restart: %q %v", tok, err)
 	}
 }
@@ -170,11 +170,11 @@ func TestAChangedPasswordIsSetBack(t *testing.T) {
 	f, srv := newFakeKeycloak(t)
 	k := &Keycloak{URL: srv.URL, User: "root", Password: "pw"}
 	ctx := context.Background()
-	if err := k.Keep(ctx, "agent-todo-media", "todo/media", true); err != nil {
+	if err := k.Keep(ctx, "agent-todo-designer", "todo/designer", true); err != nil {
 		t.Fatal(err)
 	}
-	f.password["agent-todo-media"] = "changed"
-	if tok, err := k.Token(ctx, "agent-todo-media", "todo/media"); err != nil || tok != "token-of-agent-todo-media" {
+	f.password["agent-todo-designer"] = "changed"
+	if tok, err := k.Token(ctx, "agent-todo-designer", "todo/designer"); err != nil || tok != "token-of-agent-todo-designer" {
 		t.Fatalf("token %q %v", tok, err)
 	}
 }
@@ -185,16 +185,16 @@ func TestALockedAgentCannotSignIn(t *testing.T) {
 	f, srv := newFakeKeycloak(t)
 	k := &Keycloak{URL: srv.URL, User: "root", Password: "pw"}
 	ctx := context.Background()
-	if _, err := k.Token(ctx, "agent-todo-media", "todo/media"); err != nil {
+	if _, err := k.Token(ctx, "agent-todo-designer", "todo/designer"); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.Keep(ctx, "agent-todo-media", "todo/media", false); err != nil {
+	if err := k.Keep(ctx, "agent-todo-designer", "todo/designer", false); err != nil {
 		t.Fatal(err)
 	}
-	if f.users["agent-todo-media"]["enabled"] != false {
-		t.Errorf("user %v", f.users["agent-todo-media"])
+	if f.users["agent-todo-designer"]["enabled"] != false {
+		t.Errorf("user %v", f.users["agent-todo-designer"])
 	}
-	if _, err := k.Token(ctx, "agent-todo-media", "todo/media"); err == nil || !strings.Contains(err.Error(), "locked") {
+	if _, err := k.Token(ctx, "agent-todo-designer", "todo/designer"); err == nil || !strings.Contains(err.Error(), "locked") {
 		t.Errorf("token of a locked agent: %v", err)
 	}
 	// Nothing is made for an agent that is only ever locked.
@@ -207,10 +207,10 @@ func TestALockedAgentCannotSignIn(t *testing.T) {
 // Keycloak it may not.
 func TestARunWithoutAPersonSignsInAsTheAgent(t *testing.T) {
 	_, srv := newFakeKeycloak(t)
-	agent := &agents.Agent{Unit: "todo", Name: "media", Tools: []string{"browse", "screenshot"}}
+	agent := &agents.Agent{Unit: "todo", Name: "designer", Tools: []string{"browse", "screenshot"}}
 	routine := Person{Name: AgentAccount(agent), Unattended: true, Owner: "bob"}
 	tools := &Tools{Keycloak: &Keycloak{URL: srv.URL, User: "root", Password: "pw"}}
-	if tok, err := tools.signIn(context.Background(), routine, agent); err != nil || tok != "token-of-agent-todo-media" {
+	if tok, err := tools.signIn(context.Background(), routine, agent); err != nil || tok != "token-of-agent-todo-designer" {
 		t.Errorf("routine: %q %v", tok, err)
 	}
 	if tok, err := tools.signIn(context.Background(), Person{Name: "bob", Token: "bobs"}, agent); err != nil || tok != "bobs" {

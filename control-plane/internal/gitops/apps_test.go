@@ -40,6 +40,7 @@ type fakeApps struct {
 	packages map[string]bool              // owner/name/tag
 	pulls    map[string]string            // org/repo -> its open pull requests, as JSON
 	props    map[string]string            // ZFS dataset -> garrison:restored
+	zfsAway  bool                         // zfs get fails, as while the cluster starts
 	composes map[string]string            // Swarm stack -> the compose file it was last deployed with
 	calls    []string
 }
@@ -123,6 +124,9 @@ func branchOf(dir string) string {
 }
 
 func (f *fakeApps) run(_ context.Context, _ []string, stdin []byte, name string, args ...string) ([]byte, error) {
+	if name == "kubectl" && strings.Join(args, " ") == "get --raw /readyz" {
+		return []byte("ok"), nil
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	call := name + " " + strings.Join(args, " ")
@@ -156,6 +160,9 @@ func (f *fakeApps) run(_ context.Context, _ []string, stdin []byte, name string,
 		// The commit that last changed a file: config's head will do.
 		return []byte(f.commits[branchOf(dirArg())] + "\n"), nil
 	case name == "zfs" && args[0] == "get":
+		if f.zfsAway {
+			return nil, errors.New("the zfs pod does not answer")
+		}
 		if v, ok := f.props[args[len(args)-1]]; ok {
 			return []byte(v + "\n"), nil
 		}
@@ -454,6 +461,17 @@ func TestRedeploysSnapshotFirstAndRestoresRunOnce(t *testing.T) {
 	if got := f.called("kubectl scale deployment"); len(got) != 0 {
 		t.Errorf("restored twice: %v", got)
 	}
+	// Nor when whether it was done cannot be read, as right after a
+	// restart: restoring again would lose what was written since.
+	f.calls, f.zfsAway = nil, true
+	c.restoreTried = nil
+	if _, errs := c.syncApps(ctx, false, apps); len(errs) != 0 {
+		t.Errorf("errs while zfs is away: %v", errs)
+	}
+	if got := f.called("kubectl scale deployment"); len(got) != 0 {
+		t.Errorf("restored again while its mark could not be read: %v", got)
+	}
+	f.zfsAway = false
 
 	// A request for an environment that is not deployed is reported.
 	f.files["homepage/config@main"]["restores/todo.yaml"] = "stack: todo\nenvironment: dev\nsnapshot: deploy-1\n"

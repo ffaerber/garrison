@@ -4,4 +4,6 @@ What a new app repo can start with: `create_repo` with `template` writes one fol
 
 | Template | What it is |
 | --- | --- |
+| `storyboards/` | The stories of a channel's shorts, one file each (title, sources, narration, scenes). The chain `storyboards` writes them for a person to review; once merged, `@designer` makes each one's short. Its README has the routines. |
+| `channel/` | The public page of a unit's channel: every short `@designer` made in its media library, newest first, to watch, with its title and spoken text. Reads the library read-only and serves only the shorts. Its README has the stack. |
 | `todo/` | A todo app in Go on Postgres, a list of their own for everyone signed in, with its tests, Dockerfile and the pipeline that tests and builds its image for every push. Its README has the stack to propose. |

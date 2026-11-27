@@ -2,7 +2,10 @@ package agents
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -73,11 +76,11 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	for p, c := range PlatformFiles() {
 		files[p] = c
 	}
-	// The gateway's tools, and the agent service's generate_media and web_search; the
+	// The gateway's tools, and the agent service's generate_media, generate_speech and web_search; the
 	// gateway's own test checks these are all.
 	all := []string{"list_units", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "web_search", "propose_skill"}
+		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "generate_speech", "web_search", "propose_skill"}
 	got, problems, err := Load(context.Background(), files, files, PlatformUnit, all)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +90,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 		names = append(names, a.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"coder", "commander", "media", "operator", "scout", "sentry"}; len(problems) > 0 || !slices.Equal(names, want) {
+	if want := []string{"coder", "commander", "designer", "operator", "scout", "sentry"}; len(problems) > 0 || !slices.Equal(names, want) {
 		t.Fatalf("got %v, want %v; %v", names, want, problems)
 	}
 	// Each has a role of its own, and only the tools it needs: only the
@@ -103,6 +106,12 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 			t.Errorf("%s reaches %s", a.Name, a.Internet)
 		}
 		// It searches the web too, through the installation's SearXNG.
+		if a.Name == "designer" && (a.Turn != MaxTurn || a.Memory != 4<<30) {
+			t.Errorf("designer's turn is %s and memory %d: its videos take long, and ffmpeg more than 1 GiB", a.Turn, a.Memory)
+		}
+		if a.Name != "designer" && (a.Turn != 0 || a.Memory != 0) {
+			t.Errorf("%s has a turn or memory of its own: %s, %d", a.Name, a.Turn, a.Memory)
+		}
 		if a.Name == "scout" && !slices.Contains(a.Tools, "web_search") {
 			t.Errorf("the scout has no web_search")
 		}
@@ -168,13 +177,13 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 func TestTheAgentsWorkInEveryUnit(t *testing.T) {
 	platform := mapFiles{
 		"agents/operator/agent.yaml": "tools: all\n", "agents/operator/prompt.md": "Operate.\n",
-		"agents/media/agent.yaml": "tools: [read_file]\n", "agents/media/prompt.md": "Shoot.\n",
+		"agents/designer/agent.yaml": "tools: [read_file]\n", "agents/designer/prompt.md": "Shoot.\n",
 		"grants.yaml": "- {agent: operator, repo: control-plane, level: propose}\n",
 	}
 	lab := mapFiles{
 		"members.yaml":  "admins: [alice]\n",
-		"grants.yaml":   "- {agent: media, repo: example, branch: screenshots, level: autonomous, unattended: true}\n",
-		"routines.yaml": "- {agent: media, name: daily, schedule: \"@daily\", owner: alice, task: Take a screenshot.}\n",
+		"grants.yaml":   "- {agent: designer, repo: example, branch: screenshots, level: autonomous, unattended: true}\n",
+		"routines.yaml": "- {agent: designer, name: daily, schedule: \"@daily\", owner: alice, task: Take a screenshot.}\n",
 	}
 	got, problems, err := Load(context.Background(), platform, lab, "lab", tools)
 	if err != nil || len(problems) > 0 || len(got) != 2 {
@@ -185,7 +194,7 @@ func TestTheAgentsWorkInEveryUnit(t *testing.T) {
 			t.Errorf("%+v", a)
 		}
 		switch a.Name {
-		case "media":
+		case "designer":
 			if len(a.Grants) != 1 || a.Grants[0].Repo != "example" || len(a.Routines) != 1 || a.Routines[0].Name != "daily" || !a.NeedsAccount() {
 				t.Errorf("media in lab: %+v", a)
 			}
@@ -334,5 +343,30 @@ func TestAnEmptyFolderMeansNoAgents(t *testing.T) {
 	got, problems := platformOnly(t, mapFiles{"agents/README.md": "none here\n"})
 	if len(problems) > 0 || len(got) != 0 {
 		t.Errorf("got %v %v", got, problems)
+	}
+}
+
+func TestParseMemory(t *testing.T) {
+	for in, want := range map[string]int64{"512Mi": 512 << 20, "4Gi": 4 << 30, "4G": 0, "x": 0, "1.5Gi": 0, "-1Gi": -1 << 30, "": 0} {
+		if got := parseMemory(in); got != want {
+			t.Errorf("%q: %d, want %d", in, got, want)
+		}
+	}
+}
+
+// The cluster refuses a sandbox with more memory than MaxMemory allows an
+// agent.yaml: the two must agree, or an agent that asks for MaxMemory
+// never starts.
+func TestMaxMemoryIsTheClustersLimit(t *testing.T) {
+	raw, err := os.ReadFile("../../../garrison/platform/kubernetes.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`compareTo\(quantity\('(\d+)Gi'\)\) <= 0"\s*\n\s*message: "a sandbox has a memory limit`).FindSubmatch(raw)
+	if m == nil {
+		t.Fatal("no memory limit in garrison-sandboxes")
+	}
+	if want := fmt.Sprintf("%d", MaxMemory>>30); string(m[1]) != want {
+		t.Errorf("the cluster allows %sGi, MaxMemory is %sGi", m[1], want)
 	}
 }

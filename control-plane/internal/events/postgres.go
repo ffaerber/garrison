@@ -66,7 +66,7 @@ func Open(ctx context.Context, url string, wait time.Duration) (*Postgres, error
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		_, err = pool.Exec(ctx, schema+routineSchema+questionSchema)
+		_, err = pool.Exec(ctx, schema+routineSchema+questionSchema+traceSchema+inviteSchema)
 		if err == nil || time.Now().After(deadline) || ctx.Err() != nil {
 			break
 		}
@@ -247,6 +247,8 @@ func (p *Postgres) Prune(ctx context.Context) {
 		if _, err := p.Pool.Exec(ctx, "DELETE FROM events WHERE at < $1", time.Now().Add(-keep)); err != nil && ctx.Err() == nil {
 			log.Printf("events: prune: %v", err)
 		}
+		p.PruneTraces(ctx)
+		p.PruneInvites(ctx)
 		select {
 		case <-ctx.Done():
 			return

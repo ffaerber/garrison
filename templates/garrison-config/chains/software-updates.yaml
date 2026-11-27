@@ -1,18 +1,22 @@
 # Software updates: which versions Garrison runs, which are out, and pull
 # requests for the updates. The sentry leads; the scout looks on the web,
-# with only the names and versions; the coder proposes.
+# with only the names and tags; the coder proposes. What counts as an
+# update is the agents' judgment, not a version number's shape: projects
+# tag by semantic version, by date (2026.11.23-a7163d091), with frequent
+# majors (Chrome's 156.0.8078.48) or by variant (17-alpine, cu130-slim-
+# 20261123), and a line or variant in use can be discontinued.
 description: Checks the software Garrison runs for new releases, and proposes the updates as pull requests
 when: someone asks about software updates, new versions or releases of what Garrison or an app runs; the weekly update routine
 lead: sentry
 merge: review          # its pull requests wait for a person
 steps:
   - agent: sentry
-    does: "List the software and the versions in use. In garrison, each repo with a kubernetes.yaml pins its images in its image: lines (list_repos, then read_file of each kubernetes.yaml), e.g. gitea/gitea:1.25 or postgres:17-alpine; for a unit asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."
+    does: "List the software and the tags in use. In garrison, each repo with a kubernetes.yaml pins its images in its image: lines (list_repos, then read_file of each kubernetes.yaml), e.g. gitea/gitea:1.25, postgres:17-alpine or searxng/searxng:2026.11.9-57ff753ad; for a unit asked about, also the images of its stacks/*.yaml. Keep to what was asked, if it names repos or software."
   - agent: scout
-    does: "For each image and version (only these, nothing else of Garrison), find the newest release on the project's own pages (its releases page, changelog or Docker Hub tags). Per image: the newest version of the same major line, the newest major version if higher, and the link to its release notes."
+    does: "For each image and its tag (only these, nothing else of Garrison), look at the project's own pages (its releases page, changelog, README and registry tags) and report: how it tags its images (semantic versions, dates, a browser's frequent majors, variants such as -alpine or -slim, a line such as 1.25); what it published after the tag in use, newest first, in the same variant; whether the line or variant in use is still built and supported, or discontinued or at its end of life, and if so what the project recommends instead; and the links to the release notes, with any breaking change, migration or upgrade step they name."
   - agent: sentry
-    does: "Sort what the scout found. A newer minor or patch release of the line in use is an update to propose. A new major release (e.g. PostgreSQL 17 to 18) is only reported, with the link to its upgrade notes: it needs a migration and a person's plan. A tag that names only the line in use (gitea:1.25, postgres:17-alpine) already gets that line's patches when the image is pulled, so it needs no change for them."
+    does: "Decide, image by image, from what the scout found, not from the shape of the numbers. An update to propose: a newer release the project ships as an ordinary upgrade, whose notes name no breaking change, migration or manual step, whatever its number (a browser's next major, a new date, a newer build of the same variant, a minor or patch release). Only reported, with the link to its upgrade notes: a release that needs a migration or a person's plan (e.g. PostgreSQL 17 to 18). Flagged, with the replacement the project recommends: a line or variant in use that is discontinued or at its end of life; propose the replacement only if it is the same software and an ordinary upgrade, else report it. A tag that names only a supported line in use (gitea:1.25, postgres:17-alpine) already gets that line's patches when the image is pulled, so it needs no change for them. Say for each why."
   - agent: coder
-    does: "Propose the updates the sentry passes on: one pull request per repo, changing only the image tag in its kubernetes.yaml (or stacks/<app>.yaml), titled 'Update <image> to <version>', with the link to the release notes in the description. Propose nothing else, and say which pull requests you opened, with their links."
+    does: "Propose the updates the sentry passes on: one pull request per repo, changing only the image tags in its kubernetes.yaml (or stacks/<app>.yaml), titled 'Update <image> to <tag>', with the sentry's reason and the link to the release notes in the description. Propose nothing else, and say which pull requests you opened, with their links."
   - agent: sentry
-    does: "Report: what is current, the pull requests the coder opened (links), and the major upgrades waiting, with their notes. Nothing deploys until a person merges."
+    does: "Report: what is current, the pull requests the coder opened (links), the upgrades that need a person's plan, and the lines or variants to replace, each with its notes. Nothing deploys until a person merges."

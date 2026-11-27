@@ -26,6 +26,31 @@ type Providers interface {
 	// that cannot be one is models.ErrInvalidProvider; someone who may not,
 	// changes.ErrForbidden.
 	ProposeProvider(ctx context.Context, person, name, apiURL string, include []string) (int, error)
+	// Agents are garrison's agents, each with the model its agent.yaml
+	// names, as <provider>/<model>, or "" for the default.
+	Agents(ctx context.Context) ([]AgentModel, error)
+	// ProposeModels proposes def as the default model and the agents of
+	// choose on theirs ("" for the default), as person, in one change, and
+	// returns its number. A model not offered, or nothing to change, is
+	// models.ErrInvalidProvider.
+	ProposeModels(ctx context.Context, person, def string, choose map[string]string) (int, error)
+}
+
+// AgentModel is an agent and the model it uses.
+type AgentModel struct {
+	Name, Description string
+	Model             string // <provider>/<model>; "" for the default
+}
+
+// modelGroup is one provider's models, for the page's choices.
+type modelGroup struct {
+	Provider string
+	Models   []modelChoice
+}
+
+type modelChoice struct {
+	ID, Name string // <provider>/<model>, and <model>
+	Enabled  bool
 }
 
 // providerRow is one provider on the Models page.
@@ -49,6 +74,9 @@ type modelsView struct {
 	Notice    string
 	Error     string
 	ModelsURL string // models.yaml in Gitea, where models are turned on
+	// Choosing the models: every model offered, by provider, and the agents.
+	Groups []modelGroup
+	Agents []AgentModel
 }
 
 func (s *Server) modelsView(ctx context.Context) (*modelsView, error) {
@@ -85,6 +113,18 @@ func (s *Server) modelsView(ctx context.Context) (*modelsView, error) {
 			}
 		}
 		v.Providers = append(v.Providers, row)
+		g := modelGroup{Provider: name}
+		for _, id := range catalog.Offered() {
+			if m, ok := strings.CutPrefix(id, name+"/"); ok {
+				g.Models = append(g.Models, modelChoice{ID: id, Name: m, Enabled: catalog[id].Enabled})
+			}
+		}
+		if len(g.Models) > 0 {
+			v.Groups = append(v.Groups, g)
+		}
+	}
+	if v.Agents, err = s.Providers.Agents(ctx); err != nil {
+		return nil, err
 	}
 	// Keys saved for providers still waiting for their change to be merged.
 	for _, secret := range stored {
@@ -127,7 +167,9 @@ func (s *Server) modelsPage(w http.ResponseWriter, r *http.Request, v events.Vis
 }
 
 // modelsPost adds a provider (action=add: name, url, key, include), sets
-// the key of one (action=key: name, key) or deletes it (action=delete: name).
+// the key of one (action=key: name, key), deletes it (action=delete: name),
+// or proposes the models agents use (action=choose: default, and
+// agent-<name> for each agent, empty for the default).
 func (s *Server) modelsPost(w http.ResponseWriter, r *http.Request, v events.Visibility) {
 	if s.Providers == nil || s.Secrets == nil {
 		http.NotFound(w, r)
@@ -174,6 +216,21 @@ func (s *Server) modelsPost(w http.ResponseWriter, r *http.Request, v events.Vis
 			log.Printf("home: %s: models %s %s: %v", v.Person, action, name, err)
 			fail(http.StatusServiceUnavailable, err)
 		}
+	}
+	if action == "choose" {
+		choose := map[string]string{}
+		for k, vals := range f {
+			if a, ok := strings.CutPrefix(k, "agent-"); ok && len(vals) > 0 {
+				choose[a] = strings.TrimSpace(vals[0])
+			}
+		}
+		n, err := s.Providers.ProposeModels(r.Context(), v.Person, strings.TrimSpace(f.Get("default")), choose)
+		if err != nil {
+			failed(err)
+			return
+		}
+		http.Redirect(w, r, changes.Path(models.Unit, models.Repo, n), http.StatusSeeOther)
+		return
 	}
 	if !models.ValidNewProvider(name) {
 		failed(fmt.Errorf("%w: a provider's name is lowercase letters, digits and dashes, at most %d, e.g. openrouter", models.ErrInvalidProvider, models.MaxNewProvider))

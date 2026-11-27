@@ -389,7 +389,7 @@ func (s *Server) askAgent(ctx context.Context, c sandbox.Caller, raw json.RawMes
 		}
 		task := strings.TrimSpace(in.Task)
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), s.turnTimeout())
+			ctx, cancel := context.WithTimeout(context.Background(), s.turnTimeout(target))
 			defer cancel()
 			out := &collect{}
 			_, err := s.sandboxTurn(ctx, run, c.Person, c.Chat, key, target, msg, out)

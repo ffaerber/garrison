@@ -16,7 +16,7 @@ Garrison moved from Docker Swarm to k3s: the platform, the agents' sandboxes (po
   - `home`: the dashboard at `https://<domain>/` (`internal/home`), with the feed, cards, secrets and Models page.
   - `guard`, `gate`: Docker access for pipelines, and the sign-in gate in front of apps.
   - `validate`, `render`, `apply`, `applied`, `claims`: the CLI on the host.
-- **Agents** are defined only in `garrison/config` and work in every unit. A unit gives them rights (`grants.yaml`, which gives an agent account of its own in Gitea) and routines (`routines.yaml`). The defaults come from `templates/garrison-config/agents/`: operator, commander, coder, sentry, scout, media. Design: [docs/agents.md](docs/agents.md).
+- **Agents** are defined only in `garrison/config` and work in every unit. A unit gives them rights (`grants.yaml`, which gives an agent account of its own in Gitea) and routines (`routines.yaml`). The defaults come from `templates/garrison-config/agents/`: operator, commander, coder, sentry, scout, designer. Design: [docs/agents.md](docs/agents.md).
 - **People** sign in through Keycloak (realm `garrison`). The group `root-admins` may change the platform. Unit roles come from `members.yaml`, applied to Gitea teams `admins` and `members`; nobody approves their own role change.
 - **Data**: Postgres (`garrison` database: events, routine state), ZFS datasets per app environment, Sanoid snapshots, and SOPS-encrypted secrets in Git.
 
