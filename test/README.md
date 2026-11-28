@@ -51,7 +51,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 
 | Step | Kind | Does |
 | --- | --- | --- |
-| `base` | fixture | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison` |
+| `base` | fixture | Fresh Ubuntu VM with Docker, ZFS, git and the other base packages, and this repo at `~/garrison`; one virtual NVMe drive, `/dev/loop40` (test/vm/nvme.sh: Multipass attaches no disks, so a loop device on a sparse file, attached at boot before ZFS), on which the install makes Garrison's pool (`POOL_DEVICE`) |
 | `install` | fixture | The installer: Traefik, Keycloak, Gitea, the runner, the control plane, Prometheus, Grafana and Loki; then its setup in the browser (`scenarios/setup.sh`): the first root admin `owner`, the AI providers of `PROVIDERS`, each tested (a wrong key refused), and the default, tested and saved; the test people; the system stack checked (`system`) |
 | `login` | fixture | Signs in through Keycloak as admin, alice and bob, to Gitea, Grafana and Open WebUI, and checks what each may do |
 | `platform` | scenario | The deployer deploying from Gitea, monitoring data, dashboards from Git, app stacks, private environments, hostname claims, the model sync with a fake provider, the dashboard's Models page (a provider's key, choosing an agent's model), a skill an agent proposes for another (`propose_skill`) and its lessons in the feed, the agents' web search (SearXNG) |
@@ -63,7 +63,7 @@ Each step is `test/e2e/scenarios/<step>.sh` on the helpers of `test/e2e/lib.sh`;
 | `deploy` | fixture | The unit `todo`, alice its only person: `todo/app` and `todo/quotes` pushed, the app built on the user runner and deployed as `todo` and `dev-todo`, with the deployer's refusals |
 | `journey` | scenario | Scenario 10: an app from nothing to main, through the operator |
 | `people` | scenario | In the browser: alice asks the commander, vaguely, to bring bob and carol in; it asks which roles. Bob and carol then find todo's channel in their sidebar, with its how-to and history; after bob leaves, it is gone from his and Open WebUI refuses him its messages |
-| `nodes` | scenario | A second VM, a clone of `base`, joins with `install.sh --join` and a larger pool; an app with data runs there, with its snapshots, a restore and a reboot (`docs/nodes.md`) |
+| `nodes` | scenario | A second VM, a clone of `base`, joins with `install.sh --join` and a larger drive (40G); an app with data runs there, with its snapshots, a restore and a reboot (`docs/nodes.md`) |
 | `newsroom` | scenario | A news page the chain `news-page` keeps current: a fake news site, the coder and the scout, an update merged with nobody watching, and the next day's news (`docs/scenarios.md`) |
 | `team` | fixture | Carol an admin and bob a member, by a config pull request; the developer, tester and desk in `garrison/config`, with their grants in todo. No LLM |
 | `roles` | scenario | Bob cannot raise his own rights; nobody's approval of their own role change counts; no agent may have a grant on config |

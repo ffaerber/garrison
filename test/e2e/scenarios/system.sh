@@ -4,6 +4,11 @@
 section_system() {
 echo "# system stack"
 check "ZFS pool is online"                 test "$(zpool list -H -o health garrison)" = ONLINE
+# A test VM's pool is on its drive, a virtual NVMe (test/vm/nvme.sh), as
+# on a real machine, not on a file.
+if [ -b /dev/loop40 ]; then
+  check "the pool is on the machine's drive" bash -c 'zpool list -v -H -P garrison | grep -q "/dev/loop40"'
+fi
 check "Keycloak serves OIDC discovery over valid TLS" status_is 200 keycloak /realms/master/.well-known/openid-configuration 300
 check "Keycloak issuer uses the public hostname" \
   bash -c "$(declare -f req); ETC=$ETC DOMAIN=$DOMAIN; req keycloak https://keycloak.$DOMAIN/realms/master/.well-known/openid-configuration | grep -q '\"issuer\":\"https://keycloak.$DOMAIN/realms/master\"'"

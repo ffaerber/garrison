@@ -38,7 +38,7 @@ check "Prometheus and Loki publish no port on the host" bash -c '! (ss -ltn | gr
 
 echo "# dashboards from Git"
 folder_count() { grafana_api "" "$g/api/search?type=dash-db&folderUIDs=ns-garrison&tag=git" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }
-six_dashboards() { [ "$(folder_count)" -ge 6 ]; }
+six_dashboards() { [ "$(folder_count)" -ge 7 ]; }
 check "the garrison folder holds the dashboards from Git" until_true 180 six_dashboards
 sso_login "$tmp/grafana-bob.jar" "$g/login/generic_oauth" "$TEST_PASSWORD" "$tmp/grafana-bob.html" bob >/dev/null 2>&1
 check "bob can open the overview"          test "$(grafana_api bob -o /dev/null -w '%{http_code}' "$g/api/dashboards/uid/garrison-overview")" = 200

@@ -26,6 +26,7 @@ const (
 	KindUndeploy      = "undeploy"
 	KindRestore       = "restore"
 	KindSnapshot      = "snapshot" // a snapshot someone asked for
+	KindMove          = "move"     // an environment moved to another machine
 	KindRoutine       = "routine"
 	KindAsk           = "ask" // an agent handed work to another
 	KindAlert         = "alert"

@@ -174,7 +174,52 @@ func (g *Gitea) stackProblems(ctx context.Context, ns, ref string) ([]string, er
 		}
 	}
 	more, err := restoreProblems(ctx, f, parsed)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, more...)
+	more, err = moveProblems(ctx, f, parsed)
 	return append(out, more...), err
+}
+
+// moveProblems checks the move requests, moves/<name>.yaml: each names a
+// valid stack of the unit, one of its environments, and a machine's name.
+// Whether the machine exists and the environment can move, the deployer
+// tells.
+func moveProblems(ctx context.Context, f configFiles, stacks map[string]*stack.Stack) ([]string, error) {
+	entries, err := f.List(ctx, stack.MoveDir)
+	if errors.Is(err, agents.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		path := stack.MoveDir + "/" + e.Name
+		if e.Type != "file" || !strings.HasSuffix(e.Name, ".yaml") {
+			out = append(out, path+": "+stack.MoveDir+"/ holds only <name>.yaml files")
+			continue
+		}
+		data, err := f.Read(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		m, err := stack.ParseMove([]byte(data))
+		if err != nil {
+			out = append(out, path+": "+strings.ReplaceAll(err.Error(), "\n", "; "))
+			continue
+		}
+		s, ok := stacks[m.Stack]
+		if !ok {
+			out = append(out, fmt.Sprintf("%s: there is no valid stack %s in %s/", path, m.Stack, stack.Dir))
+			continue
+		}
+		if _, ok := s.Environments[m.Environment]; !ok || m.Environment == stack.PreviewEnvironment {
+			out = append(out, fmt.Sprintf("%s: %s has no environment %s to move", path, m.Stack, m.Environment))
+		}
+	}
+	return out, nil
 }
 
 // restoreProblems checks the restore requests, restores/<name>.yaml: each

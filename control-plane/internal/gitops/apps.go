@@ -521,6 +521,9 @@ func (c *Config) syncApps(ctx context.Context, force bool, prev map[string]App) 
 			}
 			parsed[name] = s
 		}
+		for _, err := range c.moves(ctx, ns, cfgDir, parsed, next) {
+			fail(ns, "", cfgCommit, "%v", err)
+		}
 		for _, err := range c.restores(ctx, ns, cfgDir, parsed, next) {
 			fail(ns, "", cfgCommit, "%v", err)
 		}

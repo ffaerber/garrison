@@ -20,6 +20,14 @@ reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 ---
+# zfs-metrics.sh, which the zfs DaemonSet's second container runs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zfs-files
+  annotations:
+    garrison.io/files: zfs-metrics.sh
+---
 # The deployer's hands on each machine: it runs `kubectl exec` here, and
 # nsenter into the host's namespaces, for zfs, rsync and mount on the
 # machine that holds an environment's data (apply.NodeExec). Nothing else
@@ -48,6 +56,28 @@ spec:
           resources:
             requests: { cpu: 1m, memory: 4Mi }
             limits: { memory: 32Mi }
+        # The machine's pools and datasets as metrics, every minute, for
+        # node-exporter's textfile collector (garrison/prometheus) and the
+        # Grafana dashboard Storage.
+        - name: metrics
+          image: busybox:1.37
+          command: [sh, /files/zfs-metrics.sh]
+          env:
+            - { name: OUT, value: /metrics }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          securityContext: { privileged: true }
+          resources:
+            requests: { cpu: 1m, memory: 4Mi }
+            limits: { memory: 32Mi }
+          volumeMounts:
+            - { name: files, mountPath: /files, readOnly: true }
+            - { name: metrics, mountPath: /metrics }
+      volumes:
+        - name: files
+          configMap: { name: zfs-files }
+        - name: metrics
+          hostPath: { path: /var/lib/garrison/metrics, type: DirectoryOrCreate }
 # ---------- OpenEBS ZFS LocalPV v2.11.2 ----------
 ---
 apiVersion: scheduling.k8s.io/v1

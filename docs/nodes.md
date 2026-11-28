@@ -42,7 +42,7 @@ The environment's volumes stay on that machine. Its datasets are at `garrison/ns
 
 ## Limits
 
-- **Data does not move.** An app's data stays on the machine that holds it; if that machine is down, so is the app. There are no copies on other machines yet.
+- **Data moves on request.** An app's data stays on the machine that holds it; if that machine is down, so is the app (there are no copies on other machines yet). A request in the unit's config moves an environment with its data: `moves/<name>.yaml` with `stack`, `environment` (main by default) and `to:` the machine's name. Once merged, the deployer stops the environment, sends its datasets to that machine (`zfs send -R`, with their properties and snapshots), points its volumes there and starts it there; the old copy stays on the old machine as `<dataset>.moved-<time>`, a way back, until someone destroys it. The feed records it. This first version stops the app for the whole copy and streams through the Kubernetes API, which suits small data; an environment that mounts a unit's share cannot move alone.
 - **A sandbox's workspace stays where it was made.** A chat whose workspace is on one machine cannot also mount a media library on another.
 - **The main machine runs the platform.** If it is down, nothing is deployed and nobody signs in, though apps elsewhere keep running.
-- **Leaving.** A machine leaves with `kubectl drain <node> --ignore-daemonsets` and `kubectl delete node <node>` on the main one, and `/usr/local/bin/k3s-agent-uninstall.sh` on it. Its apps' data stays in its pool: move the datasets by hand (`zfs send | zfs recv`) before an app can run elsewhere.
+- **Leaving.** A machine leaves with `kubectl drain <node> --ignore-daemonsets` and `kubectl delete node <node>` on the main one, and `/usr/local/bin/k3s-agent-uninstall.sh` on it. Its apps' data stays in its pool: move them first (`moves/`, above).

@@ -55,6 +55,7 @@ type Config struct {
 	Keys         *secrets.Keys   // the units' keys, which decrypt stored secrets; nil: apps with them are left alone
 	LLMKeysDir   string          // where the agent service reads the LLM providers' keys, which garrison's config keeps; empty: not written
 	LoginsDir    string          // where the gateway's browser reads the units' site logins (secrets login-*); empty: not written
+	Pipe         apply.Pipe      // streams data between machines for moves; apply.NodePipe(Run) if nil
 
 	password string
 	home     string            // HOME for git, holding the .netrc
@@ -63,6 +64,7 @@ type Config struct {
 	snapsChanged bool            // the deployer took or restored a snapshot since snapshots.json was written
 	snapsListed  time.Time       // when snapshots.json was last written
 	restoreTried map[string]bool // stack@commit of restore requests carried out or failed
+	moveTried    map[string]bool // stack@commit of move requests tried
 }
 
 // record adds e, from the deployer, to the feed, if there is one.

@@ -5,6 +5,7 @@ What this unit is: who belongs to it, its apps, and what Garrison's agents may d
 - `members.yaml`: its admins and members.
 - `stacks/<name>.yaml`: its apps, one per file, each deployed at `https://<name>.<domain>`.
 - `restores/<name>.yaml`: bringing an app's data back from a snapshot.
+- `moves/<name>.yaml`: moving an app's environment, with its data, to another machine (`stack`, `environment`, `to`).
 
 ## Media
 

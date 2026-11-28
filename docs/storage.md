@@ -79,6 +79,8 @@ Without SSH. Each machine runs Garrison's privileged `zfs` pod (a DaemonSet), th
 
 ## Moving an app to another machine
 
+**First version built** (see [nodes.md](nodes.md)): steps 3 to 7 below, without the copies before the stop (steps 1 and 2), so the app is down for the whole copy; the stream goes through the Kubernetes API, not straight between the machines' `zfs` pods; the old copy is kept, renamed, with no `keep` yet. Tested by the scenario `nodes`, both ways.
+
 A request in Git, like a restore: `moves/<name>.yaml` in the unit's config (`stack`, `environment`, `to: <machine>`), merged by an admin, as a move stops the app for a moment. The deployer then:
 
 | Step | What | The app |

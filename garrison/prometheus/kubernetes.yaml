@@ -144,7 +144,9 @@ spec:
       containers:
         - name: node-exporter
           image: prom/node-exporter:v1.10.2
-          args: [--path.rootfs=/host]
+          # The textfile collector serves what the zfs DaemonSet writes
+          # there: the pools' and datasets' sizes (garrison/openebs).
+          args: [--path.rootfs=/host, --collector.textfile.directory=/host/var/lib/garrison/metrics]
           ports: [{ containerPort: 9100 }]
           volumeMounts:
             - { name: root, mountPath: /host, readOnly: true, mountPropagation: HostToContainer }

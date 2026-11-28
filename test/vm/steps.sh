@@ -144,7 +144,7 @@ TTS_URL=$(server_setting TTS_URL)
 inputs() {
   local shared="test/e2e/smoke.sh test/e2e/lib.sh test/e2e/ready.sh test/e2e/scenarios/$1.sh"
   case $1 in
-    base)     ;;
+    base)     echo test/vm/nvme.sh ;;
     install)  echo install.sh installer garrison control-plane schemas templates files sandbox go.mod go.sum host "$ANSWERS" test/e2e/add-test-users.sh test/e2e/scenarios/setup.sh test/e2e/lib.sh ;;
     login)    echo "$shared" test/e2e/scenarios/system.sh ;;
     platform) echo "$shared" test/e2e/stacks ;;
@@ -230,7 +230,8 @@ exists() { multipass list --format csv 2>/dev/null | cut -d, -f1 | grep -qx "$VM
 
 # ---------- the steps ----------
 
-# A fresh Ubuntu VM with Docker, ZFS and the other base packages, and the repo.
+# A fresh Ubuntu VM with Docker, ZFS and the other base packages, the repo,
+# and one virtual NVMe drive (test/vm/nvme.sh) for Garrison's pool.
 step_base() {
   exists && multipass delete --purge "$VM"
   multipass launch 26.04 --name "$VM" --cpus 4 --memory 8G --disk 40G
@@ -239,6 +240,7 @@ step_base() {
     apt-get install -y -qq docker.io zfsutils-linux git curl openssl dnsmasq-base python3-yaml >/dev/null
     systemctl enable --now docker >/dev/null'
   sync_repo
+  in_vm sudo garrison/test/vm/nvme.sh 20G
 }
 
 # The installer, then its setup in the browser as a person does it (the
@@ -333,7 +335,7 @@ browser_scenario() {
   return $rc
 }
 # A second machine, $VM-node2, a clone of base, joins deploy's with
-# `install.sh --join` and a larger pool, so new data goes there; scenario
+# `install.sh --join` and a larger drive, so new data goes there; scenario
 # nodes then checks what runs where, and an app's data there. The machine is
 # deleted when the scenario passes and kept, stopped, when it fails.
 step_nodes() {
@@ -347,8 +349,10 @@ step_nodes() {
   multipass start "$node" >/dev/null
   trap 'multipass stop "$node" >/dev/null 2>&1 || true' EXIT
   VM=$node sync_repo
+  # Its drive (from base) grown, so its pool has the most free space.
+  VM=$node in_vm sudo garrison/test/vm/nvme.sh 40G
   join=$(in_vm sudo bash -c 'cd garrison && ./install.sh --join-command')
-  VM=$node in_vm sudo bash -c "cd garrison && ${join#sudo } --pool-size 40G" || rc=$?
+  VM=$node in_vm sudo bash -c "cd garrison && ${join#sudo } --pool-device /dev/loop40" || rc=$?
   [ $rc != 0 ] || VM=$main smoke nodes || rc=$?
   trap - EXIT
   if [ $rc = 0 ] && [ "${KEEP:-}" != 1 ]; then

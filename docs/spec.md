@@ -32,6 +32,49 @@ A home cloud you run by talking to it, with Git underneath. This spec defines th
 - **Environment:** a branch mapped to a running copy of a stack, for example `dev` to dev-todo.domain.com.
 - **Agents:** Garrison's agents, defined once in `garrison` and working in every unit: the operator runs the cluster and its units; coding agents build apps.
 
+## How it works
+
+```
+ you ──chat──> Open WebUI ──> agent service ──> sandbox (Pi agent, gVisor)
+                                   │                    │ tools (MCP)
+                                   v                    v
+                               LLM provider          gateway ──acts as you──> Gitea: pull requests
+                                                                                 │ you merge
+                                                                                 v
+                          Kubernetes (k3s) <──deploys── deployer <──webhook── Gitea (main)
+```
+
+- **Everything is a file in Git**, in Gitea on the machine: each app (`<unit>/config/stacks/<name>.yaml`, answering at `https://<name>.<domain>`, a branch such as `dev` at `dev-<name>.<domain>`, pull requests with previews), each unit's people (`config/members.yaml`, changed only with someone else's approval), the agents' rights and routines, secrets (SOPS-encrypted), restores and moves. Nothing changes behind Git's back.
+- **A change travels** from a chat to an agent in its sandbox, to a gateway tool acting with the person's own rights, to a pull request; a person approves and merges it; Gitea's webhook wakes the deployer, which makes the cluster match `main`. The dashboard's feed records each step.
+- **The control plane** (Go, `control-plane/`) is one binary with several roles: the **deployer** applies Git to Kubernetes (k3s); the **gateway** gives agents their tools and keeps units, members and chat in sync; the **agent service** runs each chat in a gVisor sandbox, holds the LLM keys and proxies the internet per agent; **home** serves the dashboard.
+- **Agents** (`@operator`, `@coder`, `@sentry`, `@scout`, `@designer`, `@commander`) are defined once in `garrison/config` and work in every unit, for whoever mentions them, with that person's rights; a unit gives them more only by a reviewed grant. They run routines (on a schedule, when a branch moves, on an alert, on a release), ask people when they need an answer, and follow chains of command for jobs with several steps.
+- **Safety nets:** ZFS snapshots of all data (hourly, daily, monthly, and before every deploy), restores and moves by pull request, and monitoring with Grafana, Prometheus and Loki, whose alerts reach the feed and can start a routine.
+
+### After the install
+
+The installer (`sudo ./install.sh --answers my.env`; the answers file sets at least `DOMAIN`, see `test/answers/selfsigned.env` and `install.sh` for every setting) ends with a link, valid until the setup is done (also in `/etc/garrison/setup-link`, root only):
+
+1. **The first root admin:** username, email and password, for signing in everywhere.
+2. **The AI providers:** each OpenAI-compatible API the agents think with (an inference server on the network, Ollama's cloud, OpenRouter, Anthropic), with its key, tested by listing its models.
+3. **The default model:** every agent uses it, in every unit; tested with a question, then saved to `llm/` of `garrison/config`. Later, on the dashboard's Models page, a root admin adds providers and puts single agents on another model.
+
+Then `https://<domain>/` is the dashboard, `https://chat.<domain>` the team chat, `https://git.<domain>` Gitea, all behind Keycloak. People join by a link from the dashboard's People page, sent by whoever made it (Garrison sends no mail); a link into a unit proposes them in its `members.yaml`. A forgotten password is reset the same way. Let's Encrypt is not built yet: installs use a self-signed certificate.
+
+### This repository
+
+| Path | Contents |
+| --- | --- |
+| `install.sh`, `installer/` | The installer and its helpers |
+| `garrison/` | The system stacks, one directory per repo of the `garrison` organisation in Gitea, pushed at install |
+| `control-plane/` | Go: deployer, gateway, agent service, dashboard, guards; the `garrison` CLI |
+| `templates/` | Starting contents of new config repos and app repos, the agents among them; compiled into the control plane |
+| `sandbox/` | The agents' sandbox image: Pi, its tools, a headless browser |
+| `files/` | The media library's file browser image |
+| `schemas/` | JSON Schema for stack files, unit config, change records |
+| `host/` | Host-side scripts: BuildKit, repairing services after a reboot |
+| `docs/` | Spec, status, agents, scenarios, walkthrough, designs |
+| `test/` | End-to-end tests on throwaway Multipass VMs |
+
 ## System stack
 
 Each component is a repo of the `garrison` organisation in Gitea, named after its stack. The installer deploys the first six in this order, because each depends on the ones before it; they are what it takes to build and run the deployer. The deployer then deploys every repo of `garrison`, these included.
