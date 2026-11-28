@@ -64,6 +64,10 @@ type Routine struct {
 	Schedule string         `yaml:"schedule"` // cron: minute hour day month weekday, in Garrison's time zone
 	Cron     *cron.Schedule `yaml:"-"`
 	OnPush   *Push          `yaml:"on_push"`
+	// OnRelease starts it when a repo, of this unit or another, has a new
+	// release; another unit's only if that unit publishes its releases to
+	// this one (publishes.yaml there).
+	OnRelease *Release `yaml:"on_release"`
 	// OnAlert starts it when an alert of its unit fires whose labels
 	// have these values, e.g. {alertname: ServiceDown}; {} for every alert.
 	OnAlert map[string]string `yaml:"on_alert"`
@@ -79,6 +83,12 @@ type Push struct {
 	// below one ending in /, changed: e.g. [topics.md], so that the
 	// routine's own merges of other files start nothing.
 	Paths []string `yaml:"paths"`
+}
+
+// Release names a repo whose new releases start a routine.
+type Release struct {
+	Unit string `yaml:"unit,omitempty"` // "": the routine's own
+	Repo string `yaml:"repo"`
 }
 
 // MaxPaths is how many paths an on_push may name.
@@ -181,14 +191,18 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 		}
 		seen[r.Name] = true
 		set := 0
-		for _, ok := range []bool{r.Raw != "", r.Schedule != "", r.OnPush != nil, r.OnAlert != nil} {
+		for _, ok := range []bool{r.Raw != "", r.Schedule != "", r.OnPush != nil, r.OnAlert != nil, r.OnRelease != nil} {
 			if ok {
 				set++
 			}
 		}
 		switch {
 		case set > 1:
-			why = append(why, at+": one of schedule, every, on_push and on_alert, not several")
+			why = append(why, at+": one of schedule, every, on_push, on_alert and on_release, not several")
+		case r.OnRelease != nil:
+			if (r.OnRelease.Unit != "" && !person.MatchString(r.OnRelease.Unit)) || !repoName.MatchString(r.OnRelease.Repo) {
+				why = append(why, at+": on_release needs a repo, and the unit it is in if not this one")
+			}
 		case r.OnAlert != nil:
 			for k, v := range r.OnAlert {
 				switch {
@@ -234,7 +248,7 @@ func checkRoutines(rs []Routine) (out []Routine, why []string) {
 				}
 			}
 		default:
-			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h), on_push (repo and branch) or on_alert (label values, e.g. {alertname: ServiceDown})")
+			why = append(why, at+": when it runs is missing: schedule (cron, e.g. \"0 6 * * *\"), every (e.g. 6h), on_push (repo and branch), on_release (unit and repo) or on_alert (label values, e.g. {alertname: ServiceDown})")
 		}
 		if !person.MatchString(r.Owner) {
 			why = append(why, at+": owner must be the username of a person of this unit")

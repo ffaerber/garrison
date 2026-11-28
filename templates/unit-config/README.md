@@ -50,8 +50,18 @@ The agents are Garrison's, defined in `garrison/config`; each works in every uni
 - agent: operator
   name: morning
   schedule: "30 6 * * mon-fri"      # cron, in Garrison's time zone; or every: 6h,
-  owner: alice                      # on_push: {repo: web, branch: main}, on_alert: {alertname: ServiceFailing}
+  owner: alice                      # on_push: {repo: web, branch: main}, on_alert: {alertname: ServiceFailing},
+                                    # on_release: {unit: todo, repo: app}
   task: Look at the apps' logs of the night and tell us what failed.
+```
+
+A routine with `on_release: {unit: todo, repo: app}` runs on each new release of that repo (one released in Gitea, not a draft or pre-release), with its notes; another unit's releases only while that unit publishes them here.
+
+`publishes.yaml`: what other units may use of this one. Its admins decide what leaves the unit:
+
+```yaml
+- releases: app        # the releases of the repo app
+  to: [site]           # may start routines of these units (on_release)
 ```
 
 An agent with grants or routines here acts with an account of its own, `agent-<unit>-<agent>`, which writes only to the repos its grants name.

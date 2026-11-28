@@ -327,6 +327,14 @@ func Bindings(ctx context.Context, f Files, defs []Agent) (map[string][]Grant, m
 		}
 		routines[r.Agent] = append(routines[r.Agent], ok...)
 	}
+	// What the unit publishes to others is checked with the rest, though
+	// only other units' routines read it (Gitea.Publishes).
+	if raw, err := f.Read(ctx, PublishesFile); err == nil {
+		_, why := ParsePublishes([]byte(raw))
+		problems = append(problems, why...)
+	} else if !errors.Is(err, ErrNotExist) {
+		return nil, nil, nil, err
+	}
 	return grants, routines, problems, nil
 }
 

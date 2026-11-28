@@ -542,3 +542,41 @@ func (t *Tools) checkPatched(ctx context.Context, as string, c Change, branch st
 	t.Gitea.do(ctx, as, http.MethodDelete, repo+"/branches/"+escapePath(branch), nil, nil)
 	return err
 }
+
+// Release is a repo's release in Gitea.
+type Release struct {
+	Tag, Name, Notes, URL string
+}
+
+// LatestRelease is a repo's newest release that is neither a draft nor a
+// pre-release, as the admin; a zero Release if it has none.
+func (g *Gitea) LatestRelease(ctx context.Context, org, repo string) (Release, error) {
+	if err := validOrg(org); err != nil {
+		return Release{}, err
+	}
+	if err := validRepo(repo); err != nil {
+		return Release{}, err
+	}
+	var r struct {
+		Tag  string `json:"tag_name"`
+		Name string `json:"name"`
+		Body string `json:"body"`
+		URL  string `json:"html_url"`
+	}
+	status, err := g.do(ctx, "", http.MethodGet, fmt.Sprintf("/repos/%s/%s/releases/latest", org, repo), nil, &r)
+	if status == http.StatusNotFound {
+		return Release{}, nil
+	}
+	return Release{Tag: r.Tag, Name: r.Name, Notes: r.Body, URL: r.URL}, err
+}
+
+// Publishes is a unit's publishes.yaml, what it lets other units use;
+// entries that are wrong are left out.
+func (g *Gitea) Publishes(ctx context.Context, org string) ([]agents.Publish, error) {
+	data, err := g.File(ctx, org, "config", agents.PublishesFile)
+	if err != nil || data == "" {
+		return nil, err
+	}
+	ps, _ := agents.ParsePublishes([]byte(data))
+	return ps, nil
+}

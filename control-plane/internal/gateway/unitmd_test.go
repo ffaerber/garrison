@@ -77,3 +77,16 @@ func TestAScreenshotToShowNeedsAStore(t *testing.T) {
 		t.Errorf("%v %s", isErr, text)
 	}
 }
+
+// suggest answers each next step on a line the agent service finds.
+func TestSuggestGivesNextStepLines(t *testing.T) {
+	out, err := suggest([]string{"Have @coder fix the background colour of todo/app", "  ", "Show me   the errors of today"})
+	if err != nil || !strings.Contains(out, "Next step: Have @coder fix the background colour of todo/app\nNext step: Show me the errors of today\n") {
+		t.Errorf("%q %v", out, err)
+	}
+	for _, bad := range [][]string{nil, {"fix"}, {"a whole one", "b whole one", "c whole one", "d whole one", "e whole one"}} {
+		if _, err := suggest(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

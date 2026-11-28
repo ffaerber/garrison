@@ -111,7 +111,7 @@ echo "# 9c. in a private chat, the commander hands bob over: the agent starts in
 chat_seq=$(date +%s%N)
 ask_chat() {
   chat_api "$1" --max-time 600 -X POST -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "chat_id": sys.argv[3], "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3" "local:e2e-$chat_seq")" \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "stream": False, "chat_id": sys.argv[3], "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$2" "$3" "${ASK_CHAT:-local:e2e-$chat_seq}")" \
     "$chat/api/chat/completions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
 }
 # handed_over: todo's channel holds the agent's first message for bob, with
@@ -139,4 +139,31 @@ answer=$(ask_chat bob garrison/commander "Which apps run in my units, and are th
 check "it answers for todo, and whether its app runs" bash -c 'grep -qi "todo" <<<"$0" && grep -qiE "running|healthy|up|ready" <<<"$0"' "$answer"
 check "without asking which unit, or leave to look" bash -c '! grep -qiE "which unit|which one|want me to|shall i|should i ask|or all" <<<"$0"' "$answer"
 [ $failed -eq 0 ] || printf 'note  it said: %s\n' "$(head -c 400 <<<"$answer" | tr '\n' ' ')"
+
+echo "# 9e. next steps as buttons: the follow-ups are the commander's own"
+# Something left to do: the commander offers it with suggest, and Open
+# WebUI's follow-up request for the chat gets those steps (suggest's
+# whole requests), not the LLM's guesses: the request carries only
+# "Thanks.", in which no guess finds the coder. A retry with a plainer request,
+# as models differ in when they offer steps.
+follow_ups() {
+  chat_api bob -X POST -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"model": "garrison/commander", "chat_id": sys.argv[1], "messages": [{"role": "user", "content": sys.argv[2]}]}))' "$1" "$2")" \
+    "$chat/api/v1/tasks/follow_up/completions" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+for s in json.loads(r["choices"][0]["message"]["content"])["follow_ups"]: print(s)'
+}
+offered() { grep -qiE "coder" <<<"$1" && ! grep -qiE "^(sure|yes|ok)\b" <<<"$1"; }
+fu_chat="local:e2e-next-$(date +%s%N)"
+ASK_CHAT=$fu_chat ask_chat bob garrison/commander "The todo app's page background should be light green instead of white. Do not change anything yet: tell me which agent would make that change, and offer it as a next step." >/dev/null
+steps=$(follow_ups "$fu_chat" "Thanks.")
+if ! offered "$steps"; then
+  fu_chat="local:e2e-next-$(date +%s%N)"
+  ASK_CHAT=$fu_chat ask_chat bob garrison/commander "Do not change anything. Call the tool suggest with one next step: have @coder make the background of the todo app light green." >/dev/null
+  steps=$(follow_ups "$fu_chat" "Thanks.")
+fi
+check "the follow-ups are its next steps, for @coder" offered "$steps"
+check "each a whole request"                       bash -c 'while read -r l; do [ ${#l} -ge 8 ] || exit 1; done <<<"$0"' "$steps"
+[ $failed -eq 0 ] || printf 'note  follow-ups: %s\n' "$(tr '\n' '|' <<<"$steps")"
 }

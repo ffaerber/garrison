@@ -96,4 +96,45 @@ check "the question is answered in the feed" in_feed bob ns=todo "e['kind'] == '
 not_waiting() { local page; page=$(feed bob /) && ! grep -q "Waiting for you" <<<"$page"; }
 check "bob's dashboard no longer lists it" until_true 60 not_waiting
 
+echo "# 4j4. another unit's routine starts on todo's releases, once todo publishes them"
+# A unit site, whose sentry reports each release of todo/app. todo's
+# releases reach it only once todo's publishes.yaml names site.
+code=$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"username":"site","visibility":"limited","description":"Our website"}' "$api/orgs")
+check "alice makes the unit site"          bash -c "[ $code = 201 ] || [ $code = 422 ]"
+site_config() { [ "$(gitea_api "" -o /dev/null -w '%{http_code}' "$api/repos/site/config/raw/members.yaml?ref=main")" = 200 ]; }
+check "site has its config"                until_true 120 site_config
+cat > "$tmp/site-routines.yaml" <<'YAML'
+- agent: sentry
+  name: todo-news
+  on_release: {unit: todo, repo: app}
+  owner: alice
+  task: In one or two sentences, say which version of the todo app was released and what it brings, from its release notes. Change nothing.
+YAML
+check "site gets a routine on todo's releases" set_config site routines.yaml "$tmp/site-routines.yaml"
+release() { test "$(gitea_api alice -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$(python3 -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "name": "Todo " + sys.argv[1], "body": sys.argv[2], "target_commitish": "main"}))' "$1" "$2")" "$hp/app/releases")" = 201; }
+seen_tag() { [ "$(kubectl --namespace garrison exec -i deployment/postgres -- psql -U postgres -d garrison -tAc "SELECT head FROM routine_state WHERE key = 'site/sentry/todo-news'")" = "$1" ]; }
+# news_runs: the finished runs of site's routine on todo's releases, as
+# "status<TAB>title<TAB>detail" lines.
+news_runs() { feed alice "/api/events?limit=200&ns=site" | python3 -c '
+import json,sys
+for e in json.load(sys.stdin):
+    if e.get("kind") == "routine" and "todo/app released" in e.get("title","") and e.get("status") != "running":
+        print(e["status"], e["title"], (e.get("detail") or "").replace("\n", " "), sep="\t")'; }
+not_told() { ! seen_tag v0.9.0 && [ -z "$(news_runs)" ]; }
+check "todo releases 0.9 of app"           release v0.9.0 "The first release."
+sleep 90
+check "site's routine is not told: todo publishes nothing to it" not_told
+printf -- '- releases: app\n  to: [site]\n' > "$tmp/publishes.yaml"
+check "todo publishes app's releases to site" set_config todo publishes.yaml "$tmp/publishes.yaml"
+check "site's routine sees 0.9, and starts nothing for it" until_true 150 seen_tag v0.9.0
+publishes_shown() { feed alice /u/todo.md | grep -q "the releases of app, to site"; }
+check "todo's unit.md says what it publishes" publishes_shown
+check "todo releases 1.0, with notes"      release v1.0.0 "Due dates for todos, and a dark mode."
+news_ran() { news_runs | grep -q "^ok	.*todo/app released v1.0.0"; }
+check "site's routine runs on it"          until_true 600 news_ran
+from_notes() { news_runs | grep "todo/app released v1.0.0" | grep -qiE "due|dark"; }
+check "it tells of the release, from its notes" from_notes
+check "it ran once, on 1.0 alone"          test "$(news_runs | wc -l)" = 1
+[ $failed -eq 0 ] || news_runs | sed 's/^/      /' | cut -c1-300
+
 }

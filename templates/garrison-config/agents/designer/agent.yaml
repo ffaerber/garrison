@@ -7,4 +7,4 @@ model: ""
 # clips with crossfades, needs more than the usual 1 GiB.
 turn: 30m
 memory: 4Gi
-tools: [generate_media, generate_speech, read_unit, list_repos, list_files, read_file, list_stacks, propose_change, propose_patch]
+tools: [generate_media, generate_speech, suggest, read_unit, list_repos, list_files, read_file, list_stacks, propose_change, propose_patch]

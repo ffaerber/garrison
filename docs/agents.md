@@ -230,6 +230,11 @@ Routines: work one of garrison's agents does in a unit by itself, in `routines.y
   on_push: {repo: todo, branch: main}  # when the branch moves
   owner: bob
   task: Check what changed and say whether it needs a follow-up.
+- agent: coder
+  name: product-news
+  on_release: {unit: todo, repo: app}  # a new release, of this unit or one that publishes it here
+  owner: alice
+  task: Write a short news item about the release into the site's news.yaml and propose it.
 - agent: operator
   name: on-failure
   on_alert: {alertname: ServiceFailing}  # when one of this unit's alerts fires

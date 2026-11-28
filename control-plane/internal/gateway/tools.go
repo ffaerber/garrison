@@ -156,6 +156,9 @@ func baseSpecs() []Spec {
 		spec("take_snapshot", "Takes a snapshot of one environment's data now, e.g. before something risky: manual-<time>, kept with the others (list_snapshots), usable for a restore. It changes no data, so it needs no review; any person of the unit may ask for one, and the feed records it.", map[string]any{"unit": nsArg, "stack": str("the environment's stack name, as list_stacks shows it, e.g. todo or dev-todo")}, "unit", "stack"),
 		spec("query_metrics", "Runs an instant PromQL query against Prometheus. It has node-exporter metrics (node_*), the kubelet's container metrics (container_*, labelled with namespace, pod and container) and garrison_pod_info{namespace, pod, unit, stack, service}, which says what a pod belongs to: join with * on (namespace, pod) group_left (stack, service) garrison_pod_info.", map[string]any{"query": str("PromQL expression")}, "query"),
 		spec("list_members", "Shows who may change a unit: its admins and members, from members.yaml in its repo config. Not for garrison, which root admins change.", map[string]any{"unit": nsArg}, "unit"),
+		spec("suggest", "Offers the person up to four next steps, as buttons under your answer in a private chat: a click sends the step as their next message, to you. Call it last in a turn, when there are clear next steps, e.g. after finding what is wrong: \"Have @coder fix the background colour of todo/app\". Each is a whole request, written as the person would say it, with what it is about named (the app, the unit), never cut off or a fragment; nothing for what was already done or asked. In a channel there are no buttons: end with a line saying what to reply instead.", map[string]any{
+			"next": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "one to four whole requests, as the person would send them, most useful first"},
+		}, "next"),
 		spec("list_models", "Lists the LLMs agents may use: the default, the enabled ones an agent.yaml may name as model, those offered but not enabled, and those retired. From llm/models.yaml in garrison/config, which root admins change.", nil),
 		spec("add_provider", "Proposes another LLM provider, an OpenAI-compatible API, in llm/providers.yaml of garrison/config, as a pull request by the person asking; only root admins may. Once merged, its models are listed by the model sync, turned off until a root admin chooses them on the dashboard's Models page. Never ask for or pass its API key: the person sets it on the dashboard's Models page, whose link the answer gives. If they paste a key into the chat, do not repeat or use it; tell them to replace it at the provider, as the chat keeps it, and to set the new one on that page.", map[string]any{
 			"name":    str("the provider's name in Garrison: lowercase letters, digits and dashes, at most 28, e.g. openrouter"),
@@ -200,6 +203,9 @@ func baseSpecs() []Spec {
 			"on_push": map[string]any{"type": "object", "description": "instead of schedule or every: when a branch of the unit's repo moves; with paths, only when one of those files (or a folder ending in /) changed, e.g. {repo: news, branch: main, paths: [topics.md]}",
 				"properties": map[string]any{"repo": str("the unit's repo"), "branch": str("its branch, e.g. main"), "paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "files that start it, e.g. topics.md; empty for every change"}},
 				"required":   []string{"repo", "branch"}},
+			"on_release": map[string]any{"type": "object", "description": "instead of schedule or every: when a repo has a new release (a tag released in Gitea), of this unit or another; another unit's only if it publishes its releases to this one (publishes.yaml in its config, which its admins change). The release's notes come with the task. E.g. {unit: todo, repo: app}",
+				"properties": map[string]any{"unit": str("the unit the repo is in; empty for this one"), "repo": str("the repo")},
+				"required":   []string{"repo"}},
 			"task":        str("what the agent does each time, as you would ask it: what to look at, what to do, what to say"),
 			"repos":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "the unit's repos the task changes (proposes a screenshot or a patch into), if any"},
 			"title":       str("short title of the change; default names the routine"),
@@ -265,8 +271,9 @@ type args struct {
 	Template                                                                          string `json:"template"`
 	FullPage                                                                          bool   `json:"full_page"`
 	Agent, Schedule, Every, Task, Chain                                               string
-	Include, Repos                                                                    []string
-	OnPush                                                                            *agents.Push `json:"on_push"`
+	Include, Repos, Next                                                              []string
+	OnPush                                                                            *agents.Push    `json:"on_push"`
+	OnRelease                                                                         *agents.Release `json:"on_release"`
 }
 
 // Call runs one tool for person, talking to agent (nil: the plain /mcp
@@ -430,6 +437,8 @@ func (t *Tools) call(ctx context.Context, p Person, agent *agents.Agent, name st
 			"\nTo change it, propose a new members.yaml in the repo config. It needs the approval of an admin who did not write the change and whose role it does not change.", nil
 	case "list_models":
 		return t.listModels(ctx)
+	case "suggest":
+		return suggest(a.Next)
 	case "add_provider":
 		note := ""
 		if agent != nil {
@@ -1300,4 +1309,31 @@ func (t *Tools) showShot(ctx context.Context, p Person, agent *agents.Agent, a a
 	}
 	return fmt.Sprintf("Screenshot: %s/shots/%s.png\nOf %s, %dx%d, page title %q.%s Put the address into your answer as it is; it shows the picture to whom may see it, for 14 days. Nothing was proposed.",
 		strings.TrimSuffix(t.Dashboard, "/"), id, shot.URL, w, h, shot.Title, blocked), nil
+}
+
+// MaxNextSteps is how many next steps suggest offers.
+const MaxNextSteps = 4
+
+// suggest answers with each next step on a line of its own, "Next step: …",
+// which the agent service offers as Open WebUI's follow-ups of the chat.
+func suggest(next []string) (string, error) {
+	var b strings.Builder
+	n := 0
+	for _, s := range next {
+		s = strings.Join(strings.Fields(s), " ")
+		if s == "" {
+			continue
+		}
+		if len(s) < 8 || len(s) > 200 {
+			return "", fmt.Errorf("%w: a next step is a whole request of 8 to 200 characters: %q", ErrInvalid, s)
+		}
+		if n++; n > MaxNextSteps {
+			return "", fmt.Errorf("%w: at most %d next steps", ErrInvalid, MaxNextSteps)
+		}
+		fmt.Fprintf(&b, "Next step: %s\n", s)
+	}
+	if n == 0 {
+		return "", fmt.Errorf("%w: no next step given", ErrInvalid)
+	}
+	return b.String() + "These show as buttons under your answer in a private chat; do not repeat them in it.", nil
 }

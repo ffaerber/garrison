@@ -114,7 +114,7 @@ Language models know these forms well: an order with intent, situation, mission,
 ## Order
 
 1. `unit.md`, generated, in every agent's turn and on the dashboard: it pays off at once (agents that know where they are). **Built**: people, apps (addresses, commit, running or not), repos with their last change, the agents' rights and routines; "Recent", "Uses" and "Publishes" come with the links between units.
-2. Releases as events, `publishes.yaml`, routines on another unit's event, `read_unit`, the chain `product-news`: two units working together, end to end.
+2. Releases as events, `publishes.yaml`, routines on another unit's event, `read_unit`, the chain `product-news`: two units working together, end to end. **Built**: `publishes.yaml` for releases, routines `on_release` of another unit's repo with its notes, unit.md's "Publishes". Still to come: releases in the feed, the chain `product-news`, `read_unit` of what another unit publishes.
 3. The corporate design: `garrison/brand`, its stack, the agents' guide, the chain `brand-update`.
 4. The world view: `unit.yaml` with each unit's purpose, `organisation.md`, garrison.md generated and given to the agents; then the operator's new-unit conversation, links proposed to both units, and the coherence routine.
 5. Mission command: `intent` in `ask_agent` and the chains' steps, `tell_at_once` per unit, an after action review after each chain run.

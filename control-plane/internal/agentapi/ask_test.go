@@ -1037,3 +1037,65 @@ func TestAskAgentNeedsAMode(t *testing.T) {
 		}
 	}
 }
+
+// A routine on another unit's releases runs only while that unit publishes
+// them to its own, and then on each new release, not on the one it found.
+func TestOnReleaseOfAnotherUnit(t *testing.T) {
+	s, _, _ := setup(t)
+	var mu sync.Mutex
+	tag, publishes := "v1", ""
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/repos/homepage/config/raw/members.yaml":
+			io.WriteString(w, "admins: [alice]\nmembers: [bob]\n")
+		case "/api/v1/repos/todo/config/raw/publishes.yaml":
+			if publishes == "" {
+				http.NotFound(w, r)
+				return
+			}
+			io.WriteString(w, publishes)
+		case "/api/v1/repos/todo/app/releases/latest":
+			io.WriteString(w, `{"tag_name":"`+tag+`","name":"Todo `+tag+`","body":"Due dates for todos.","html_url":"https://git.example.com/todo/app/releases/tag/`+tag+`"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gitea.Close()
+	set := func(t, p string) { mu.Lock(); tag, publishes = t, p; mu.Unlock() }
+	g := &gateway.Gitea{URL: gitea.URL, User: "admin", Password: "pw"}
+	s.Agents = fakeAgents{{Unit: "homepage", Name: "dev", Prompt: "Dev.", Tools: []string{"list_repos"}, Routines: []agents.Routine{
+		{Name: "news", OnRelease: &agents.Release{Unit: "todo", Repo: "app"}, Owner: "bob", Task: "Write the news."},
+	}}}
+	withSandboxes(t, s)
+	s.Gateway.ServiceKey = "k"
+	poster := &fakePoster{}
+	s.Poster = poster
+	r := &Routines{Server: s, Gitea: g, Now: time.Now}
+	settle := func() []gateway.Post {
+		time.Sleep(300 * time.Millisecond)
+		return poster.all()
+	}
+	r.Check(context.Background())
+	set("v2", "")
+	r.Check(context.Background()) // todo does not publish to homepage
+	if got := settle(); len(got) != 0 {
+		t.Fatalf("ran on releases not published to it: %+v", got)
+	}
+	set("v2", "- releases: app\n  to: [homepage]\n")
+	r.Check(context.Background()) // first seen: v2 is remembered
+	if got := settle(); len(got) != 0 {
+		t.Fatalf("ran on the release it found: %+v", got)
+	}
+	set("v3", "- releases: app\n  to: [homepage]\n")
+	r.Check(context.Background())
+	deadline := time.Now().Add(5 * time.Second)
+	for len(poster.all()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	posts := poster.all()
+	if len(posts) != 1 || !strings.Contains(posts[0].Text, "todo/app released v3 (Todo v3)") {
+		t.Fatalf("a new release: %+v", posts)
+	}
+}

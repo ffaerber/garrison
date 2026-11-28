@@ -122,6 +122,8 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 		streamed, wrote := false, false
 		var said strings.Builder
 		var cards []string // "Review it: …" lines of the changes the tools opened
+		var steps []string // next steps the agent offered (suggest)
+		s.next.set(chat, nil)
 		say := func(s string) {
 			if !streamed && wrote {
 				out.content("\n\n")
@@ -179,6 +181,11 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 				if !ev.IsError && ev.Result != nil {
 					for _, c := range ev.Result.Content {
 						cards = append(cards, reviewLine.FindAllString(c.Text, -1)...)
+						if strings.HasSuffix(ev.ToolName, "suggest") {
+							for _, m := range nextStep.FindAllStringSubmatch(c.Text, -1) {
+								steps = append(steps, m[1])
+							}
+						}
 					}
 				}
 				if ev.IsError && ev.Result != nil {
@@ -210,6 +217,7 @@ func (s *Server) sandboxTurn(ctx context.Context, run sandbox.Run, person, chat,
 				streamed = false
 				say(line)
 			}
+			s.next.set(chat, steps)
 		}
 		return err
 	})

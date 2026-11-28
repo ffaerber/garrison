@@ -2,5 +2,5 @@
 # Its tools only read: which units the person is in, what each is, and the models.
 description: Finds the agent for what you want, and hands the work to it or tells you whom to ask
 model: ""
-tools: [list_units, read_unit, list_models]
+tools: [list_units, read_unit, list_models, suggest]
 agents: any

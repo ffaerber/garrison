@@ -19,14 +19,15 @@ import (
 
 // routineEntry is one routine as add_routine writes it into routines.yaml.
 type routineEntry struct {
-	Agent    string       `yaml:"agent,omitempty"`
-	Chain    string       `yaml:"chain,omitempty"`
-	Name     string       `yaml:"name"`
-	Schedule string       `yaml:"schedule,omitempty"`
-	Every    string       `yaml:"every,omitempty"`
-	OnPush   *agents.Push `yaml:"on_push,omitempty"`
-	Owner    string       `yaml:"owner"`
-	Task     string       `yaml:"task,omitempty"`
+	Agent     string          `yaml:"agent,omitempty"`
+	Chain     string          `yaml:"chain,omitempty"`
+	Name      string          `yaml:"name"`
+	Schedule  string          `yaml:"schedule,omitempty"`
+	Every     string          `yaml:"every,omitempty"`
+	OnPush    *agents.Push    `yaml:"on_push,omitempty"`
+	OnRelease *agents.Release `yaml:"on_release,omitempty"`
+	Owner     string          `yaml:"owner"`
+	Task      string          `yaml:"task,omitempty"`
 }
 
 // grantEntry is the grant add_routine adds when the routine changes a repo.
@@ -96,15 +97,18 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		return "", fmt.Errorf("%w: a routine needs a name, and agent and task, or chain", ErrInvalid)
 	}
 	whens := 0
-	for _, set := range []bool{a.Schedule != "", a.Every != "", a.OnPush != nil} {
+	for _, set := range []bool{a.Schedule != "", a.Every != "", a.OnPush != nil, a.OnRelease != nil} {
 		if set {
 			whens++
 		}
 	}
 	if whens != 1 {
-		return "", fmt.Errorf("%w: give one of schedule (cron, e.g. \"0 9 * * *\" for every day at 9), every (e.g. 6h) or on_push (a repo and branch, and the paths that start it)", ErrInvalid)
+		return "", fmt.Errorf("%w: give one of schedule (cron, e.g. \"0 9 * * *\" for every day at 9), every (e.g. 6h), on_push (a repo and branch, and the paths that start it) or on_release (a unit and repo)", ErrInvalid)
 	}
-	entry := routineEntry{Agent: which, Name: name, Schedule: strings.TrimSpace(a.Schedule), Every: strings.TrimSpace(a.Every), OnPush: a.OnPush, Owner: p.Name, Task: task}
+	if a.OnRelease != nil && a.OnRelease.Unit == a.Unit {
+		a.OnRelease.Unit = ""
+	}
+	entry := routineEntry{Agent: which, Name: name, Schedule: strings.TrimSpace(a.Schedule), Every: strings.TrimSpace(a.Every), OnPush: a.OnPush, OnRelease: a.OnRelease, Owner: p.Name, Task: task}
 	if chainName != "" {
 		entry.Agent, entry.Chain = "", chainName
 	}
@@ -196,6 +200,12 @@ func (t *Tools) addRoutine(ctx context.Context, p Person, agent *agents.Agent, a
 		if len(entry.OnPush.Paths) > 0 {
 			when += ", changing " + strings.Join(entry.OnPush.Paths, " or ")
 		}
+	case entry.OnRelease != nil:
+		from := entry.OnRelease.Unit
+		if from == "" {
+			from = a.Unit
+		}
+		when = fmt.Sprintf("on each release of %s/%s", from, entry.OnRelease.Repo)
 	}
 	title := a.Title
 	if strings.TrimSpace(title) == "" {

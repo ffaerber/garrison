@@ -80,7 +80,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	// gateway's own test checks these are all.
 	all := []string{"list_units", "read_unit", "list_stacks", "stack_status", "service_logs", "service_usage", "list_snapshots", "take_snapshot",
 		"query_metrics", "list_members", "list_models", "list_repos", "list_files", "read_file", "list_changes",
-		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "generate_speech", "web_search", "propose_skill"}
+		"propose_change", "propose_patch", "create_unit", "create_repo", "create_branch", "merge_change", "browse", "screenshot", "generate_media", "generate_speech", "web_search", "propose_skill", "suggest"}
 	got, problems, err := Load(context.Background(), files, files, PlatformUnit, all)
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestTheWrittenAgentsLoad(t *testing.T) {
 	c := got[i]
 	// It acts only through other agents; its tools only read: which units
 	// the person is in, what each is (unit.md), and the models.
-	if !c.AsksAny() || !slices.Equal(c.Tools, []string{"list_units", "read_unit", "list_models"}) || c.Prompt != CommanderPrompt || c.Description == "" {
+	if !c.AsksAny() || !slices.Equal(c.Tools, []string{"list_units", "read_unit", "list_models", "suggest"}) || c.Prompt != CommanderPrompt || c.Description == "" {
 		t.Errorf("commander = %+v", c)
 	}
 	if !c.MayAsk("todo/developer") || !c.MayAsk("operator") || c.MayAsk("garrison/commander") || c.MayAsk("lab/commander") {

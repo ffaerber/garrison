@@ -12,7 +12,7 @@ Each scenario starts from a fixture: `deploy` (todo with its apps deployed, alic
 | `roles` | 2, 3, and the grant on config of 4g |
 | `change` | 4, 4f, 4h, 4i, 4k |
 | `marketing` | 4b–4e, 4j3 |
-| `routines` | 4j, 4j2 |
+| `routines` | 4j, 4j2, 4j4 |
 | `commander` | 4l, 9b |
 | `operator` | 7, 8, 9 |
 | `leaving` | 5, 5b, 5c, 6 |
@@ -134,6 +134,14 @@ Todo's config gives the marketing agent a grant on app that routines may use (`l
 - The marketing agent gets its account in Gitea, `agent-todo-marketing`, and the same account in Keycloak, enabled.
 - Alice pushes to `shots`. The routine runs with nobody watching: its browser signs in as `agent-todo-marketing`, which the sign-in in front of todo takes, and the agent's account proposes `docs/screenshots/routine.png`: the todo page, *as the agent todo/marketing*, *Asked by bob through todo/marketing, routine todo/marketing/shots, with nobody watching.*
 
+## 4j4. Another unit's routine starts on todo's releases
+
+Alice makes the unit `site`, whose config gives the sentry a routine `todo-news`, owned by alice, with `on_release: {unit: todo, repo: app}`.
+
+- Alice releases `v0.9.0` of todo/app in Gitea: todo publishes nothing to site yet, so the routine is not even told of it.
+- todo's config gets `publishes.yaml`, `- releases: app, to: [site]`: the routine now sees 0.9 and starts nothing for a release it found, and todo's unit.md says what it publishes.
+- Alice releases `v1.0.0` with notes: the routine runs once, for alice, with the notes, and its answer in site's feed tells of the release from them.
+
 ## 4k. An agent installs what it needs, from the package registries
 
 Alice adds the builder to `garrison/config` with `internet: packages`; a root admin approves. Bob: *Install Python in your sandbox with apk add python3, then run python3 -c 'print(6*7)'.* Then: *Run curl https://example.org/.*
@@ -159,6 +167,10 @@ Then, in a private chat, bob: *In the unit todo, I want a dark mode for the todo
 Then, in another private chat, bob clicks Open WebUI's suggestion *Which apps run in my units, and are they healthy?*
 
 - bob is in todo and family by then. A question that only looks needs no choice: the commander answers for each of his units, from their unit.md (which its turn begins with) or by asking the agents, saying for todo whether its app runs, and asks neither which unit nor leave to look.
+
+Then, in another private chat, bob: *The todo app's page background should be light green instead of white. Do not change anything yet: tell me which agent would make that change, and offer it as a next step.*
+
+- The commander offers the step with `suggest`; Open WebUI's follow-up request for that chat (asked with only *Thanks.*) gets the commander's steps, naming the coder, each a whole request: the buttons under its answer.
 
 ## 5. Alice removes bob
 

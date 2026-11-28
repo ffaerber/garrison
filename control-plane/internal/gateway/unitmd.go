@@ -120,6 +120,16 @@ func (t *Tools) UnitMD(ctx context.Context, as, ns string) (string, error) {
 				if r.OnPush != nil {
 					when = "on a push"
 				}
+				if r.OnRelease != nil {
+					from := r.OnRelease.Unit
+					if from == "" {
+						from = ns
+					}
+					when = "on a release of " + from + "/" + r.OnRelease.Repo
+				}
+				if r.OnAlert != nil {
+					when = "on an alert"
+				}
 				parts = append(parts, fmt.Sprintf("routine %s (%s)", r.Name, strings.TrimSpace(when)))
 			}
 			if len(parts) > 0 {
@@ -130,6 +140,13 @@ func (t *Tools) UnitMD(ctx context.Context, as, ns string) (string, error) {
 			b.WriteString("## Agents' rights and routines here\n\n")
 			b.WriteString(strings.Join(lines, "\n"))
 			b.WriteString("\n\nEvery other agent works here too, with the rights of the person it works for.\n")
+		}
+	}
+	// What it lets other units use (publishes.yaml).
+	if ps, err := g.Publishes(ctx, ns); err == nil && len(ps) > 0 {
+		b.WriteString("\n## Publishes\n\n")
+		for _, p := range ps {
+			fmt.Fprintf(&b, "- the releases of %s, to %s: their routines may start on them\n", p.Releases, strings.Join(p.To, ", "))
 		}
 	}
 	out := b.String()

@@ -71,6 +71,7 @@ type Server struct {
 	Poster    Poster        // posts answers no message waits for; nil: none
 	Units     UnitDescriber // unit.md for each turn; nil: none
 	sent      sentUnits
+	next      nextSteps
 	Events    events.Recorder // the feed, which gets the routines' runs; nil: none
 	Questions *Questions      // what routines asked people (ask_person); nil: they cannot ask
 }
@@ -170,6 +171,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	// Open WebUI's own tasks (a chat's title, tags, follow-up suggestions)
 	// need no agent: they go straight to the LLM.
 	if task := r.Header.Get(TaskHeader); task != "" {
+		if s.followUps(w, r, req) {
+			return
+		}
 		var generic map[string]any
 		json.Unmarshal(body, &generic)
 		llm, model, _ := s.route(r.Context(), "", "")
